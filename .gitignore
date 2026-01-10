@@ -1,0 +1,4 @@
+/target
+Cargo.lock
+*.mp3
+.DS_Store
