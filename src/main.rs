@@ -4,7 +4,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::*;
-use mp3rgain::{analyze, apply_gain, apply_gain_db, db_to_steps, steps_to_db, GAIN_STEP_DB};
+use mp3rgain::{analyze, apply_gain, db_to_steps, steps_to_db, GAIN_STEP_DB};
 use std::path::PathBuf;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");

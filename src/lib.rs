@@ -112,6 +112,7 @@ impl ChannelMode {
 
 /// Parsed MP3 frame header
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct FrameHeader {
     version: MpegVersion,
     has_crc: bool,
