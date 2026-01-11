@@ -5,17 +5,27 @@
 
 use anyhow::Result;
 use colored::*;
+use indicatif::{ProgressBar, ProgressStyle};
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{analyze, apply_gain_with_undo, db_to_steps, steps_to_db, undo_gain, GAIN_STEP_DB};
+use serde::Serialize;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const PROGRESS_THRESHOLD: usize = 5;
 
 // =============================================================================
 // Options
 // =============================================================================
+
+#[derive(Default, Clone, Copy, PartialEq)]
+enum OutputFormat {
+    #[default]
+    Text,
+    Json,
+}
 
 #[derive(Default)]
 struct Options {
@@ -30,12 +40,108 @@ struct Options {
     album_gain: bool, // -a (apply album gain)
 
     // Behavior options
-    preserve_timestamp: bool, // -p
-    ignore_clipping: bool,    // -c
-    quiet: bool,              // -q
+    preserve_timestamp: bool,    // -p
+    ignore_clipping: bool,       // -c
+    prevent_clipping: bool,      // -k
+    quiet: bool,                 // -q
+    recursive: bool,             // -R
+    dry_run: bool,               // -n or --dry-run
+    output_format: OutputFormat, // -o <format>
 
     // Files
     files: Vec<PathBuf>,
+}
+
+// =============================================================================
+// JSON Output Structures
+// =============================================================================
+
+#[derive(Serialize)]
+struct JsonOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    files: Option<Vec<JsonFileResult>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    album: Option<JsonAlbumResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<JsonSummary>,
+}
+
+#[derive(Serialize, Clone)]
+struct JsonFileResult {
+    file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frames: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mpeg_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    channel_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min_gain: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_gain: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    avg_gain: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    headroom_steps: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    headroom_db: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gain_applied_steps: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gain_applied_db: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    loudness_db: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    peak: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    warning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dry_run: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct JsonAlbumResult {
+    loudness_db: f64,
+    gain_db: f64,
+    gain_steps: i32,
+    peak: f64,
+}
+
+#[derive(Serialize)]
+struct JsonSummary {
+    total_files: usize,
+    successful: usize,
+    failed: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dry_run: Option<bool>,
+}
+
+impl Default for JsonFileResult {
+    fn default() -> Self {
+        Self {
+            file: String::new(),
+            status: None,
+            frames: None,
+            mpeg_version: None,
+            channel_mode: None,
+            min_gain: None,
+            max_gain: None,
+            avg_gain: None,
+            headroom_steps: None,
+            headroom_db: None,
+            gain_applied_steps: None,
+            gain_applied_db: None,
+            loudness_db: None,
+            peak: None,
+            error: None,
+            warning: None,
+            dry_run: None,
+        }
+    }
 }
 
 // =============================================================================
@@ -61,7 +167,23 @@ fn parse_args(args: &[String]) -> Result<Options> {
     while i < args.len() {
         let arg = &args[i];
 
-        if arg.starts_with('-') && arg.len() > 1 {
+        if arg == "--dry-run" {
+            opts.dry_run = true;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--help" {
+            print_usage();
+            std::process::exit(0);
+        }
+
+        if arg == "--version" {
+            print_version();
+            std::process::exit(0);
+        }
+
+        if arg.starts_with('-') && arg.len() > 1 && !arg.starts_with("--") {
             let flag = &arg[1..];
 
             match flag {
@@ -106,12 +228,34 @@ fn parse_args(args: &[String]) -> Result<Options> {
                         }
                     }
                 }
+                "o" => {
+                    i += 1;
+                    if i >= args.len() {
+                        eprintln!("{}: -o requires an argument", "error".red().bold());
+                        std::process::exit(1);
+                    }
+                    match args[i].to_lowercase().as_str() {
+                        "json" => opts.output_format = OutputFormat::Json,
+                        "text" => opts.output_format = OutputFormat::Text,
+                        other => {
+                            eprintln!(
+                                "{}: unknown output format '{}', use 'text' or 'json'",
+                                "error".red().bold(),
+                                other
+                            );
+                            std::process::exit(1);
+                        }
+                    }
+                }
                 "r" => opts.track_gain = true,
                 "a" => opts.album_gain = true,
                 "u" => opts.undo = true,
                 "p" => opts.preserve_timestamp = true,
                 "c" => opts.ignore_clipping = true,
+                "k" => opts.prevent_clipping = true,
                 "q" => opts.quiet = true,
+                "R" => opts.recursive = true,
+                "n" => opts.dry_run = true,
                 "v" | "-version" => {
                     print_version();
                     std::process::exit(0);
@@ -120,16 +264,19 @@ fn parse_args(args: &[String]) -> Result<Options> {
                     print_usage();
                     std::process::exit(0);
                 }
-                // Handle combined short flags like -qp
-                _ if flag.chars().all(|c| "pqcura".contains(c)) => {
+                // Handle combined short flags like -qp, -kc, etc.
+                _ if flag.chars().all(|c| "pqckuranR".contains(c)) => {
                     for c in flag.chars() {
                         match c {
                             'p' => opts.preserve_timestamp = true,
                             'q' => opts.quiet = true,
                             'c' => opts.ignore_clipping = true,
+                            'k' => opts.prevent_clipping = true,
                             'u' => opts.undo = true,
                             'r' => opts.track_gain = true,
                             'a' => opts.album_gain = true,
+                            'n' => opts.dry_run = true,
+                            'R' => opts.recursive = true,
                             _ => {}
                         }
                     }
@@ -154,7 +301,7 @@ fn parse_args(args: &[String]) -> Result<Options> {
                     eprintln!("{}: unknown option: -{}", "warning".yellow().bold(), flag);
                 }
             }
-        } else {
+        } else if !arg.starts_with("--") {
             // It's a file
             opts.files.push(PathBuf::from(arg));
         }
@@ -165,11 +312,52 @@ fn parse_args(args: &[String]) -> Result<Options> {
     Ok(opts)
 }
 
-fn run(opts: Options) -> Result<()> {
+fn expand_files_recursive(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let mut result = Vec::new();
+
+    for path in paths {
+        if path.is_dir() {
+            collect_mp3_files(path, &mut result)?;
+        } else {
+            result.push(path.clone());
+        }
+    }
+
+    result.sort();
+    Ok(result)
+}
+
+fn collect_mp3_files(dir: &Path, result: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            collect_mp3_files(&path, result)?;
+        } else if let Some(ext) = path.extension() {
+            if ext.to_ascii_lowercase() == "mp3" {
+                result.push(path);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn run(mut opts: Options) -> Result<()> {
     // Validate options
     if opts.files.is_empty() {
         eprintln!("{}: no files specified", "error".red().bold());
         std::process::exit(1);
+    }
+
+    // Expand files if recursive mode
+    if opts.recursive {
+        opts.files = expand_files_recursive(&opts.files)?;
+        if opts.files.is_empty() {
+            eprintln!("{}: no MP3 files found", "error".red().bold());
+            std::process::exit(1);
+        }
     }
 
     // Determine action
@@ -206,22 +394,79 @@ fn run(opts: Options) -> Result<()> {
 }
 
 // =============================================================================
+// Progress Bar
+// =============================================================================
+
+fn create_progress_bar(total: usize, opts: &Options) -> Option<ProgressBar> {
+    if opts.quiet || opts.output_format == OutputFormat::Json || total < PROGRESS_THRESHOLD {
+        return None;
+    }
+
+    let pb = ProgressBar::new(total as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("=>-"),
+    );
+    Some(pb)
+}
+
+fn progress_set_message(pb: &Option<ProgressBar>, msg: &str) {
+    if let Some(ref pb) = pb {
+        pb.set_message(msg.to_string());
+    }
+}
+
+fn progress_inc(pb: &Option<ProgressBar>) {
+    if let Some(ref pb) = pb {
+        pb.inc(1);
+    }
+}
+
+fn progress_finish(pb: Option<ProgressBar>) {
+    if let Some(pb) = pb {
+        pb.finish_and_clear();
+    }
+}
+
+// =============================================================================
 // Commands
 // =============================================================================
 
 fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
     if steps == 0 {
-        if !opts.quiet {
+        if opts.output_format == OutputFormat::Json {
+            let output = JsonOutput {
+                files: Some(vec![]),
+                album: None,
+                summary: Some(JsonSummary {
+                    total_files: files.len(),
+                    successful: 0,
+                    failed: 0,
+                    dry_run: if opts.dry_run { Some(true) } else { None },
+                }),
+            };
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else if !opts.quiet {
             println!("{}: gain is 0, nothing to do", "info".cyan());
         }
         return Ok(());
     }
 
     let db_value = steps_to_db(steps);
-    if !opts.quiet {
+    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+
+    if opts.output_format != OutputFormat::Json && !opts.quiet {
         println!(
-            "{} Applying {} step(s) ({:+.1} dB) to {} file(s)",
+            "{}{} {} {} step(s) ({:+.1} dB) to {} file(s)",
+            dry_run_prefix,
             "mp3rgain".green().bold(),
+            if opts.dry_run {
+                "Would apply"
+            } else {
+                "Applying"
+            },
             steps,
             db_value,
             files.len()
@@ -229,32 +474,154 @@ fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
         println!();
     }
 
+    let pb = create_progress_bar(files.len(), opts);
+    let mut json_results: Vec<JsonFileResult> = Vec::new();
+    let mut successful = 0;
+    let mut failed = 0;
+
     for file in files {
-        process_apply(file, steps, opts)?;
+        let filename = file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        progress_set_message(&pb, filename);
+
+        let result = process_apply(file, steps, opts)?;
+        if opts.output_format == OutputFormat::Json {
+            if result.status.as_deref() == Some("success") {
+                successful += 1;
+            } else if result.status.as_deref() == Some("error") {
+                failed += 1;
+            }
+            json_results.push(result);
+        } else if result.status.as_deref() == Some("success") {
+            successful += 1;
+        } else if result.status.as_deref() == Some("error") {
+            failed += 1;
+        }
+
+        progress_inc(&pb);
+    }
+
+    progress_finish(pb);
+
+    if opts.output_format == OutputFormat::Json {
+        let output = JsonOutput {
+            files: Some(json_results),
+            album: None,
+            summary: Some(JsonSummary {
+                total_files: files.len(),
+                successful,
+                failed,
+                dry_run: if opts.dry_run { Some(true) } else { None },
+            }),
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if opts.dry_run && !opts.quiet {
+        println!();
+        println!("{}", "No files were modified.".yellow());
     }
 
     Ok(())
 }
 
 fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
+    let pb = create_progress_bar(files.len(), opts);
+    let mut json_results: Vec<JsonFileResult> = Vec::new();
+
     for file in files {
-        process_info(file, opts)?;
+        let filename = file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        progress_set_message(&pb, filename);
+
+        let result = process_info(file, opts)?;
+        if opts.output_format == OutputFormat::Json {
+            json_results.push(result);
+        }
+
+        progress_inc(&pb);
     }
+
+    progress_finish(pb);
+
+    if opts.output_format == OutputFormat::Json {
+        let output = JsonOutput {
+            files: Some(json_results),
+            album: None,
+            summary: None,
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+
     Ok(())
 }
 
 fn cmd_undo(files: &[PathBuf], opts: &Options) -> Result<()> {
-    if !opts.quiet {
+    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+
+    if opts.output_format != OutputFormat::Json && !opts.quiet {
         println!(
-            "{} Undoing gain changes on {} file(s)",
+            "{}{} {} gain changes on {} file(s)",
+            dry_run_prefix,
             "mp3rgain".green().bold(),
+            if opts.dry_run {
+                "Would undo"
+            } else {
+                "Undoing"
+            },
             files.len()
         );
         println!();
     }
 
+    let pb = create_progress_bar(files.len(), opts);
+    let mut json_results: Vec<JsonFileResult> = Vec::new();
+    let mut successful = 0;
+    let mut failed = 0;
+
     for file in files {
-        process_undo(file, opts)?;
+        let filename = file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        progress_set_message(&pb, filename);
+
+        let result = process_undo(file, opts)?;
+        if opts.output_format == OutputFormat::Json {
+            if result.status.as_deref() == Some("success") {
+                successful += 1;
+            } else if result.status.as_deref() == Some("error") {
+                failed += 1;
+            }
+            json_results.push(result);
+        } else if result.status.as_deref() == Some("success") {
+            successful += 1;
+        } else if result.status.as_deref() == Some("error") {
+            failed += 1;
+        }
+
+        progress_inc(&pb);
+    }
+
+    progress_finish(pb);
+
+    if opts.output_format == OutputFormat::Json {
+        let output = JsonOutput {
+            files: Some(json_results),
+            album: None,
+            summary: Some(JsonSummary {
+                total_files: files.len(),
+                successful,
+                failed,
+                dry_run: if opts.dry_run { Some(true) } else { None },
+            }),
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if opts.dry_run && !opts.quiet {
+        println!();
+        println!("{}", "No files were modified.".yellow());
     }
 
     Ok(())
@@ -270,18 +637,70 @@ fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         std::process::exit(1);
     }
 
-    if !opts.quiet {
+    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+
+    if opts.output_format != OutputFormat::Json && !opts.quiet {
         println!(
-            "{} Analyzing and applying track gain to {} file(s)",
+            "{}{} Analyzing and {} track gain to {} file(s)",
+            dry_run_prefix,
             "mp3rgain".green().bold(),
+            if opts.dry_run {
+                "would apply"
+            } else {
+                "applying"
+            },
             files.len()
         );
         println!("  Target: {} dB (ReplayGain 1.0)", REPLAYGAIN_REFERENCE_DB);
         println!();
     }
 
+    let pb = create_progress_bar(files.len(), opts);
+    let mut json_results: Vec<JsonFileResult> = Vec::new();
+    let mut successful = 0;
+    let mut failed = 0;
+
     for file in files {
-        process_track_gain(file, opts)?;
+        let filename = file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        progress_set_message(&pb, filename);
+
+        let result = process_track_gain(file, opts)?;
+        if opts.output_format == OutputFormat::Json {
+            if result.status.as_deref() == Some("success") {
+                successful += 1;
+            } else if result.status.as_deref() == Some("error") {
+                failed += 1;
+            }
+            json_results.push(result);
+        } else if result.status.as_deref() == Some("success") {
+            successful += 1;
+        } else if result.status.as_deref() == Some("error") {
+            failed += 1;
+        }
+
+        progress_inc(&pb);
+    }
+
+    progress_finish(pb);
+
+    if opts.output_format == OutputFormat::Json {
+        let output = JsonOutput {
+            files: Some(json_results),
+            album: None,
+            summary: Some(JsonSummary {
+                total_files: files.len(),
+                successful,
+                failed,
+                dry_run: if opts.dry_run { Some(true) } else { None },
+            }),
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if opts.dry_run && !opts.quiet {
+        println!();
+        println!("{}", "No files were modified.".yellow());
     }
 
     Ok(())
@@ -297,9 +716,12 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         std::process::exit(1);
     }
 
-    if !opts.quiet {
+    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+
+    if opts.output_format != OutputFormat::Json && !opts.quiet {
         println!(
-            "{} Analyzing album gain for {} file(s)",
+            "{}{} Analyzing album gain for {} file(s)",
+            dry_run_prefix,
             "mp3rgain".green().bold(),
             files.len()
         );
@@ -308,15 +730,15 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     }
 
     // First, analyze all tracks
-    if !opts.quiet {
-        println!("  {} Analyzing tracks...", "→".cyan());
+    if opts.output_format != OutputFormat::Json && !opts.quiet {
+        println!("  {} Analyzing tracks...", "->".cyan());
     }
 
     let file_refs: Vec<&std::path::Path> = files.iter().map(|p| p.as_path()).collect();
 
     match replaygain::analyze_album(&file_refs) {
         Ok(album_result) => {
-            if !opts.quiet {
+            if opts.output_format != OutputFormat::Json && !opts.quiet {
                 println!();
                 println!("  Album loudness: {:.1} dB", album_result.album_loudness_db);
                 println!(
@@ -330,20 +752,118 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
             // Apply album gain to all files
             let steps = album_result.album_gain_steps();
+
             if steps == 0 {
-                if !opts.quiet {
-                    println!("  {} No adjustment needed", "·".cyan());
+                if opts.output_format == OutputFormat::Json {
+                    let json_results: Vec<JsonFileResult> = files
+                        .iter()
+                        .enumerate()
+                        .map(|(i, file)| {
+                            let track = &album_result.tracks[i];
+                            JsonFileResult {
+                                file: file.display().to_string(),
+                                status: Some("skipped".to_string()),
+                                loudness_db: Some(track.loudness_db),
+                                peak: Some(track.peak),
+                                gain_applied_steps: Some(0),
+                                gain_applied_db: Some(0.0),
+                                ..Default::default()
+                            }
+                        })
+                        .collect();
+
+                    let output = JsonOutput {
+                        files: Some(json_results),
+                        album: Some(JsonAlbumResult {
+                            loudness_db: album_result.album_loudness_db,
+                            gain_db: album_result.album_gain_db,
+                            gain_steps: album_result.album_gain_steps(),
+                            peak: album_result.album_peak,
+                        }),
+                        summary: Some(JsonSummary {
+                            total_files: files.len(),
+                            successful: 0,
+                            failed: 0,
+                            dry_run: if opts.dry_run { Some(true) } else { None },
+                        }),
+                    };
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else if !opts.quiet {
+                    println!("  {} No adjustment needed", ".".cyan());
                 }
                 return Ok(());
             }
 
+            let pb = create_progress_bar(files.len(), opts);
+            let mut json_results: Vec<JsonFileResult> = Vec::new();
+            let mut successful = 0;
+            let mut failed = 0;
+
             for (i, file) in files.iter().enumerate() {
+                let filename = file
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                progress_set_message(&pb, filename);
+
                 let track_result = &album_result.tracks[i];
-                process_apply_replaygain(file, steps, track_result, opts)?;
+                let result = process_apply_replaygain(file, steps, track_result, opts)?;
+                if opts.output_format == OutputFormat::Json {
+                    if result.status.as_deref() == Some("success") {
+                        successful += 1;
+                    } else if result.status.as_deref() == Some("error") {
+                        failed += 1;
+                    }
+                    json_results.push(result);
+                } else if result.status.as_deref() == Some("success") {
+                    successful += 1;
+                } else if result.status.as_deref() == Some("error") {
+                    failed += 1;
+                }
+
+                progress_inc(&pb);
+            }
+
+            progress_finish(pb);
+
+            if opts.output_format == OutputFormat::Json {
+                let output = JsonOutput {
+                    files: Some(json_results),
+                    album: Some(JsonAlbumResult {
+                        loudness_db: album_result.album_loudness_db,
+                        gain_db: album_result.album_gain_db,
+                        gain_steps: album_result.album_gain_steps(),
+                        peak: album_result.album_peak,
+                    }),
+                    summary: Some(JsonSummary {
+                        total_files: files.len(),
+                        successful,
+                        failed,
+                        dry_run: if opts.dry_run { Some(true) } else { None },
+                    }),
+                };
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            } else if opts.dry_run && !opts.quiet {
+                println!();
+                println!("{}", "No files were modified.".yellow());
             }
         }
         Err(e) => {
-            eprintln!("{}: Failed to analyze album: {}", "error".red().bold(), e);
+            if opts.output_format == OutputFormat::Json {
+                let output = JsonOutput {
+                    files: None,
+                    album: None,
+                    summary: Some(JsonSummary {
+                        total_files: files.len(),
+                        successful: 0,
+                        failed: files.len(),
+                        dry_run: if opts.dry_run { Some(true) } else { None },
+                    }),
+                };
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            } else {
+                eprintln!("{}: Failed to analyze album: {}", "error".red().bold(), e);
+            }
             std::process::exit(1);
         }
     }
@@ -355,57 +875,124 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 // File processing
 // =============================================================================
 
-fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<()> {
+fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileResult> {
     let filename = file
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
+    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+
     // Save original timestamp if needed
-    let original_mtime = if opts.preserve_timestamp {
+    let original_mtime = if opts.preserve_timestamp && !opts.dry_run {
         std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
     } else {
         None
     };
 
-    // Check for clipping if not ignored
-    if !opts.ignore_clipping && steps > 0 {
+    // Check for clipping and possibly prevent it
+    let mut actual_steps = steps;
+    let mut warning_msg: Option<String> = None;
+
+    if steps > 0 {
         if let Ok(info) = analyze(file) {
-            if steps > info.headroom_steps && !opts.quiet {
-                eprintln!(
-                    "  {} {} - clipping warning: requested {} steps but only {} headroom",
-                    "!".yellow(),
-                    filename,
-                    steps,
-                    info.headroom_steps
-                );
-                eprintln!("      Use -c to ignore clipping warnings");
+            if steps > info.headroom_steps {
+                if opts.prevent_clipping {
+                    // -k: automatically reduce gain to prevent clipping
+                    let original_steps = steps;
+                    actual_steps = info.headroom_steps;
+                    if opts.output_format != OutputFormat::Json && !opts.quiet {
+                        eprintln!(
+                            "  {} {}{} - gain reduced from {} to {} steps to prevent clipping",
+                            "!".yellow(),
+                            dry_run_prefix,
+                            filename,
+                            original_steps,
+                            actual_steps
+                        );
+                    }
+                    warning_msg = Some(format!(
+                        "gain reduced from {} to {} steps to prevent clipping",
+                        original_steps, actual_steps
+                    ));
+                } else if !opts.ignore_clipping && !opts.quiet {
+                    // Show warning but continue
+                    eprintln!(
+                        "  {} {}{} - clipping warning: requested {} steps but only {} headroom",
+                        "!".yellow(),
+                        dry_run_prefix,
+                        filename,
+                        steps,
+                        info.headroom_steps
+                    );
+                    eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
+                    warning_msg = Some(format!(
+                        "clipping warning: requested {} steps but only {} headroom",
+                        steps, info.headroom_steps
+                    ));
+                }
             }
         }
     }
 
-    match apply_gain_with_undo(file, steps) {
+    // Dry run: don't actually modify
+    if opts.dry_run {
+        if opts.output_format != OutputFormat::Json && !opts.quiet {
+            println!(
+                "  {} [DRY RUN] {} (would apply {} steps)",
+                "~".cyan(),
+                filename,
+                actual_steps
+            );
+        }
+        return Ok(JsonFileResult {
+            file: file.display().to_string(),
+            status: Some("dry_run".to_string()),
+            gain_applied_steps: Some(actual_steps),
+            gain_applied_db: Some(steps_to_db(actual_steps)),
+            warning: warning_msg,
+            dry_run: Some(true),
+            ..Default::default()
+        });
+    }
+
+    match apply_gain_with_undo(file, actual_steps) {
         Ok(frames) => {
             // Restore timestamp if needed
             if let Some(mtime) = original_mtime {
                 restore_timestamp(file, mtime);
             }
 
-            if !opts.quiet {
-                println!("  {} {} ({} frames)", "✓".green(), filename, frames);
+            if opts.output_format != OutputFormat::Json && !opts.quiet {
+                println!("  {} {} ({} frames)", "v".green(), filename, frames);
             }
+
+            Ok(JsonFileResult {
+                file: file.display().to_string(),
+                status: Some("success".to_string()),
+                frames: Some(frames),
+                gain_applied_steps: Some(actual_steps),
+                gain_applied_db: Some(steps_to_db(actual_steps)),
+                warning: warning_msg,
+                ..Default::default()
+            })
         }
         Err(e) => {
-            if !opts.quiet {
-                eprintln!("  {} {} - {}", "✗".red(), filename, e);
+            if opts.output_format != OutputFormat::Json && !opts.quiet {
+                eprintln!("  {} {} - {}", "x".red(), filename, e);
             }
+
+            Ok(JsonFileResult {
+                file: file.display().to_string(),
+                status: Some("error".to_string()),
+                error: Some(e.to_string()),
+                ..Default::default()
+            })
         }
     }
-
-    Ok(())
 }
 
-fn process_info(file: &Path, opts: &Options) -> Result<()> {
+fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
     let filename = file
         .file_name()
         .and_then(|n| n.to_str())
@@ -413,103 +1000,172 @@ fn process_info(file: &Path, opts: &Options) -> Result<()> {
 
     match analyze(file) {
         Ok(info) => {
-            if opts.quiet {
-                // Quiet mode: tab-separated output
-                println!(
-                    "{}\t{}\t{}\t{}\t{:.1}\t{}\t{:.1}",
-                    filename,
-                    info.frame_count,
-                    info.min_gain,
-                    info.max_gain,
-                    info.avg_gain,
-                    info.headroom_steps,
-                    info.headroom_db
-                );
-            } else {
-                println!("{}", filename.cyan().bold());
-                println!(
-                    "  Format:      {} Layer III, {}",
-                    info.mpeg_version, info.channel_mode
-                );
-                println!("  Frames:      {}", info.frame_count);
-                println!(
-                    "  Gain range:  {} - {} (avg: {:.1})",
-                    info.min_gain, info.max_gain, info.avg_gain
-                );
-                println!(
-                    "  Headroom:    {} steps ({:+.1} dB)",
-                    info.headroom_steps.to_string().green(),
-                    info.headroom_db
-                );
-                println!();
+            if opts.output_format != OutputFormat::Json {
+                if opts.quiet {
+                    // Quiet mode: tab-separated output
+                    println!(
+                        "{}\t{}\t{}\t{}\t{:.1}\t{}\t{:.1}",
+                        filename,
+                        info.frame_count,
+                        info.min_gain,
+                        info.max_gain,
+                        info.avg_gain,
+                        info.headroom_steps,
+                        info.headroom_db
+                    );
+                } else {
+                    println!("{}", filename.cyan().bold());
+                    println!(
+                        "  Format:      {} Layer III, {}",
+                        info.mpeg_version, info.channel_mode
+                    );
+                    println!("  Frames:      {}", info.frame_count);
+                    println!(
+                        "  Gain range:  {} - {} (avg: {:.1})",
+                        info.min_gain, info.max_gain, info.avg_gain
+                    );
+                    println!(
+                        "  Headroom:    {} steps ({:+.1} dB)",
+                        info.headroom_steps.to_string().green(),
+                        info.headroom_db
+                    );
+                    println!();
+                }
             }
+
+            Ok(JsonFileResult {
+                file: file.display().to_string(),
+                mpeg_version: Some(info.mpeg_version),
+                channel_mode: Some(info.channel_mode),
+                frames: Some(info.frame_count),
+                min_gain: Some(info.min_gain),
+                max_gain: Some(info.max_gain),
+                avg_gain: Some(info.avg_gain),
+                headroom_steps: Some(info.headroom_steps),
+                headroom_db: Some(info.headroom_db),
+                ..Default::default()
+            })
         }
         Err(e) => {
-            eprintln!("{} - {}", filename.red(), e);
+            if opts.output_format != OutputFormat::Json {
+                eprintln!("{} - {}", filename.red(), e);
+            }
+
+            Ok(JsonFileResult {
+                file: file.display().to_string(),
+                status: Some("error".to_string()),
+                error: Some(e.to_string()),
+                ..Default::default()
+            })
         }
     }
-
-    Ok(())
 }
 
-fn process_undo(file: &PathBuf, opts: &Options) -> Result<()> {
+fn process_undo(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> {
     let filename = file
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
+    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+
     // Save original timestamp if needed
-    let original_mtime = if opts.preserve_timestamp {
+    let original_mtime = if opts.preserve_timestamp && !opts.dry_run {
         std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
     } else {
         None
     };
 
+    // Dry run: just analyze what would be done
+    if opts.dry_run {
+        // Try to read the undo tag to see what would happen
+        if opts.output_format != OutputFormat::Json && !opts.quiet {
+            println!("  {} [DRY RUN] {} (would undo)", "~".cyan(), filename);
+        }
+        return Ok(JsonFileResult {
+            file: file.display().to_string(),
+            status: Some("dry_run".to_string()),
+            dry_run: Some(true),
+            ..Default::default()
+        });
+    }
+
     match undo_gain(file) {
         Ok(frames) => {
             if frames == 0 {
-                if !opts.quiet {
-                    println!("  {} {} (no changes to undo)", "·".cyan(), filename);
+                if opts.output_format != OutputFormat::Json && !opts.quiet {
+                    println!(
+                        "  {} {}{} (no changes to undo)",
+                        ".".cyan(),
+                        dry_run_prefix,
+                        filename
+                    );
                 }
+
+                Ok(JsonFileResult {
+                    file: file.display().to_string(),
+                    status: Some("skipped".to_string()),
+                    frames: Some(0),
+                    ..Default::default()
+                })
             } else {
                 // Restore timestamp if needed
                 if let Some(mtime) = original_mtime {
                     restore_timestamp(file, mtime);
                 }
 
-                if !opts.quiet {
+                if opts.output_format != OutputFormat::Json && !opts.quiet {
                     println!(
                         "  {} {} ({} frames restored)",
-                        "✓".green(),
+                        "v".green(),
                         filename,
                         frames
                     );
                 }
+
+                Ok(JsonFileResult {
+                    file: file.display().to_string(),
+                    status: Some("success".to_string()),
+                    frames: Some(frames),
+                    ..Default::default()
+                })
             }
         }
         Err(e) => {
-            if !opts.quiet {
-                eprintln!("  {} {} - {}", "✗".red(), filename, e);
+            if opts.output_format != OutputFormat::Json && !opts.quiet {
+                eprintln!("  {} {} - {}", "x".red(), filename, e);
             }
+
+            Ok(JsonFileResult {
+                file: file.display().to_string(),
+                status: Some("error".to_string()),
+                error: Some(e.to_string()),
+                ..Default::default()
+            })
         }
     }
-
-    Ok(())
 }
 
-fn process_track_gain(file: &PathBuf, opts: &Options) -> Result<()> {
+fn process_track_gain(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> {
     let filename = file
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
-    if !opts.quiet {
-        println!("  {} Analyzing {}...", "→".cyan(), filename);
+    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+
+    if opts.output_format != OutputFormat::Json && !opts.quiet {
+        println!(
+            "  {} {}Analyzing {}...",
+            "->".cyan(),
+            dry_run_prefix,
+            filename
+        );
     }
 
     match replaygain::analyze_track(file) {
         Ok(result) => {
-            if !opts.quiet {
+            if opts.output_format != OutputFormat::Json && !opts.quiet {
                 println!(
                     "      Loudness: {:.1} dB, Gain: {:+.1} dB ({} steps), Peak: {:.4}",
                     result.loudness_db,
@@ -521,20 +1177,35 @@ fn process_track_gain(file: &PathBuf, opts: &Options) -> Result<()> {
 
             let steps = result.gain_steps();
             if steps == 0 {
-                if !opts.quiet {
-                    println!("  {} {} (no adjustment needed)", "·".cyan(), filename);
+                if opts.output_format != OutputFormat::Json && !opts.quiet {
+                    println!("  {} {} (no adjustment needed)", ".".cyan(), filename);
                 }
-                return Ok(());
+                return Ok(JsonFileResult {
+                    file: file.display().to_string(),
+                    status: Some("skipped".to_string()),
+                    loudness_db: Some(result.loudness_db),
+                    peak: Some(result.peak),
+                    gain_applied_steps: Some(0),
+                    gain_applied_db: Some(0.0),
+                    ..Default::default()
+                });
             }
 
-            process_apply_replaygain(file, steps, &result, opts)?;
+            process_apply_replaygain(file, steps, &result, opts)
         }
         Err(e) => {
-            eprintln!("  {} {} - {}", "✗".red(), filename, e);
+            if opts.output_format != OutputFormat::Json && !opts.quiet {
+                eprintln!("  {} {} - {}", "x".red(), filename, e);
+            }
+
+            Ok(JsonFileResult {
+                file: file.display().to_string(),
+                status: Some("error".to_string()),
+                error: Some(e.to_string()),
+                ..Default::default()
+            })
         }
     }
-
-    Ok(())
 }
 
 fn process_apply_replaygain(
@@ -542,60 +1213,137 @@ fn process_apply_replaygain(
     steps: i32,
     result: &ReplayGainResult,
     opts: &Options,
-) -> Result<()> {
+) -> Result<JsonFileResult> {
     let filename = file
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
+    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+
     // Save original timestamp if needed
-    let original_mtime = if opts.preserve_timestamp {
+    let original_mtime = if opts.preserve_timestamp && !opts.dry_run {
         std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
     } else {
         None
     };
 
     // Check for clipping if not ignored
-    if !opts.ignore_clipping && steps > 0 {
+    let mut actual_steps = steps;
+    let mut warning_msg: Option<String> = None;
+
+    if steps > 0 {
         // Check if applying this gain would cause clipping
-        // Peak of 1.0 means full scale; we need headroom for the gain
         let gain_linear = 10.0_f64.powf(result.gain_db / 20.0);
         let new_peak = result.peak * gain_linear;
-        if new_peak > 1.0 && !opts.quiet {
-            eprintln!(
-                "  {} {} - clipping warning: peak would be {:.2} (>{:.2})",
-                "!".yellow(),
-                filename,
-                new_peak,
-                1.0
-            );
-            eprintln!("      Use -c to ignore clipping warnings");
+        if new_peak > 1.0 {
+            if opts.prevent_clipping {
+                // Calculate the maximum safe gain
+                let max_safe_db = -20.0 * result.peak.log10();
+                let max_safe_steps = db_to_steps(max_safe_db);
+                actual_steps = max_safe_steps.max(0);
+
+                if opts.output_format != OutputFormat::Json && !opts.quiet {
+                    eprintln!(
+                        "  {} {}{} - gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
+                        "!".yellow(),
+                        dry_run_prefix,
+                        filename,
+                        steps,
+                        actual_steps,
+                        result.peak
+                    );
+                }
+                warning_msg = Some(format!(
+                    "gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
+                    steps, actual_steps, result.peak
+                ));
+            } else if !opts.ignore_clipping && !opts.quiet {
+                if opts.output_format != OutputFormat::Json {
+                    eprintln!(
+                        "  {} {}{} - clipping warning: peak would be {:.2} (>{:.2})",
+                        "!".yellow(),
+                        dry_run_prefix,
+                        filename,
+                        new_peak,
+                        1.0
+                    );
+                    eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
+                }
+                warning_msg = Some(format!(
+                    "clipping warning: peak would be {:.2} (>1.00)",
+                    new_peak
+                ));
+            }
         }
     }
 
-    match apply_gain_with_undo(file, steps) {
+    // Dry run: don't actually modify
+    if opts.dry_run {
+        if opts.output_format != OutputFormat::Json && !opts.quiet {
+            println!(
+                "  {} [DRY RUN] {} (would apply {:+.1} dB, {} steps)",
+                "~".cyan(),
+                filename,
+                steps_to_db(actual_steps),
+                actual_steps
+            );
+        }
+        return Ok(JsonFileResult {
+            file: file.display().to_string(),
+            status: Some("dry_run".to_string()),
+            loudness_db: Some(result.loudness_db),
+            peak: Some(result.peak),
+            gain_applied_steps: Some(actual_steps),
+            gain_applied_db: Some(steps_to_db(actual_steps)),
+            warning: warning_msg,
+            dry_run: Some(true),
+            ..Default::default()
+        });
+    }
+
+    match apply_gain_with_undo(file, actual_steps) {
         Ok(frames) => {
             // Restore timestamp if needed
             if let Some(mtime) = original_mtime {
                 restore_timestamp(file, mtime);
             }
 
-            if !opts.quiet {
+            if opts.output_format != OutputFormat::Json && !opts.quiet {
                 println!(
                     "  {} {} ({} frames, {:+.1} dB)",
-                    "✓".green(),
+                    "v".green(),
                     filename,
                     frames,
-                    steps_to_db(steps)
+                    steps_to_db(actual_steps)
                 );
             }
+
+            Ok(JsonFileResult {
+                file: file.display().to_string(),
+                status: Some("success".to_string()),
+                frames: Some(frames),
+                loudness_db: Some(result.loudness_db),
+                peak: Some(result.peak),
+                gain_applied_steps: Some(actual_steps),
+                gain_applied_db: Some(steps_to_db(actual_steps)),
+                warning: warning_msg,
+                ..Default::default()
+            })
         }
         Err(e) => {
-            eprintln!("  {} {} - {}", "✗".red(), filename, e);
+            if opts.output_format != OutputFormat::Json && !opts.quiet {
+                eprintln!("  {} {} - {}", "x".red(), filename, e);
+            }
+
+            Ok(JsonFileResult {
+                file: file.display().to_string(),
+                status: Some("error".to_string()),
+                error: Some(e.to_string()),
+                ..Default::default()
+            })
         }
     }
-
-    Ok(())
 }
 
 fn restore_timestamp(file: &PathBuf, mtime: SystemTime) {
@@ -625,19 +1373,24 @@ fn print_usage() {
     println!();
     println!("{}", "OPTIONS:".cyan().bold());
     println!(
-        "    -g <i>    Apply gain of i steps (each step = {} dB)",
+        "    -g <i>      Apply gain of i steps (each step = {} dB)",
         GAIN_STEP_DB
     );
-    println!("    -d <n>    Apply gain of n dB (rounded to nearest step)");
-    println!("    -r        Apply Track gain (ReplayGain analysis)");
-    println!("    -a        Apply Album gain (ReplayGain analysis)");
-    println!("    -u        Undo gain changes (restore from APEv2 tag)");
-    println!("    -s c      Check/show file info (analysis only)");
-    println!("    -p        Preserve original file timestamp");
-    println!("    -c        Ignore clipping warnings");
-    println!("    -q        Quiet mode (less output)");
-    println!("    -v        Show version");
-    println!("    -h        Show this help");
+    println!("    -d <n>      Apply gain of n dB (rounded to nearest step)");
+    println!("    -r          Apply Track gain (ReplayGain analysis)");
+    println!("    -a          Apply Album gain (ReplayGain analysis)");
+    println!("    -u          Undo gain changes (restore from APEv2 tag)");
+    println!("    -s c        Check/show file info (analysis only)");
+    println!("    -p          Preserve original file timestamp");
+    println!("    -c          Ignore clipping warnings");
+    println!("    -k          Prevent clipping (automatically limit gain)");
+    println!("    -q          Quiet mode (less output)");
+    println!("    -R          Process directories recursively");
+    println!("    -n          Dry-run mode (show what would be done)");
+    println!("    --dry-run   Same as -n");
+    println!("    -o <fmt>    Output format: 'text' (default) or 'json'");
+    println!("    -v          Show version");
+    println!("    -h          Show this help");
     println!();
     println!("{}", "EXAMPLES:".cyan().bold());
     println!("    mp3rgain song.mp3              Show file info");
@@ -648,6 +1401,10 @@ fn print_usage() {
     println!("    mp3rgain -a *.mp3              Analyze and apply album gain");
     println!("    mp3rgain -u song.mp3           Undo previous gain changes");
     println!("    mp3rgain -g 2 -p song.mp3      Apply gain, preserve timestamp");
+    println!("    mp3rgain -k -g 5 song.mp3      Apply gain with clipping prevention");
+    println!("    mp3rgain -R /path/to/music     Process directory recursively");
+    println!("    mp3rgain -n -g 2 *.mp3         Dry-run (preview changes)");
+    println!("    mp3rgain -o json song.mp3      Output in JSON format");
     println!("    mp3rgain -s c *.mp3            Check all MP3 files");
     println!();
     println!("{}", "NOTES:".cyan().bold());
@@ -657,6 +1414,7 @@ fn print_usage() {
     );
     println!("    - Changes are lossless and reversible");
     println!("    - Gain changes are stored in APEv2 tags for undo support");
+    println!("    - Progress bar shown automatically for 5+ files");
     if replaygain::is_available() {
         println!(
             "    - ReplayGain analysis is {} (target: {} dB)",
