@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
@@ -21,6 +21,10 @@ jobs:
             os: macos-latest
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -33,11 +37,19 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Upload artifact
+      - name: Upload artifact (Unix)
+        if: runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: mp3rgain-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/mp3rgain
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp3rgain-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/mp3rgain.exe
 
   release:
     name: Create Release
@@ -74,6 +86,20 @@ jobs:
           cd ../../dist
           shasum -a 256 mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz > mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
 
+      - name: Create Windows x86_64 zip
+        run: |
+          cd artifacts/mp3rgain-x86_64-pc-windows-msvc
+          zip ../../dist/mp3rgain-${{ github.ref_name }}-windows-x86_64.zip mp3rgain.exe
+          cd ../../dist
+          shasum -a 256 mp3rgain-${{ github.ref_name }}-windows-x86_64.zip > mp3rgain-${{ github.ref_name }}-windows-x86_64.zip.sha256
+
+      - name: Create Windows ARM64 zip
+        run: |
+          cd artifacts/mp3rgain-aarch64-pc-windows-msvc
+          zip ../../dist/mp3rgain-${{ github.ref_name }}-windows-arm64.zip mp3rgain.exe
+          cd ../../dist
+          shasum -a 256 mp3rgain-${{ github.ref_name }}-windows-arm64.zip > mp3rgain-${{ github.ref_name }}-windows-arm64.zip.sha256
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -82,4 +108,8 @@ jobs:
             dist/mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz.sha256
             dist/mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz
             dist/mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
+            dist/mp3rgain-${{ github.ref_name }}-windows-x86_64.zip
+            dist/mp3rgain-${{ github.ref_name }}-windows-x86_64.zip.sha256
+            dist/mp3rgain-${{ github.ref_name }}-windows-arm64.zip
+            dist/mp3rgain-${{ github.ref_name }}-windows-arm64.zip.sha256
           generate_release_notes: true
