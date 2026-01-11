@@ -96,6 +96,63 @@ mp3rgain -a *.mp3
 mp3rgain -u song.mp3
 ```
 
+### Clipping prevention
+
+```bash
+# Automatically reduce gain if clipping would occur
+mp3rgain -k -g 5 song.mp3
+# Output: gain reduced from 5 to 3 steps to prevent clipping
+
+# With ReplayGain
+mp3rgain -k -r song.mp3
+```
+
+### Recursive directory processing
+
+```bash
+# Process all MP3s in a directory recursively
+mp3rgain -R /path/to/music
+mp3rgain -g 2 -R /path/to/music
+mp3rgain -r -R /path/to/album
+```
+
+### Dry-run mode
+
+```bash
+# Preview changes without modifying files
+mp3rgain -n -g 2 *.mp3
+mp3rgain --dry-run -r *.mp3
+```
+
+### JSON output
+
+```bash
+# Output in JSON format for scripting
+mp3rgain -o json song.mp3
+
+# Combine with other options
+mp3rgain -o json -r *.mp3
+```
+
+Example JSON output:
+```json
+{
+  "files": [
+    {
+      "file": "song.mp3",
+      "mpeg_version": "MPEG1",
+      "channel_mode": "Joint Stereo",
+      "frames": 5765,
+      "min_gain": 89,
+      "max_gain": 217,
+      "avg_gain": 168.2,
+      "headroom_steps": 38,
+      "headroom_db": 57.0
+    }
+  ]
+}
+```
+
 ## Command-Line Options
 
 | Option | Description |
@@ -108,7 +165,11 @@ mp3rgain -u song.mp3
 | `-s c` | Check/show file info (analysis only) |
 | `-p` | Preserve original file timestamp |
 | `-c` | Ignore clipping warnings |
+| `-k` | Prevent clipping (automatically limit gain) |
 | `-q` | Quiet mode (less output) |
+| `-R` | Process directories recursively |
+| `-n`, `--dry-run` | Dry-run mode (show what would be done) |
+| `-o <fmt>` | Output format: `text` (default) or `json` |
 | `-v` | Show version |
 | `-h` | Show help |
 
