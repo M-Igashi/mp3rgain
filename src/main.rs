@@ -5,9 +5,10 @@
 
 use anyhow::Result;
 use colored::*;
+use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{analyze, apply_gain_with_undo, db_to_steps, steps_to_db, undo_gain, GAIN_STEP_DB};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -25,6 +26,8 @@ struct Options {
     // Mode options
     undo: bool,       // -u
     check_only: bool, // -s c (check/analysis only)
+    track_gain: bool, // -r (apply track gain)
+    album_gain: bool, // -a (apply album gain)
 
     // Behavior options
     preserve_timestamp: bool, // -p
@@ -103,6 +106,8 @@ fn parse_args(args: &[String]) -> Result<Options> {
                         }
                     }
                 }
+                "r" => opts.track_gain = true,
+                "a" => opts.album_gain = true,
                 "u" => opts.undo = true,
                 "p" => opts.preserve_timestamp = true,
                 "c" => opts.ignore_clipping = true,
@@ -116,13 +121,15 @@ fn parse_args(args: &[String]) -> Result<Options> {
                     std::process::exit(0);
                 }
                 // Handle combined short flags like -qp
-                _ if flag.chars().all(|c| "pqcu".contains(c)) => {
+                _ if flag.chars().all(|c| "pqcura".contains(c)) => {
                     for c in flag.chars() {
                         match c {
                             'p' => opts.preserve_timestamp = true,
                             'q' => opts.quiet = true,
                             'c' => opts.ignore_clipping = true,
                             'u' => opts.undo = true,
+                            'r' => opts.track_gain = true,
+                            'a' => opts.album_gain = true,
                             _ => {}
                         }
                     }
@@ -169,6 +176,16 @@ fn run(opts: Options) -> Result<()> {
     if opts.undo {
         // -u: undo from APEv2 tags
         return cmd_undo(&opts.files, &opts);
+    }
+
+    if opts.album_gain {
+        // -a: apply album gain (ReplayGain)
+        return cmd_album_gain(&opts.files, &opts);
+    }
+
+    if opts.track_gain {
+        // -r: apply track gain (ReplayGain)
+        return cmd_track_gain(&opts.files, &opts);
     }
 
     if opts.check_only {
@@ -243,6 +260,97 @@ fn cmd_undo(files: &[PathBuf], opts: &Options) -> Result<()> {
     Ok(())
 }
 
+fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
+    if !replaygain::is_available() {
+        eprintln!(
+            "{}: ReplayGain analysis requires the 'replaygain' feature",
+            "error".red().bold()
+        );
+        eprintln!("  Install with: cargo install mp3rgain --features replaygain");
+        std::process::exit(1);
+    }
+
+    if !opts.quiet {
+        println!(
+            "{} Analyzing and applying track gain to {} file(s)",
+            "mp3rgain".green().bold(),
+            files.len()
+        );
+        println!("  Target: {} dB (ReplayGain 1.0)", REPLAYGAIN_REFERENCE_DB);
+        println!();
+    }
+
+    for file in files {
+        process_track_gain(file, opts)?;
+    }
+
+    Ok(())
+}
+
+fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
+    if !replaygain::is_available() {
+        eprintln!(
+            "{}: ReplayGain analysis requires the 'replaygain' feature",
+            "error".red().bold()
+        );
+        eprintln!("  Install with: cargo install mp3rgain --features replaygain");
+        std::process::exit(1);
+    }
+
+    if !opts.quiet {
+        println!(
+            "{} Analyzing album gain for {} file(s)",
+            "mp3rgain".green().bold(),
+            files.len()
+        );
+        println!("  Target: {} dB (ReplayGain 1.0)", REPLAYGAIN_REFERENCE_DB);
+        println!();
+    }
+
+    // First, analyze all tracks
+    if !opts.quiet {
+        println!("  {} Analyzing tracks...", "→".cyan());
+    }
+
+    let file_refs: Vec<&std::path::Path> = files.iter().map(|p| p.as_path()).collect();
+
+    match replaygain::analyze_album(&file_refs) {
+        Ok(album_result) => {
+            if !opts.quiet {
+                println!();
+                println!("  Album loudness: {:.1} dB", album_result.album_loudness_db);
+                println!(
+                    "  Album gain:     {:+.1} dB ({} steps)",
+                    album_result.album_gain_db,
+                    album_result.album_gain_steps()
+                );
+                println!("  Album peak:     {:.4}", album_result.album_peak);
+                println!();
+            }
+
+            // Apply album gain to all files
+            let steps = album_result.album_gain_steps();
+            if steps == 0 {
+                if !opts.quiet {
+                    println!("  {} No adjustment needed", "·".cyan());
+                }
+                return Ok(());
+            }
+
+            for (i, file) in files.iter().enumerate() {
+                let track_result = &album_result.tracks[i];
+                process_apply_replaygain(file, steps, track_result, opts)?;
+            }
+        }
+        Err(e) => {
+            eprintln!("{}: Failed to analyze album: {}", "error".red().bold(), e);
+            std::process::exit(1);
+        }
+    }
+
+    Ok(())
+}
+
 // =============================================================================
 // File processing
 // =============================================================================
@@ -263,17 +371,15 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<()> {
     // Check for clipping if not ignored
     if !opts.ignore_clipping && steps > 0 {
         if let Ok(info) = analyze(file) {
-            if steps > info.headroom_steps {
-                if !opts.quiet {
-                    eprintln!(
-                        "  {} {} - clipping warning: requested {} steps but only {} headroom",
-                        "!".yellow(),
-                        filename,
-                        steps,
-                        info.headroom_steps
-                    );
-                    eprintln!("      Use -c to ignore clipping warnings");
-                }
+            if steps > info.headroom_steps && !opts.quiet {
+                eprintln!(
+                    "  {} {} - clipping warning: requested {} steps but only {} headroom",
+                    "!".yellow(),
+                    filename,
+                    steps,
+                    info.headroom_steps
+                );
+                eprintln!("      Use -c to ignore clipping warnings");
             }
         }
     }
@@ -299,7 +405,7 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<()> {
     Ok(())
 }
 
-fn process_info(file: &PathBuf, opts: &Options) -> Result<()> {
+fn process_info(file: &Path, opts: &Options) -> Result<()> {
     let filename = file
         .file_name()
         .and_then(|n| n.to_str())
@@ -391,6 +497,107 @@ fn process_undo(file: &PathBuf, opts: &Options) -> Result<()> {
     Ok(())
 }
 
+fn process_track_gain(file: &PathBuf, opts: &Options) -> Result<()> {
+    let filename = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    if !opts.quiet {
+        println!("  {} Analyzing {}...", "→".cyan(), filename);
+    }
+
+    match replaygain::analyze_track(file) {
+        Ok(result) => {
+            if !opts.quiet {
+                println!(
+                    "      Loudness: {:.1} dB, Gain: {:+.1} dB ({} steps), Peak: {:.4}",
+                    result.loudness_db,
+                    result.gain_db,
+                    result.gain_steps(),
+                    result.peak
+                );
+            }
+
+            let steps = result.gain_steps();
+            if steps == 0 {
+                if !opts.quiet {
+                    println!("  {} {} (no adjustment needed)", "·".cyan(), filename);
+                }
+                return Ok(());
+            }
+
+            process_apply_replaygain(file, steps, &result, opts)?;
+        }
+        Err(e) => {
+            eprintln!("  {} {} - {}", "✗".red(), filename, e);
+        }
+    }
+
+    Ok(())
+}
+
+fn process_apply_replaygain(
+    file: &PathBuf,
+    steps: i32,
+    result: &ReplayGainResult,
+    opts: &Options,
+) -> Result<()> {
+    let filename = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    // Save original timestamp if needed
+    let original_mtime = if opts.preserve_timestamp {
+        std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
+    } else {
+        None
+    };
+
+    // Check for clipping if not ignored
+    if !opts.ignore_clipping && steps > 0 {
+        // Check if applying this gain would cause clipping
+        // Peak of 1.0 means full scale; we need headroom for the gain
+        let gain_linear = 10.0_f64.powf(result.gain_db / 20.0);
+        let new_peak = result.peak * gain_linear;
+        if new_peak > 1.0 && !opts.quiet {
+            eprintln!(
+                "  {} {} - clipping warning: peak would be {:.2} (>{:.2})",
+                "!".yellow(),
+                filename,
+                new_peak,
+                1.0
+            );
+            eprintln!("      Use -c to ignore clipping warnings");
+        }
+    }
+
+    match apply_gain_with_undo(file, steps) {
+        Ok(frames) => {
+            // Restore timestamp if needed
+            if let Some(mtime) = original_mtime {
+                restore_timestamp(file, mtime);
+            }
+
+            if !opts.quiet {
+                println!(
+                    "  {} {} ({} frames, {:+.1} dB)",
+                    "✓".green(),
+                    filename,
+                    frames,
+                    steps_to_db(steps)
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("  {} {} - {}", "✗".red(), filename, e);
+        }
+    }
+
+    Ok(())
+}
+
 fn restore_timestamp(file: &PathBuf, mtime: SystemTime) {
     let _ = std::fs::File::options()
         .write(true)
@@ -422,6 +629,8 @@ fn print_usage() {
         GAIN_STEP_DB
     );
     println!("    -d <n>    Apply gain of n dB (rounded to nearest step)");
+    println!("    -r        Apply Track gain (ReplayGain analysis)");
+    println!("    -a        Apply Album gain (ReplayGain analysis)");
     println!("    -u        Undo gain changes (restore from APEv2 tag)");
     println!("    -s c      Check/show file info (analysis only)");
     println!("    -p        Preserve original file timestamp");
@@ -435,6 +644,8 @@ fn print_usage() {
     println!("    mp3rgain -g 2 song.mp3         Apply +2 steps (+3.0 dB)");
     println!("    mp3rgain -g -3 song.mp3        Apply -3 steps (-4.5 dB)");
     println!("    mp3rgain -d 4.5 song.mp3       Apply +4.5 dB (rounds to +3 steps)");
+    println!("    mp3rgain -r song.mp3           Analyze and apply track gain");
+    println!("    mp3rgain -a *.mp3              Analyze and apply album gain");
     println!("    mp3rgain -u song.mp3           Undo previous gain changes");
     println!("    mp3rgain -g 2 -p song.mp3      Apply gain, preserve timestamp");
     println!("    mp3rgain -s c *.mp3            Check all MP3 files");
@@ -446,8 +657,16 @@ fn print_usage() {
     );
     println!("    - Changes are lossless and reversible");
     println!("    - Gain changes are stored in APEv2 tags for undo support");
-    println!();
-    println!("{}", "NOT YET IMPLEMENTED:".yellow().bold());
-    println!("    -r        Apply Track gain (requires ReplayGain analysis)");
-    println!("    -a        Apply Album gain (requires ReplayGain analysis)");
+    if replaygain::is_available() {
+        println!(
+            "    - ReplayGain analysis is {} (target: {} dB)",
+            "enabled".green(),
+            REPLAYGAIN_REFERENCE_DB
+        );
+    } else {
+        println!();
+        println!("{}", "REPLAYGAIN:".yellow().bold());
+        println!("    -r and -a options require the 'replaygain' feature:");
+        println!("    cargo install mp3rgain --features replaygain");
+    }
 }

@@ -12,6 +12,12 @@
 //! - **Compatible**: Works with all MP3 files (MPEG1/2/2.5 Layer III)
 //! - **Reversible**: Changes can be undone by applying negative gain
 //!
+//! ## Optional Features
+//!
+//! - **replaygain**: Enable ReplayGain analysis (requires symphonia)
+//!   - Track gain calculation (`-r` flag)
+//!   - Album gain calculation (`-a` flag)
+//!
 //! ## Example
 //!
 //! ```no_run
@@ -30,6 +36,8 @@
 //!
 //! Each gain step equals 1.5 dB (fixed by MP3 specification).
 //! The global_gain field is 8 bits, allowing values 0-255.
+
+pub mod replaygain;
 
 use anyhow::{Context, Result};
 use std::fs;
@@ -299,7 +307,7 @@ fn read_gain_at(data: &[u8], loc: &GainLocation) -> u8 {
         data[idx]
     } else if idx + 1 < data.len() {
         let shift = loc.bit_offset;
-        let high = (data[idx] << shift) as u8;
+        let high = data[idx] << shift;
         let low = data[idx + 1] >> (8 - shift);
         high | low
     } else {
