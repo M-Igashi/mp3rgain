@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use colored::*;
-use mp3rgain::{analyze, apply_gain, db_to_steps, steps_to_db, GAIN_STEP_DB};
+use mp3rgain::{analyze, apply_gain_with_undo, db_to_steps, steps_to_db, undo_gain, GAIN_STEP_DB};
 use std::env;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -165,17 +165,12 @@ fn run(opts: Options) -> Result<()> {
         std::process::exit(1);
     }
 
+    // Determine action
     if opts.undo {
-        eprintln!(
-            "{}: -u (undo from tags) is not yet supported",
-            "error".red().bold()
-        );
-        eprintln!("To undo a previous gain change, apply the inverse gain:");
-        eprintln!("  mp3rgain -g -2 file.mp3    # undo a previous +2 step change");
-        std::process::exit(1);
+        // -u: undo from APEv2 tags
+        return cmd_undo(&opts.files, &opts);
     }
 
-    // Determine action
     if opts.check_only {
         // -s c: analysis only
         cmd_info(&opts.files, &opts)
@@ -231,6 +226,23 @@ fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
     Ok(())
 }
 
+fn cmd_undo(files: &[PathBuf], opts: &Options) -> Result<()> {
+    if !opts.quiet {
+        println!(
+            "{} Undoing gain changes on {} file(s)",
+            "mp3rgain".green().bold(),
+            files.len()
+        );
+        println!();
+    }
+
+    for file in files {
+        process_undo(file, opts)?;
+    }
+
+    Ok(())
+}
+
 // =============================================================================
 // File processing
 // =============================================================================
@@ -266,7 +278,7 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<()> {
         }
     }
 
-    match apply_gain(file, steps) {
+    match apply_gain_with_undo(file, steps) {
         Ok(frames) => {
             // Restore timestamp if needed
             if let Some(mtime) = original_mtime {
@@ -334,6 +346,51 @@ fn process_info(file: &PathBuf, opts: &Options) -> Result<()> {
     Ok(())
 }
 
+fn process_undo(file: &PathBuf, opts: &Options) -> Result<()> {
+    let filename = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    // Save original timestamp if needed
+    let original_mtime = if opts.preserve_timestamp {
+        std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
+    } else {
+        None
+    };
+
+    match undo_gain(file) {
+        Ok(frames) => {
+            if frames == 0 {
+                if !opts.quiet {
+                    println!("  {} {} (no changes to undo)", "·".cyan(), filename);
+                }
+            } else {
+                // Restore timestamp if needed
+                if let Some(mtime) = original_mtime {
+                    restore_timestamp(file, mtime);
+                }
+
+                if !opts.quiet {
+                    println!(
+                        "  {} {} ({} frames restored)",
+                        "✓".green(),
+                        filename,
+                        frames
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            if !opts.quiet {
+                eprintln!("  {} {} - {}", "✗".red(), filename, e);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn restore_timestamp(file: &PathBuf, mtime: SystemTime) {
     let _ = std::fs::File::options()
         .write(true)
@@ -365,6 +422,7 @@ fn print_usage() {
         GAIN_STEP_DB
     );
     println!("    -d <n>    Apply gain of n dB (rounded to nearest step)");
+    println!("    -u        Undo gain changes (restore from APEv2 tag)");
     println!("    -s c      Check/show file info (analysis only)");
     println!("    -p        Preserve original file timestamp");
     println!("    -c        Ignore clipping warnings");
@@ -377,6 +435,7 @@ fn print_usage() {
     println!("    mp3rgain -g 2 song.mp3         Apply +2 steps (+3.0 dB)");
     println!("    mp3rgain -g -3 song.mp3        Apply -3 steps (-4.5 dB)");
     println!("    mp3rgain -d 4.5 song.mp3       Apply +4.5 dB (rounds to +3 steps)");
+    println!("    mp3rgain -u song.mp3           Undo previous gain changes");
     println!("    mp3rgain -g 2 -p song.mp3      Apply gain, preserve timestamp");
     println!("    mp3rgain -s c *.mp3            Check all MP3 files");
     println!();
@@ -386,10 +445,9 @@ fn print_usage() {
         GAIN_STEP_DB
     );
     println!("    - Changes are lossless and reversible");
-    println!("    - To undo: apply the inverse gain (e.g., -g -2 to undo -g 2)");
+    println!("    - Gain changes are stored in APEv2 tags for undo support");
     println!();
     println!("{}", "NOT YET IMPLEMENTED:".yellow().bold());
     println!("    -r        Apply Track gain (requires ReplayGain analysis)");
     println!("    -a        Apply Album gain (requires ReplayGain analysis)");
-    println!("    -u        Undo based on stored tag info");
 }
