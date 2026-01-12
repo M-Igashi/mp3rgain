@@ -727,6 +727,13 @@ const APE_FLAG_IS_HEADER: u32 = 1 << 29;
 /// MP3Gain specific tag keys
 pub const TAG_MP3GAIN_UNDO: &str = "MP3GAIN_UNDO";
 pub const TAG_MP3GAIN_MINMAX: &str = "MP3GAIN_MINMAX";
+pub const TAG_MP3GAIN_ALBUM_MINMAX: &str = "MP3GAIN_ALBUM_MINMAX";
+
+/// ReplayGain tag keys
+pub const TAG_REPLAYGAIN_TRACK_GAIN: &str = "REPLAYGAIN_TRACK_GAIN";
+pub const TAG_REPLAYGAIN_TRACK_PEAK: &str = "REPLAYGAIN_TRACK_PEAK";
+pub const TAG_REPLAYGAIN_ALBUM_GAIN: &str = "REPLAYGAIN_ALBUM_GAIN";
+pub const TAG_REPLAYGAIN_ALBUM_PEAK: &str = "REPLAYGAIN_ALBUM_PEAK";
 
 /// APEv2 tag item
 #[derive(Debug, Clone)]
@@ -1033,6 +1040,127 @@ pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
         .with_context(|| format!("Failed to write: {}", file_path.display()))?;
 
     Ok(())
+}
+
+/// Find maximum amplitude in an MP3 file
+/// Returns (max_amplitude, max_global_gain, min_global_gain)
+pub fn find_max_amplitude(file_path: &Path) -> Result<(f64, u8, u8)> {
+    let data =
+        fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
+
+    let mut min_gain = 255u8;
+    let mut max_gain = 0u8;
+
+    let frame_count = iterate_frames(&data, |_pos, _header, locations| {
+        for loc in locations {
+            let gain = read_gain_at(&data, loc);
+            min_gain = min_gain.min(gain);
+            max_gain = max_gain.max(gain);
+        }
+    })?;
+
+    if frame_count == 0 {
+        anyhow::bail!("No valid MP3 frames found");
+    }
+
+    // Calculate max amplitude based on max_gain
+    // Higher global_gain = louder audio
+    // The relationship is: each step of global_gain is 1.5 dB
+    // Max amplitude is reached when global_gain is at maximum
+    // We estimate amplitude as a value between 0 and 1 based on headroom
+    let headroom_steps = (MAX_GAIN - max_gain) as i32;
+    let headroom_db = headroom_steps as f64 * GAIN_STEP_DB;
+
+    // Convert headroom to amplitude (inverse logarithmic relationship)
+    // If headroom is 0, max amplitude is 1.0 (clipping threshold)
+    // For each 1.5 dB of headroom, amplitude decreases by ~16%
+    let max_amplitude = 10.0_f64.powf(-headroom_db / 20.0);
+
+    Ok((max_amplitude, max_gain, min_gain))
+}
+
+/// Apply gain with wrapping (values wrap around instead of clamping)
+pub fn apply_gain_wrap(file_path: &Path, gain_steps: i32) -> Result<usize> {
+    if gain_steps == 0 {
+        return Ok(0);
+    }
+
+    let mut data =
+        fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
+
+    let mut modified_frames = 0;
+    let file_size = data.len();
+    let mut pos = skip_id3v2(&data);
+
+    while pos + 4 <= file_size {
+        let header = match parse_header(&data[pos..]) {
+            Some(h) => h,
+            None => {
+                pos += 1;
+                continue;
+            }
+        };
+
+        let next_pos = pos + header.frame_size;
+        let valid_frame = if next_pos + 2 <= file_size {
+            data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
+        } else {
+            next_pos <= file_size
+        };
+
+        if !valid_frame {
+            pos += 1;
+            continue;
+        }
+
+        let locations = calculate_gain_locations(pos, &header);
+
+        for loc in &locations {
+            let current_gain = read_gain_at(&data, loc) as i32;
+            // Wrap around instead of clamping
+            let new_gain = ((current_gain + gain_steps) % 256 + 256) % 256;
+            write_gain_at(&mut data, loc, new_gain as u8);
+        }
+
+        modified_frames += 1;
+        pos = next_pos;
+    }
+
+    fs::write(file_path, &data)
+        .with_context(|| format!("Failed to write: {}", file_path.display()))?;
+
+    Ok(modified_frames)
+}
+
+/// Apply gain with wrapping and store undo information in APEv2 tag
+pub fn apply_gain_with_undo_wrap(file_path: &Path, gain_steps: i32) -> Result<usize> {
+    if gain_steps == 0 {
+        return Ok(0);
+    }
+
+    // First, get current min/max before modification
+    let analysis = analyze(file_path)?;
+
+    // Read existing APE tag or create new one
+    let mut tag = read_ape_tag_from_file(file_path)?.unwrap_or_else(ApeTag::new);
+
+    // Store or update undo information
+    let existing_undo = tag.get_undo_gain().unwrap_or(0);
+    let new_undo = existing_undo + gain_steps;
+    tag.set_undo_gain(new_undo, new_undo, true); // true = wrap mode
+
+    // Store original min/max if not already stored
+    if tag.get(TAG_MP3GAIN_MINMAX).is_none() {
+        tag.set_minmax(analysis.min_gain, analysis.max_gain);
+    }
+
+    // Apply the gain with wrapping
+    let frames = apply_gain_wrap(file_path, gain_steps)?;
+
+    // Write APE tag
+    write_ape_tag(file_path, &tag)?;
+
+    Ok(frames)
 }
 
 /// Apply gain and store undo information in APEv2 tag
