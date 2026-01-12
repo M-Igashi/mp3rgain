@@ -70,7 +70,7 @@ struct JsonOutput {
     summary: Option<JsonSummary>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Default)]
 struct JsonFileResult {
     file: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -122,30 +122,6 @@ struct JsonSummary {
     failed: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     dry_run: Option<bool>,
-}
-
-impl Default for JsonFileResult {
-    fn default() -> Self {
-        Self {
-            file: String::new(),
-            status: None,
-            frames: None,
-            mpeg_version: None,
-            channel_mode: None,
-            min_gain: None,
-            max_gain: None,
-            avg_gain: None,
-            headroom_steps: None,
-            headroom_db: None,
-            gain_applied_steps: None,
-            gain_applied_db: None,
-            loudness_db: None,
-            peak: None,
-            error: None,
-            warning: None,
-            dry_run: None,
-        }
-    }
 }
 
 // =============================================================================
@@ -376,7 +352,7 @@ fn collect_mp3_files(dir: &Path, result: &mut Vec<PathBuf>) -> Result<()> {
         if path.is_dir() {
             collect_mp3_files(&path, result)?;
         } else if let Some(ext) = path.extension() {
-            if ext.to_ascii_lowercase() == "mp3" {
+            if ext.eq_ignore_ascii_case("mp3") {
                 result.push(path);
             }
         }
