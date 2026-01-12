@@ -7,12 +7,17 @@
 //! 2. RMS calculation in 50ms windows
 //! 3. 95th percentile statistical analysis
 //!
+//! Supports both MP3 and AAC/M4A files when compiled with the replaygain feature.
+//!
 //! Reference: https://wiki.hydrogenaud.io/index.php?title=ReplayGain_specification
 
 #[cfg(feature = "replaygain")]
 use anyhow::Context;
 use anyhow::Result;
 use std::path::Path;
+
+#[cfg(feature = "replaygain")]
+use crate::mp4meta;
 
 #[cfg(feature = "replaygain")]
 use symphonia::core::audio::{AudioBufferRef, Signal};
@@ -31,6 +36,15 @@ use symphonia::core::probe::Hint;
 /// Original mp3gain uses 89 dB (ReplayGain 1.0)
 pub const REPLAYGAIN_REFERENCE_DB: f64 = 89.0;
 
+/// Audio file type
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AudioFileType {
+    /// MP3 file
+    Mp3,
+    /// AAC/M4A file
+    Aac,
+}
+
 /// Result of ReplayGain analysis for a single track
 #[derive(Debug, Clone)]
 pub struct ReplayGainResult {
@@ -42,6 +56,8 @@ pub struct ReplayGainResult {
     pub peak: f64,
     /// Sample rate of the audio
     pub sample_rate: u32,
+    /// File type (MP3 or AAC)
+    pub file_type: AudioFileType,
 }
 
 impl ReplayGainResult {
@@ -332,9 +348,22 @@ fn calculate_loudness(rms_values: &[f64]) -> f64 {
 // Main analysis functions
 // =============================================================================
 
+/// Detect file type from path
+#[cfg(feature = "replaygain")]
+fn detect_file_type(file_path: &Path) -> AudioFileType {
+    if mp4meta::is_mp4_file(file_path) {
+        AudioFileType::Aac
+    } else {
+        AudioFileType::Mp3
+    }
+}
+
 /// Analyze a single track and calculate ReplayGain
 #[cfg(feature = "replaygain")]
 pub fn analyze_track(file_path: &Path) -> Result<ReplayGainResult> {
+    // Detect file type
+    let file_type = detect_file_type(file_path);
+
     // Open the media source
     let file = std::fs::File::open(file_path)
         .with_context(|| format!("Failed to open: {}", file_path.display()))?;
@@ -423,6 +452,7 @@ pub fn analyze_track(file_path: &Path) -> Result<ReplayGainResult> {
         gain_db,
         peak,
         sample_rate,
+        file_type,
     })
 }
 

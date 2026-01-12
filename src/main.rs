@@ -6,7 +6,8 @@
 use anyhow::Result;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
-use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
+use mp3rgain::mp4meta;
+use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{
     analyze, apply_gain_channel_with_undo, apply_gain_with_undo, apply_gain_with_undo_wrap,
     db_to_steps, delete_ape_tag, find_max_amplitude, read_ape_tag_from_file, steps_to_db,
@@ -45,6 +46,12 @@ enum StoredTagMode {
     Recalc,   // -s r: Force recalculation
     UseId3v2, // -s i: Use ID3v2 tags (not fully implemented, show warning)
     UseApev2, // -s a: Use APEv2 tags (default)
+}
+
+/// Album gain info for AAC files
+struct AacAlbumInfo {
+    album_gain_db: f64,
+    album_peak: f64,
 }
 
 #[derive(Default)]
@@ -399,7 +406,7 @@ fn expand_files_recursive(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
 
     for path in paths {
         if path.is_dir() {
-            collect_mp3_files(path, &mut result)?;
+            collect_audio_files(path, &mut result)?;
         } else {
             result.push(path.clone());
         }
@@ -409,15 +416,19 @@ fn expand_files_recursive(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     Ok(result)
 }
 
-fn collect_mp3_files(dir: &Path, result: &mut Vec<PathBuf>) -> Result<()> {
+fn collect_audio_files(dir: &Path, result: &mut Vec<PathBuf>) -> Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
 
         if path.is_dir() {
-            collect_mp3_files(&path, result)?;
+            collect_audio_files(&path, result)?;
         } else if let Some(ext) = path.extension() {
-            if ext.eq_ignore_ascii_case("mp3") {
+            if ext.eq_ignore_ascii_case("mp3")
+                || ext.eq_ignore_ascii_case("m4a")
+                || ext.eq_ignore_ascii_case("aac")
+                || ext.eq_ignore_ascii_case("mp4")
+            {
                 result.push(path);
             }
         }
@@ -437,7 +448,7 @@ fn run(mut opts: Options) -> Result<()> {
     if opts.recursive {
         opts.files = expand_files_recursive(&opts.files)?;
         if opts.files.is_empty() {
-            eprintln!("{}: no MP3 files found", "error".red().bold());
+            eprintln!("{}: no audio files found (MP3/M4A)", "error".red().bold());
             std::process::exit(1);
         }
     }
@@ -1376,7 +1387,17 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 progress_set_message(&pb, filename);
 
                 let track_result = &album_result.tracks[i];
-                let result = process_apply_replaygain(file, steps, track_result, opts)?;
+                let album_info = AacAlbumInfo {
+                    album_gain_db: album_result.album_gain_db,
+                    album_peak: album_result.album_peak,
+                };
+                let result = process_apply_replaygain_with_album(
+                    file,
+                    steps,
+                    track_result,
+                    opts,
+                    Some(&album_info),
+                )?;
                 if opts.output_format == OutputFormat::Json {
                     if result.status.as_deref() == Some("success") {
                         successful += 1;
@@ -1931,6 +1952,16 @@ fn process_apply_replaygain(
     result: &ReplayGainResult,
     opts: &Options,
 ) -> Result<JsonFileResult> {
+    process_apply_replaygain_with_album(file, steps, result, opts, None)
+}
+
+fn process_apply_replaygain_with_album(
+    file: &PathBuf,
+    steps: i32,
+    result: &ReplayGainResult,
+    opts: &Options,
+    album_info: Option<&AacAlbumInfo>,
+) -> Result<JsonFileResult> {
     let filename = file
         .file_name()
         .and_then(|n| n.to_str())
@@ -1998,12 +2029,17 @@ fn process_apply_replaygain(
     // Dry run: don't actually modify
     if opts.dry_run {
         if opts.output_format == OutputFormat::Text && !opts.quiet {
+            let format_info = match result.file_type {
+                AudioFileType::Aac => " (tags only)",
+                AudioFileType::Mp3 => "",
+            };
             println!(
-                "  {} [DRY RUN] {} (would apply {:+.1} dB, {} steps)",
+                "  {} [DRY RUN] {} (would apply {:+.1} dB, {} steps{})",
                 "~".cyan(),
                 filename,
                 steps_to_db(actual_steps),
-                actual_steps
+                actual_steps,
+                format_info
             );
         }
         return Ok(JsonFileResult {
@@ -2019,6 +2055,20 @@ fn process_apply_replaygain(
         });
     }
 
+    // Handle AAC/M4A files differently - only write ReplayGain tags
+    if result.file_type == AudioFileType::Aac {
+        return process_apply_replaygain_aac_with_album(
+            file,
+            actual_steps,
+            result,
+            opts,
+            warning_msg,
+            original_mtime,
+            album_info,
+        );
+    }
+
+    // MP3: Apply gain to audio frames
     let apply_result = if opts.wrap_gain {
         apply_with_temp_file(file, |f| apply_gain_with_undo_wrap(f, actual_steps), opts)
     } else {
@@ -2050,6 +2100,80 @@ fn process_apply_replaygain(
                 peak: Some(result.peak),
                 gain_applied_steps: Some(actual_steps),
                 gain_applied_db: Some(steps_to_db(actual_steps)),
+                warning: warning_msg,
+                ..Default::default()
+            })
+        }
+        Err(e) => {
+            if opts.output_format == OutputFormat::Text && !opts.quiet {
+                eprintln!("  {} {} - {}", "x".red(), filename, e);
+            }
+
+            Ok(JsonFileResult {
+                file: file.display().to_string(),
+                status: Some("error".to_string()),
+                error: Some(e.to_string()),
+                ..Default::default()
+            })
+        }
+    }
+}
+
+/// Apply ReplayGain to AAC/M4A files with optional album info
+fn process_apply_replaygain_aac_with_album(
+    file: &PathBuf,
+    _actual_steps: i32,
+    result: &ReplayGainResult,
+    opts: &Options,
+    warning_msg: Option<String>,
+    original_mtime: Option<std::time::SystemTime>,
+    album_info: Option<&AacAlbumInfo>,
+) -> Result<JsonFileResult> {
+    let filename = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    // Create ReplayGain tags for AAC
+    let mut tags = mp4meta::ReplayGainTags::new();
+    tags.set_track(result.gain_db, result.peak);
+
+    // Add album tags if available
+    if let Some(album) = album_info {
+        tags.set_album(album.album_gain_db, album.album_peak);
+    }
+
+    // Write tags to file
+    match mp4meta::write_replaygain_tags(file, &tags) {
+        Ok(()) => {
+            // Restore timestamp if needed
+            if let Some(mtime) = original_mtime {
+                restore_timestamp(file, mtime);
+            }
+
+            let tag_type = if album_info.is_some() {
+                "track+album tags"
+            } else {
+                "tags"
+            };
+
+            if opts.output_format == OutputFormat::Text && !opts.quiet {
+                println!(
+                    "  {} {} ({} written, {:+.1} dB)",
+                    "v".green(),
+                    filename,
+                    tag_type,
+                    result.gain_db
+                );
+            }
+
+            Ok(JsonFileResult {
+                file: file.display().to_string(),
+                status: Some("success".to_string()),
+                loudness_db: Some(result.loudness_db),
+                peak: Some(result.peak),
+                gain_applied_steps: Some(result.gain_steps()),
+                gain_applied_db: Some(result.gain_db),
                 warning: warning_msg,
                 ..Default::default()
             })

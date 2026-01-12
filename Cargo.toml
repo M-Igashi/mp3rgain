@@ -1,6 +1,6 @@
 [package]
 name = "mp3rgain"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 authors = ["Masanari Higashi <M-Igashi@users.noreply.github.com>"]
 description = "Lossless MP3 volume adjustment - a modern mp3gain replacement written in Rust"
@@ -14,11 +14,13 @@ categories = ["multimedia::audio", "command-line-utilities"]
 [features]
 default = []
 replaygain = ["symphonia"]
+aac = ["symphonia-aac"]
+symphonia-aac = ["symphonia"]
 
 [dependencies]
 anyhow = "1.0"
 colored = "2.0"
-symphonia = { version = "0.5", optional = true, default-features = false, features = ["mp3"] }
+symphonia = { version = "0.5", optional = true, default-features = false, features = ["mp3", "aac", "isomp4"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 indicatif = "0.17"
