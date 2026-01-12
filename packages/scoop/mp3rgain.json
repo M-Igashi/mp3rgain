@@ -1,0 +1,31 @@
+{
+    "version": "1.1.0",
+    "description": "Lossless MP3 volume adjustment - a modern mp3gain replacement written in Rust",
+    "homepage": "https://github.com/M-Igashi/mp3rgain",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/M-Igashi/mp3rgain/releases/download/v1.1.0/mp3rgain-v1.1.0-windows-x86_64.zip",
+            "hash": "50018229acef9ea9fd388b46edeef94d3f9d7889f2a021167dc241810c235d1e"
+        },
+        "arm64": {
+            "url": "https://github.com/M-Igashi/mp3rgain/releases/download/v1.1.0/mp3rgain-v1.1.0-windows-arm64.zip",
+            "hash": "d56c1a27bdf4cf376014f33ec4ed7082282facf1d0c52706dbd3a8527cb3ab00"
+        }
+    },
+    "bin": "mp3rgain.exe",
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/M-Igashi/mp3rgain/releases/download/v$version/mp3rgain-v$version-windows-x86_64.zip"
+            },
+            "arm64": {
+                "url": "https://github.com/M-Igashi/mp3rgain/releases/download/v$version/mp3rgain-v$version-windows-arm64.zip"
+            }
+        },
+        "hash": {
+            "url": "$url.sha256"
+        }
+    }
+}

@@ -24,7 +24,18 @@ mp3rgain adjusts MP3 volume without re-encoding by modifying the `global_gain` f
 
 ### Windows
 
-**Download and extract** (recommended for most users):
+**Scoop** (recommended):
+```powershell
+scoop bucket add mp3rgain https://github.com/M-Igashi/scoop-bucket
+scoop install mp3rgain
+```
+
+**winget**:
+```powershell
+winget install M-Igashi.mp3rgain
+```
+
+**Download and extract**:
 
 1. Download the latest release from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
    - `mp3rgain-*-windows-x86_64.zip` (most Windows PCs)
