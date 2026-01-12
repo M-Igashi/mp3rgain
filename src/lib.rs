@@ -531,6 +531,185 @@ pub fn steps_to_db(steps: i32) -> f64 {
     steps as f64 * GAIN_STEP_DB
 }
 
+/// Channel selection for independent gain adjustment
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Channel {
+    /// Left channel (channel 0)
+    Left,
+    /// Right channel (channel 1)
+    Right,
+}
+
+impl Channel {
+    /// Get channel index (0 for left, 1 for right)
+    pub fn index(&self) -> usize {
+        match self {
+            Channel::Left => 0,
+            Channel::Right => 1,
+        }
+    }
+
+    /// Create from index (0 = left, 1 = right)
+    pub fn from_index(index: usize) -> Option<Self> {
+        match index {
+            0 => Some(Channel::Left),
+            1 => Some(Channel::Right),
+            _ => None,
+        }
+    }
+}
+
+/// Check if an MP3 file is mono
+pub fn is_mono(file_path: &Path) -> Result<bool> {
+    let analysis = analyze(file_path)?;
+    Ok(analysis.channel_mode == "Mono")
+}
+
+/// Apply gain adjustment to a specific channel only (lossless)
+///
+/// # Arguments
+/// * `file_path` - Path to MP3 file
+/// * `channel` - Which channel to adjust (Left or Right)
+/// * `gain_steps` - Number of 1.5dB steps to apply (positive = louder)
+///
+/// # Returns
+/// * Number of frames modified
+///
+/// # Errors
+/// * Returns error if file is mono (no separate channels)
+pub fn apply_gain_channel(file_path: &Path, channel: Channel, gain_steps: i32) -> Result<usize> {
+    if gain_steps == 0 {
+        return Ok(0);
+    }
+
+    // Check if file is mono
+    let analysis = analyze(file_path)?;
+    if analysis.channel_mode == "Mono" {
+        anyhow::bail!("Cannot apply channel-specific gain to mono file. Use -g for mono files.");
+    }
+
+    let mut data =
+        fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
+
+    let mut modified_frames = 0;
+    let file_size = data.len();
+    let mut pos = skip_id3v2(&data);
+    let target_channel = channel.index();
+
+    while pos + 4 <= file_size {
+        let header = match parse_header(&data[pos..]) {
+            Some(h) => h,
+            None => {
+                pos += 1;
+                continue;
+            }
+        };
+
+        let next_pos = pos + header.frame_size;
+        let valid_frame = if next_pos + 2 <= file_size {
+            data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
+        } else {
+            next_pos <= file_size
+        };
+
+        if !valid_frame {
+            pos += 1;
+            continue;
+        }
+
+        let locations = calculate_gain_locations(pos, &header);
+        let num_channels = header.channel_mode.channel_count();
+        let num_granules = header.granule_count();
+
+        // Apply gain only to the target channel
+        // Locations are ordered: [gr0_ch0, gr0_ch1, gr1_ch0, gr1_ch1] for stereo MPEG1
+        for gr in 0..num_granules {
+            let loc_index = gr * num_channels + target_channel;
+            if loc_index < locations.len() {
+                let loc = &locations[loc_index];
+                let current_gain = read_gain_at(&data, loc);
+                let new_gain = if gain_steps > 0 {
+                    current_gain.saturating_add(gain_steps.min(255) as u8)
+                } else {
+                    current_gain.saturating_sub((-gain_steps).min(255) as u8)
+                };
+                write_gain_at(&mut data, loc, new_gain);
+            }
+        }
+
+        modified_frames += 1;
+        pos = next_pos;
+    }
+
+    fs::write(file_path, &data)
+        .with_context(|| format!("Failed to write: {}", file_path.display()))?;
+
+    Ok(modified_frames)
+}
+
+/// Apply channel-specific gain and store undo information in APEv2 tag
+pub fn apply_gain_channel_with_undo(
+    file_path: &Path,
+    channel: Channel,
+    gain_steps: i32,
+) -> Result<usize> {
+    if gain_steps == 0 {
+        return Ok(0);
+    }
+
+    // Check if file is mono before doing anything
+    let analysis = analyze(file_path)?;
+    if analysis.channel_mode == "Mono" {
+        anyhow::bail!("Cannot apply channel-specific gain to mono file. Use -g for mono files.");
+    }
+
+    // Read existing APE tag or create new one
+    let mut tag = read_ape_tag_from_file(file_path)?.unwrap_or_else(ApeTag::new);
+
+    // Get existing undo values (left, right)
+    let (existing_left, existing_right) = parse_undo_values(tag.get(TAG_MP3GAIN_UNDO));
+
+    // Update the appropriate channel
+    let (new_left, new_right) = match channel {
+        Channel::Left => (existing_left + gain_steps, existing_right),
+        Channel::Right => (existing_left, existing_right + gain_steps),
+    };
+
+    tag.set_undo_gain(new_left, new_right, false);
+
+    // Store original min/max if not already stored
+    if tag.get(TAG_MP3GAIN_MINMAX).is_none() {
+        tag.set_minmax(analysis.min_gain, analysis.max_gain);
+    }
+
+    // Apply the gain
+    let frames = apply_gain_channel(file_path, channel, gain_steps)?;
+
+    // Write APE tag
+    write_ape_tag(file_path, &tag)?;
+
+    Ok(frames)
+}
+
+/// Parse MP3GAIN_UNDO tag value into (left_gain, right_gain)
+fn parse_undo_values(undo_str: Option<&str>) -> (i32, i32) {
+    match undo_str {
+        Some(v) => {
+            let parts: Vec<&str> = v.split(',').collect();
+            let left = parts
+                .first()
+                .and_then(|s| s.trim().parse::<i32>().ok())
+                .unwrap_or(0);
+            let right = parts
+                .get(1)
+                .and_then(|s| s.trim().parse::<i32>().ok())
+                .unwrap_or(left);
+            (left, right)
+        }
+        None => (0, 0),
+    }
+}
+
 // =============================================================================
 // APEv2 Tag Support
 // =============================================================================

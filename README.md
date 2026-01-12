@@ -116,6 +116,16 @@ mp3rgain -g 2 -R /path/to/music
 mp3rgain -r -R /path/to/album
 ```
 
+### Channel-specific gain (stereo balance)
+
+```bash
+# Apply +3 steps to left channel only
+mp3rgain -l 0 3 song.mp3
+
+# Apply -2 steps to right channel only
+mp3rgain -l 1 -2 song.mp3
+```
+
 ### Dry-run mode
 
 ```bash
@@ -159,6 +169,7 @@ Example JSON output:
 |--------|-------------|
 | `-g <i>` | Apply gain of i steps (each step = 1.5 dB) |
 | `-d <n>` | Apply gain of n dB (rounded to nearest step) |
+| `-l <c> <g>` | Apply gain to left (0) or right (1) channel only |
 | `-r` | Apply Track gain (ReplayGain analysis) |
 | `-a` | Apply Album gain (ReplayGain analysis) |
 | `-u` | Undo gain changes (restore from APEv2 tag) |
