@@ -7,7 +7,10 @@ use anyhow::Result;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
-use mp3rgain::{analyze, apply_gain_with_undo, db_to_steps, steps_to_db, undo_gain, GAIN_STEP_DB};
+use mp3rgain::{
+    analyze, apply_gain_channel_with_undo, apply_gain_with_undo, db_to_steps, steps_to_db,
+    undo_gain, Channel, GAIN_STEP_DB,
+};
 use serde::Serialize;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -30,8 +33,9 @@ enum OutputFormat {
 #[derive(Default)]
 struct Options {
     // Gain options
-    gain_steps: Option<i32>, // -g <i>
-    gain_db: Option<f64>,    // -d <n>
+    gain_steps: Option<i32>,              // -g <i>
+    gain_db: Option<f64>,                 // -d <n>
+    channel_gain: Option<(Channel, i32)>, // -l <channel> <gain>
 
     // Mode options
     undo: bool,       // -u
@@ -247,6 +251,43 @@ fn parse_args(args: &[String]) -> Result<Options> {
                         }
                     }
                 }
+                "l" => {
+                    // -l <channel> <gain> : apply gain to specific channel
+                    i += 1;
+                    if i >= args.len() {
+                        eprintln!(
+                            "{}: -l requires two arguments: <channel> <gain>",
+                            "error".red().bold()
+                        );
+                        std::process::exit(1);
+                    }
+                    let channel_arg: usize = args[i].parse().map_err(|_| {
+                        anyhow::anyhow!(
+                            "invalid channel number: {} (use 0 for left, 1 for right)",
+                            args[i]
+                        )
+                    })?;
+                    let channel = Channel::from_index(channel_arg).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "invalid channel: {} (use 0 for left, 1 for right)",
+                            channel_arg
+                        )
+                    })?;
+
+                    i += 1;
+                    if i >= args.len() {
+                        eprintln!(
+                            "{}: -l requires two arguments: <channel> <gain>",
+                            "error".red().bold()
+                        );
+                        std::process::exit(1);
+                    }
+                    let gain: i32 = args[i]
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("invalid gain value: {}", args[i]))?;
+
+                    opts.channel_gain = Some((channel, gain));
+                }
                 "r" => opts.track_gain = true,
                 "a" => opts.album_gain = true,
                 "u" => opts.undo = true,
@@ -376,6 +417,12 @@ fn run(mut opts: Options) -> Result<()> {
         return cmd_track_gain(&opts.files, &opts);
     }
 
+    if opts.channel_gain.is_some() {
+        // -l: apply channel-specific gain
+        let (channel, steps) = opts.channel_gain.unwrap();
+        return cmd_apply_channel(&opts.files, channel, steps, &opts);
+    }
+
     if opts.check_only {
         // -s c: analysis only
         cmd_info(&opts.files, &opts)
@@ -487,6 +534,107 @@ fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
         progress_set_message(&pb, filename);
 
         let result = process_apply(file, steps, opts)?;
+        if opts.output_format == OutputFormat::Json {
+            if result.status.as_deref() == Some("success") {
+                successful += 1;
+            } else if result.status.as_deref() == Some("error") {
+                failed += 1;
+            }
+            json_results.push(result);
+        } else if result.status.as_deref() == Some("success") {
+            successful += 1;
+        } else if result.status.as_deref() == Some("error") {
+            failed += 1;
+        }
+
+        progress_inc(&pb);
+    }
+
+    progress_finish(pb);
+
+    if opts.output_format == OutputFormat::Json {
+        let output = JsonOutput {
+            files: Some(json_results),
+            album: None,
+            summary: Some(JsonSummary {
+                total_files: files.len(),
+                successful,
+                failed,
+                dry_run: if opts.dry_run { Some(true) } else { None },
+            }),
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if opts.dry_run && !opts.quiet {
+        println!();
+        println!("{}", "No files were modified.".yellow());
+    }
+
+    Ok(())
+}
+
+fn cmd_apply_channel(
+    files: &[PathBuf],
+    channel: Channel,
+    steps: i32,
+    opts: &Options,
+) -> Result<()> {
+    if steps == 0 {
+        if opts.output_format == OutputFormat::Json {
+            let output = JsonOutput {
+                files: Some(vec![]),
+                album: None,
+                summary: Some(JsonSummary {
+                    total_files: files.len(),
+                    successful: 0,
+                    failed: 0,
+                    dry_run: if opts.dry_run { Some(true) } else { None },
+                }),
+            };
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else if !opts.quiet {
+            println!("{}: gain is 0, nothing to do", "info".cyan());
+        }
+        return Ok(());
+    }
+
+    let db_value = steps_to_db(steps);
+    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+    let channel_name = match channel {
+        Channel::Left => "left",
+        Channel::Right => "right",
+    };
+
+    if opts.output_format != OutputFormat::Json && !opts.quiet {
+        println!(
+            "{}{} {} {} step(s) ({:+.1} dB) to {} channel of {} file(s)",
+            dry_run_prefix,
+            "mp3rgain".green().bold(),
+            if opts.dry_run {
+                "Would apply"
+            } else {
+                "Applying"
+            },
+            steps,
+            db_value,
+            channel_name,
+            files.len()
+        );
+        println!();
+    }
+
+    let pb = create_progress_bar(files.len(), opts);
+    let mut json_results: Vec<JsonFileResult> = Vec::new();
+    let mut successful = 0;
+    let mut failed = 0;
+
+    for file in files {
+        let filename = file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        progress_set_message(&pb, filename);
+
+        let result = process_apply_channel(file, channel, steps, opts)?;
         if opts.output_format == OutputFormat::Json {
             if result.status.as_deref() == Some("success") {
                 successful += 1;
@@ -992,6 +1140,91 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
     }
 }
 
+fn process_apply_channel(
+    file: &PathBuf,
+    channel: Channel,
+    steps: i32,
+    opts: &Options,
+) -> Result<JsonFileResult> {
+    let filename = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    let channel_name = match channel {
+        Channel::Left => "left",
+        Channel::Right => "right",
+    };
+
+    // Save original timestamp if needed
+    let original_mtime = if opts.preserve_timestamp && !opts.dry_run {
+        std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
+    } else {
+        None
+    };
+
+    // Dry run: don't actually modify
+    if opts.dry_run {
+        if opts.output_format != OutputFormat::Json && !opts.quiet {
+            println!(
+                "  {} [DRY RUN] {} (would apply {} steps to {} channel)",
+                "~".cyan(),
+                filename,
+                steps,
+                channel_name
+            );
+        }
+        return Ok(JsonFileResult {
+            file: file.display().to_string(),
+            status: Some("dry_run".to_string()),
+            gain_applied_steps: Some(steps),
+            gain_applied_db: Some(steps_to_db(steps)),
+            dry_run: Some(true),
+            ..Default::default()
+        });
+    }
+
+    match apply_gain_channel_with_undo(file, channel, steps) {
+        Ok(frames) => {
+            // Restore timestamp if needed
+            if let Some(mtime) = original_mtime {
+                restore_timestamp(file, mtime);
+            }
+
+            if opts.output_format != OutputFormat::Json && !opts.quiet {
+                println!(
+                    "  {} {} ({} frames, {} channel)",
+                    "v".green(),
+                    filename,
+                    frames,
+                    channel_name
+                );
+            }
+
+            Ok(JsonFileResult {
+                file: file.display().to_string(),
+                status: Some("success".to_string()),
+                frames: Some(frames),
+                gain_applied_steps: Some(steps),
+                gain_applied_db: Some(steps_to_db(steps)),
+                ..Default::default()
+            })
+        }
+        Err(e) => {
+            if opts.output_format != OutputFormat::Json && !opts.quiet {
+                eprintln!("  {} {} - {}", "x".red(), filename, e);
+            }
+
+            Ok(JsonFileResult {
+                file: file.display().to_string(),
+                status: Some("error".to_string()),
+                error: Some(e.to_string()),
+                ..Default::default()
+            })
+        }
+    }
+}
+
 fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
     let filename = file
         .file_name()
@@ -1377,6 +1610,7 @@ fn print_usage() {
         GAIN_STEP_DB
     );
     println!("    -d <n>      Apply gain of n dB (rounded to nearest step)");
+    println!("    -l <c> <g>  Apply gain to left (0) or right (1) channel only");
     println!("    -r          Apply Track gain (ReplayGain analysis)");
     println!("    -a          Apply Album gain (ReplayGain analysis)");
     println!("    -u          Undo gain changes (restore from APEv2 tag)");
@@ -1406,6 +1640,8 @@ fn print_usage() {
     println!("    mp3rgain -n -g 2 *.mp3         Dry-run (preview changes)");
     println!("    mp3rgain -o json song.mp3      Output in JSON format");
     println!("    mp3rgain -s c *.mp3            Check all MP3 files");
+    println!("    mp3rgain -l 0 3 song.mp3       Apply +3 steps to left channel");
+    println!("    mp3rgain -l 1 -2 song.mp3      Apply -2 steps to right channel");
     println!();
     println!("{}", "NOTES:".cyan().bold());
     println!(
