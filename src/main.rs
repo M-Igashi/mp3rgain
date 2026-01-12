@@ -69,6 +69,7 @@ struct Options {
     album_gain: bool,               // -a (apply album gain)
     skip_album: bool,               // -e: skip album analysis
     max_amplitude_only: bool,       // -x: only find max amplitude
+    track_index: Option<u32>,       // -i <index>: track index for multi-track files
 
     // Behavior options
     preserve_timestamp: bool,    // -p
@@ -323,6 +324,18 @@ fn parse_args(args: &[String]) -> Result<Options> {
                 "a" => opts.album_gain = true,
                 "e" => opts.skip_album = true,
                 "x" => opts.max_amplitude_only = true,
+                "i" => {
+                    i += 1;
+                    if i >= args.len() {
+                        eprintln!("{}: -i requires an argument", "error".red().bold());
+                        std::process::exit(1);
+                    }
+                    opts.track_index = Some(
+                        args[i]
+                            .parse()
+                            .map_err(|_| anyhow::anyhow!("invalid track index: {}", args[i]))?,
+                    );
+                }
                 "u" => opts.undo = true,
                 "p" => opts.preserve_timestamp = true,
                 "c" => opts.ignore_clipping = true,
@@ -385,6 +398,14 @@ fn parse_args(args: &[String]) -> Result<Options> {
                     opts.gain_modifier = val
                         .parse()
                         .map_err(|_| anyhow::anyhow!("invalid modifier value: {}", val))?;
+                }
+                // Handle -i with attached value (e.g., -i1)
+                _ if flag.starts_with('i') => {
+                    let val = &flag[1..];
+                    opts.track_index = Some(
+                        val.parse()
+                            .map_err(|_| anyhow::anyhow!("invalid track index: {}", val))?,
+                    );
                 }
                 _ => {
                     eprintln!("{}: unknown option: -{}", "warning".yellow().bold(), flag);
@@ -1308,7 +1329,7 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
     let file_refs: Vec<&std::path::Path> = files.iter().map(|p| p.as_path()).collect();
 
-    match replaygain::analyze_album(&file_refs) {
+    match replaygain::analyze_album_with_index(&file_refs, opts.track_index) {
         Ok(album_result) => {
             // Apply gain modifier
             let modified_gain_steps = album_result.album_gain_steps() + opts.gain_modifier;
@@ -1893,7 +1914,7 @@ fn process_track_gain(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> 
         );
     }
 
-    match replaygain::analyze_track(file) {
+    match replaygain::analyze_track_with_index(file, opts.track_index) {
         Ok(result) => {
             // Apply gain modifier
             let base_steps = result.gain_steps();
@@ -2229,6 +2250,7 @@ fn print_usage() {
     println!("    -r          Apply Track gain (ReplayGain analysis)");
     println!("    -a          Apply Album gain (ReplayGain analysis)");
     println!("    -e          Skip album analysis (even with multiple files)");
+    println!("    -i <n>      Specify which audio track to process (default: 0)");
     println!("    -u          Undo gain changes (restore from APEv2 tag)");
     println!("    -x          Only find max amplitude of file");
     println!("    -s <mode>   Stored tag handling:");
