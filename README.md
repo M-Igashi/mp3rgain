@@ -22,6 +22,18 @@ mp3rgain adjusts MP3 volume without re-encoding by modifying the `global_gain` f
 
 ## Installation
 
+### macOS
+
+**Homebrew** (recommended):
+```bash
+brew install M-Igashi/tap/mp3rgain
+```
+
+**Download binary:**
+1. Download `mp3rgain-*-macos-universal.tar.gz` from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases)
+2. Extract: `tar -xzf mp3rgain-*-macos-universal.tar.gz`
+3. Move to PATH: `sudo mv mp3rgain /usr/local/bin/`
+
 ### Windows
 
 **Scoop** (recommended):
@@ -55,23 +67,6 @@ winget install M-Igashi.mp3rgain
    - Restart your terminal
 
 > **Note:** mp3rgain is a command-line tool, not a GUI application. Double-clicking the executable will briefly open and close a terminal window. Always run it from PowerShell or Command Prompt.
-
-**Using Cargo** (for Rust developers):
-```powershell
-cargo install mp3rgain
-```
-
-### macOS
-
-**Homebrew** (recommended):
-```bash
-brew install M-Igashi/tap/mp3rgain
-```
-
-**Download binary:**
-1. Download `mp3rgain-*-macos-universal.tar.gz` from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases)
-2. Extract: `tar -xzf mp3rgain-*-macos-universal.tar.gz`
-3. Move to PATH: `sudo mv mp3rgain /usr/local/bin/`
 
 ### Linux
 
