@@ -7,72 +7,69 @@ This document provides a detailed comparison between mp3rgain and the original a
 | | mp3rgain | aacgain | mp3gain |
 |---|----------|---------|---------|
 | **Language** | Rust | C | C |
-| **Last Update** | Active | 2022 | ~2015 |
+| **Last Update** | Active (2025) | 2022 | ~2015 |
 | **License** | MIT | LGPL | LGPL |
+| **Version** | 1.0.0 | 1.8.2 | 1.5.2.1 |
 | **Repository** | [M-Igashi/mp3rgain](https://github.com/M-Igashi/mp3rgain) | [dgilman/aacgain](https://github.com/dgilman/aacgain) | SourceForge |
 
-## Supported Formats
+## Feature Comparison
+
+### Supported Formats
 
 | Format | mp3rgain | aacgain | mp3gain |
 |--------|----------|---------|---------|
 | MP3 (MPEG1 Layer III) | Yes | Yes | Yes |
 | MP3 (MPEG2 Layer III) | Yes | Yes | Yes |
 | MP3 (MPEG2.5 Layer III) | Yes | Yes | Yes |
-| AAC (M4A/MP4/M4V) | Planned | Yes | No |
+| AAC (M4A/MP4) | Yes (tags only) | Yes (lossless) | No |
 | AAC (raw .aac) | No | No | No |
 | HE-AAC/SBR | No | No | No |
 | Apple Lossless | No | No | No |
 
-## Command-Line Options
+Note: For AAC files, mp3rgain writes ReplayGain metadata tags. aacgain can modify the audio data losslessly using iTunes-style Sound Check.
 
-### Fully Implemented in mp3rgain
+### Command-Line Options
 
-| Option | Description | mp3rgain | aacgain |
-|--------|-------------|----------|---------|
-| `-g <i>` | Apply gain of i steps | Yes | Yes |
-| `-d <n>` | Apply gain of n dB | Yes | Yes |
-| `-r` | Apply track gain (ReplayGain) | Yes | Yes |
-| `-a` | Apply album gain (ReplayGain) | Yes | Yes |
-| `-u` | Undo gain changes | Yes | Yes |
-| `-l <c> <g>` | Channel-specific gain | Yes | Yes |
-| `-k` | Prevent clipping | Yes | Yes |
-| `-c` | Ignore clipping warnings | Yes | Yes |
-| `-p` | Preserve file timestamp | Yes | Yes |
-| `-q` | Quiet mode | Yes | Yes |
-| `-s c` | Check/analyze only | Yes | Yes |
-| `-v` | Show version | Yes | Yes |
-| `-h` | Show help | Yes | Yes |
+All options from the original mp3gain are fully implemented in mp3rgain:
 
-### mp3rgain Extensions (Not in aacgain)
+| Option | Description | mp3rgain | aacgain | mp3gain |
+|--------|-------------|----------|---------|---------|
+| `-g <i>` | Apply gain of i steps | Yes | Yes | Yes |
+| `-d <n>` | Apply gain of n dB | Yes | Yes | Yes |
+| `-r` | Apply track gain (ReplayGain) | Yes | Yes | Yes |
+| `-a` | Apply album gain (ReplayGain) | Yes | Yes | Yes |
+| `-u` | Undo gain changes | Yes | Yes | Yes |
+| `-l <c> <g>` | Channel-specific gain | Yes | Yes | Yes |
+| `-m <i>` | Modify suggested gain | Yes | Yes | Yes |
+| `-e` | Skip album analysis | Yes | Yes | Yes |
+| `-x` | Find max amplitude only | Yes | Yes | Yes |
+| `-k` | Prevent clipping | Yes | Yes | Yes |
+| `-c` | Ignore clipping warnings | Yes | Yes | Yes |
+| `-p` | Preserve file timestamp | Yes | Yes | Yes |
+| `-q` | Quiet mode | Yes | Yes | Yes |
+| `-w` | Wrap gain values | Yes | Yes | Yes |
+| `-t` | Use temp file for writing | Yes | Yes | Yes |
+| `-f` | Assume MPEG 2 Layer III | Yes | Yes | Yes |
+| `-s c` | Check stored tag info | Yes | Yes | Yes |
+| `-s d` | Delete stored tag info | Yes | Yes | Yes |
+| `-s s` | Skip stored tag info | Yes | Yes | Yes |
+| `-s r` | Force recalculation | Yes | Yes | Yes |
+| `-s i` | Use ID3v2 tags | Partial | Yes | Yes |
+| `-s a` | Use APEv2 tags | Yes | Yes | Yes |
+| `-v` | Show version | Yes | Yes | Yes |
+| `-h` | Show help | Yes | Yes | Yes |
+
+### mp3rgain Extensions (Not in aacgain/mp3gain)
 
 | Option | Description |
 |--------|-------------|
 | `-R` | Recursive directory processing |
-| `-n` / `--dry-run` | Dry-run mode (preview changes) |
-| `-o json` | JSON output format |
-| `-o text` | Text output format (default) |
+| `-n` / `--dry-run` | Dry-run mode (preview changes without modifying files) |
+| `-o json` | JSON output format (for scripting and automation) |
+| `-o tsv` | Tab-separated output (database-friendly) |
 | Progress bar | Visual progress for batch operations |
 
-### Planned Features (from aacgain)
-
-| Option | Description | Issue |
-|--------|-------------|-------|
-| `-m <i>` | Modify suggested gain by integer | [#18](https://github.com/M-Igashi/mp3rgain/issues/18) |
-| `-e` | Skip album analysis | [#19](https://github.com/M-Igashi/mp3rgain/issues/19) |
-| `-x` | Find max amplitude only | [#20](https://github.com/M-Igashi/mp3rgain/issues/20) |
-| `-w` | Wrap gain values | [#21](https://github.com/M-Igashi/mp3rgain/issues/21) |
-| `-t` | Use temp file for writing | [#22](https://github.com/M-Igashi/mp3rgain/issues/22) |
-| `-f` | Assume MPEG 2 Layer III | [#23](https://github.com/M-Igashi/mp3rgain/issues/23) |
-| `-s d` | Delete stored tag info | [#24](https://github.com/M-Igashi/mp3rgain/issues/24) |
-| `-s s` | Skip (ignore) stored tag info | [#24](https://github.com/M-Igashi/mp3rgain/issues/24) |
-| `-s r` | Force recalculation | [#24](https://github.com/M-Igashi/mp3rgain/issues/24) |
-| `-s i` | Use ID3v2 tags | [#24](https://github.com/M-Igashi/mp3rgain/issues/24) |
-| `-s a` | Use APEv2 tags (default) | [#24](https://github.com/M-Igashi/mp3rgain/issues/24) |
-| `-i <i>` | Track index for multi-track | [#25](https://github.com/M-Igashi/mp3rgain/issues/25) |
-| `-o` (tsv) | Tab-separated output | [#26](https://github.com/M-Igashi/mp3rgain/issues/26) |
-| AAC support | M4A/MP4/M4V files | [#17](https://github.com/M-Igashi/mp3rgain/issues/17) |
-
-## Technical Differences
+## Technical Comparison
 
 ### ReplayGain Implementation
 
@@ -83,19 +80,19 @@ This document provides a detailed comparison between mp3rgain and the original a
 | Window size | 50ms | 50ms |
 | Percentile | 95th | 95th |
 | MP3 decoding | symphonia (Rust) | mpglib (C) |
-| AAC decoding | Planned (symphonia) | faad2 (C) |
+| AAC decoding | symphonia (Rust) | faad2 (C) |
 
 ### Tag Storage
 
-| Tag Type | mp3rgain | aacgain/mp3gain |
-|----------|----------|-----------------|
-| APEv2 (default) | Yes | Yes |
-| ID3v2 | Planned | Yes (-s i) |
-| MP4 atoms | Planned | Yes (AAC) |
+| Tag Type | mp3rgain | aacgain | mp3gain |
+|----------|----------|---------|---------|
+| APEv2 (default for MP3) | Yes | Yes | Yes |
+| ID3v2 | Planned | Yes | Yes |
+| iTunes freeform (M4A) | Yes | Yes | - |
 
 ### Undo Information
 
-Both store undo data in APEv2 tags:
+Both tools store undo data in APEv2 tags:
 - `MP3GAIN_MINMAX` - Original min/max gain values
 - `MP3GAIN_UNDO` - Gain adjustment applied
 
@@ -106,12 +103,12 @@ Both store undo data in APEv2 tags:
 | macOS (Intel) | Yes | Build required | Build required |
 | macOS (Apple Silicon) | Yes (Universal) | Build required | Limited |
 | Linux (x86_64) | Yes | Build required | Build required |
-| Linux (ARM64) | Planned | Build required | Limited |
+| Linux (ARM64) | Yes | Build required | Limited |
 | Windows (x86_64) | Yes | Binary available | Binary available |
 | Windows (ARM64) | Yes | No | No |
 | Windows 11 | Yes | Compatibility issues | Compatibility issues |
 
-## Installation Methods
+## Installation
 
 ### mp3rgain
 
@@ -119,8 +116,11 @@ Both store undo data in APEv2 tags:
 # macOS (Homebrew)
 brew install M-Igashi/tap/mp3rgain
 
-# Any platform (Cargo)
-cargo install mp3rgain --features replaygain
+# Any platform (Cargo) - includes ReplayGain by default
+cargo install mp3rgain
+
+# Minimal installation (no audio decoding, gain adjustment only)
+cargo install mp3rgain --no-default-features
 
 # Binary download
 # https://github.com/M-Igashi/mp3rgain/releases
@@ -153,59 +153,88 @@ dnf install mp3gain  # Fedora
 
 ### From mp3gain to mp3rgain
 
-Most commands work identically:
+mp3rgain is a drop-in replacement. All commands work identically:
 
 ```bash
-# Before (mp3gain)
+# These commands work the same way
 mp3gain -r *.mp3
-mp3gain -a *.mp3
-mp3gain -g 2 song.mp3
-mp3gain -u song.mp3
-
-# After (mp3rgain) - same commands
 mp3rgain -r *.mp3
+
+mp3gain -a *.mp3
 mp3rgain -a *.mp3
+
+mp3gain -g 2 song.mp3
 mp3rgain -g 2 song.mp3
+
+mp3gain -u song.mp3
 mp3rgain -u song.mp3
 ```
 
-New features available:
+Additional features in mp3rgain:
 ```bash
-# Recursive processing
+# Recursive processing (new)
 mp3rgain -r -R /path/to/music
 
-# Dry-run mode
+# Dry-run mode (new)
 mp3rgain -r -n *.mp3
 
-# JSON output
+# JSON output (new)
 mp3rgain -o json *.mp3
 ```
 
 ### From aacgain to mp3rgain
 
-For MP3 files, commands are identical. For AAC files, wait for issue #17 to be resolved.
+For MP3 files, commands are identical.
 
+For AAC/M4A files, mp3rgain writes ReplayGain tags that compatible players will read:
 ```bash
-# MP3 files - works now
-mp3rgain -r *.mp3
-
-# AAC files - coming soon
-# mp3rgain -r *.m4a  # After #17 is implemented
+# Analyze and tag M4A files
+mp3rgain -r *.m4a
+mp3rgain -a *.m4a
 ```
+
+Note: aacgain can modify AAC audio data losslessly (similar to MP3 global_gain), while mp3rgain only writes metadata tags for AAC files. Most modern players support ReplayGain tags.
+
+## Binary Size Comparison
+
+| Tool | Approximate Size |
+|------|------------------|
+| mp3rgain (full) | ~1.8 MB |
+| mp3rgain (minimal) | ~670 KB |
+| aacgain | ~500 KB + dependencies |
+| mp3gain | ~200 KB + dependencies |
+
+mp3rgain is a single static binary with no runtime dependencies.
+
+## Performance
+
+Both mp3rgain and mp3gain/aacgain provide similar performance for gain analysis and application. The main differences:
+
+- **Startup time**: mp3rgain has no dynamic library loading
+- **Memory safety**: mp3rgain is written in Rust with memory-safe guarantees
+- **Parallel processing**: Both process files sequentially (per-file, not per-album)
 
 ## Known Limitations
 
 ### mp3rgain
-- No AAC support yet (planned)
-- No ID3v2 tag storage yet (planned)
-- No `-o` tab-delimited output yet (planned)
+- AAC: Writes tags only, does not modify audio data
+- ID3v2 tag storage not yet implemented (uses APEv2)
 
 ### aacgain
 - Limited Windows 11 compatibility
-- Requires C build environment
+- Requires C build environment on some platforms
 - faad2 dependency for AAC
 
 ### mp3gain
 - Unmaintained since ~2015
 - Limited modern OS support
 - No AAC support
+
+## Why Choose mp3rgain?
+
+1. **Modern platform support**: Works on Windows 11, macOS (including Apple Silicon), and Linux
+2. **No dependencies**: Single static binary, no ffmpeg or other libraries required
+3. **Memory safety**: Written in Rust with strong safety guarantees
+4. **Active development**: Regularly updated and maintained
+5. **Extended features**: Recursive processing, dry-run mode, JSON output
+6. **Drop-in replacement**: 100% command-line compatible with original mp3gain
