@@ -136,14 +136,57 @@ mp3rgain -n -g 2 *.mp3
 mp3rgain --dry-run -r *.mp3
 ```
 
-### JSON output
+### Find maximum amplitude
+
+```bash
+# Only show max amplitude (no gain applied)
+mp3rgain -x song.mp3
+```
+
+### Modify suggested gain
+
+```bash
+# Apply track gain with +2 step offset
+mp3rgain -r -m 2 *.mp3
+
+# Apply album gain with -1 step offset
+mp3rgain -a -m -1 *.mp3
+```
+
+### Tag management
+
+```bash
+# Check stored tag info
+mp3rgain -s c *.mp3
+
+# Delete stored ReplayGain tags
+mp3rgain -s d *.mp3
+
+# Skip existing tags and force recalculation
+mp3rgain -s r -r *.mp3
+```
+
+### Output formats
 
 ```bash
 # Output in JSON format for scripting
 mp3rgain -o json song.mp3
 
+# Tab-separated output (database-friendly)
+mp3rgain -o tsv *.mp3
+
 # Combine with other options
 mp3rgain -o json -r *.mp3
+```
+
+### Safe file writing
+
+```bash
+# Use temp file for atomic writes (safer)
+mp3rgain -t -g 2 song.mp3
+
+# Apply gain with wrapping (for edge cases)
+mp3rgain -w -g 10 song.mp3
 ```
 
 Example JSON output:
@@ -172,17 +215,23 @@ Example JSON output:
 | `-g <i>` | Apply gain of i steps (each step = 1.5 dB) |
 | `-d <n>` | Apply gain of n dB (rounded to nearest step) |
 | `-l <c> <g>` | Apply gain to left (0) or right (1) channel only |
+| `-m <i>` | Modify suggested gain by integer i |
 | `-r` | Apply Track gain (ReplayGain analysis) |
 | `-a` | Apply Album gain (ReplayGain analysis) |
+| `-e` | Skip album analysis (even with multiple files) |
 | `-u` | Undo gain changes (restore from APEv2 tag) |
-| `-s c` | Check/show file info (analysis only) |
+| `-x` | Only find max amplitude of file |
+| `-s <mode>` | Stored tag handling: `c` (check), `d` (delete), `s` (skip), `r` (recalc), `i` (ID3v2), `a` (APEv2) |
 | `-p` | Preserve original file timestamp |
 | `-c` | Ignore clipping warnings |
 | `-k` | Prevent clipping (automatically limit gain) |
+| `-w` | Wrap gain values (instead of clamping 0-255) |
+| `-t` | Use temp file for writing (safer atomic writes) |
+| `-f` | Assume MPEG 2 Layer III (compatibility flag) |
 | `-q` | Quiet mode (less output) |
 | `-R` | Process directories recursively |
 | `-n`, `--dry-run` | Dry-run mode (show what would be done) |
-| `-o <fmt>` | Output format: `text` (default) or `json` |
+| `-o <fmt>` | Output format: `text` (default), `json`, or `tsv` |
 | `-v` | Show version |
 | `-h` | Show help |
 
