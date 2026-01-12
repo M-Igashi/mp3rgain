@@ -8,16 +8,14 @@
 
 mp3rgain adjusts MP3 volume without re-encoding by modifying the `global_gain` field in each frame's side information. This preserves audio quality while achieving permanent volume changes.
 
-**NEW in v0.9.0**: AAC/M4A support - analyze and write ReplayGain tags to M4A files!
-
 ## Features
 
 - **Lossless**: No re-encoding, preserves original audio quality
-- **Fast**: Direct binary manipulation, no audio decoding required
+- **Fast**: Direct binary manipulation, no audio decoding required for gain adjustment
 - **Reversible**: All changes can be undone (stored in APEv2 tags)
-- **ReplayGain**: Track and album gain analysis (optional feature)
+- **ReplayGain**: Track and album gain analysis (included by default)
 - **AAC/M4A Support**: Analyze and tag M4A files with ReplayGain metadata
-- **Zero dependencies**: Single static binary (no ffmpeg, no mp3gain)
+- **Zero runtime dependencies**: Single static binary (no ffmpeg, no mp3gain)
 - **Cross-platform**: macOS, Linux, Windows (x86_64 and ARM64)
 - **mp3gain compatible**: Full command-line compatibility with original mp3gain
 - **Pure Rust**: Memory-safe implementation
@@ -33,11 +31,11 @@ brew install M-Igashi/tap/mp3rgain
 ### Cargo (all platforms)
 
 ```bash
-# Basic installation
+# Standard installation (includes ReplayGain support)
 cargo install mp3rgain
 
-# With ReplayGain analysis support (-r and -a options)
-cargo install mp3rgain --features replaygain
+# Minimal installation (gain adjustment only, no audio decoding)
+cargo install mp3rgain --no-default-features
 ```
 
 ### Download binary
@@ -48,7 +46,23 @@ Download the latest release from [GitHub Releases](https://github.com/M-Igashi/m
 - Windows (x86_64): `mp3rgain-*-windows-x86_64.zip`
 - Windows (ARM64): `mp3rgain-*-windows-arm64.zip`
 
-All binaries include ReplayGain support (`-r` and `-a` options).
+All binaries include full ReplayGain support.
+
+## Quick Start
+
+```bash
+# Normalize a single track to ReplayGain reference level (89 dB)
+mp3rgain -r song.mp3
+
+# Normalize an album (all tracks get the same adjustment)
+mp3rgain -a *.mp3
+
+# Apply manual gain adjustment (+3.0 dB)
+mp3rgain -g 2 song.mp3
+
+# Undo previous changes
+mp3rgain -u song.mp3
+```
 
 ## Usage
 
@@ -83,7 +97,7 @@ mp3rgain -g -3 *.mp3
 mp3rgain -g 2 -p song.mp3
 ```
 
-### ReplayGain (requires `--features replaygain`)
+### ReplayGain
 
 ```bash
 # Apply track gain (normalize each file to 89 dB)
@@ -94,7 +108,7 @@ mp3rgain -r *.mp3
 mp3rgain -a *.mp3
 ```
 
-### AAC/M4A Support (requires `--features replaygain`)
+### AAC/M4A Support
 
 ```bash
 # Analyze and tag M4A files with ReplayGain
@@ -259,18 +273,18 @@ Example JSON output:
 
 ### mp3gain Compatibility
 
-mp3rgain is fully compatible with the original mp3gain command-line interface:
+mp3rgain is a drop-in replacement for the original mp3gain:
 
 ```bash
-# These commands work the same way in both mp3gain and mp3rgain
-mp3gain -g 2 song.mp3      # original mp3gain
-mp3rgain -g 2 song.mp3     # mp3rgain (drop-in replacement)
-
+# These commands work identically in both mp3gain and mp3rgain
 mp3gain -r *.mp3           # original mp3gain
-mp3rgain -r *.mp3          # mp3rgain (requires --features replaygain)
+mp3rgain -r *.mp3          # mp3rgain
 
 mp3gain -a *.mp3           # original mp3gain  
-mp3rgain -a *.mp3          # mp3rgain (requires --features replaygain)
+mp3rgain -a *.mp3          # mp3rgain
+
+mp3gain -g 2 song.mp3      # original mp3gain
+mp3rgain -g 2 song.mp3     # mp3rgain
 ```
 
 ## Technical Details
@@ -292,7 +306,7 @@ MP3 files contain a `global_gain` field in each frame's side information that co
 
 ### ReplayGain Analysis
 
-When built with the `replaygain` feature, mp3rgain uses the [symphonia](https://github.com/pdrat/symphonia) crate for audio decoding and implements the ReplayGain 1.0 algorithm:
+mp3rgain uses the [symphonia](https://github.com/pdrat/symphonia) crate for audio decoding and implements the ReplayGain 1.0 algorithm:
 
 1. Decode MP3/AAC to PCM audio
 2. Apply equal-loudness filter (Yule-Walker + Butterworth)
@@ -326,7 +340,7 @@ Players that support ReplayGain tags will automatically apply volume normalizati
 The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained since ~2015 and has compatibility issues with modern systems (including Windows 11). mp3rgain is a modern replacement that:
 
 - Works on Windows 11, macOS, and Linux
-- Has no external dependencies (base installation)
+- Has no runtime dependencies
 - Is written in memory-safe Rust
 - Uses the same command-line interface
 - Includes a library API for integration
