@@ -45,6 +45,8 @@ Download the latest release from [GitHub Releases](https://github.com/M-Igashi/m
 - Windows (x86_64): `mp3rgain-*-windows-x86_64.zip`
 - Windows (ARM64): `mp3rgain-*-windows-arm64.zip`
 
+All binaries include ReplayGain support (`-r` and `-a` options).
+
 ## Usage
 
 ### Show file information (default)
