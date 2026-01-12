@@ -51,8 +51,8 @@ All core functionality complete:
 
 ### v1.2.0 - Package Manager Expansion
 
-- [ ] Scoop package (Windows) - *in progress*
-- [ ] winget package (Windows Package Manager)
+- [x] Scoop package (Windows)
+- [x] winget package (Windows Package Manager)
 - [ ] Homebrew core inclusion
 - [ ] AUR package (Arch Linux)
 - [ ] Nix package
