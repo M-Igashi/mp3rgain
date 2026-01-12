@@ -369,7 +369,7 @@ println!("Headroom: {} steps", info.headroom_steps);
 
 - [symphonia](https://github.com/pdrat/symphonia) - Pure Rust audio decoding library (used for ReplayGain analysis)
 - [Original mp3gain](http://mp3gain.sourceforge.net/) - The original C implementation that inspired this project
-- [aacgain](https://aacgain.altosdesign.com/) - AAC/MP4 ReplayGain implementation that inspired the `-i` track index option
+- [aacgain](https://github.com/dgilman/aacgain) - AAC/MP4 ReplayGain implementation
 
 ## Contributing
 
