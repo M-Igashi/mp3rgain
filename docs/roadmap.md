@@ -1,66 +1,76 @@
 # mp3rgain Roadmap
 
-## Current Status: v0.1.0
+## Current Status: v1.0.0 (Production Ready)
 
-Core functionality complete:
+All core functionality complete:
 - [x] MP3 frame parsing (MPEG 1/2/2.5 Layer III)
 - [x] Global gain modification
 - [x] ID3v2 tag preservation
 - [x] VBR/CBR support
 - [x] CLI interface (apply/info/undo commands)
+- [x] ReplayGain analysis (track and album gain)
+- [x] AAC/M4A support (ReplayGain tags)
+- [x] Full mp3gain command-line compatibility
+- [x] Cross-platform support (Windows, macOS, Linux)
 
-## Short-term Goals
+## Completed Milestones
 
 ### v0.2.0 - Windows & Stability
 
-- [ ] Windows 11 compatibility verification
-- [ ] Windows ARM64 support
-- [ ] Comprehensive test suite with real MP3 files
-- [ ] Error handling improvements
-- [ ] Homebrew official formula submission
+- [x] Windows 11 compatibility verification
+- [x] Windows ARM64 support
+- [x] Comprehensive test suite with real MP3 files
+- [x] Error handling improvements
+- [x] Homebrew tap formula
 
 ### v0.3.0 - mp3gain Feature Parity
 
-- [ ] ReplayGain analysis (track gain calculation)
-- [ ] Album gain support
-- [ ] `-r` (apply Track gain) flag compatibility
-- [ ] `-a` (apply Album gain) flag compatibility
-- [ ] `-c` (ignore clipping) flag
-- [ ] `-p` (preserve original timestamp) flag
-
-## Medium-term Goals
+- [x] ReplayGain analysis (track gain calculation)
+- [x] Album gain support
+- [x] `-r` (apply Track gain) flag compatibility
+- [x] `-a` (apply Album gain) flag compatibility
+- [x] `-c` (ignore clipping) flag
+- [x] `-p` (preserve original timestamp) flag
 
 ### v0.4.0 - Extended Features
 
-- [ ] Batch processing improvements
-- [ ] Progress bar for large files
-- [ ] JSON output format
-- [ ] Dry-run mode
-- [ ] Undo log file (for exact restoration)
+- [x] Batch processing with recursive directory support
+- [x] Progress bar for large files
+- [x] JSON output format
+- [x] Dry-run mode
+- [x] TSV output format
 
-### v0.5.0 - Additional Formats (Optional)
+### v1.0.0 - AAC/M4A Support
 
-- [ ] AAC/M4A support (like aacgain)
-- [ ] FLAC support (optional)
-- [ ] Ogg Vorbis support (optional)
+- [x] AAC/M4A ReplayGain analysis
+- [x] iTunes freeform tag writing
+- [x] Multi-track audio support (`-i` option)
+- [x] Production-ready release
 
-## Long-term Goals
+## Upcoming Goals
+
+### v1.2.0 - Package Manager Expansion
+
+- [ ] Scoop package (Windows) - *in progress*
+- [ ] winget package (Windows Package Manager)
+- [ ] Homebrew core inclusion
+- [ ] AUR package (Arch Linux)
+- [ ] Nix package
+
+### Future
 
 - [ ] GUI wrapper (optional)
+- [ ] FLAC support (optional)
+- [ ] Ogg Vorbis support (optional)
 - [ ] Library API stabilization
 - [ ] Integration with music players/taggers
-- [ ] Homebrew core inclusion
 
 ## Community Goals
 
 - [ ] Reach 100 GitHub stars
 - [ ] 5+ contributors
-- [ ] Windows user base
-- [ ] Package manager availability (beyond Homebrew)
-  - [ ] Scoop (Windows)
-  - [ ] winget (Windows)
-  - [ ] AUR (Arch Linux)
-  - [ ] Nix
+- [ ] Grow Windows user base
+- [ ] Package availability in major package managers
 
 ---
 

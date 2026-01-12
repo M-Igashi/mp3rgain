@@ -22,11 +22,52 @@ mp3rgain adjusts MP3 volume without re-encoding by modifying the `global_gain` f
 
 ## Installation
 
-### Homebrew (macOS)
+### Windows
 
+**Download and extract** (recommended for most users):
+
+1. Download the latest release from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
+   - `mp3rgain-*-windows-x86_64.zip` (most Windows PCs)
+   - `mp3rgain-*-windows-arm64.zip` (ARM-based Windows devices)
+
+2. Extract the ZIP file to a folder (e.g., `C:\Tools\mp3rgain`)
+
+3. Open PowerShell or Command Prompt and navigate to the folder:
+   ```powershell
+   cd C:\Tools\mp3rgain
+   .\mp3rgain.exe -h
+   ```
+
+4. (Optional) Add to PATH for system-wide access:
+   - Open "Edit environment variables for your account" from Start menu
+   - Edit the `Path` variable and add your folder (e.g., `C:\Tools\mp3rgain`)
+   - Restart your terminal
+
+> **Note:** mp3rgain is a command-line tool, not a GUI application. Double-clicking the executable will briefly open and close a terminal window. Always run it from PowerShell or Command Prompt.
+
+**Using Cargo** (for Rust developers):
+```powershell
+cargo install mp3rgain
+```
+
+### macOS
+
+**Homebrew** (recommended):
 ```bash
 brew install M-Igashi/tap/mp3rgain
 ```
+
+**Download binary:**
+1. Download `mp3rgain-*-macos-universal.tar.gz` from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases)
+2. Extract: `tar -xzf mp3rgain-*-macos-universal.tar.gz`
+3. Move to PATH: `sudo mv mp3rgain /usr/local/bin/`
+
+### Linux
+
+**Download binary:**
+1. Download `mp3rgain-*-linux-x86_64.tar.gz` from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases)
+2. Extract: `tar -xzf mp3rgain-*-linux-x86_64.tar.gz`
+3. Move to PATH: `sudo mv mp3rgain /usr/local/bin/`
 
 ### Cargo (all platforms)
 
@@ -38,15 +79,7 @@ cargo install mp3rgain
 cargo install mp3rgain --no-default-features
 ```
 
-### Download binary
-
-Download the latest release from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
-- macOS (Universal): `mp3rgain-*-macos-universal.tar.gz`
-- Linux (x86_64): `mp3rgain-*-linux-x86_64.tar.gz`
-- Windows (x86_64): `mp3rgain-*-windows-x86_64.zip`
-- Windows (ARM64): `mp3rgain-*-windows-arm64.zip`
-
-All binaries include full ReplayGain support.
+All binaries include full ReplayGain support with zero runtime dependencies.
 
 ## Quick Start
 
