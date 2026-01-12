@@ -36,15 +36,15 @@ brew install M-Igashi/tap/mp3rgain
 
 ### Windows
 
-**Scoop** (recommended):
+**winget** (recommended):
+```powershell
+winget install M-Igashi.mp3rgain
+```
+
+**Scoop**:
 ```powershell
 scoop bucket add mp3rgain https://github.com/M-Igashi/scoop-bucket
 scoop install mp3rgain
-```
-
-**winget**:
-```powershell
-winget install M-Igashi.mp3rgain
 ```
 
 **Download and extract**:
