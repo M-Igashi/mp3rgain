@@ -8,12 +8,15 @@
 
 mp3rgain adjusts MP3 volume without re-encoding by modifying the `global_gain` field in each frame's side information. This preserves audio quality while achieving permanent volume changes.
 
+**NEW in v0.9.0**: AAC/M4A support - analyze and write ReplayGain tags to M4A files!
+
 ## Features
 
 - **Lossless**: No re-encoding, preserves original audio quality
 - **Fast**: Direct binary manipulation, no audio decoding required
 - **Reversible**: All changes can be undone (stored in APEv2 tags)
 - **ReplayGain**: Track and album gain analysis (optional feature)
+- **AAC/M4A Support**: Analyze and tag M4A files with ReplayGain metadata
 - **Zero dependencies**: Single static binary (no ffmpeg, no mp3gain)
 - **Cross-platform**: macOS, Linux, Windows (x86_64 and ARM64)
 - **mp3gain compatible**: Full command-line compatibility with original mp3gain
@@ -90,6 +93,25 @@ mp3rgain -r *.mp3
 # Apply album gain (normalize album to 89 dB)
 mp3rgain -a *.mp3
 ```
+
+### AAC/M4A Support (requires `--features replaygain`)
+
+```bash
+# Analyze and tag M4A files with ReplayGain
+mp3rgain -r song.m4a
+mp3rgain -r *.m4a
+
+# Album gain for M4A files
+mp3rgain -a *.m4a
+
+# Mix MP3 and M4A files
+mp3rgain -r *.mp3 *.m4a
+
+# Recursive directory processing includes M4A files
+mp3rgain -R /path/to/music
+```
+
+Note: For M4A files, mp3rgain writes ReplayGain tags (iTunes freeform format) but does not modify the audio data, as AAC doesn't have a lossless gain adjustment mechanism like MP3's `global_gain` field.
 
 ### Undo previous adjustment
 
@@ -270,22 +292,33 @@ MP3 files contain a `global_gain` field in each frame's side information that co
 
 ### ReplayGain Analysis
 
-When built with the `replaygain` feature, mp3rgain uses the [symphonia](https://github.com/pdrat/symphonia) crate for MP3 decoding and implements the ReplayGain 1.0 algorithm:
+When built with the `replaygain` feature, mp3rgain uses the [symphonia](https://github.com/pdrat/symphonia) crate for audio decoding and implements the ReplayGain 1.0 algorithm:
 
-1. Decode MP3 to PCM audio
+1. Decode MP3/AAC to PCM audio
 2. Apply equal-loudness filter (Yule-Walker + Butterworth)
 3. Calculate RMS loudness in 50ms windows
 4. Use 95th percentile for loudness measurement
 5. Calculate gain to reach 89 dB reference level
+
+### AAC/M4A Support
+
+For AAC/M4A files, mp3rgain:
+- Analyzes audio loudness using the same ReplayGain algorithm as MP3
+- Writes ReplayGain tags in iTunes freeform format (`com.apple.iTunes:replaygain_*`)
+- Does NOT modify audio data (AAC lacks a lossless gain mechanism)
+
+Players that support ReplayGain tags will automatically apply volume normalization during playback.
 
 ### Compatibility
 
 - MPEG1 Layer III (MP3)
 - MPEG2 Layer III
 - MPEG2.5 Layer III
+- AAC/M4A (ReplayGain tags only)
 - Mono, Stereo, Joint Stereo, Dual Channel
 - ID3v2 tags (preserved)
 - APEv2 tags (for undo support)
+- iTunes metadata (for M4A files)
 - VBR and CBR files
 
 ## Why mp3rgain?

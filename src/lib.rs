@@ -37,6 +37,7 @@
 //! Each gain step equals 1.5 dB (fixed by MP3 specification).
 //! The global_gain field is 8 bits, allowing values 0-255.
 
+pub mod mp4meta;
 pub mod replaygain;
 
 use anyhow::{Context, Result};
