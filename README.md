@@ -123,6 +123,10 @@ mp3rgain -r *.mp3 *.m4a
 
 # Recursive directory processing includes M4A files
 mp3rgain -R /path/to/music
+
+# Process specific audio track in multi-track files (e.g., video files)
+mp3rgain -i 1 movie.m4v   # Process second audio track
+mp3rgain -i 0 song.m4a    # Process first track (default)
 ```
 
 Note: For M4A files, mp3rgain writes ReplayGain tags (iTunes freeform format) but does not modify the audio data, as AAC doesn't have a lossless gain adjustment mechanism like MP3's `global_gain` field.
@@ -255,6 +259,7 @@ Example JSON output:
 | `-r` | Apply Track gain (ReplayGain analysis) |
 | `-a` | Apply Album gain (ReplayGain analysis) |
 | `-e` | Skip album analysis (even with multiple files) |
+| `-i <n>` | Specify which audio track to process (default: 0) |
 | `-u` | Undo gain changes (restore from APEv2 tag) |
 | `-x` | Only find max amplitude of file |
 | `-s <mode>` | Stored tag handling: `c` (check), `d` (delete), `s` (skip), `r` (recalc), `i` (ID3v2), `a` (APEv2) |
@@ -364,6 +369,7 @@ println!("Headroom: {} steps", info.headroom_steps);
 
 - [symphonia](https://github.com/pdrat/symphonia) - Pure Rust audio decoding library (used for ReplayGain analysis)
 - [Original mp3gain](http://mp3gain.sourceforge.net/) - The original C implementation that inspired this project
+- [aacgain](https://aacgain.altosdesign.com/) - AAC/MP4 ReplayGain implementation that inspired the `-i` track index option
 
 ## Contributing
 

@@ -361,6 +361,15 @@ fn detect_file_type(file_path: &Path) -> AudioFileType {
 /// Analyze a single track and calculate ReplayGain
 #[cfg(feature = "replaygain")]
 pub fn analyze_track(file_path: &Path) -> Result<ReplayGainResult> {
+    analyze_track_with_index(file_path, None)
+}
+
+/// Analyze a single track with optional track index selection
+#[cfg(feature = "replaygain")]
+pub fn analyze_track_with_index(
+    file_path: &Path,
+    track_index: Option<u32>,
+) -> Result<ReplayGainResult> {
     // Detect file type
     let file_type = detect_file_type(file_path);
 
@@ -387,12 +396,32 @@ pub fn analyze_track(file_path: &Path) -> Result<ReplayGainResult> {
 
     let mut format = probed.format;
 
-    // Find the first audio track
-    let track = format
+    // Find audio tracks
+    let audio_tracks: Vec<_> = format
         .tracks()
         .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .ok_or_else(|| anyhow::anyhow!("No audio track found"))?;
+        .filter(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .collect();
+
+    if audio_tracks.is_empty() {
+        anyhow::bail!("No audio track found");
+    }
+
+    // Select track by index or default to first
+    let track = match track_index {
+        Some(idx) => {
+            let idx = idx as usize;
+            if idx >= audio_tracks.len() {
+                anyhow::bail!(
+                    "Track index {} out of range (file has {} audio track(s))",
+                    idx,
+                    audio_tracks.len()
+                );
+            }
+            audio_tracks[idx]
+        }
+        None => audio_tracks[0],
+    };
 
     let track_id = track.id;
     let sample_rate = track
@@ -538,12 +567,21 @@ fn process_audio_buffer(
 /// Analyze multiple tracks for album gain
 #[cfg(feature = "replaygain")]
 pub fn analyze_album(files: &[&Path]) -> Result<AlbumGainResult> {
+    analyze_album_with_index(files, None)
+}
+
+/// Analyze multiple tracks for album gain with optional track index selection
+#[cfg(feature = "replaygain")]
+pub fn analyze_album_with_index(
+    files: &[&Path],
+    track_index: Option<u32>,
+) -> Result<AlbumGainResult> {
     let mut track_results = Vec::with_capacity(files.len());
     let mut album_peak: f64 = 0.0;
 
     for file in files {
         // Analyze each track
-        let result = analyze_track(file)?;
+        let result = analyze_track_with_index(file, track_index)?;
         album_peak = album_peak.max(result.peak);
 
         // We need to re-analyze to get raw RMS values for album calculation
@@ -583,7 +621,29 @@ pub fn analyze_track(_file_path: &Path) -> Result<ReplayGainResult> {
 }
 
 #[cfg(not(feature = "replaygain"))]
+pub fn analyze_track_with_index(
+    _file_path: &Path,
+    _track_index: Option<u32>,
+) -> Result<ReplayGainResult> {
+    anyhow::bail!(
+        "ReplayGain analysis requires the 'replaygain' feature.\n\
+        Install with: cargo install mp3rgain --features replaygain"
+    )
+}
+
+#[cfg(not(feature = "replaygain"))]
 pub fn analyze_album(_files: &[&Path]) -> Result<AlbumGainResult> {
+    anyhow::bail!(
+        "ReplayGain analysis requires the 'replaygain' feature.\n\
+        Install with: cargo install mp3rgain --features replaygain"
+    )
+}
+
+#[cfg(not(feature = "replaygain"))]
+pub fn analyze_album_with_index(
+    _files: &[&Path],
+    _track_index: Option<u32>,
+) -> Result<AlbumGainResult> {
     anyhow::bail!(
         "ReplayGain analysis requires the 'replaygain' feature.\n\
         Install with: cargo install mp3rgain --features replaygain"
