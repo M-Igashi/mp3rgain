@@ -105,6 +105,7 @@ Run `mp3rgain -h` for the full list of options.
 
 ## Documentation
 
+- [Security](docs/security.md) - Security improvements over original mp3gain (CVE-2021-34085, CVE-2019-18359)
 - [Compatibility Report](docs/compatibility-report.md) - Verification against original mp3gain
 - [Technical Comparison](docs/COMPARISON.md) - Comparison with similar tools
 
