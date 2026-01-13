@@ -71,6 +71,35 @@ scoop install mp3rgain
 
 ### Linux
 
+**Arch Linux (AUR)**:
+```bash
+# Using yay
+yay -S mp3rgain
+
+# Using paru
+paru -S mp3rgain
+
+# Manual
+git clone https://aur.archlinux.org/mp3rgain.git
+cd mp3rgain && makepkg -si
+```
+
+**Nix/NixOS**:
+```bash
+# Using flakes
+nix run github:M-Igashi/mp3rgain
+
+# Install to profile
+nix profile install github:M-Igashi/mp3rgain
+```
+
+**Debian/Ubuntu (.deb)**:
+```bash
+# Download from releases
+wget https://github.com/M-Igashi/mp3rgain/releases/download/v1.1.1/mp3rgain_1.1.1-1_amd64.deb
+sudo dpkg -i mp3rgain_1.1.1-1_amd64.deb
+```
+
 **Download binary:**
 1. Download `mp3rgain-*-linux-x86_64.tar.gz` from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases)
 2. Extract: `tar -xzf mp3rgain-*-linux-x86_64.tar.gz`
