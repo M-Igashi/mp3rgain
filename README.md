@@ -370,6 +370,7 @@ Players that support ReplayGain tags will automatically apply volume normalizati
 
 ### Compatibility
 
+**Format Support:**
 - MPEG1 Layer III (MP3)
 - MPEG2 Layer III
 - MPEG2.5 Layer III
@@ -379,6 +380,14 @@ Players that support ReplayGain tags will automatically apply volume normalizati
 - APEv2 tags (for undo support)
 - iTunes metadata (for M4A files)
 - VBR and CBR files
+
+**mp3gain Binary Compatibility:**
+
+mp3rgain produces **byte-for-byte identical output** to the original mp3gain when applying gain adjustments. This has been verified through automated testing with SHA-256 hash comparison.
+
+[![CI Status](https://github.com/M-Igashi/mp3rgain/actions/workflows/ci.yml/badge.svg)](https://github.com/M-Igashi/mp3rgain/actions/workflows/ci.yml)
+
+See the [Compatibility Report](docs/compatibility-report.md) for detailed verification results and test methodology.
 
 ## Why mp3rgain?
 
