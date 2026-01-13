@@ -132,14 +132,16 @@ run_test() {
     log_verbose "  Running: ${args[*]}"
 
     # Apply with original mp3gain
-    if ! "$MP3GAIN_BIN" "${args[@]}" "$test_original" > /dev/null 2>&1; then
+    # Use -s s to skip tag writing for pure audio comparison
+    if ! "$MP3GAIN_BIN" -s s "${args[@]}" "$test_original" > /dev/null 2>&1; then
         log "  ${YELLOW}SKIP${NC}: mp3gain failed on this test"
         ((SKIP_COUNT++))
         return 0
     fi
 
     # Apply with mp3rgain
-    if ! "$MP3RGAIN_BIN" "${args[@]}" "$test_new" > /dev/null 2>&1; then
+    # Use -s s to skip tag writing for pure audio comparison
+    if ! "$MP3RGAIN_BIN" -s s "${args[@]}" "$test_new" > /dev/null 2>&1; then
         log "  ${RED}FAIL${NC}: mp3rgain failed on this test"
         ((FAIL_COUNT++))
         return 1
