@@ -353,6 +353,31 @@ fn skip_id3v2(data: &[u8]) -> usize {
     10 + size
 }
 
+/// Check if a frame contains a Xing or Info VBR header
+/// These frames should be skipped when applying gain adjustments
+/// to match the behavior of the original mp3gain
+fn is_xing_frame(data: &[u8], frame_offset: usize, header: &FrameHeader) -> bool {
+    // Calculate where the Xing/Info header would be located
+    // It appears after the side information
+    let side_info_len = match (header.version, header.channel_mode) {
+        (MpegVersion::Mpeg1, ChannelMode::Mono) => 17,
+        (MpegVersion::Mpeg1, _) => 32,
+        (_, ChannelMode::Mono) => 9,
+        (_, _) => 17,
+    };
+
+    let xing_offset = frame_offset + header.side_info_offset() + side_info_len;
+
+    // Check if we have enough data
+    if xing_offset + 4 > data.len() {
+        return false;
+    }
+
+    // Check for "Xing" (VBR) or "Info" (CBR with LAME header) markers
+    let marker = &data[xing_offset..xing_offset + 4];
+    marker == b"Xing" || marker == b"Info"
+}
+
 /// Internal function to iterate over frames
 fn iterate_frames<F>(data: &[u8], mut callback: F) -> Result<usize>
 where
@@ -487,6 +512,13 @@ pub fn apply_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
             continue;
         }
 
+        // Skip Xing/Info header frames (VBR metadata)
+        // This matches the behavior of the original mp3gain
+        if is_xing_frame(&data, pos, &header) {
+            pos = next_pos;
+            continue;
+        }
+
         let locations = calculate_gain_locations(pos, &header);
 
         for loc in &locations {
@@ -615,6 +647,12 @@ pub fn apply_gain_channel(file_path: &Path, channel: Channel, gain_steps: i32) -
 
         if !valid_frame {
             pos += 1;
+            continue;
+        }
+
+        // Skip Xing/Info header frames (VBR metadata)
+        if is_xing_frame(&data, pos, &header) {
+            pos = next_pos;
             continue;
         }
 
@@ -1114,6 +1152,12 @@ pub fn apply_gain_wrap(file_path: &Path, gain_steps: i32) -> Result<usize> {
             continue;
         }
 
+        // Skip Xing/Info header frames (VBR metadata)
+        if is_xing_frame(&data, pos, &header) {
+            pos = next_pos;
+            continue;
+        }
+
         let locations = calculate_gain_locations(pos, &header);
 
         for loc in &locations {
@@ -1294,5 +1338,39 @@ mod tests {
 
         let data_with_tag = vec![b'I', b'D', b'3', 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         assert_eq!(skip_id3v2(&data_with_tag), 10);
+    }
+
+    #[test]
+    fn test_is_xing_frame() {
+        // Create a minimal frame with Xing header for MPEG1 stereo
+        // Frame header (4 bytes) + side info (32 bytes for stereo) + "Xing"
+        let mut data = vec![0u8; 100];
+        data[0] = 0xFF;
+        data[1] = 0xFB; // MPEG1, Layer III, no CRC
+        data[2] = 0x90; // 128kbps, 44100Hz
+        data[3] = 0x00; // Stereo
+
+        // Place "Xing" at offset 4 (header) + 32 (side info for MPEG1 stereo) = 36
+        data[36] = b'X';
+        data[37] = b'i';
+        data[38] = b'n';
+        data[39] = b'g';
+
+        let header = parse_header(&data).unwrap();
+        assert!(is_xing_frame(&data, 0, &header));
+
+        // Test "Info" marker (used by LAME for CBR files)
+        data[36] = b'I';
+        data[37] = b'n';
+        data[38] = b'f';
+        data[39] = b'o';
+        assert!(is_xing_frame(&data, 0, &header));
+
+        // Test non-Xing frame
+        data[36] = 0x00;
+        data[37] = 0x00;
+        data[38] = 0x00;
+        data[39] = 0x00;
+        assert!(!is_xing_frame(&data, 0, &header));
     }
 }
