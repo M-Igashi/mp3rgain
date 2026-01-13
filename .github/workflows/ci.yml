@@ -103,3 +103,52 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt -- --check
+
+  compatibility:
+    name: Compatibility Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-compat-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install mp3gain
+        run: sudo apt-get update && sudo apt-get install -y mp3gain ffmpeg
+
+      - name: Generate test fixtures
+        run: |
+          mkdir -p tests/fixtures
+          ffmpeg -y -f lavfi -i "sine=frequency=440:duration=1" -ac 2 -ar 44100 -b:a 128k -f mp3 tests/fixtures/test_stereo.mp3
+          ffmpeg -y -f lavfi -i "sine=frequency=440:duration=1" -ac 1 -ar 44100 -b:a 64k -f mp3 tests/fixtures/test_mono.mp3
+          ffmpeg -y -f lavfi -i "sine=frequency=440:duration=1" -ac 2 -ar 44100 -b:a 128k -joint_stereo 1 -f mp3 tests/fixtures/test_joint_stereo.mp3
+          ffmpeg -y -f lavfi -i "sine=frequency=440:duration=1" -ac 2 -ar 44100 -q:a 2 -f mp3 tests/fixtures/test_vbr.mp3
+
+      - name: Build mp3rgain
+        run: cargo build --release
+
+      - name: Show mp3gain version
+        run: mp3gain -v || true
+
+      - name: Run compatibility tests
+        run: |
+          chmod +x ./scripts/compatibility-test.sh
+          MP3GAIN_BIN=mp3gain MP3RGAIN_BIN=./target/release/mp3rgain ./scripts/compatibility-test.sh
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-test-results
+          path: |
+            tests/fixtures/*.mp3
+          retention-days: 7
