@@ -138,6 +138,7 @@ jobs:
     name: Update Scoop Bucket
     needs: release
     runs-on: ubuntu-latest
+    if: ${{ secrets.SCOOP_BUCKET_TOKEN != '' }}
     steps:
       - name: Checkout scoop-bucket
         uses: actions/checkout@v4
