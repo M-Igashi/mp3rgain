@@ -11,16 +11,12 @@ mp3rgain adjusts MP3 volume without re-encoding by modifying the `global_gain` f
 
 ## Features
 
-- **Lossless**: No re-encoding, preserves original audio quality
-- **Fast**: Direct binary manipulation, no audio decoding required for gain adjustment
-- **Reversible**: All changes can be undone (stored in APEv2 tags)
-- **ReplayGain**: Track and album gain analysis (included by default)
-- **AAC/M4A Support**: Analyze and tag M4A files with ReplayGain metadata
-- **Zero runtime dependencies**: Single static binary (no ffmpeg, no mp3gain)
+- **Lossless & Reversible**: No re-encoding, all changes can be undone
+- **ReplayGain**: Track and album gain analysis with AAC/M4A support
+- **Zero dependencies**: Single static binary (no ffmpeg, no mp3gain)
 - **Cross-platform**: macOS, Linux, Windows (x86_64 and ARM64)
-- **mp3gain compatible**: Full command-line compatibility with original mp3gain
+- **mp3gain compatible**: Drop-in replacement with identical CLI
 - **GUI Application**: Native desktop app for drag-and-drop workflow
-- **Pure Rust**: Memory-safe implementation
 
 ## Installation
 
@@ -33,428 +29,108 @@ brew install M-Igashi/tap/mp3rgain
 ### Windows
 
 ```powershell
-# winget (recommended)
 winget install M-Igashi.mp3rgain
-
-# Scoop
-scoop bucket add mp3rgain https://github.com/M-Igashi/scoop-bucket
-scoop install mp3rgain
 ```
 
 ### Linux
 
 ```bash
 # Arch Linux (AUR)
-yay -S mp3rgain      # or: paru -S mp3rgain
+yay -S mp3rgain
 
 # Nix/NixOS
 nix profile install github:M-Igashi/mp3rgain
-
-# Debian/Ubuntu (.deb)
-wget https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain_1.2.0-1_amd64.deb
-sudo dpkg -i mp3rgain_1.2.0-1_amd64.deb
 ```
 
-### Cargo (all platforms)
+### Cargo
 
 ```bash
 cargo install mp3rgain
 ```
 
-<details>
-<summary>Manual installation (download binaries)</summary>
+### Manual Download
 
-Download the latest release from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
-
-**macOS:**
-```bash
-curl -LO https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain-v1.2.0-macos-universal.tar.gz
-tar -xzf mp3rgain-v1.2.0-macos-universal.tar.gz
-sudo mv mp3rgain /usr/local/bin/
-```
-
-**Linux:**
-```bash
-curl -LO https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain-v1.2.0-linux-x86_64.tar.gz
-tar -xzf mp3rgain-v1.2.0-linux-x86_64.tar.gz
-sudo mv mp3rgain /usr/local/bin/
-```
-
-**Windows:**
-1. Download `mp3rgain-v1.2.0-windows-x86_64.zip` (or `arm64` for ARM devices)
-2. Extract to a folder (e.g., `C:\Tools\mp3rgain`)
-3. Add the folder to your PATH environment variable
-
-</details>
-
-## GUI Application
-
-mp3rgain includes a native GUI application (`mp3rgui`) for users who prefer a graphical interface.
-
-**Features:**
-- Drag-and-drop file/folder support
-- Track and album ReplayGain analysis
-- Apply track/album gain with one click
-- Clipping detection with visual warnings
-- Adjustable target volume (default: 89 dB)
-- Progress indicators for batch operations
-
-**Download:** Get the GUI from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
-- `mp3rgui-macos-universal.tar.gz` (macOS Intel/Apple Silicon)
-- `mp3rgui-linux-x86_64.tar.gz` (Linux)
-- `mp3rgui-windows-x86_64.zip` (Windows)
-
-**Build from source:**
-```bash
-cd mp3rgui
-cargo build --release
-```
+Download binaries from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases).
 
 ## Quick Start
 
 ```bash
-# Normalize a single track to ReplayGain reference level (89 dB)
+# Normalize a single track (ReplayGain)
 mp3rgain -r song.mp3
 
-# Normalize an album (all tracks get the same adjustment)
+# Normalize an album
 mp3rgain -a *.mp3
 
-# Apply manual gain adjustment (+3.0 dB)
+# Manual gain adjustment (+3.0 dB)
 mp3rgain -g 2 song.mp3
 
-# Undo previous changes
+# Undo changes
 mp3rgain -u song.mp3
-```
 
-## Usage
-
-### Show file information (default)
-
-```bash
+# Show file info
 mp3rgain song.mp3
 ```
 
-Output:
-```
-song.mp3
-  Format:      MPEG1 Layer III, Joint Stereo
-  Frames:      5765
-  Gain range:  89 - 217 (avg: 168.2)
-  Headroom:    38 steps (+57.0 dB)
-```
+## GUI Application
 
-### Apply gain adjustment
+A native GUI application (`mp3rgui`) is available for users who prefer a graphical interface.
 
-```bash
-# Apply +2 steps (+3.0 dB)
-mp3rgain -g 2 song.mp3
+**Features:** Drag-and-drop, track/album analysis, one-click gain application, clipping warnings, progress indicators.
 
-# Apply +4.5 dB (rounds to nearest step)
-mp3rgain -d 4.5 song.mp3
+**Download:** [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases)
+- `mp3rgui-macos-universal.tar.gz` (macOS)
+- `mp3rgui-linux-x86_64.tar.gz` (Linux)
+- `mp3rgui-windows-x86_64.zip` (Windows)
 
-# Reduce volume by 3 steps (-4.5 dB)
-mp3rgain -g -3 *.mp3
-
-# Apply gain and preserve file timestamp
-mp3rgain -g 2 -p song.mp3
-```
-
-### ReplayGain
-
-```bash
-# Apply track gain (normalize each file to 89 dB)
-mp3rgain -r song.mp3
-mp3rgain -r *.mp3
-
-# Apply album gain (normalize album to 89 dB)
-mp3rgain -a *.mp3
-```
-
-### AAC/M4A Support
-
-```bash
-# Analyze and tag M4A files with ReplayGain
-mp3rgain -r song.m4a
-mp3rgain -r *.m4a
-
-# Album gain for M4A files
-mp3rgain -a *.m4a
-
-# Mix MP3 and M4A files
-mp3rgain -r *.mp3 *.m4a
-
-# Recursive directory processing includes M4A files
-mp3rgain -R /path/to/music
-
-# Process specific audio track in multi-track files (e.g., video files)
-mp3rgain -i 1 movie.m4v   # Process second audio track
-mp3rgain -i 0 song.m4a    # Process first track (default)
-```
-
-Note: For M4A files, mp3rgain writes ReplayGain tags (iTunes freeform format) but does not modify the audio data, as AAC doesn't have a lossless gain adjustment mechanism like MP3's `global_gain` field.
-
-### Undo previous adjustment
-
-```bash
-# Undo gain changes (uses APEv2 tag info)
-mp3rgain -u song.mp3
-```
-
-### Clipping prevention
-
-```bash
-# Automatically reduce gain if clipping would occur
-mp3rgain -k -g 5 song.mp3
-# Output: gain reduced from 5 to 3 steps to prevent clipping
-
-# With ReplayGain
-mp3rgain -k -r song.mp3
-```
-
-### Recursive directory processing
-
-```bash
-# Process all MP3s in a directory recursively
-mp3rgain -R /path/to/music
-mp3rgain -g 2 -R /path/to/music
-mp3rgain -r -R /path/to/album
-```
-
-### Channel-specific gain (stereo balance)
-
-```bash
-# Apply +3 steps to left channel only
-mp3rgain -l 0 3 song.mp3
-
-# Apply -2 steps to right channel only
-mp3rgain -l 1 -2 song.mp3
-```
-
-### Dry-run mode
-
-```bash
-# Preview changes without modifying files
-mp3rgain -n -g 2 *.mp3
-mp3rgain --dry-run -r *.mp3
-```
-
-### Find maximum amplitude
-
-```bash
-# Only show max amplitude (no gain applied)
-mp3rgain -x song.mp3
-```
-
-### Modify suggested gain
-
-```bash
-# Apply track gain with +2 step offset
-mp3rgain -r -m 2 *.mp3
-
-# Apply album gain with -1 step offset
-mp3rgain -a -m -1 *.mp3
-```
-
-### Tag management
-
-```bash
-# Check stored tag info
-mp3rgain -s c *.mp3
-
-# Delete stored ReplayGain tags
-mp3rgain -s d *.mp3
-
-# Skip existing tags and force recalculation
-mp3rgain -s r -r *.mp3
-```
-
-### Output formats
-
-```bash
-# Output in JSON format for scripting
-mp3rgain -o json song.mp3
-
-# Tab-separated output (database-friendly)
-mp3rgain -o tsv *.mp3
-
-# Combine with other options
-mp3rgain -o json -r *.mp3
-```
-
-### Safe file writing
-
-```bash
-# Use temp file for atomic writes (safer)
-mp3rgain -t -g 2 song.mp3
-
-# Apply gain with wrapping (for edge cases)
-mp3rgain -w -g 10 song.mp3
-```
-
-Example JSON output:
-```json
-{
-  "files": [
-    {
-      "file": "song.mp3",
-      "mpeg_version": "MPEG1",
-      "channel_mode": "Joint Stereo",
-      "frames": 5765,
-      "min_gain": 89,
-      "max_gain": 217,
-      "avg_gain": 168.2,
-      "headroom_steps": 38,
-      "headroom_db": 57.0
-    }
-  ]
-}
-```
+> **macOS users:** If you see "mp3rgui cannot be opened" warning, run:
+> ```bash
+> xattr -cr /path/to/mp3rgui
+> ```
 
 ## Command-Line Options
 
 | Option | Description |
 |--------|-------------|
-| `-g <i>` | Apply gain of i steps (each step = 1.5 dB) |
-| `-d <n>` | Apply gain of n dB (rounded to nearest step) |
-| `-l <c> <g>` | Apply gain to left (0) or right (1) channel only |
-| `-m <i>` | Modify suggested gain by integer i |
-| `-r` | Apply Track gain (ReplayGain analysis) |
-| `-a` | Apply Album gain (ReplayGain analysis) |
-| `-e` | Skip album analysis (even with multiple files) |
-| `-i <n>` | Specify which audio track to process (default: 0) |
-| `-u` | Undo gain changes (restore from APEv2 tag) |
-| `-x` | Only find max amplitude of file |
-| `-s <mode>` | Stored tag handling: `c` (check), `d` (delete), `s` (skip), `r` (recalc), `i` (ID3v2), `a` (APEv2) |
-| `-p` | Preserve original file timestamp |
-| `-c` | Ignore clipping warnings |
-| `-k` | Prevent clipping (automatically limit gain) |
-| `-w` | Wrap gain values (instead of clamping 0-255) |
-| `-t` | Use temp file for writing (safer atomic writes) |
-| `-f` | Assume MPEG 2 Layer III (compatibility flag) |
-| `-q` | Quiet mode (less output) |
+| `-r` | Apply Track gain (ReplayGain) |
+| `-a` | Apply Album gain (ReplayGain) |
+| `-g <i>` | Apply gain of i steps (1 step = 1.5 dB) |
+| `-d <n>` | Apply gain of n dB |
+| `-u` | Undo gain changes |
+| `-k` | Prevent clipping |
 | `-R` | Process directories recursively |
-| `-n`, `--dry-run` | Dry-run mode (show what would be done) |
-| `-o <fmt>` | Output format: `text` (default), `json`, or `tsv` |
-| `-v` | Show version |
-| `-h` | Show help |
+| `-n` | Dry-run mode |
+| `-o <fmt>` | Output format: `text`, `json`, `tsv` |
 
-### mp3gain Compatibility
+Run `mp3rgain -h` for the full list of options.
 
-mp3rgain is a drop-in replacement for the original mp3gain:
+## Documentation
 
-```bash
-# These commands work identically in both mp3gain and mp3rgain
-mp3gain -r *.mp3           # original mp3gain
-mp3rgain -r *.mp3          # mp3rgain
-
-mp3gain -a *.mp3           # original mp3gain  
-mp3rgain -a *.mp3          # mp3rgain
-
-mp3gain -g 2 song.mp3      # original mp3gain
-mp3rgain -g 2 song.mp3     # mp3rgain
-```
-
-## Technical Details
-
-### Gain Steps
-
-Each gain step equals **1.5 dB** (fixed by MP3 specification). The `global_gain` field is 8 bits, allowing values 0-255.
-
-| Steps | dB Change |
-|-------|-----------|
-| +1 | +1.5 dB |
-| +2 | +3.0 dB |
-| +4 | +6.0 dB |
-| -2 | -3.0 dB |
-
-### How It Works
-
-MP3 files contain a `global_gain` field in each frame's side information that controls playback volume. mp3rgain directly modifies these values without touching the audio data, making the adjustment completely lossless and reversible.
-
-### ReplayGain Analysis
-
-mp3rgain uses the [symphonia](https://github.com/pdrat/symphonia) crate for audio decoding and implements the ReplayGain 1.0 algorithm:
-
-1. Decode MP3/AAC to PCM audio
-2. Apply equal-loudness filter (Yule-Walker + Butterworth)
-3. Calculate RMS loudness in 50ms windows
-4. Use 95th percentile for loudness measurement
-5. Calculate gain to reach 89 dB reference level
-
-### AAC/M4A Support
-
-For AAC/M4A files, mp3rgain:
-- Analyzes audio loudness using the same ReplayGain algorithm as MP3
-- Writes ReplayGain tags in iTunes freeform format (`com.apple.iTunes:replaygain_*`)
-- Does NOT modify audio data (AAC lacks a lossless gain mechanism)
-
-Players that support ReplayGain tags will automatically apply volume normalization during playback.
-
-### Compatibility
-
-**Format Support:**
-- MPEG1 Layer III (MP3)
-- MPEG2 Layer III
-- MPEG2.5 Layer III
-- AAC/M4A (ReplayGain tags only)
-- Mono, Stereo, Joint Stereo, Dual Channel
-- ID3v2 tags (preserved)
-- APEv2 tags (for undo support)
-- iTunes metadata (for M4A files)
-- VBR and CBR files
-
-**mp3gain Binary Compatibility:**
-
-mp3rgain produces **byte-for-byte identical output** to the original mp3gain when applying gain adjustments. This has been verified through automated testing with SHA-256 hash comparison.
-
-[![CI Status](https://github.com/M-Igashi/mp3rgain/actions/workflows/ci.yml/badge.svg)](https://github.com/M-Igashi/mp3rgain/actions/workflows/ci.yml)
-
-See the [Compatibility Report](docs/compatibility-report.md) for detailed verification results and test methodology.
+- [Compatibility Report](docs/compatibility-report.md) - Verification against original mp3gain
+- [Technical Comparison](docs/COMPARISON.md) - Comparison with similar tools
 
 ## Why mp3rgain?
 
-The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained since ~2015 and has compatibility issues with modern systems (including Windows 11). mp3rgain is a modern replacement that:
-
-- Works on Windows 11, macOS, and Linux
-- Has no runtime dependencies
-- Is written in memory-safe Rust
-- Uses the same command-line interface
-- Includes a library API for integration
+The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained since ~2015. mp3rgain is a modern, memory-safe replacement that works on current systems including Windows 11, macOS, and Linux.
 
 ## Library Usage
 
 ```rust
-use mp3rgain::{apply_gain, apply_gain_db, analyze};
+use mp3rgain::{apply_gain, analyze};
 use std::path::Path;
 
-// Apply +2 gain steps (+3.0 dB)
-let frames = apply_gain(Path::new("song.mp3"), 2)?;
-println!("Modified {} frames", frames);
-
-// Analyze file
+let frames = apply_gain(Path::new("song.mp3"), 2)?;  // +3.0 dB
 let info = analyze(Path::new("song.mp3"))?;
-println!("Headroom: {} steps", info.headroom_steps);
 ```
-
-## Acknowledgments
-
-- [symphonia](https://github.com/pdeljanov/Symphonia) - Pure Rust audio decoding library (used for ReplayGain analysis)
-- [Original mp3gain](http://mp3gain.sourceforge.net/) - The original C implementation that inspired this project
-- [aacgain](https://github.com/dgilman/aacgain) - AAC/MP4 ReplayGain implementation
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-We especially welcome:
-- Windows testing and compatibility reports
-- Bug reports and feature requests
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License - see [LICENSE](LICENSE).
 
 ## See Also
 
-- [Original mp3gain](http://mp3gain.sourceforge.net/) - The original C implementation
-- [headroom](https://github.com/M-Igashi/headroom) - DJ audio loudness optimizer (uses mp3rgain internally)
+- [Original mp3gain](http://mp3gain.sourceforge.net/)
+- [headroom](https://github.com/M-Igashi/headroom) - DJ audio loudness optimizer
