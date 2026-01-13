@@ -1,0 +1,19 @@
+#!/usr/bin/make -f
+export DH_VERBOSE = 1
+export CARGO_HOME = $(CURDIR)/debian/cargo-home
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release --locked
+
+override_dh_auto_install:
+	install -Dm755 target/release/mp3rgain debian/mp3rgain/usr/bin/mp3rgain
+
+override_dh_auto_test:
+	cargo test --release --locked
+
+override_dh_auto_clean:
+	cargo clean || true
+	rm -rf $(CARGO_HOME)
