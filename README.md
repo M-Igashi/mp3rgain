@@ -25,97 +25,66 @@ mp3rgain adjusts MP3 volume without re-encoding by modifying the `global_gain` f
 
 ### macOS
 
-**Homebrew** (recommended):
 ```bash
 brew install M-Igashi/tap/mp3rgain
 ```
 
-**Download binary:**
-1. Download `mp3rgain-*-macos-universal.tar.gz` from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases)
-2. Extract: `tar -xzf mp3rgain-*-macos-universal.tar.gz`
-3. Move to PATH: `sudo mv mp3rgain /usr/local/bin/`
-
 ### Windows
 
-**winget** (recommended):
 ```powershell
+# winget (recommended)
 winget install M-Igashi.mp3rgain
-```
 
-**Scoop**:
-```powershell
+# Scoop
 scoop bucket add mp3rgain https://github.com/M-Igashi/scoop-bucket
 scoop install mp3rgain
 ```
 
-**Download and extract**:
-
-1. Download the latest release from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
-   - `mp3rgain-*-windows-x86_64.zip` (most Windows PCs)
-   - `mp3rgain-*-windows-arm64.zip` (ARM-based Windows devices)
-
-2. Extract the ZIP file to a folder (e.g., `C:\Tools\mp3rgain`)
-
-3. Open PowerShell or Command Prompt and navigate to the folder:
-   ```powershell
-   cd C:\Tools\mp3rgain
-   .\mp3rgain.exe -h
-   ```
-
-4. (Optional) Add to PATH for system-wide access:
-   - Open "Edit environment variables for your account" from Start menu
-   - Edit the `Path` variable and add your folder (e.g., `C:\Tools\mp3rgain`)
-   - Restart your terminal
-
-> **Note:** mp3rgain is a command-line tool, not a GUI application. Double-clicking the executable will briefly open and close a terminal window. Always run it from PowerShell or Command Prompt.
-
 ### Linux
 
-**Arch Linux (AUR)**:
 ```bash
-# Using yay
-yay -S mp3rgain
+# Arch Linux (AUR)
+yay -S mp3rgain      # or: paru -S mp3rgain
 
-# Using paru
-paru -S mp3rgain
-
-# Manual
-git clone https://aur.archlinux.org/mp3rgain.git
-cd mp3rgain && makepkg -si
-```
-
-**Nix/NixOS**:
-```bash
-# Using flakes
-nix run github:M-Igashi/mp3rgain
-
-# Install to profile
+# Nix/NixOS
 nix profile install github:M-Igashi/mp3rgain
-```
 
-**Debian/Ubuntu (.deb)**:
-```bash
-# Download from releases
-wget https://github.com/M-Igashi/mp3rgain/releases/download/v1.1.1/mp3rgain_1.1.1-1_amd64.deb
+# Debian/Ubuntu (.deb)
+wget https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain_1.1.1-1_amd64.deb
 sudo dpkg -i mp3rgain_1.1.1-1_amd64.deb
 ```
-
-**Download binary:**
-1. Download `mp3rgain-*-linux-x86_64.tar.gz` from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases)
-2. Extract: `tar -xzf mp3rgain-*-linux-x86_64.tar.gz`
-3. Move to PATH: `sudo mv mp3rgain /usr/local/bin/`
 
 ### Cargo (all platforms)
 
 ```bash
-# Standard installation (includes ReplayGain support)
 cargo install mp3rgain
-
-# Minimal installation (gain adjustment only, no audio decoding)
-cargo install mp3rgain --no-default-features
 ```
 
-All binaries include full ReplayGain support with zero runtime dependencies.
+<details>
+<summary>Manual installation (download binaries)</summary>
+
+Download the latest release from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
+
+**macOS:**
+```bash
+curl -LO https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain-v1.1.1-macos-universal.tar.gz
+tar -xzf mp3rgain-v1.1.1-macos-universal.tar.gz
+sudo mv mp3rgain /usr/local/bin/
+```
+
+**Linux:**
+```bash
+curl -LO https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain-v1.1.1-linux-x86_64.tar.gz
+tar -xzf mp3rgain-v1.1.1-linux-x86_64.tar.gz
+sudo mv mp3rgain /usr/local/bin/
+```
+
+**Windows:**
+1. Download `mp3rgain-v1.1.1-windows-x86_64.zip` (or `arm64` for ARM devices)
+2. Extract to a folder (e.g., `C:\Tools\mp3rgain`)
+3. Add the folder to your PATH environment variable
+
+</details>
 
 ## Quick Start
 
