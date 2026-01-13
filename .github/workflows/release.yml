@@ -36,6 +36,8 @@ jobs:
 
       - name: Build
         run: cargo build --release --features replaygain --target ${{ matrix.target }}
+        env:
+          RUSTFLAGS: ${{ contains(matrix.target, 'windows') && '-C target-feature=+crt-static' || '' }}
 
       - name: Upload artifact (Unix)
         if: runner.os != 'Windows'
