@@ -138,7 +138,7 @@ jobs:
     name: Update Scoop Bucket
     needs: release
     runs-on: ubuntu-latest
-    if: ${{ secrets.SCOOP_BUCKET_TOKEN != '' }}
+    continue-on-error: true
     steps:
       - name: Checkout scoop-bucket
         uses: actions/checkout@v4
@@ -198,6 +198,7 @@ jobs:
     name: Update Homebrew Tap
     needs: release
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout homebrew-tap
         uses: actions/checkout@v4
@@ -227,6 +228,7 @@ jobs:
     name: Publish to crates.io
     needs: release
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
