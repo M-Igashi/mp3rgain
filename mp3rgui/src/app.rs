@@ -94,6 +94,12 @@ impl Mp3rgainApp {
     }
 
     fn is_supported_format(path: &PathBuf) -> bool {
+        // Skip macOS resource fork files (._*)
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name.starts_with("._") {
+                return false;
+            }
+        }
         path.extension().map_or(false, |ext| {
             ext.eq_ignore_ascii_case("mp3")
                 || ext.eq_ignore_ascii_case("m4a")
