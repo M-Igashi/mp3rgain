@@ -1,0 +1,31 @@
+# Maintainer: Masanari Higashi <M-Igashi@users.noreply.github.com>
+pkgname=mp3rgain
+pkgver=1.1.1
+pkgrel=1
+pkgdesc='Lossless MP3 volume adjustment - a modern mp3gain replacement written in Rust'
+arch=('x86_64' 'aarch64')
+url='https://github.com/M-Igashi/mp3rgain'
+license=('MIT')
+depends=('gcc-libs')
+makedepends=('rust' 'cargo')
+source=("https://github.com/M-Igashi/mp3rgain/archive/v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "mp3rgain-${pkgver}"
+    export CARGO_HOME="${srcdir}/cargo-home"
+    cargo build --release --locked
+}
+
+check() {
+    cd "mp3rgain-${pkgver}"
+    export CARGO_HOME="${srcdir}/cargo-home"
+    cargo test --release --locked
+}
+
+package() {
+    cd "mp3rgain-${pkgver}"
+    install -Dm755 target/release/mp3rgain "${pkgdir}/usr/bin/mp3rgain"
+    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/mp3rgain/LICENSE"
+    install -Dm644 README.md "${pkgdir}/usr/share/doc/mp3rgain/README.md"
+}

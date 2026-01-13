@@ -1,0 +1,25 @@
+Source: mp3rgain
+Section: sound
+Priority: optional
+Maintainer: Masanari Higashi <M-Igashi@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13), cargo, rustc
+Standards-Version: 4.6.0
+Homepage: https://github.com/M-Igashi/mp3rgain
+Vcs-Browser: https://github.com/M-Igashi/mp3rgain
+Vcs-Git: https://github.com/M-Igashi/mp3rgain.git
+Rules-Requires-Root: no
+
+Package: mp3rgain
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Lossless MP3 volume adjustment tool
+ mp3rgain is a modern mp3gain replacement written in Rust that adjusts
+ MP3 file volumes losslessly using ReplayGain analysis. It modifies only
+ the MP3 header information without re-encoding the audio data.
+ .
+ Features:
+  - ReplayGain 2.0 analysis and tagging
+  - Album and track gain modes
+  - Batch processing with progress display
+  - JSON output for scripting
+  - Cross-platform support
