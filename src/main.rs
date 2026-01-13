@@ -9,11 +9,11 @@ use indicatif::{ProgressBar, ProgressStyle};
 use mp3rgain::mp4meta;
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{
-    analyze, apply_gain_channel_with_undo, apply_gain_with_undo, apply_gain_with_undo_wrap,
-    db_to_steps, delete_ape_tag, find_max_amplitude, read_ape_tag_from_file, steps_to_db,
-    undo_gain, Channel, GAIN_STEP_DB, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
-    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK,
+    analyze, apply_gain, apply_gain_channel_with_undo, apply_gain_with_undo,
+    apply_gain_with_undo_wrap, apply_gain_wrap, db_to_steps, delete_ape_tag, find_max_amplitude,
+    read_ape_tag_from_file, steps_to_db, undo_gain, Channel, GAIN_STEP_DB, TAG_MP3GAIN_MINMAX,
+    TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
+    TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use serde::Serialize;
 use std::env;
@@ -1601,7 +1601,14 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
         });
     }
 
-    let apply_result = if opts.wrap_gain {
+    let apply_result = if opts.stored_tag_mode == StoredTagMode::Skip {
+        // -s s: Skip tag writing, just apply gain
+        if opts.wrap_gain {
+            apply_with_temp_file(file, |f| apply_gain_wrap(f, actual_steps), opts)
+        } else {
+            apply_with_temp_file(file, |f| apply_gain(f, actual_steps), opts)
+        }
+    } else if opts.wrap_gain {
         apply_with_temp_file(file, |f| apply_gain_with_undo_wrap(f, actual_steps), opts)
     } else {
         apply_with_temp_file(file, |f| apply_gain_with_undo(f, actual_steps), opts)
