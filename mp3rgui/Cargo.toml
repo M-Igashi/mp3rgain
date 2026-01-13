@@ -1,6 +1,6 @@
 [package]
 name = "mp3rgui"
-version = "0.1.0"
+version = "1.2.0"
 edition = "2021"
 authors = ["Masanari Higashi <M-Igashi@users.noreply.github.com>"]
 description = "GUI application for mp3rgain - lossless MP3 volume adjustment"

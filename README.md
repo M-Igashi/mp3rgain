@@ -51,8 +51,8 @@ yay -S mp3rgain      # or: paru -S mp3rgain
 nix profile install github:M-Igashi/mp3rgain
 
 # Debian/Ubuntu (.deb)
-wget https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain_1.1.1-1_amd64.deb
-sudo dpkg -i mp3rgain_1.1.1-1_amd64.deb
+wget https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain_1.2.0-1_amd64.deb
+sudo dpkg -i mp3rgain_1.2.0-1_amd64.deb
 ```
 
 ### Cargo (all platforms)
@@ -68,20 +68,20 @@ Download the latest release from [GitHub Releases](https://github.com/M-Igashi/m
 
 **macOS:**
 ```bash
-curl -LO https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain-v1.1.1-macos-universal.tar.gz
-tar -xzf mp3rgain-v1.1.1-macos-universal.tar.gz
+curl -LO https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain-v1.2.0-macos-universal.tar.gz
+tar -xzf mp3rgain-v1.2.0-macos-universal.tar.gz
 sudo mv mp3rgain /usr/local/bin/
 ```
 
 **Linux:**
 ```bash
-curl -LO https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain-v1.1.1-linux-x86_64.tar.gz
-tar -xzf mp3rgain-v1.1.1-linux-x86_64.tar.gz
+curl -LO https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain-v1.2.0-linux-x86_64.tar.gz
+tar -xzf mp3rgain-v1.2.0-linux-x86_64.tar.gz
 sudo mv mp3rgain /usr/local/bin/
 ```
 
 **Windows:**
-1. Download `mp3rgain-v1.1.1-windows-x86_64.zip` (or `arm64` for ARM devices)
+1. Download `mp3rgain-v1.2.0-windows-x86_64.zip` (or `arm64` for ARM devices)
 2. Extract to a folder (e.g., `C:\Tools\mp3rgain`)
 3. Add the folder to your PATH environment variable
 
