@@ -223,6 +223,46 @@ jobs:
           git commit -m "Update mp3rgain to ${{ needs.release.outputs.version }}" || exit 0
           git push
 
+  # Build Debian package
+  build-deb:
+    name: Build Debian Package
+    needs: release
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential debhelper
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Setup debian directory
+        run: cp -r packages/debian/debian .
+
+      - name: Update changelog version
+        run: |
+          VERSION=${{ needs.release.outputs.version }}
+          DATE=$(date -R)
+          cat > debian/changelog << EOF
+          mp3rgain (${VERSION}-1) unstable; urgency=medium
+
+            * Release ${VERSION}
+
+           -- Masanari Higashi <M-Igashi@users.noreply.github.com>  ${DATE}
+          EOF
+
+      - name: Build package
+        run: dpkg-buildpackage -us -uc -b
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2
+        with:
+          files: ../mp3rgain_${{ needs.release.outputs.version }}-1_amd64.deb
+
   # Publish to crates.io
   publish-cargo:
     name: Publish to crates.io
