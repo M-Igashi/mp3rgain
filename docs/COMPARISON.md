@@ -214,6 +214,41 @@ Both mp3rgain and mp3gain/aacgain provide similar performance for gain analysis 
 - **Memory safety**: mp3rgain is written in Rust with memory-safe guarantees
 - **Parallel processing**: Both process files sequentially (per-file, not per-album)
 
+## Important Notes
+
+### Avoiding Double Volume Adjustment
+
+If you apply `global_gain` adjustment with mp3rgain and later add ReplayGain tags with another tool (like rsgain), you may get **double adjustment** - the player will apply ReplayGain on top of the already-modified volume.
+
+**Recommendations:**
+
+1. **Choose one approach**: Either use `global_gain` adjustment (mp3rgain) OR ReplayGain tags (rsgain), not both.
+
+2. **If you need both**: Apply `global_gain` first, then delete any existing ReplayGain tags:
+   ```bash
+   mp3rgain -r *.mp3           # Apply gain
+   mp3rgain -s d *.mp3         # Delete ReplayGain tags
+   ```
+
+3. **Check before re-tagging**: If your files have been processed with mp3rgain, undo first before applying ReplayGain tags with another tool:
+   ```bash
+   mp3rgain -u *.mp3           # Undo global_gain changes
+   rsgain easy *.mp3           # Then apply ReplayGain tags
+   ```
+
+### When to Use global_gain vs ReplayGain Tags
+
+| Use Case | Recommended Approach |
+|----------|---------------------|
+| DJ equipment (CDJs, controllers) | `global_gain` (mp3rgain) |
+| Car stereos, portable players | `global_gain` (mp3rgain) |
+| Smart speakers, Chromecast | `global_gain` (mp3rgain) |
+| Desktop players (foobar2000, etc.) | ReplayGain tags (rsgain) |
+| Streaming to phone apps | ReplayGain tags (rsgain) |
+| Maximum flexibility | ReplayGain tags (rsgain) |
+
+For most modern listening setups, **ReplayGain tags are the cleaner solution**. Use `global_gain` adjustment when your playback device doesn't support ReplayGain tags.
+
 ## Known Limitations
 
 ### mp3rgain
