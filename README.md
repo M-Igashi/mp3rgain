@@ -19,6 +19,7 @@ mp3rgain adjusts MP3 volume without re-encoding by modifying the `global_gain` f
 - **Zero runtime dependencies**: Single static binary (no ffmpeg, no mp3gain)
 - **Cross-platform**: macOS, Linux, Windows (x86_64 and ARM64)
 - **mp3gain compatible**: Full command-line compatibility with original mp3gain
+- **GUI Application**: Native desktop app for drag-and-drop workflow
 - **Pure Rust**: Memory-safe implementation
 
 ## Installation
@@ -85,6 +86,29 @@ sudo mv mp3rgain /usr/local/bin/
 3. Add the folder to your PATH environment variable
 
 </details>
+
+## GUI Application
+
+mp3rgain includes a native GUI application (`mp3rgui`) for users who prefer a graphical interface.
+
+**Features:**
+- Drag-and-drop file/folder support
+- Track and album ReplayGain analysis
+- Apply track/album gain with one click
+- Clipping detection with visual warnings
+- Adjustable target volume (default: 89 dB)
+- Progress indicators for batch operations
+
+**Download:** Get the GUI from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
+- `mp3rgui-macos-universal.tar.gz` (macOS Intel/Apple Silicon)
+- `mp3rgui-linux-x86_64.tar.gz` (Linux)
+- `mp3rgui-windows-x86_64.zip` (Windows)
+
+**Build from source:**
+```bash
+cd mp3rgui
+cargo build --release
+```
 
 ## Quick Start
 
