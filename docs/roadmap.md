@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current Status: v1.0.0 (Production Ready)
+## Current Status: v1.1.1 (Production Ready)
 
 All core functionality complete:
 - [x] MP3 frame parsing (MPEG 1/2/2.5 Layer III)
@@ -47,21 +47,27 @@ All core functionality complete:
 - [x] Multi-track audio support (`-i` option)
 - [x] Production-ready release
 
-## Upcoming Goals
-
-### v1.2.0 - Package Manager Expansion
+### v1.1.0 - Package Manager Expansion
 
 - [x] Scoop package (Windows)
 - [x] winget package (Windows Package Manager)
-- [ ] Homebrew core inclusion
-- [ ] AUR package (Arch Linux)
-- [ ] Nix package
+- [x] AUR package (Arch Linux)
+- [x] Nix package
+- [x] Debian/Ubuntu package (.deb)
 
-### Future
+## Upcoming Goals
 
-- [ ] GUI wrapper (optional)
-- [ ] FLAC support (optional)
-- [ ] Ogg Vorbis support (optional)
+### v1.2.0 - Distribution Expansion
+
+- [ ] Homebrew core inclusion (currently in tap)
+- [ ] Fedora/RPM package
+- [ ] Flatpak package
+
+### Future Enhancements
+
+- [ ] GUI application (cross-platform)
+- [ ] FLAC support
+- [ ] Ogg Vorbis support
 - [ ] Library API stabilization
 - [ ] Integration with music players/taggers
 
@@ -70,7 +76,7 @@ All core functionality complete:
 - [ ] Reach 100 GitHub stars
 - [ ] 5+ contributors
 - [ ] Grow Windows user base
-- [ ] Package availability in major package managers
+- [x] Package availability in major package managers
 
 ---
 
