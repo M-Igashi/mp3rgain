@@ -62,19 +62,13 @@ Compatibility tests run automatically on every pull request in GitHub Actions. S
 | Negative gain -3 | `-g -3` | Verified |
 | Negative gain -5 | `-g -5` | Verified |
 
-### Phase 2: Undo Operations (`-u`)
-
-| Test | Command | Status |
-|------|---------|--------|
-| Undo after +3 gain | `-g 3` then `-u` | Verified |
-
-### Phase 3: Clipping Prevention (`-k`)
+### Phase 2: Clipping Prevention (`-k`)
 
 | Test | Command | Status |
 |------|---------|--------|
 | Clip prevention high gain | `-k -g 10` | Verified |
 
-### Phase 4: Channel-Specific Gain (`-l`)
+### Phase 3: Channel-Specific Gain (`-l`)
 
 | Test | Command | Status |
 |------|---------|--------|
@@ -141,13 +135,14 @@ Binary compatibility ensures:
 | Feature | mp3gain | mp3rgain |
 |---------|---------|----------|
 | `-d` option | Modifies suggested gain (use with `-r`/`-a`) | Directly applies dB gain |
+| Undo tag cleanup | Keeps empty APE tags after undo | Removes APE tags completely after undo |
 | ReplayGain algorithm | Uses LAME routines | Uses Symphonia + native Rust |
 | ReplayGain results | May differ slightly | May differ slightly |
 | Gain adjustment (`-g`) | Identical | Identical |
-| APEv2 tag format | Identical | Identical |
 
 **Notes**:
 - The `-d` option has different semantics: mp3gain uses it to modify the suggested ReplayGain value, while mp3rgain uses it to directly apply a dB gain value. Use `-g` for compatible behavior.
+- After undo, mp3gain leaves empty APE tags in the file while mp3rgain removes them completely. The audio data is identical in both cases.
 - ReplayGain analysis results may have minor differences due to different audio decoding libraries, but the gain *application* mechanism is identical.
 
 ## Reproducing Tests
