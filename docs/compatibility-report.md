@@ -62,32 +62,19 @@ Compatibility tests run automatically on every pull request in GitHub Actions. S
 | Negative gain -3 | `-g -3` | Verified |
 | Negative gain -5 | `-g -5` | Verified |
 
-### Phase 2: dB Gain Operations (`-d`)
-
-| Test | Command | Status |
-|------|---------|--------|
-| +1.5 dB | `-d 1.5` | Verified |
-| +3.0 dB | `-d 3.0` | Verified |
-| +4.5 dB | `-d 4.5` | Verified |
-| +6.0 dB | `-d 6.0` | Verified |
-| -1.5 dB | `-d -1.5` | Verified |
-| -3.0 dB | `-d -3.0` | Verified |
-| -4.5 dB | `-d -4.5` | Verified |
-| -6.0 dB | `-d -6.0` | Verified |
-
-### Phase 3: Undo Operations (`-u`)
+### Phase 2: Undo Operations (`-u`)
 
 | Test | Command | Status |
 |------|---------|--------|
 | Undo after +3 gain | `-g 3` then `-u` | Verified |
 
-### Phase 4: Clipping Prevention (`-k`)
+### Phase 3: Clipping Prevention (`-k`)
 
 | Test | Command | Status |
 |------|---------|--------|
 | Clip prevention high gain | `-k -g 10` | Verified |
 
-### Phase 5: Channel-Specific Gain (`-l`)
+### Phase 4: Channel-Specific Gain (`-l`)
 
 | Test | Command | Status |
 |------|---------|--------|
@@ -153,12 +140,15 @@ Binary compatibility ensures:
 
 | Feature | mp3gain | mp3rgain |
 |---------|---------|----------|
+| `-d` option | Modifies suggested gain (use with `-r`/`-a`) | Directly applies dB gain |
 | ReplayGain algorithm | Uses LAME routines | Uses Symphonia + native Rust |
 | ReplayGain results | May differ slightly | May differ slightly |
-| Gain adjustment | Identical | Identical |
+| Gain adjustment (`-g`) | Identical | Identical |
 | APEv2 tag format | Identical | Identical |
 
-**Note**: ReplayGain analysis results may have minor differences due to different audio decoding libraries, but the gain *application* mechanism is identical.
+**Notes**:
+- The `-d` option has different semantics: mp3gain uses it to modify the suggested ReplayGain value, while mp3rgain uses it to directly apply a dB gain value. Use `-g` for compatible behavior.
+- ReplayGain analysis results may have minor differences due to different audio decoding libraries, but the gain *application* mechanism is identical.
 
 ## Reproducing Tests
 
