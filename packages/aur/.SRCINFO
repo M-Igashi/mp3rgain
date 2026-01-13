@@ -1,0 +1,15 @@
+pkgbase = mp3rgain
+	pkgdesc = Lossless MP3 volume adjustment - a modern mp3gain replacement written in Rust
+	pkgver = 1.1.1
+	pkgrel = 1
+	url = https://github.com/M-Igashi/mp3rgain
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = rust
+	makedepends = cargo
+	depends = gcc-libs
+	source = https://github.com/M-Igashi/mp3rgain/archive/v1.1.1.tar.gz
+	sha256sums = SKIP
+
+pkgname = mp3rgain
