@@ -135,7 +135,7 @@ run_test() {
     # Use -s s to skip tag writing for pure audio comparison
     if ! "$MP3GAIN_BIN" -s s "${args[@]}" "$test_original" > /dev/null 2>&1; then
         log "  ${YELLOW}SKIP${NC}: mp3gain failed on this test"
-        ((SKIP_COUNT++))
+        SKIP_COUNT=$((SKIP_COUNT + 1))
         return 0
     fi
 
@@ -143,7 +143,7 @@ run_test() {
     # Use -s s to skip tag writing for pure audio comparison
     if ! "$MP3RGAIN_BIN" -s s "${args[@]}" "$test_new" > /dev/null 2>&1; then
         log "  ${RED}FAIL${NC}: mp3rgain failed on this test"
-        ((FAIL_COUNT++))
+        FAIL_COUNT=$((FAIL_COUNT + 1))
         return 1
     fi
 
@@ -156,13 +156,13 @@ run_test() {
     if [ "$hash_original" = "$hash_new" ]; then
         log "  ${GREEN}PASS${NC}: $test_name"
         log_verbose "    Hash: $hash_original"
-        ((PASS_COUNT++))
+        PASS_COUNT=$((PASS_COUNT + 1))
         return 0
     else
         log "  ${RED}FAIL${NC}: $test_name - hashes differ"
         log "    mp3gain:  $hash_original"
         log "    mp3rgain: $hash_new"
-        ((FAIL_COUNT++))
+        FAIL_COUNT=$((FAIL_COUNT + 1))
         return 1
     fi
 }
@@ -235,12 +235,12 @@ test_undo() {
     # Compare mp3gain and mp3rgain results
     if [ "$hash_original" = "$hash_new" ]; then
         log "  ${GREEN}PASS${NC}: undo produces identical results"
-        ((PASS_COUNT++))
+        PASS_COUNT=$((PASS_COUNT + 1))
     else
         log "  ${RED}FAIL${NC}: undo results differ"
         log "    mp3gain:  $hash_original"
         log "    mp3rgain: $hash_new"
-        ((FAIL_COUNT++))
+        FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 }
 
