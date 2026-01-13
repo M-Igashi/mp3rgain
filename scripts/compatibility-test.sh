@@ -181,19 +181,9 @@ test_gain_steps() {
     done
 }
 
-# Test dB gain with -d flag
-test_gain_db() {
-    local mp3_file="$1"
-    local basename
-    basename=$(basename "$mp3_file" .mp3)
-
-    log ""
-    log "Testing dB gain on: $basename"
-
-    for db in -6.0 -4.5 -3.0 -1.5 1.5 3.0 4.5 6.0; do
-        run_test "gain ${db}dB" "$mp3_file" -d "$db"
-    done
-}
+# Note: -d option test removed because mp3gain's -d modifies "suggested gain"
+# (used with ReplayGain), while mp3rgain's -d directly applies dB gain.
+# This is a documented difference, not a compatibility issue.
 
 # Test undo functionality
 test_undo() {
@@ -324,7 +314,6 @@ main() {
     # Run tests on each file
     for mp3 in "${mp3_files[@]}"; do
         test_gain_steps "$mp3"
-        test_gain_db "$mp3"
         test_undo "$mp3"
         test_clipping_prevention "$mp3"
         test_channel_gain "$mp3"
