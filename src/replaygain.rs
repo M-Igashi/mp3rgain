@@ -477,8 +477,7 @@ pub fn analyze_track_with_index(
     let rms_values = calculate_rms_windows(&all_filtered_samples, sample_rate);
     let loudness_db = calculate_loudness(&rms_values);
 
-    // Calculate gain needed to reach reference level
-    let gain_db = REPLAYGAIN_REFERENCE_DB + loudness_db; // loudness_db is negative
+    let gain_db = REPLAYGAIN_REFERENCE_DB + loudness_db;
 
     Ok(ReplayGainResult {
         loudness_db,
@@ -508,7 +507,6 @@ fn process_audio_buffer(
                     let sample = buf.chan(ch)[frame] as f64;
                     *peak = peak.max(sample.abs());
 
-                    // Apply equal-loudness filter
                     let filtered = if ch < filters.len() {
                         filters[ch].process(sample)
                     } else {
@@ -516,7 +514,6 @@ fn process_audio_buffer(
                     };
                     sum += filtered * filtered;
                 }
-                // Store combined RMS contribution for this frame
                 all_samples.push((sum / channels as f64).sqrt());
             }
         }

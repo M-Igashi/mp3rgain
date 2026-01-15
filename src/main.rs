@@ -756,12 +756,12 @@ fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
         let output = JsonOutput {
             files: Some(json_results),
             album: None,
-            summary: Some(JsonSummary {
-                total_files: files.len(),
+            summary: Some(create_json_summary(
+                files.len(),
                 successful,
                 failed,
-                dry_run: if opts.dry_run { Some(true) } else { None },
-            }),
+                opts.dry_run,
+            )),
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else if opts.dry_run && !opts.quiet {
@@ -898,18 +898,42 @@ fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
     Ok(())
 }
 
+fn update_counters(result: &JsonFileResult, successful: &mut usize, failed: &mut usize) {
+    match result.status.as_deref() {
+        Some("success") => *successful += 1,
+        Some("error") => *failed += 1,
+        _ => {}
+    }
+}
+
+fn create_json_summary(
+    total_files: usize,
+    successful: usize,
+    failed: usize,
+    dry_run: bool,
+) -> JsonSummary {
+    JsonSummary {
+        total_files,
+        successful,
+        failed,
+        dry_run: if dry_run { Some(true) } else { None },
+    }
+}
+
+fn print_dry_run_notice(opts: &Options) {
+    if opts.dry_run && !opts.quiet && opts.output_format == OutputFormat::Text {
+        println!();
+        println!("{}", "No files were modified.".yellow());
+    }
+}
+
 fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
     if steps == 0 {
         if opts.output_format == OutputFormat::Json {
             let output = JsonOutput {
                 files: Some(vec![]),
                 album: None,
-                summary: Some(JsonSummary {
-                    total_files: files.len(),
-                    successful: 0,
-                    failed: 0,
-                    dry_run: if opts.dry_run { Some(true) } else { None },
-                }),
+                summary: Some(create_json_summary(files.len(), 0, 0, opts.dry_run)),
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
         } else if !opts.quiet {
@@ -954,36 +978,19 @@ fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
         progress_set_message(&pb, filename);
 
         let result = process_apply(file, steps, opts)?;
-        match opts.output_format {
-            OutputFormat::Json => {
-                if result.status.as_deref() == Some("success") {
-                    successful += 1;
-                } else if result.status.as_deref() == Some("error") {
-                    failed += 1;
-                }
-                json_results.push(result);
+        update_counters(&result, &mut successful, &mut failed);
+
+        if opts.output_format == OutputFormat::Tsv {
+            if let Ok(info) = analyze(file) {
+                println!(
+                    "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
+                    filename, steps, db_value, 1.0, info.max_gain, info.min_gain
+                );
             }
-            OutputFormat::Tsv => {
-                // TSV output for apply: file, mp3_gain, db_gain, max_amp, max_global_gain, min_global_gain
-                if let Ok(info) = analyze(file) {
-                    println!(
-                        "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
-                        filename,
-                        steps,
-                        db_value,
-                        1.0, // max amplitude placeholder
-                        info.max_gain,
-                        info.min_gain
-                    );
-                }
-            }
-            OutputFormat::Text => {
-                if result.status.as_deref() == Some("success") {
-                    successful += 1;
-                } else if result.status.as_deref() == Some("error") {
-                    failed += 1;
-                }
-            }
+        }
+
+        if opts.output_format == OutputFormat::Json {
+            json_results.push(result);
         }
 
         progress_inc(&pb);
@@ -995,17 +1002,16 @@ fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
         let output = JsonOutput {
             files: Some(json_results),
             album: None,
-            summary: Some(JsonSummary {
-                total_files: files.len(),
+            summary: Some(create_json_summary(
+                files.len(),
                 successful,
                 failed,
-                dry_run: if opts.dry_run { Some(true) } else { None },
-            }),
+                opts.dry_run,
+            )),
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
-    } else if opts.dry_run && !opts.quiet && opts.output_format == OutputFormat::Text {
-        println!();
-        println!("{}", "No files were modified.".yellow());
+    } else {
+        print_dry_run_notice(opts);
     }
 
     Ok(())
@@ -1022,12 +1028,7 @@ fn cmd_apply_channel(
             let output = JsonOutput {
                 files: Some(vec![]),
                 album: None,
-                summary: Some(JsonSummary {
-                    total_files: files.len(),
-                    successful: 0,
-                    failed: 0,
-                    dry_run: if opts.dry_run { Some(true) } else { None },
-                }),
+                summary: Some(create_json_summary(files.len(), 0, 0, opts.dry_run)),
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
         } else if !opts.quiet {
@@ -1074,17 +1075,10 @@ fn cmd_apply_channel(
         progress_set_message(&pb, filename);
 
         let result = process_apply_channel(file, channel, steps, opts)?;
+        update_counters(&result, &mut successful, &mut failed);
+
         if opts.output_format == OutputFormat::Json {
-            if result.status.as_deref() == Some("success") {
-                successful += 1;
-            } else if result.status.as_deref() == Some("error") {
-                failed += 1;
-            }
             json_results.push(result);
-        } else if result.status.as_deref() == Some("success") {
-            successful += 1;
-        } else if result.status.as_deref() == Some("error") {
-            failed += 1;
         }
 
         progress_inc(&pb);
@@ -1096,17 +1090,16 @@ fn cmd_apply_channel(
         let output = JsonOutput {
             files: Some(json_results),
             album: None,
-            summary: Some(JsonSummary {
-                total_files: files.len(),
+            summary: Some(create_json_summary(
+                files.len(),
                 successful,
                 failed,
-                dry_run: if opts.dry_run { Some(true) } else { None },
-            }),
+                opts.dry_run,
+            )),
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
-    } else if opts.dry_run && !opts.quiet && opts.output_format == OutputFormat::Text {
-        println!();
-        println!("{}", "No files were modified.".yellow());
+    } else {
+        print_dry_run_notice(opts);
     }
 
     Ok(())
@@ -1181,17 +1174,10 @@ fn cmd_undo(files: &[PathBuf], opts: &Options) -> Result<()> {
         progress_set_message(&pb, filename);
 
         let result = process_undo(file, opts)?;
+        update_counters(&result, &mut successful, &mut failed);
+
         if opts.output_format == OutputFormat::Json {
-            if result.status.as_deref() == Some("success") {
-                successful += 1;
-            } else if result.status.as_deref() == Some("error") {
-                failed += 1;
-            }
             json_results.push(result);
-        } else if result.status.as_deref() == Some("success") {
-            successful += 1;
-        } else if result.status.as_deref() == Some("error") {
-            failed += 1;
         }
 
         progress_inc(&pb);
@@ -1203,17 +1189,16 @@ fn cmd_undo(files: &[PathBuf], opts: &Options) -> Result<()> {
         let output = JsonOutput {
             files: Some(json_results),
             album: None,
-            summary: Some(JsonSummary {
-                total_files: files.len(),
+            summary: Some(create_json_summary(
+                files.len(),
                 successful,
                 failed,
-                dry_run: if opts.dry_run { Some(true) } else { None },
-            }),
+                opts.dry_run,
+            )),
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
-    } else if opts.dry_run && !opts.quiet && opts.output_format == OutputFormat::Text {
-        println!();
-        println!("{}", "No files were modified.".yellow());
+    } else {
+        print_dry_run_notice(opts);
     }
 
     Ok(())
@@ -1263,17 +1248,10 @@ fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         progress_set_message(&pb, filename);
 
         let result = process_track_gain(file, opts)?;
+        update_counters(&result, &mut successful, &mut failed);
+
         if opts.output_format == OutputFormat::Json {
-            if result.status.as_deref() == Some("success") {
-                successful += 1;
-            } else if result.status.as_deref() == Some("error") {
-                failed += 1;
-            }
             json_results.push(result);
-        } else if result.status.as_deref() == Some("success") {
-            successful += 1;
-        } else if result.status.as_deref() == Some("error") {
-            failed += 1;
         }
 
         progress_inc(&pb);
@@ -1285,17 +1263,16 @@ fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         let output = JsonOutput {
             files: Some(json_results),
             album: None,
-            summary: Some(JsonSummary {
-                total_files: files.len(),
+            summary: Some(create_json_summary(
+                files.len(),
                 successful,
                 failed,
-                dry_run: if opts.dry_run { Some(true) } else { None },
-            }),
+                opts.dry_run,
+            )),
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
-    } else if opts.dry_run && !opts.quiet && opts.output_format == OutputFormat::Text {
-        println!();
-        println!("{}", "No files were modified.".yellow());
+    } else {
+        print_dry_run_notice(opts);
     }
 
     Ok(())
@@ -1386,12 +1363,7 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                             gain_steps: modified_gain_steps,
                             peak: album_result.album_peak,
                         }),
-                        summary: Some(JsonSummary {
-                            total_files: files.len(),
-                            successful: 0,
-                            failed: 0,
-                            dry_run: if opts.dry_run { Some(true) } else { None },
-                        }),
+                        summary: Some(create_json_summary(files.len(), 0, 0, opts.dry_run)),
                     };
                     println!("{}", serde_json::to_string_pretty(&output)?);
                 } else if !opts.quiet {
@@ -1424,17 +1396,10 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                     opts,
                     Some(&album_info),
                 )?;
+                update_counters(&result, &mut successful, &mut failed);
+
                 if opts.output_format == OutputFormat::Json {
-                    if result.status.as_deref() == Some("success") {
-                        successful += 1;
-                    } else if result.status.as_deref() == Some("error") {
-                        failed += 1;
-                    }
                     json_results.push(result);
-                } else if result.status.as_deref() == Some("success") {
-                    successful += 1;
-                } else if result.status.as_deref() == Some("error") {
-                    failed += 1;
                 }
 
                 progress_inc(&pb);
@@ -1451,17 +1416,16 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                         gain_steps: modified_gain_steps,
                         peak: album_result.album_peak,
                     }),
-                    summary: Some(JsonSummary {
-                        total_files: files.len(),
+                    summary: Some(create_json_summary(
+                        files.len(),
                         successful,
                         failed,
-                        dry_run: if opts.dry_run { Some(true) } else { None },
-                    }),
+                        opts.dry_run,
+                    )),
                 };
                 println!("{}", serde_json::to_string_pretty(&output)?);
-            } else if opts.dry_run && !opts.quiet && opts.output_format == OutputFormat::Text {
-                println!();
-                println!("{}", "No files were modified.".yellow());
+            } else {
+                print_dry_run_notice(opts);
             }
         }
         Err(e) => {
@@ -1469,12 +1433,12 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 let output = JsonOutput {
                     files: None,
                     album: None,
-                    summary: Some(JsonSummary {
-                        total_files: files.len(),
-                        successful: 0,
-                        failed: files.len(),
-                        dry_run: if opts.dry_run { Some(true) } else { None },
-                    }),
+                    summary: Some(create_json_summary(
+                        files.len(),
+                        0,
+                        files.len(),
+                        opts.dry_run,
+                    )),
                 };
                 println!("{}", serde_json::to_string_pretty(&output)?);
             } else {
