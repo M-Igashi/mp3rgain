@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current Status: v1.2.7 (Production Ready)
+## Current Status: v1.3.0 (Production Ready)
 
 All core functionality complete:
 - [x] MP3 frame parsing (MPEG 1/2/2.5 Layer III)
@@ -61,9 +61,14 @@ All core functionality complete:
 - [x] Fix ReplayGain filter coefficients (v1.2.6)
 - [x] Improved Debian package build
 
+### v1.3.0 - Code Quality & Stability
+
+- [x] Code refactoring for better maintainability
+- [x] Documentation updates
+
 ## Upcoming Goals
 
-### v1.3.0 - Distribution Expansion
+### v1.4.0 - Distribution Expansion
 
 - [ ] Homebrew core inclusion (currently in tap)
 - [ ] Fedora/RPM package
