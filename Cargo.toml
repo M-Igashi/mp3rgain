@@ -1,6 +1,6 @@
 [package]
 name = "mp3rgain"
-version = "1.2.2"
+version = "1.2.3"
 edition = "2021"
 authors = ["Masanari Higashi <M-Igashi@users.noreply.github.com>"]
 description = "Lossless MP3 volume adjustment - a modern mp3gain replacement written in Rust"
