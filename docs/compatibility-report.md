@@ -201,7 +201,7 @@ Tests are run automatically in CI on every pull request. See the latest workflow
 
 | Date | mp3gain Version | mp3rgain Version | Result |
 |------|-----------------|------------------|--------|
-| 2026-01 | 1.6.2 | 1.1.1 | All tests passed |
+| 2026-01 | 1.6.2 | 1.2.7 | All tests passed |
 
 ## FAQ
 
@@ -210,6 +210,8 @@ Tests are run automatically in CI on every pull request. See the latest workflow
 ReplayGain analysis requires decoding the MP3 to PCM audio. mp3gain uses LAME's internal routines, while mp3rgain uses the Symphonia library. Minor floating-point differences in audio decoding can result in slightly different loudness measurements (typically <0.1 dB).
 
 **The gain adjustment mechanism itself is identical** - only the analysis phase may differ.
+
+**Note**: Prior to v1.2.6, mp3rgain had a bug where filter coefficients for 44.1 kHz and 48 kHz were swapped, causing significant loudness calculation errors. This has been fixed in v1.2.6+.
 
 ### Q: Can I use APEv2 tags created by mp3gain with mp3rgain?
 

@@ -9,7 +9,7 @@ This document provides a detailed comparison between mp3rgain and the original a
 | **Language** | Rust | C | C |
 | **Last Update** | Active (2026) | 2022 | ~2015 |
 | **License** | MIT | LGPL | LGPL |
-| **Version** | 1.0.0 | 1.8.2 | 1.5.2.1 |
+| **Version** | 1.2.7 | 1.8.2 | 1.5.2.1 |
 | **Repository** | [M-Igashi/mp3rgain](https://github.com/M-Igashi/mp3rgain) | [dgilman/aacgain](https://github.com/dgilman/aacgain) | SourceForge |
 
 ## Feature Comparison
@@ -79,8 +79,11 @@ All options from the original mp3gain are fully implemented in mp3rgain:
 | Reference level | 89 dB | 89 dB |
 | Window size | 50ms | 50ms |
 | Percentile | 95th | 95th |
+| Equal-loudness filter | Yule-Walker + Butterworth | Yule-Walker + Butterworth |
 | MP3 decoding | symphonia (Rust) | mpglib (C) |
 | AAC decoding | symphonia (Rust) | faad2 (C) |
+
+**Note**: As of v1.2.6, mp3rgain's ReplayGain analysis uses the correct filter coefficients from the original ReplayGain specification, producing results consistent with the original mp3gain/aacgain.
 
 ### Tag Storage
 
