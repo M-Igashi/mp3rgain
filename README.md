@@ -94,14 +94,27 @@ A native GUI application (`mp3rgui`) is available for users who prefer a graphic
 | `-r` | Apply Track gain (ReplayGain) |
 | `-a` | Apply Album gain (ReplayGain) |
 | `-g <i>` | Apply gain of i steps (1 step = 1.5 dB) |
-| `-d <n>` | Apply gain of n dB |
+| `-d <n>` | Modify target dB level (use with analysis) |
 | `-u` | Undo gain changes |
 | `-k` | Prevent clipping |
 | `-R` | Process directories recursively |
 | `-n` | Dry-run mode |
-| `-o <fmt>` | Output format: `text`, `json`, `tsv` |
+| `-o [fmt]` | Output format: `text`, `json`, `tsv` (default: tsv if no argument) |
 
 Run `mp3rgain -h` for the full list of options.
+
+## Integration
+
+### beets
+
+mp3rgain works as a drop-in replacement for mp3gain in the [beets](https://beets.io/) replaygain plugin:
+
+```yaml
+# config.yaml
+replaygain:
+  backend: command
+  command: mp3rgain
+```
 
 ## Documentation
 

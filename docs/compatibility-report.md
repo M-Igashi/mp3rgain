@@ -134,14 +134,15 @@ Binary compatibility ensures:
 
 | Feature | mp3gain | mp3rgain |
 |---------|---------|----------|
-| `-d` option | Modifies suggested gain (use with `-r`/`-a`) | Directly applies dB gain |
+| `-d` option | Modifies suggested gain | Identical (v1.2.1+) |
+| `-o` option | TSV output (no argument) | Identical (v1.2.1+) |
 | Undo tag cleanup | Keeps empty APE tags after undo | Removes APE tags completely after undo |
 | ReplayGain algorithm | Uses LAME routines | Uses Symphonia + native Rust |
 | ReplayGain results | May differ slightly | May differ slightly |
 | Gain adjustment (`-g`) | Identical | Identical |
 
 **Notes**:
-- The `-d` option has different semantics: mp3gain uses it to modify the suggested ReplayGain value, while mp3rgain uses it to directly apply a dB gain value. Use `-g` for compatible behavior.
+- As of v1.2.1, the `-d` and `-o` options are fully mp3gain-compatible. The `-d` option modifies the suggested ReplayGain value, and `-o` without an argument outputs TSV format.
 - After undo, mp3gain leaves empty APE tags in the file while mp3rgain removes them completely. The audio data is identical in both cases.
 - ReplayGain analysis results may have minor differences due to different audio decoding libraries, but the gain *application* mechanism is identical.
 
@@ -218,11 +219,36 @@ Yes. Both tools use the same APEv2 tag format for storing undo information and R
 
 Yes. mp3rgain produces identical output on macOS, Linux, and Windows.
 
+## Third-Party Integration
+
+### beets
+
+mp3rgain is compatible with the [beets](https://beets.io/) replaygain plugin as a drop-in replacement for mp3gain:
+
+```yaml
+# ~/.config/beets/config.yaml
+replaygain:
+  backend: command
+  command: mp3rgain
+```
+
+The following beets command syntax is fully supported (as of v1.2.1):
+
+```bash
+mp3rgain -o -s s -k -d 0 file.mp3
+```
+
+- `-o` (without argument): TSV output format
+- `-s s`: Skip stored tag info
+- `-k`: Prevent clipping
+- `-d 0`: Target 89 dB (ReplayGain reference level)
+
 ## Related Resources
 
 - [Original mp3gain](http://mp3gain.sourceforge.net/)
 - [ReplayGain Specification](https://wiki.hydrogenaud.io/index.php?title=ReplayGain_specification)
 - [MP3 Frame Header Format](http://www.mp3-tech.org/programmer/frame_header.html)
+- [beets replaygain plugin](https://beets.readthedocs.io/en/stable/plugins/replaygain.html)
 
 ## Contributing
 
