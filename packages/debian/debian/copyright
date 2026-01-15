@@ -1,10 +1,10 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: mp3rgain
-Upstream-Contact: Masanari Higashi <M-Igashi@users.noreply.github.com>
+Upstream-Contact: Jesse Pinkman <M-Igashi@users.noreply.github.com>
 Source: https://github.com/M-Igashi/mp3rgain
 
 Files: *
-Copyright: 2024-2025 Masanari Higashi
+Copyright: 2024-2025 Jesse Pinkman
 License: MIT
 
 License: MIT
