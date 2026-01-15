@@ -58,9 +58,9 @@ struct AacAlbumInfo {
 struct Options {
     // Gain options
     gain_steps: Option<i32>,              // -g <i>
-    gain_db: Option<f64>,                 // -d <n>
+    gain_modifier_db: f64,                // -d <n>: modify suggested dB gain (mp3gain compatible)
     channel_gain: Option<(Channel, i32)>, // -l <channel> <gain>
-    gain_modifier: i32,                   // -m <i>: modify suggested gain by integer
+    gain_modifier: i32,                   // -m <i>: modify suggested gain by integer steps
 
     // Mode options
     undo: bool,                     // -u
@@ -213,16 +213,16 @@ fn parse_args(args: &[String]) -> Result<Options> {
                     );
                 }
                 "d" => {
+                    // mp3gain compatible: -d modifies the suggested dB gain
+                    // (adjusts target level relative to 89 dB reference)
                     i += 1;
                     if i >= args.len() {
                         eprintln!("{}: -d requires an argument", "error".red().bold());
                         std::process::exit(1);
                     }
-                    opts.gain_db = Some(
-                        args[i]
-                            .parse()
-                            .map_err(|_| anyhow::anyhow!("invalid dB value: {}", args[i]))?,
-                    );
+                    opts.gain_modifier_db = args[i]
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("invalid dB value: {}", args[i]))?;
                 }
                 "m" => {
                     i += 1;
@@ -264,23 +264,28 @@ fn parse_args(args: &[String]) -> Result<Options> {
                     }
                 }
                 "o" => {
-                    i += 1;
-                    if i >= args.len() {
-                        eprintln!("{}: -o requires an argument", "error".red().bold());
-                        std::process::exit(1);
-                    }
-                    match args[i].to_lowercase().as_str() {
-                        "json" => opts.output_format = OutputFormat::Json,
-                        "text" => opts.output_format = OutputFormat::Text,
-                        "tsv" | "db" => opts.output_format = OutputFormat::Tsv,
-                        other => {
-                            eprintln!(
-                                "{}: unknown output format '{}', use 'text', 'json', or 'tsv'",
-                                "error".red().bold(),
-                                other
-                            );
-                            std::process::exit(1);
+                    // mp3gain compatibility: -o without argument means TSV output
+                    // Check if next arg is a valid format specifier
+                    let next_is_format = if i + 1 < args.len() {
+                        matches!(
+                            args[i + 1].to_lowercase().as_str(),
+                            "json" | "text" | "tsv" | "db"
+                        )
+                    } else {
+                        false
+                    };
+
+                    if next_is_format {
+                        i += 1;
+                        match args[i].to_lowercase().as_str() {
+                            "json" => opts.output_format = OutputFormat::Json,
+                            "text" => opts.output_format = OutputFormat::Text,
+                            "tsv" | "db" => opts.output_format = OutputFormat::Tsv,
+                            _ => unreachable!(),
                         }
+                    } else {
+                        // mp3gain compatible: -o alone means TSV
+                        opts.output_format = OutputFormat::Tsv;
                     }
                 }
                 "l" => {
@@ -387,10 +392,9 @@ fn parse_args(args: &[String]) -> Result<Options> {
                 // Handle -d with attached value (e.g., -d4.5)
                 _ if flag.starts_with('d') => {
                     let val = &flag[1..];
-                    opts.gain_db = Some(
-                        val.parse()
-                            .map_err(|_| anyhow::anyhow!("invalid dB value: {}", val))?,
-                    );
+                    opts.gain_modifier_db = val
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("invalid dB value: {}", val))?;
                 }
                 // Handle -m with attached value (e.g., -m2)
                 _ if flag.starts_with('m') => {
@@ -519,16 +523,12 @@ fn run(mut opts: Options) -> Result<()> {
         return cmd_apply_channel(&opts.files, channel, steps, &opts);
     }
 
-    if opts.gain_steps.is_some() || opts.gain_db.is_some() {
-        // -g or -d: apply gain
-        let steps = match (opts.gain_steps, opts.gain_db) {
-            (Some(g), _) => g,
-            (_, Some(d)) => db_to_steps(d),
-            _ => unreachable!(),
-        };
-        cmd_apply(&opts.files, steps, &opts)
+    if opts.gain_steps.is_some() {
+        // -g: apply fixed gain steps
+        cmd_apply(&opts.files, opts.gain_steps.unwrap(), &opts)
     } else {
-        // Default: show info (like mp3gain without -r or -a)
+        // Default: analyze files (mp3gain compatible)
+        // With -d modifier, perform ReplayGain analysis
         cmd_info(&opts.files, &opts)
     }
 }
@@ -1113,6 +1113,11 @@ fn cmd_apply_channel(
 }
 
 fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
+    // Print mp3gain-compatible TSV header
+    if opts.output_format == OutputFormat::Tsv {
+        println!("File\tMP3 gain\tdB gain\tMax Amplitude\tMax global_gain\tMin global_gain");
+    }
+
     let pb = create_progress_bar(files.len(), opts);
     let mut json_results: Vec<JsonFileResult> = Vec::new();
 
@@ -1741,6 +1746,53 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
+    // For TSV output (mp3gain compatible), perform ReplayGain analysis
+    if opts.output_format == OutputFormat::Tsv && replaygain::is_available() {
+        match replaygain::analyze_track_with_index(file, opts.track_index) {
+            Ok(rg_result) => {
+                // Get max amplitude info
+                let (max_amp, max_gain, min_gain) =
+                    find_max_amplitude(file).unwrap_or((1.0, 255, 0));
+
+                // Calculate gain with modifier (mp3gain compatible: -d modifies suggested gain)
+                let gain_db = rg_result.gain_db + opts.gain_modifier_db;
+                let gain_steps = db_to_steps(gain_db);
+
+                // Max Amplitude scaled to 32768 (mp3gain format for beets)
+                // beets divides by 32768, so we output peak * 32768
+                let max_amplitude_scaled = rg_result.peak * 32768.0;
+
+                // mp3gain compatible TSV: File, MP3 gain, dB gain, Max Amplitude, Max global_gain, Min global_gain
+                println!(
+                    "{}\t{}\t{:.6}\t{:.6}\t{}\t{}",
+                    filename, gain_steps, gain_db, max_amplitude_scaled, max_gain, min_gain
+                );
+
+                return Ok(JsonFileResult {
+                    file: file.display().to_string(),
+                    loudness_db: Some(rg_result.loudness_db),
+                    gain_applied_db: Some(gain_db),
+                    gain_applied_steps: Some(gain_steps),
+                    peak: Some(rg_result.peak),
+                    max_amplitude: Some(max_amp),
+                    max_gain: Some(max_gain),
+                    min_gain: Some(min_gain),
+                    ..Default::default()
+                });
+            }
+            Err(e) => {
+                eprintln!("{} - {}", filename.red(), e);
+                return Ok(JsonFileResult {
+                    file: file.display().to_string(),
+                    status: Some("error".to_string()),
+                    error: Some(e.to_string()),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+
+    // Non-TSV output: use basic analysis
     match analyze(file) {
         Ok(info) => {
             match opts.output_format {
@@ -1777,13 +1829,13 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
                     }
                 }
                 OutputFormat::Tsv => {
-                    // TSV format: File, MP3 gain, dB gain, Max Amplitude, Max global_gain, Min global_gain
+                    // Fallback TSV (ReplayGain not available): basic info
                     println!(
                         "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
                         filename,
                         info.headroom_steps,
                         info.headroom_db,
-                        1.0, // placeholder for max amplitude
+                        1.0,
                         info.max_gain,
                         info.min_gain
                     );
