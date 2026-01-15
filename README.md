@@ -28,7 +28,10 @@ brew install M-Igashi/tap/mp3rgain
 
 ### Windows
 
-Download binaries from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases).
+```powershell
+scoop bucket add mp3rgain https://github.com/M-Igashi/scoop-bucket
+scoop install mp3rgain
+```
 
 ### Linux
 
