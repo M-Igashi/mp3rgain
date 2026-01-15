@@ -1,0 +1,10 @@
+/Users/masanarihigashi/Projects/mp3rgain/mp3rgui/target/release/deps/usvg_tree-36fa378504c539a7.d: /Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/lib.rs /Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/filter.rs /Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/geom.rs /Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/text.rs
+
+/Users/masanarihigashi/Projects/mp3rgain/mp3rgui/target/release/deps/libusvg_tree-36fa378504c539a7.rlib: /Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/lib.rs /Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/filter.rs /Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/geom.rs /Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/text.rs
+
+/Users/masanarihigashi/Projects/mp3rgain/mp3rgui/target/release/deps/libusvg_tree-36fa378504c539a7.rmeta: /Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/lib.rs /Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/filter.rs /Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/geom.rs /Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/text.rs
+
+/Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/lib.rs:
+/Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/filter.rs:
+/Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/geom.rs:
+/Users/masanarihigashi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/usvg-tree-0.37.0/src/text.rs:

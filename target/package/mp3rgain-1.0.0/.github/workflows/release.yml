@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build for ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --features replaygain --target ${{ matrix.target }}
+
+      - name: Upload artifact (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp3rgain-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/mp3rgain
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp3rgain-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/mp3rgain.exe
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create universal macOS binary
+        run: |
+          mkdir -p dist
+          lipo -create \
+            artifacts/mp3rgain-x86_64-apple-darwin/mp3rgain \
+            artifacts/mp3rgain-aarch64-apple-darwin/mp3rgain \
+            -output dist/mp3rgain
+          chmod +x dist/mp3rgain
+
+      - name: Create macOS tarball
+        run: |
+          cd dist
+          tar -czvf mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz mp3rgain
+          shasum -a 256 mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz > mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz.sha256
+
+      - name: Create Linux tarball
+        run: |
+          cd artifacts/mp3rgain-x86_64-unknown-linux-gnu
+          chmod +x mp3rgain
+          tar -czvf ../../dist/mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz mp3rgain
+          cd ../../dist
+          shasum -a 256 mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz > mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
+
+      - name: Create Windows x86_64 zip
+        run: |
+          cd artifacts/mp3rgain-x86_64-pc-windows-msvc
+          zip ../../dist/mp3rgain-${{ github.ref_name }}-windows-x86_64.zip mp3rgain.exe
+          cd ../../dist
+          shasum -a 256 mp3rgain-${{ github.ref_name }}-windows-x86_64.zip > mp3rgain-${{ github.ref_name }}-windows-x86_64.zip.sha256
+
+      - name: Create Windows ARM64 zip
+        run: |
+          cd artifacts/mp3rgain-aarch64-pc-windows-msvc
+          zip ../../dist/mp3rgain-${{ github.ref_name }}-windows-arm64.zip mp3rgain.exe
+          cd ../../dist
+          shasum -a 256 mp3rgain-${{ github.ref_name }}-windows-arm64.zip > mp3rgain-${{ github.ref_name }}-windows-arm64.zip.sha256
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz
+            dist/mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz.sha256
+            dist/mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz
+            dist/mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
+            dist/mp3rgain-${{ github.ref_name }}-windows-x86_64.zip
+            dist/mp3rgain-${{ github.ref_name }}-windows-x86_64.zip.sha256
+            dist/mp3rgain-${{ github.ref_name }}-windows-arm64.zip
+            dist/mp3rgain-${{ github.ref_name }}-windows-arm64.zip.sha256
+          generate_release_notes: true
