@@ -324,7 +324,7 @@ jobs:
 
             * Release ${VERSION}
 
-           -- Masanari Higashi <M-Igashi@users.noreply.github.com>  ${DATE}
+           -- Jesse Pinkman <M-Igashi@users.noreply.github.com>  ${DATE}
           EOF
           # Remove leading whitespace from heredoc
           sed -i 's/^          //' debian/changelog
