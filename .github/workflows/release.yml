@@ -307,7 +307,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential debhelper
+          sudo apt-get install -y build-essential debhelper devscripts fakeroot
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
@@ -319,13 +319,11 @@ jobs:
         run: |
           VERSION=${{ needs.release.outputs.version }}
           DATE=$(date -R)
-          printf '%s\n' \
-            "mp3rgain (${VERSION}-1) unstable; urgency=medium" \
-            "" \
-            "  * Release ${VERSION}" \
-            "" \
-            " -- Jesse Pinkman <M-Igashi@users.noreply.github.com>  ${DATE}" \
-            > debian/changelog
+          printf 'mp3rgain (%s-1) unstable; urgency=medium\n\n  * Release %s\n\n -- Jesse Pinkman <M-Igashi@users.noreply.github.com>  %s\n' \
+            "$VERSION" "$VERSION" "$DATE" > debian/changelog
+          echo "=== Generated changelog ==="
+          cat debian/changelog
+          echo "==="
 
       - name: Build package
         run: dpkg-buildpackage -us -uc -b -d
