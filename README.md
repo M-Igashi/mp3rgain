@@ -126,6 +126,17 @@ replaygain:
 
 The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained since ~2015. mp3rgain is a modern, memory-safe replacement that works on current systems including Windows 11, macOS, and Linux.
 
+## ReplayGain Algorithm
+
+mp3rgain implements the **original ReplayGain 1.0 algorithm**, the same as the classic mp3gain/aacgain:
+
+- Equal-loudness filter (Yule-Walker + Butterworth high-pass)
+- RMS calculation in 50ms windows
+- 95th percentile statistical analysis
+- **89 dB reference level**
+
+This is a deliberate choice to maintain full compatibility with the original mp3gain. Loudness values will differ from tools using EBU R128/LUFS-based analysis (such as foobar2000's ReplayGain scanner, loudgain, or ffmpeg's loudnorm filter), which use a -23 LUFS reference level.
+
 ## Library Usage
 
 ```rust

@@ -93,25 +93,27 @@ impl AlbumGainResult {
 
 /// Yule-Walker filter coefficients for equal-loudness weighting
 /// These are the coefficients used in the original ReplayGain algorithm
-/// for 44100 Hz sample rate (will be interpolated for other rates)
+/// Reference: https://github.com/cpuimage/ReplayGainAnalysis/blob/master/gain_analysis.c
 #[cfg(feature = "replaygain")]
 mod filter_coeffs {
     /// A coefficients for Yule-Walker filter at 44100 Hz
+    /// From ABYule[4] in gain_analysis.c (index 4 = 44100 Hz)
     pub const YULE_A_44100: [f64; 11] = [
         1.0,
-        -3.84664617118067,
-        7.81501653005538,
-        -11.34170355132042,
-        13.05504219327545,
-        -12.28759895145294,
-        9.48293806319790,
-        -5.87257861775999,
-        2.75465861874613,
-        -0.86984376593551,
-        0.13919314567432,
+        -3.47845948550071,
+        6.36317777566148,
+        -8.54751527471874,
+        9.47693607801280,
+        -8.81498681370155,
+        6.85401540936998,
+        -4.39470996079559,
+        2.19611684890774,
+        -0.75104302451432,
+        0.13149317958808,
     ];
 
     /// B coefficients for Yule-Walker filter at 44100 Hz
+    /// From ABYule[4] in gain_analysis.c (index 4 = 44100 Hz)
     pub const YULE_B_44100: [f64; 11] = [
         0.05418656406430,
         -0.02911007808948,
@@ -133,21 +135,23 @@ mod filter_coeffs {
     pub const BUTTER_B_44100: [f64; 3] = [0.98500175787242, -1.97000351574484, 0.98500175787242];
 
     /// A coefficients for Yule-Walker filter at 48000 Hz
+    /// From ABYule[3] in gain_analysis.c (index 3 = 48000 Hz)
     pub const YULE_A_48000: [f64; 11] = [
         1.0,
-        -3.47845948550071,
-        6.36317777566148,
-        -8.54751527471874,
-        9.47693607801280,
-        -8.81498681370155,
-        6.85401540936998,
-        -4.39470996079559,
-        2.19611684890774,
-        -0.75104302451432,
-        0.13149317958808,
+        -3.84664617118067,
+        7.81501653005538,
+        -11.34170355132042,
+        13.05504219327545,
+        -12.28759895145294,
+        9.48293806319790,
+        -5.87257861775999,
+        2.75465861874613,
+        -0.86984376593551,
+        0.13919314567432,
     ];
 
     /// B coefficients for Yule-Walker filter at 48000 Hz
+    /// From ABYule[3] in gain_analysis.c (index 3 = 48000 Hz)
     pub const YULE_B_48000: [f64; 11] = [
         0.03857599435200,
         -0.02160367184185,
