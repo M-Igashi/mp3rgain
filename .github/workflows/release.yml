@@ -319,15 +319,13 @@ jobs:
         run: |
           VERSION=${{ needs.release.outputs.version }}
           DATE=$(date -R)
-          cat > debian/changelog <<EOF
-          mp3rgain (${VERSION}-1) unstable; urgency=medium
-
-            * Release ${VERSION}
-
-           -- Jesse Pinkman <M-Igashi@users.noreply.github.com>  ${DATE}
-          EOF
-          # Remove leading whitespace from heredoc
-          sed -i 's/^          //' debian/changelog
+          printf '%s\n' \
+            "mp3rgain (${VERSION}-1) unstable; urgency=medium" \
+            "" \
+            "  * Release ${VERSION}" \
+            "" \
+            " -- Jesse Pinkman <M-Igashi@users.noreply.github.com>  ${DATE}" \
+            > debian/changelog
 
       - name: Build package
         run: dpkg-buildpackage -us -uc -b -d
