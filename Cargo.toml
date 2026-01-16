@@ -34,6 +34,6 @@ name = "mp3rgain"
 path = "src/main.rs"
 
 [profile.release]
-lto = true
+lto = "thin"
 codegen-units = 1
-strip = true
+strip = "debuginfo"

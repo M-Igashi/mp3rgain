@@ -26,6 +26,6 @@ rfd = "0.15"
 winresource = "0.1"
 
 [profile.release]
-lto = true
+lto = "thin"
 codegen-units = 1
-strip = true
+strip = "debuginfo"
