@@ -2165,7 +2165,7 @@ fn process_apply_replaygain_with_album(
 
 /// Apply ReplayGain to AAC/M4A files with optional album info
 fn process_apply_replaygain_aac_with_album(
-    file: &PathBuf,
+    file: &Path,
     _actual_steps: i32,
     result: &ReplayGainResult,
     opts: &Options,
