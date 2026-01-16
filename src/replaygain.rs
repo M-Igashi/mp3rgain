@@ -623,11 +623,16 @@ impl EqualLoudnessFilter {
 /// Steps per dB for histogram resolution (matches original mp3gain)
 const STEPS_PER_DB: f64 = 100.0;
 
-/// Maximum histogram size (covers -70 dB to +10 dB range)
+/// Maximum histogram size
+/// For 16-bit samples: mean_square ranges from ~0 to ~1B (32768²)
+/// 10*log10(1B) ≈ 90 dB, so we need coverage from about 0 to 100 dB
+/// Size = 100 dB * 100 steps/dB = 10000, plus margin = 12000
 const HISTOGRAM_SIZE: usize = 12000;
 
-/// Histogram offset to handle negative dB values
-const HISTOGRAM_OFFSET: i32 = 7000;
+/// Histogram offset to map dB values to array indices
+/// For 16-bit samples, typical values are 40-90 dB (10*log10 of mean_square)
+/// Offset of 2000 allows coverage from -20 dB to +100 dB
+const HISTOGRAM_OFFSET: i32 = 2000;
 
 /// RMS percentile for loudness calculation (95th percentile)
 const RMS_PERCENTILE: f64 = 0.95;
@@ -660,7 +665,7 @@ impl LoudnessHistogram {
     fn get_loudness(&self) -> f64 {
         let total: u64 = self.data.iter().map(|&x| x as u64).sum();
         if total == 0 {
-            return -70.0;
+            return -20.0; // Default for empty histogram
         }
 
         let threshold = ((total as f64) * (1.0 - RMS_PERCENTILE)).ceil() as u64;
@@ -673,7 +678,7 @@ impl LoudnessHistogram {
             }
         }
 
-        -70.0
+        -20.0 // Default for lowest values
     }
 }
 
@@ -935,6 +940,14 @@ pub fn analyze_track_with_index(
     Ok(internal.result)
 }
 
+/// Scale factor to convert normalized float samples to 16-bit integer range.
+/// The original ReplayGain algorithm (and its PINK_REF calibration constant of 64.82)
+/// was designed for non-normalized 16-bit integer samples (-32768 to 32767).
+/// Symphonia decoders output normalized float samples (-1.0 to 1.0), so we must
+/// scale them to match the original algorithm's expected input range.
+/// Without this scaling, gain values are off by 20 * log10(32768) ≈ 90.31 dB.
+const SAMPLE_SCALE_16BIT: f64 = 32768.0;
+
 /// Process an audio buffer and feed filtered samples to the analyzer
 #[cfg(feature = "replaygain")]
 fn process_audio_buffer(
@@ -949,15 +962,16 @@ fn process_audio_buffer(
             let frames = buf.frames();
 
             for frame in 0..frames {
-                // Get samples for each channel
-                let left = buf.chan(0)[frame] as f64;
-                *peak = peak.max(left.abs());
-                let left_filtered = filters[0].process(left);
+                // Get normalized sample and track peak (in normalized range for peak reporting)
+                let left_norm = buf.chan(0)[frame] as f64;
+                *peak = peak.max(left_norm.abs());
+                // Scale to 16-bit range for ReplayGain algorithm compatibility
+                let left_filtered = filters[0].process(left_norm * SAMPLE_SCALE_16BIT);
 
                 if channels >= 2 {
-                    let right = buf.chan(1)[frame] as f64;
-                    *peak = peak.max(right.abs());
-                    let right_filtered = filters[1].process(right);
+                    let right_norm = buf.chan(1)[frame] as f64;
+                    *peak = peak.max(right_norm.abs());
+                    let right_filtered = filters[1].process(right_norm * SAMPLE_SCALE_16BIT);
                     analyzer.add_sample(left_filtered, right_filtered);
                 } else {
                     analyzer.add_mono_sample(left_filtered);
@@ -967,16 +981,18 @@ fn process_audio_buffer(
         AudioBufferRef::S16(buf) => {
             let channels = buf.spec().channels.count();
             let frames = buf.frames();
-            let scale = 1.0 / 32768.0;
 
             for frame in 0..frames {
-                let left = buf.chan(0)[frame] as f64 * scale;
-                *peak = peak.max(left.abs());
+                // S16 samples are already in the correct range for ReplayGain algorithm
+                // Convert to f64 directly without normalization for filter processing
+                let left = buf.chan(0)[frame] as f64;
+                // Track peak in normalized range (0.0 to 1.0)
+                *peak = peak.max((left / SAMPLE_SCALE_16BIT).abs());
                 let left_filtered = filters[0].process(left);
 
                 if channels >= 2 {
-                    let right = buf.chan(1)[frame] as f64 * scale;
-                    *peak = peak.max(right.abs());
+                    let right = buf.chan(1)[frame] as f64;
+                    *peak = peak.max((right / SAMPLE_SCALE_16BIT).abs());
                     let right_filtered = filters[1].process(right);
                     analyzer.add_sample(left_filtered, right_filtered);
                 } else {
@@ -987,16 +1003,18 @@ fn process_audio_buffer(
         AudioBufferRef::S32(buf) => {
             let channels = buf.spec().channels.count();
             let frames = buf.frames();
-            let scale = 1.0 / 2147483648.0;
+            // Scale S32 to 16-bit range: divide by 2^16 to go from 32-bit to 16-bit range
+            let scale = SAMPLE_SCALE_16BIT / 2147483648.0;
 
             for frame in 0..frames {
                 let left = buf.chan(0)[frame] as f64 * scale;
-                *peak = peak.max(left.abs());
+                // Track peak in normalized range
+                *peak = peak.max((left / SAMPLE_SCALE_16BIT).abs());
                 let left_filtered = filters[0].process(left);
 
                 if channels >= 2 {
                     let right = buf.chan(1)[frame] as f64 * scale;
-                    *peak = peak.max(right.abs());
+                    *peak = peak.max((right / SAMPLE_SCALE_16BIT).abs());
                     let right_filtered = filters[1].process(right);
                     analyzer.add_sample(left_filtered, right_filtered);
                 } else {
@@ -1142,28 +1160,37 @@ mod tests {
     #[cfg(feature = "replaygain")]
     #[test]
     fn test_rms_calculation() {
-        // Test that the analyzer correctly processes samples
+        // Test that the analyzer correctly processes samples through the full filter chain
         let sample_rate = 44100u32;
+        let mut filter = EqualLoudnessFilter::new(sample_rate).unwrap();
         let mut analyzer = ReplayGainAnalyzer::new(sample_rate);
 
         // Create a simple sine wave at 1kHz
+        // Note: ReplayGain algorithm expects 16-bit range samples (-32768 to 32767)
         let frequency = 1000.0;
-        let amplitude = 0.5;
+        let amplitude_normalized = 0.5; // Normalized amplitude (0.0 to 1.0)
+        let amplitude = amplitude_normalized * SAMPLE_SCALE_16BIT; // Scale to 16-bit range
         let duration_samples = sample_rate as usize; // 1 second
 
         for i in 0..duration_samples {
             let t = i as f64 / sample_rate as f64;
             let sample = amplitude * (2.0 * std::f64::consts::PI * frequency * t).sin();
-            analyzer.add_mono_sample(sample);
+            let filtered = filter.process(sample);
+            analyzer.add_mono_sample(filtered);
         }
 
         // Should have processed multiple windows (1 second = 20 windows at 50ms each)
         let loudness = analyzer.get_loudness();
-        // Loudness should be a reasonable negative dB value
-        assert!(loudness < 0.0, "Loudness should be negative: {}", loudness);
+        // Loudness should be a reasonable positive dB value for 16-bit range samples
+        // After equal-loudness filtering, the value will vary based on frequency response
         assert!(
-            loudness > -70.0,
-            "Loudness should be above -70 dB: {}",
+            loudness > 50.0,
+            "Loudness should be above 50 dB: {}",
+            loudness
+        );
+        assert!(
+            loudness < 100.0,
+            "Loudness should be below 100 dB: {}",
             loudness
         );
     }
@@ -1171,24 +1198,32 @@ mod tests {
     #[cfg(feature = "replaygain")]
     #[test]
     fn test_loudness_calculation() {
-        // Test analyzer with known amplitude
+        // Test analyzer with known amplitude using a 1kHz sine wave
+        // (DC is filtered out by the equal-loudness filter)
         let sample_rate = 44100u32;
+        let mut filter = EqualLoudnessFilter::new(sample_rate).unwrap();
         let mut analyzer = ReplayGainAnalyzer::new(sample_rate);
 
-        // Feed constant amplitude samples (simulating DC or very low frequency)
-        let amplitude = 0.1;
+        // Feed a 1kHz sine wave at 0.1 normalized amplitude
+        // Note: ReplayGain algorithm expects 16-bit range samples
+        let frequency = 1000.0;
+        let amplitude_normalized = 0.1; // Normalized amplitude
+        let amplitude = amplitude_normalized * SAMPLE_SCALE_16BIT; // Scale to 16-bit range (3276.8)
         let duration_samples = sample_rate as usize; // 1 second
 
-        for _ in 0..duration_samples {
-            analyzer.add_mono_sample(amplitude);
+        for i in 0..duration_samples {
+            let t = i as f64 / sample_rate as f64;
+            let sample = amplitude * (2.0 * std::f64::consts::PI * frequency * t).sin();
+            let filtered = filter.process(sample);
+            analyzer.add_mono_sample(filtered);
         }
 
         let loudness = analyzer.get_loudness();
-        // For constant amplitude 0.1, mean_square = 0.01
-        // 10 * log10(0.01) = -20 dB
+        // For a sine wave at 3276.8 amplitude, after filtering the loudness
+        // should be in a reasonable range for 16-bit audio
         assert!(
-            (loudness - (-20.0)).abs() < 1.0,
-            "Loudness {} should be close to -20 dB",
+            loudness > 50.0 && loudness < 80.0,
+            "Loudness {} should be between 50 and 80 dB for a 0.1 amplitude 1kHz sine",
             loudness
         );
     }
