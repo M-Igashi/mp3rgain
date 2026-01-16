@@ -2237,7 +2237,7 @@ fn process_apply_replaygain_aac_with_album(
     }
 }
 
-fn restore_timestamp(file: &PathBuf, mtime: SystemTime) {
+fn restore_timestamp(file: &Path, mtime: SystemTime) {
     let _ = std::fs::File::options()
         .write(true)
         .open(file)
