@@ -11,9 +11,9 @@ ReleaseDate: 2026-01-16
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/M-Igashi/mp3rgain/releases/download/v1.3.1/mp3rgain-v1.3.1-windows-x86_64.zip
-    InstallerSha256: 2D1AD5FF3477EECA4CF8EAC9E2787A5D627E6ECD0CC8B2B397FDEC7413D1650A
+    InstallerSha256: 6FED71A6A680AFF87032148EA487772973A8259AC9B0DDAD738D3337AC94F8B2
   - Architecture: arm64
     InstallerUrl: https://github.com/M-Igashi/mp3rgain/releases/download/v1.3.1/mp3rgain-v1.3.1-windows-arm64.zip
-    InstallerSha256: 84FCB937D83FE838392E8345AEDB605BF8E29B31194F332A7919359D22E3821C
+    InstallerSha256: 142A78EAD930B35F5522C7D16A2A8E2EE4165A4718A93ED96F7AF02F93A0F9FC
 ManifestType: installer
 ManifestVersion: 1.12.0
