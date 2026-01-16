@@ -1777,7 +1777,36 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
         }
     }
 
-    // Non-TSV output: use basic analysis
+    // Check if this is an M4A/AAC file - if so, show appropriate message
+    if mp4meta::is_mp4_file(file) {
+        match opts.output_format {
+            OutputFormat::Text => {
+                if opts.quiet {
+                    println!("{}\tM4A/AAC\t-\t-\t-\t-\t-", filename);
+                } else {
+                    println!("{}", filename.cyan().bold());
+                    println!("  Format:      M4A/AAC");
+                    println!(
+                        "  {}",
+                        "Note: Use -r or -a for ReplayGain analysis".yellow()
+                    );
+                    println!();
+                }
+            }
+            OutputFormat::Tsv => {
+                println!("{}\t-\t-\t-\t-\t-", filename);
+            }
+            OutputFormat::Json => {}
+        }
+
+        return Ok(JsonFileResult {
+            file: file.display().to_string(),
+            status: Some("info".to_string()),
+            ..Default::default()
+        });
+    }
+
+    // MP3 file: use basic analysis
     match analyze(file) {
         Ok(info) => {
             match opts.output_format {

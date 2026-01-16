@@ -353,6 +353,35 @@ fn skip_id3v2(data: &[u8]) -> usize {
     10 + size
 }
 
+/// Find the end of audio data (before trailing tags)
+/// Returns the position where audio data ends (before APE tag, ID3v1 tag, or end of file)
+fn find_audio_end(data: &[u8]) -> usize {
+    let mut audio_end = data.len();
+
+    // Check for ID3v1 tag at end (128 bytes, starts with "TAG")
+    if audio_end >= 128 && &data[audio_end - 128..audio_end - 125] == b"TAG" {
+        audio_end -= 128;
+    }
+
+    // Check for APE tag before ID3v1 (or at end if no ID3v1)
+    // APE footer is 32 bytes, starts with "APETAGEX"
+    if audio_end >= 32 && &data[audio_end - 32..audio_end - 24] == APE_PREAMBLE {
+        let footer_start = audio_end - 32;
+        // Read tag size from footer (includes items + footer, not header)
+        let tag_size = read_u32_le(&data[footer_start + 12..]) as usize;
+        let flags = read_u32_le(&data[footer_start + 20..]);
+        let has_header = (flags & APE_FLAG_HEADER_PRESENT) != 0;
+        let header_size = if has_header { 32 } else { 0 };
+
+        // Move audio_end before the APE tag
+        if footer_start + 32 >= tag_size + header_size {
+            audio_end = footer_start + 32 - tag_size - header_size;
+        }
+    }
+
+    audio_end
+}
+
 /// Check if a frame contains a Xing or Info VBR header
 /// These frames should be skipped when applying gain adjustments
 /// to match the behavior of the original mp3gain
@@ -384,11 +413,11 @@ fn iterate_frames<F>(data: &[u8], mut callback: F) -> Result<usize>
 where
     F: FnMut(usize, &FrameHeader, &[GainLocation]),
 {
-    let file_size = data.len();
+    let audio_end = find_audio_end(data);
     let mut pos = skip_id3v2(data);
     let mut frame_count = 0;
 
-    while pos + 4 <= file_size {
+    while pos + 4 <= audio_end {
         let header = match parse_header(&data[pos..]) {
             Some(h) => h,
             None => {
@@ -398,10 +427,15 @@ where
         };
 
         let next_pos = pos + header.frame_size;
-        let valid_frame = if next_pos + 2 <= file_size {
+
+        // Validate frame: either next frame starts with sync word,
+        // or this frame ends at/near the audio data boundary
+        let valid_frame = if next_pos + 2 <= audio_end {
+            // Check if next position has a valid frame sync
             data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
         } else {
-            next_pos <= file_size
+            // Last frame: valid if it ends at or before audio_end
+            next_pos <= audio_end
         };
 
         if !valid_frame {
@@ -496,10 +530,10 @@ pub fn apply_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
         fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
 
     let mut modified_frames = 0;
-    let file_size = data.len();
+    let audio_end = find_audio_end(&data);
     let mut pos = skip_id3v2(&data);
 
-    while pos + 4 <= file_size {
+    while pos + 4 <= audio_end {
         let header = match parse_header(&data[pos..]) {
             Some(h) => h,
             None => {
@@ -509,10 +543,13 @@ pub fn apply_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
         };
 
         let next_pos = pos + header.frame_size;
-        let valid_frame = if next_pos + 2 <= file_size {
+
+        // Validate frame: either next frame starts with sync word,
+        // or this frame ends at/near the audio data boundary
+        let valid_frame = if next_pos + 2 <= audio_end {
             data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
         } else {
-            next_pos <= file_size
+            next_pos <= audio_end
         };
 
         if !valid_frame {
@@ -633,11 +670,11 @@ pub fn apply_gain_channel(file_path: &Path, channel: Channel, gain_steps: i32) -
         fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
 
     let mut modified_frames = 0;
-    let file_size = data.len();
+    let audio_end = find_audio_end(&data);
     let mut pos = skip_id3v2(&data);
     let target_channel = channel.index();
 
-    while pos + 4 <= file_size {
+    while pos + 4 <= audio_end {
         let header = match parse_header(&data[pos..]) {
             Some(h) => h,
             None => {
@@ -647,10 +684,13 @@ pub fn apply_gain_channel(file_path: &Path, channel: Channel, gain_steps: i32) -
         };
 
         let next_pos = pos + header.frame_size;
-        let valid_frame = if next_pos + 2 <= file_size {
+
+        // Validate frame: either next frame starts with sync word,
+        // or this frame ends at/near the audio data boundary
+        let valid_frame = if next_pos + 2 <= audio_end {
             data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
         } else {
-            next_pos <= file_size
+            next_pos <= audio_end
         };
 
         if !valid_frame {
@@ -1165,10 +1205,10 @@ pub fn apply_gain_wrap(file_path: &Path, gain_steps: i32) -> Result<usize> {
         fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
 
     let mut modified_frames = 0;
-    let file_size = data.len();
+    let audio_end = find_audio_end(&data);
     let mut pos = skip_id3v2(&data);
 
-    while pos + 4 <= file_size {
+    while pos + 4 <= audio_end {
         let header = match parse_header(&data[pos..]) {
             Some(h) => h,
             None => {
@@ -1178,10 +1218,13 @@ pub fn apply_gain_wrap(file_path: &Path, gain_steps: i32) -> Result<usize> {
         };
 
         let next_pos = pos + header.frame_size;
-        let valid_frame = if next_pos + 2 <= file_size {
+
+        // Validate frame: either next frame starts with sync word,
+        // or this frame ends at/near the audio data boundary
+        let valid_frame = if next_pos + 2 <= audio_end {
             data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
         } else {
-            next_pos <= file_size
+            next_pos <= audio_end
         };
 
         if !valid_frame {
