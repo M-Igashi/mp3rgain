@@ -1,80 +1,152 @@
 # mp3rgain Project Rules
 
-## Winget Package Submission
+## Internal Directories and Files
 
-winget-pkgs への PR は GitHub CLI (`gh`) を使用して直接作成する。リポジトリ全体をクローンしない。
+The following directories contain internal/generated content:
 
-### 手順
+### Never commit to git (in .gitignore)
+- `target/` - Rust build artifacts
 
-1. **sparse checkout で必要な部分だけ取得**
-   ```bash
-   cd /tmp && mkdir -p winget-pr && cd winget-pr
-   git init
-   git remote add origin https://github.com/M-Igashi/winget-pkgs.git
-   git config core.sparseCheckout true
-   echo "manifests/m/M-Igashi/" > .git/info/sparse-checkout
-   git fetch --depth 1 origin master
-   git checkout master
-   ```
-
-2. **ブランチ作成とマニフェストコピー**
-   ```bash
-   git checkout -b mp3rgain-<version>
-   mkdir -p manifests/m/M-Igashi/mp3rgain/<version>
-   cp /Users/masanarihigashi/Projects/mp3rgain/packages/winget/*.yaml manifests/m/M-Igashi/mp3rgain/<version>/
-   ```
-
-3. **コミットとプッシュ**
-   ```bash
-   git add -A
-   git commit -m "New package: M-Igashi.mp3rgain version <version>"
-   git push origin mp3rgain-<version>
-   ```
-
-4. **gh で PR 作成**
-   ```bash
-   gh pr create --repo microsoft/winget-pkgs --base master --head M-Igashi:mp3rgain-<version> \
-     --title "New package: M-Igashi.mp3rgain version <version>" \
-     --body "..."
-   ```
-
-5. **クリーンアップ**
-   ```bash
-   rm -rf /tmp/winget-pr
-   ```
-
-### マニフェスト更新時の注意
-
-- リリース公開後に SHA256 を取得して `packages/winget/*.yaml` を更新
-- VCRedist 依存は不要（静的 CRT リンク済み）
-- `ReleaseDate` は実際のリリース日に更新
+### Excluded from crates.io package (in Cargo.toml exclude)
+- `target/` - Rust build artifacts
+- `.claude/` - Claude Code settings and rules
+- `mp3rgui/` - GUI subproject (separate package)
+- `packages/` - Package manager manifests (winget, etc.)
+- `docs/` - Documentation
+- `scripts/` - Build/release scripts
+- `.github/` - GitHub Actions workflows
+- `tests/` - Test files and fixtures
 
 ## Release Workflow
 
-### 必要なシークレット
+### Pre-Release Checklist (MUST DO BEFORE TAGGING)
 
-以下のシークレットが GitHub リポジトリに設定されていること:
+**Never create a release tag without completing these local verifications:**
 
-- `SCOOP_BUCKET_TOKEN` - scoop-bucket へのプッシュ用 GitHub PAT
-- `HOMEBREW_TAP_TOKEN` - homebrew-tap へのプッシュ用 GitHub PAT  
-- `CARGO_REGISTRY_TOKEN` - crates.io API トークン
+1. **Version consistency check**
+   ```bash
+   # Verify all version numbers match
+   grep '^version' Cargo.toml mp3rgui/Cargo.toml
+   # Ensure version matches intended release (e.g., 1.3.1)
+   ```
 
-### シークレット設定方法
+2. **Cargo.lock is committed**
+   ```bash
+   git status Cargo.lock
+   # If modified, commit it BEFORE tagging
+   ```
 
+3. **crates.io package size check**
+   ```bash
+   cargo package --list --allow-dirty | wc -l
+   # Should be ~10-15 files, NOT thousands
+   # If too many files, check `exclude` in Cargo.toml
+   ```
+
+4. **Local build test**
+   ```bash
+   cargo build --release
+   cargo test
+   ```
+
+5. **Clean git status**
+   ```bash
+   git status
+   # All relevant changes must be committed before tagging
+   ```
+
+### Release Tag Creation
+
+Only after ALL checks pass:
 ```bash
-gh auth token | gh secret set SCOOP_BUCKET_TOKEN --repo M-Igashi/mp3rgain
-gh auth token | gh secret set HOMEBREW_TAP_TOKEN --repo M-Igashi/mp3rgain
-# crates.io トークンは ~/.cargo/credentials.toml から取得
-cat ~/.cargo/credentials.toml  # token を確認
-echo "<token>" | gh secret set CARGO_REGISTRY_TOKEN --repo M-Igashi/mp3rgain
+git tag v<version>
+git push origin v<version>
 ```
 
-### Windows ビルド
+### If Release Workflow Fails
 
-Windows バイナリは静的 CRT リンクを使用:
+1. **Do NOT immediately re-tag** - investigate the failure first
+2. Read the full error log: `gh run view <run-id> --log-failed`
+3. Fix the issue locally and verify with the checklist above
+4. Then delete and recreate the tag:
+   ```bash
+   git tag -d v<version>
+   git push origin --delete v<version>
+   git tag v<version>
+   git push origin v<version>
+   ```
+
+### Common Release Failures and Prevention
+
+| Failure | Cause | Prevention |
+|---------|-------|------------|
+| crates.io version exists | Cargo.toml version not bumped | Check version BEFORE tagging |
+| Cargo.lock dirty | Cargo.lock not committed | Always commit Cargo.lock |
+| Payload too large | Missing `exclude` in Cargo.toml | Run `cargo package --list` locally |
+| AV false positive | Aggressive optimization | Use `lto = "thin"`, `strip = "debuginfo"` |
+
+### Cargo.toml Package Settings
+
+Required settings to avoid crates.io issues:
+```toml
+[package]
+# ... other fields ...
+exclude = ["mp3rgui/", "target/", "packages/", "docs/", "scripts/", ".github/", ".claude/", "tests/"]
+
+[profile.release]
+lto = "thin"           # Not "true" - reduces AV false positives
+codegen-units = 1
+strip = "debuginfo"    # Not "true" - preserves symbols for AV compatibility
+```
+
+## Winget Package Submission
+
+### Updating Winget Manifest After Release
+
+1. **Wait for release workflow to complete successfully**
+2. **Get new SHA256 checksums**
+   ```bash
+   curl -sL https://github.com/M-Igashi/mp3rgain/releases/download/v<version>/mp3rgain-v<version>-windows-x86_64.zip.sha256
+   curl -sL https://github.com/M-Igashi/mp3rgain/releases/download/v<version>/mp3rgain-v<version>-windows-arm64.zip.sha256
+   ```
+3. **Update `packages/winget/*.yaml`** with new version and checksums
+4. **Commit and push to mp3rgain repo**
+5. **Update winget-pkgs PR**
+
+### Winget PR Creation (via fork)
+
+```bash
+cd /tmp && rm -rf winget-pkgs
+gh repo clone microsoft/winget-pkgs -- --depth 1
+cd winget-pkgs
+git checkout -b mp3rgain-<version>
+mkdir -p manifests/m/M-Igashi/mp3rgain/<version>
+cp /Users/masanarihigashi/Projects/mp3rgain/packages/winget/*.yaml manifests/m/M-Igashi/mp3rgain/<version>/
+git add manifests/m/M-Igashi/mp3rgain/<version>/
+git commit -m "New package: M-Igashi.mp3rgain version <version>"
+git remote add fork https://github.com/M-Igashi/winget-pkgs.git
+git push fork mp3rgain-<version>
+gh pr create --repo microsoft/winget-pkgs --base master --head M-Igashi:mp3rgain-<version> \
+  --title "New package: M-Igashi.mp3rgain version <version>" \
+  --body "..."
+```
+
+### Manifest Notes
+
+- SHA256 must be UPPERCASE in winget manifests
+- `ReleaseDate` format: YYYY-MM-DD
+- VCRedist dependency is NOT required (static CRT linking)
+
+## Required GitHub Secrets
+
+- `SCOOP_BUCKET_TOKEN` - scoop-bucket push access
+- `HOMEBREW_TAP_TOKEN` - homebrew-tap push access
+- `CARGO_REGISTRY_TOKEN` - crates.io API token
+
+## Windows Build Configuration
+
+Static CRT linking (no VCRUNTIME140.dll dependency):
 ```yaml
 env:
   RUSTFLAGS: ${{ contains(matrix.target, 'windows') && '-C target-feature=+crt-static' || '' }}
 ```
-
-これにより VCRUNTIME140.dll への依存がなくなり、VCRedist 不要で動作する。
