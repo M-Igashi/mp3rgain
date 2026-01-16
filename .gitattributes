@@ -1,0 +1,3 @@
+# Exclude from GitHub language statistics
+scripts/* linguist-detectable=false
+packages/debian/debian/rules linguist-detectable=false
