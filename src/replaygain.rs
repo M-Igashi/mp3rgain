@@ -135,10 +135,12 @@ mod filter_coeffs {
         -0.00187763777362,
     ];
 
-    /// A coefficients for Butter filter (high-pass) at 44100 Hz
+    /// A coefficients for Butter filter at 44100 Hz
+    /// From ABButter[4] in gain_analysis.c (index 4 = 44100 Hz)
     pub const BUTTER_A_44100: [f64; 3] = [1.0, -1.96977855582618, 0.97022847566350];
 
-    /// B coefficients for Butter filter (high-pass) at 44100 Hz
+    /// B coefficients for Butter filter at 44100 Hz
+    /// From ABButter[4] in gain_analysis.c (index 4 = 44100 Hz)
     pub const BUTTER_B_44100: [f64; 3] = [0.98500175787242, -1.97000351574484, 0.98500175787242];
 
     /// A coefficients for Yule-Walker filter at 48000 Hz
@@ -174,9 +176,11 @@ mod filter_coeffs {
     ];
 
     /// A coefficients for Butter filter at 48000 Hz
+    /// From ABButter[3] in gain_analysis.c (index 3 = 48000 Hz)
     pub const BUTTER_A_48000: [f64; 3] = [1.0, -1.97223372919527, 0.97261396931306];
 
     /// B coefficients for Butter filter at 48000 Hz
+    /// From ABButter[3] in gain_analysis.c (index 3 = 48000 Hz)
     pub const BUTTER_B_48000: [f64; 3] = [0.98621192462708, -1.97242384925416, 0.98621192462708];
 
     /// A coefficients for Yule-Walker filter at 32000 Hz
@@ -265,32 +269,28 @@ impl EqualLoudnessFilter {
     }
 
     fn process(&mut self, sample: f64) -> f64 {
-        // Apply Yule-Walker filter
-        // Shift history
-        for i in (1..11).rev() {
-            self.yule_x[i] = self.yule_x[i - 1];
-            self.yule_y[i] = self.yule_y[i - 1];
-        }
+        // Shift Yule-Walker filter history and insert new sample
+        self.yule_x.copy_within(0..10, 1);
+        self.yule_y.copy_within(0..10, 1);
         self.yule_x[0] = sample;
 
-        let mut yule_out = self.yule_b[0] * self.yule_x[0];
-        for i in 1..11 {
-            yule_out += self.yule_b[i] * self.yule_x[i] - self.yule_a[i] * self.yule_y[i];
-        }
+        // Apply Yule-Walker filter
+        let yule_out = self.yule_b[0] * self.yule_x[0]
+            + (1..11)
+                .map(|i| self.yule_b[i] * self.yule_x[i] - self.yule_a[i] * self.yule_y[i])
+                .sum::<f64>();
         self.yule_y[0] = yule_out;
 
-        // Apply Butterworth high-pass filter
-        // Shift history
-        for i in (1..3).rev() {
-            self.butter_x[i] = self.butter_x[i - 1];
-            self.butter_y[i] = self.butter_y[i - 1];
-        }
+        // Shift Butterworth filter history and insert Yule output
+        self.butter_x.copy_within(0..2, 1);
+        self.butter_y.copy_within(0..2, 1);
         self.butter_x[0] = yule_out;
 
-        let mut butter_out = self.butter_b[0] * self.butter_x[0];
-        for i in 1..3 {
-            butter_out += self.butter_b[i] * self.butter_x[i] - self.butter_a[i] * self.butter_y[i];
-        }
+        // Apply Butterworth high-pass filter
+        let butter_out = self.butter_b[0] * self.butter_x[0]
+            + (1..3)
+                .map(|i| self.butter_b[i] * self.butter_x[i] - self.butter_a[i] * self.butter_y[i])
+                .sum::<f64>();
         self.butter_y[0] = butter_out;
 
         butter_out
