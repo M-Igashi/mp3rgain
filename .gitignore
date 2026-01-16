@@ -1,6 +1,6 @@
 .gitignore
 .DS_Store
-/target/
+**/target/
 .claude/
 
 # Internal documents - never commit
