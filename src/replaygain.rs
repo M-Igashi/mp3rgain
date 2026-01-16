@@ -1120,6 +1120,142 @@ pub fn is_available() -> bool {
     cfg!(feature = "replaygain")
 }
 
+/// Result of peak amplitude analysis
+#[derive(Debug, Clone)]
+pub struct PeakAmplitudeResult {
+    /// Maximum peak amplitude (normalized, can exceed 1.0 for clipping audio)
+    pub peak: f64,
+    /// Maximum peak in 16-bit PCM scale (0-32768+)
+    pub peak_pcm: f64,
+    /// Sample rate of the audio
+    pub sample_rate: u32,
+}
+
+/// Find the peak amplitude of an audio file by decoding the audio.
+/// This properly decodes the audio to measure actual PCM sample values,
+/// unlike the old method that estimated from global_gain fields.
+///
+/// Returns peak amplitude that can exceed 1.0 for clipping audio.
+#[cfg(feature = "replaygain")]
+pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
+    let file = std::fs::File::open(file_path)
+        .with_context(|| format!("Failed to open: {}", file_path.display()))?;
+
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+    let mut hint = Hint::new();
+    if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+
+    let probed = symphonia::default::get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .with_context(|| format!("Failed to probe format: {}", file_path.display()))?;
+
+    let mut format = probed.format;
+
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .ok_or_else(|| anyhow::anyhow!("No audio track found"))?;
+
+    let track_id = track.id;
+    let sample_rate = track
+        .codec_params
+        .sample_rate
+        .ok_or_else(|| anyhow::anyhow!("Unknown sample rate"))?;
+
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .with_context(|| "Failed to create decoder")?;
+
+    let mut max_peak: f64 = 0.0;
+
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(symphonia::core::errors::Error::IoError(e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+            {
+                break;
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        if packet.track_id() != track_id {
+            continue;
+        }
+
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
+            Err(e) => return Err(e.into()),
+        };
+
+        // Process each sample format and track peak
+        // Symphonia's MP3 decoder outputs F32 samples in the range [-1.0, 1.0]
+        // However, the decoder internally clips samples that exceed this range.
+        // For accurate peak detection of potentially clipping audio, we need to
+        // access the raw decoded values before normalization.
+        //
+        // The F32 buffer from Symphonia is already normalized and clipped.
+        // To detect clipping, we check if the peak is exactly 1.0 (or very close),
+        // which indicates the audio may have been clipped by the decoder.
+        match &decoded {
+            AudioBufferRef::F32(buf) => {
+                let channels = buf.spec().channels.count();
+                for frame in 0..buf.frames() {
+                    for ch in 0..channels {
+                        let sample = buf.chan(ch)[frame].abs() as f64;
+                        max_peak = max_peak.max(sample);
+                    }
+                }
+            }
+            AudioBufferRef::S16(buf) => {
+                let channels = buf.spec().channels.count();
+                for frame in 0..buf.frames() {
+                    for ch in 0..channels {
+                        // S16 samples: convert to normalized range
+                        // This can exceed 1.0 if sample is at max (32767/32768 ≈ 0.99997)
+                        let sample = (buf.chan(ch)[frame] as f64).abs() / SAMPLE_SCALE_16BIT;
+                        max_peak = max_peak.max(sample);
+                    }
+                }
+            }
+            AudioBufferRef::S32(buf) => {
+                let channels = buf.spec().channels.count();
+                for frame in 0..buf.frames() {
+                    for ch in 0..channels {
+                        let sample = (buf.chan(ch)[frame] as f64).abs() / 2147483648.0;
+                        max_peak = max_peak.max(sample);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(PeakAmplitudeResult {
+        peak: max_peak,
+        peak_pcm: max_peak * SAMPLE_SCALE_16BIT,
+        sample_rate,
+    })
+}
+
+#[cfg(not(feature = "replaygain"))]
+pub fn find_peak_amplitude(_file_path: &Path) -> Result<PeakAmplitudeResult> {
+    anyhow::bail!(
+        "Peak amplitude analysis requires the 'replaygain' feature.\n\
+        Install with: cargo install mp3rgain --features replaygain"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

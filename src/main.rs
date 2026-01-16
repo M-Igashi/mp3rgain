@@ -596,40 +596,61 @@ fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
 
         match find_max_amplitude(file) {
             Ok((max_amp, max_gain, min_gain)) => {
+                // Convert to PCM scale (like mp3gain: 0-32768+)
+                let max_pcm_sample = max_amp * 32768.0;
                 let headroom_db = if max_amp > 0.0 {
                     -20.0 * max_amp.log10()
                 } else {
                     f64::INFINITY
                 };
 
+                // Check if peak is at clipping threshold (Symphonia MP3 decoder limitation)
+                // Only applies to MP3 files - AAC/M4A decoder doesn't have this issue
+                let is_mp3 = file
+                    .extension()
+                    .map(|e| e.eq_ignore_ascii_case("mp3"))
+                    .unwrap_or(false);
+                let may_clip = is_mp3 && max_amp >= 0.9999;
+
                 match opts.output_format {
                     OutputFormat::Text => {
                         if !opts.quiet {
                             println!("{}", filename.cyan().bold());
-                            println!("  Max amplitude:  {:.6}", max_amp);
+                            println!("  Max PCM sample: {:.6}", max_pcm_sample);
+                            if may_clip {
+                                println!(
+                                    "  {}",
+                                    "  (may be clipped - actual peak could be higher)".yellow()
+                                );
+                            }
                             println!("  Headroom:       {:+.2} dB", headroom_db);
                             println!("  Max global_gain: {}", max_gain);
                             println!("  Min global_gain: {}", min_gain);
                             println!();
                         } else {
-                            println!("{}\t{:.6}\t{:.2}", filename, max_amp, headroom_db);
+                            println!("{}\t{:.6}\t{:.2}", filename, max_pcm_sample, headroom_db);
                         }
                     }
                     OutputFormat::Tsv => {
                         println!(
                             "{}\t{:.6}\t{:.2}\t{}\t{}",
-                            filename, max_amp, headroom_db, max_gain, min_gain
+                            filename, max_pcm_sample, headroom_db, max_gain, min_gain
                         );
                     }
                     OutputFormat::Json => {
-                        json_results.push(JsonFileResult {
+                        let mut result = JsonFileResult {
                             file: file.display().to_string(),
-                            max_amplitude: Some(max_amp),
+                            max_amplitude: Some(max_pcm_sample),
                             headroom_db: Some(headroom_db),
                             max_gain: Some(max_gain),
                             min_gain: Some(min_gain),
                             ..Default::default()
-                        });
+                        };
+                        if may_clip {
+                            result.warning =
+                                Some("peak may be clipped - actual value could be higher".into());
+                        }
+                        json_results.push(result);
                     }
                 }
             }
