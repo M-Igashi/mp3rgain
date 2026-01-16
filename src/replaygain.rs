@@ -180,6 +180,7 @@ mod filter_coeffs {
     pub const BUTTER_B_48000: [f64; 3] = [0.98621192462708, -1.97242384925416, 0.98621192462708];
 
     /// A coefficients for Yule-Walker filter at 32000 Hz
+    /// From ABYule[5] in gain_analysis.c (index 5 = 32000 Hz)
     pub const YULE_A_32000: [f64; 11] = [
         1.0,
         -2.37898834973084,
@@ -195,25 +196,28 @@ mod filter_coeffs {
     ];
 
     /// B coefficients for Yule-Walker filter at 32000 Hz
+    /// From ABYule[5] in gain_analysis.c (index 5 = 32000 Hz)
     pub const YULE_B_32000: [f64; 11] = [
-        0.00549836071843,
-        -0.00528297328296,
-        -0.00426998268581,
-        -0.00180414805164,
-        -0.00032550931093,
-        0.00252831508428,
-        -0.00331474531993,
-        0.00311096798626,
-        -0.00166102790290,
-        0.00042903502747,
-        0.00023777076452,
+        0.15457299681924,
+        -0.09331049056315,
+        -0.06247880153653,
+        0.02163541888798,
+        -0.05588393329856,
+        0.04781476674921,
+        0.00222312597743,
+        0.03174092540049,
+        -0.01390589421898,
+        0.00651420667831,
+        -0.00881362733839,
     ];
 
     /// A coefficients for Butter filter at 32000 Hz
-    pub const BUTTER_A_32000: [f64; 3] = [1.0, -1.95466019695138, 0.95531569668911];
+    /// From ABButter[5] in gain_analysis.c (index 5 = 32000 Hz)
+    pub const BUTTER_A_32000: [f64; 3] = [1.0, -1.95835380975398, 0.95920349965459];
 
     /// B coefficients for Butter filter at 32000 Hz
-    pub const BUTTER_B_32000: [f64; 3] = [0.97743085512243, -1.95486171024486, 0.97743085512243];
+    /// From ABButter[5] in gain_analysis.c (index 5 = 32000 Hz)
+    pub const BUTTER_B_32000: [f64; 3] = [0.97938932735214, -1.95877865470428, 0.97938932735214];
 }
 
 /// Equal-loudness filter state
