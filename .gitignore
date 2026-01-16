@@ -1,0 +1,15 @@
+.gitignore
+.DS_Store
+/target/
+
+# Internal documents - never commit
+**/OUTREACH.md
+**/outreach*.md
+**/MARKETING.md
+**/marketing*.md
+**/INTERNAL.md
+**/internal*.md
+**/STRATEGY.md
+**/strategy*.md
+**/NOTES.md
+**/notes*.md
