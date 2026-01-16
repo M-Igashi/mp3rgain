@@ -203,7 +203,7 @@ jobs:
             dist/mp3rgui-${{ github.ref_name }}-linux-x86_64.tar.gz
             dist/mp3rgui-${{ github.ref_name }}-windows-x86_64.zip
           draft: false
-          generate_release_notes: false
+          generate_release_notes: true
 
   # Update Scoop bucket
   update-scoop:
