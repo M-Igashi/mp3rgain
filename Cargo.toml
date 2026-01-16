@@ -10,6 +10,7 @@ homepage = "https://github.com/M-Igashi/mp3rgain"
 readme = "README.md"
 keywords = ["mp3", "audio", "gain", "volume", "lossless"]
 categories = ["multimedia::audio", "command-line-utilities"]
+exclude = ["mp3rgui/", "target/", "packages/", "docs/", "scripts/", ".github/", ".claude/", "tests/"]
 
 [features]
 default = ["replaygain"]
