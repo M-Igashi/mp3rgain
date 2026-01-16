@@ -57,6 +57,7 @@ jobs:
         run: choco install ffmpeg
 
       - name: Generate test fixtures
+        shell: bash
         run: |
           mkdir -p tests/fixtures
           ffmpeg -y -f lavfi -i "sine=frequency=440:duration=1" -ac 2 -ar 44100 -b:a 128k -f mp3 tests/fixtures/test_stereo.mp3
