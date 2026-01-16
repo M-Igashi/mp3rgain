@@ -379,6 +379,7 @@ fn is_xing_frame(data: &[u8], frame_offset: usize, header: &FrameHeader) -> bool
 }
 
 /// Internal function to iterate over frames
+/// Skips Xing/Info VBR header frames to match mp3gain behavior
 fn iterate_frames<F>(data: &[u8], mut callback: F) -> Result<usize>
 where
     F: FnMut(usize, &FrameHeader, &[GainLocation]),
@@ -405,6 +406,13 @@ where
 
         if !valid_frame {
             pos += 1;
+            continue;
+        }
+
+        // Skip Xing/Info header frames (VBR metadata)
+        // This matches the behavior of the original mp3gain
+        if is_xing_frame(data, pos, &header) {
+            pos = next_pos;
             continue;
         }
 
@@ -1081,8 +1089,45 @@ pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Find maximum amplitude in an MP3 file
+/// Find maximum amplitude in an MP3 file by decoding the audio.
 /// Returns (max_amplitude, max_global_gain, min_global_gain)
+///
+/// When the replaygain feature is enabled, this decodes the audio to measure
+/// actual PCM sample values. Otherwise, it falls back to estimation from global_gain.
+///
+/// Note: The max_amplitude is normalized (0.0 to 1.0+), where values > 1.0 indicate clipping.
+/// To get the value in 16-bit PCM scale (like mp3gain), multiply by 32768.
+#[cfg(feature = "replaygain")]
+pub fn find_max_amplitude(file_path: &Path) -> Result<(f64, u8, u8)> {
+    // Get global_gain range from frame analysis (now skips Xing frames)
+    let data =
+        fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
+
+    let mut min_gain = 255u8;
+    let mut max_gain = 0u8;
+
+    let frame_count = iterate_frames(&data, |_pos, _header, locations| {
+        for loc in locations {
+            let gain = read_gain_at(&data, loc);
+            min_gain = min_gain.min(gain);
+            max_gain = max_gain.max(gain);
+        }
+    })?;
+
+    if frame_count == 0 {
+        anyhow::bail!("No valid MP3 frames found");
+    }
+
+    // Get actual peak amplitude by decoding audio
+    let peak_result = replaygain::find_peak_amplitude(file_path)?;
+    let max_amplitude = peak_result.peak;
+
+    Ok((max_amplitude, max_gain, min_gain))
+}
+
+/// Find maximum amplitude in an MP3 file (fallback without replaygain feature)
+/// Returns (max_amplitude, max_global_gain, min_global_gain)
+#[cfg(not(feature = "replaygain"))]
 pub fn find_max_amplitude(file_path: &Path) -> Result<(f64, u8, u8)> {
     let data =
         fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
@@ -1102,17 +1147,9 @@ pub fn find_max_amplitude(file_path: &Path) -> Result<(f64, u8, u8)> {
         anyhow::bail!("No valid MP3 frames found");
     }
 
-    // Calculate max amplitude based on max_gain
-    // Higher global_gain = louder audio
-    // The relationship is: each step of global_gain is 1.5 dB
-    // Max amplitude is reached when global_gain is at maximum
-    // We estimate amplitude as a value between 0 and 1 based on headroom
+    // Fallback: estimate amplitude from global_gain (less accurate)
     let headroom_steps = (MAX_GAIN - max_gain) as i32;
     let headroom_db = headroom_steps as f64 * GAIN_STEP_DB;
-
-    // Convert headroom to amplitude (inverse logarithmic relationship)
-    // If headroom is 0, max amplitude is 1.0 (clipping threshold)
-    // For each 1.5 dB of headroom, amplitude decreases by ~16%
     let max_amplitude = 10.0_f64.powf(-headroom_db / 20.0);
 
     Ok((max_amplitude, max_gain, min_gain))
