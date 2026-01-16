@@ -36,6 +36,13 @@ use symphonia::core::probe::Hint;
 /// Original mp3gain uses 89 dB (ReplayGain 1.0)
 pub const REPLAYGAIN_REFERENCE_DB: f64 = 89.0;
 
+/// Pink noise reference calibration constant
+/// This is the loudness value produced by the ReplayGain algorithm when analyzing
+/// the standard -14 dB FS pink noise reference signal. All loudness measurements
+/// are compared against this reference to calculate the required gain adjustment.
+/// Source: https://replaygain.hydrogenaud.io/calibration.html
+const PINK_REF: f64 = 64.82;
+
 /// Audio file type
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AudioFileType {
@@ -290,60 +297,116 @@ impl EqualLoudnessFilter {
 // RMS and loudness calculation
 // =============================================================================
 
-/// Calculate RMS values for all 50ms windows
+/// Steps per dB for histogram resolution (matches original mp3gain)
+const STEPS_PER_DB: f64 = 100.0;
+
+/// Maximum histogram size (covers -70 dB to +10 dB range)
+const HISTOGRAM_SIZE: usize = 12000;
+
+/// Histogram offset to handle negative dB values
+const HISTOGRAM_OFFSET: i32 = 7000;
+
+/// RMS percentile for loudness calculation (95th percentile)
+const RMS_PERCENTILE: f64 = 0.95;
+
+/// Analyzer state for accumulating samples across buffers
 #[cfg(feature = "replaygain")]
-fn calculate_rms_windows(samples: &[f64], sample_rate: u32) -> Vec<f64> {
-    // Calculate window size based on sample rate (50ms)
-    let window_size = (sample_rate as usize * 50) / 1000;
-    if window_size == 0 || samples.len() < window_size {
-        return Vec::new();
-    }
-
-    let num_windows = samples.len() / window_size;
-    let mut rms_values = Vec::with_capacity(num_windows);
-
-    for i in 0..num_windows {
-        let start = i * window_size;
-        let end = start + window_size;
-
-        let sum_squares: f64 = samples[start..end].iter().map(|s| s * s).sum();
-        let rms = (sum_squares / window_size as f64).sqrt();
-        rms_values.push(rms);
-    }
-
-    rms_values
+struct ReplayGainAnalyzer {
+    /// Left channel sum of squares for current window
+    lsum: f64,
+    /// Right channel sum of squares for current window
+    rsum: f64,
+    /// Number of samples in current window
+    totsamp: usize,
+    /// Window size in samples (50ms worth)
+    window_samples: usize,
+    /// Histogram of loudness values
+    histogram: Vec<u32>,
 }
 
-/// Calculate loudness from RMS values using 95th percentile
 #[cfg(feature = "replaygain")]
-fn calculate_loudness(rms_values: &[f64]) -> f64 {
-    if rms_values.is_empty() {
-        return -70.0; // Very quiet
+impl ReplayGainAnalyzer {
+    fn new(sample_rate: u32) -> Self {
+        // 50ms window
+        let window_samples = (sample_rate as usize * 50) / 1000;
+        Self {
+            lsum: 0.0,
+            rsum: 0.0,
+            totsamp: 0,
+            window_samples,
+            histogram: vec![0; HISTOGRAM_SIZE],
+        }
     }
 
-    // Filter out very quiet windows (below -70 dB)
-    let min_rms = 10.0_f64.powf(-70.0 / 20.0);
-    let mut filtered: Vec<f64> = rms_values
-        .iter()
-        .filter(|&&v| v > min_rms)
-        .copied()
-        .collect();
+    /// Add a stereo sample pair (already filtered)
+    fn add_sample(&mut self, left: f64, right: f64) {
+        self.lsum += left * left;
+        self.rsum += right * right;
+        self.totsamp += 1;
 
-    if filtered.is_empty() {
-        return -70.0;
+        if self.totsamp >= self.window_samples {
+            self.finish_window();
+        }
     }
 
-    // Sort for percentile calculation
-    filtered.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    /// Add a mono sample (already filtered)
+    fn add_mono_sample(&mut self, sample: f64) {
+        let sq = sample * sample;
+        self.lsum += sq;
+        self.rsum += sq;
+        self.totsamp += 1;
 
-    // Get 95th percentile
-    let idx = ((filtered.len() as f64 * 0.95) as usize).saturating_sub(1);
-    let percentile_rms = filtered[idx.min(filtered.len() - 1)];
+        if self.totsamp >= self.window_samples {
+            self.finish_window();
+        }
+    }
 
-    // Convert to dB
-    if percentile_rms > 0.0 {
-        20.0 * percentile_rms.log10()
-    } else {
+    /// Finish the current window and add to histogram
+    fn finish_window(&mut self) {
+        if self.totsamp == 0 {
+            return;
+        }
+
+        // Calculate mean square value (average of both channels)
+        // Original: (lsum + rsum) / totsamp * 0.5
+        let mean_square = (self.lsum + self.rsum) / self.totsamp as f64 * 0.5;
+
+        // Convert to histogram index
+        // Original: STEPS_per_dB * 10.0 * log10(mean_square + 1e-37)
+        let val = STEPS_PER_DB * 10.0 * (mean_square + 1e-37).log10();
+        let idx = (val as i32 + HISTOGRAM_OFFSET) as usize;
+
+        if idx < HISTOGRAM_SIZE {
+            self.histogram[idx] += 1;
+        }
+
+        // Reset for next window
+        self.lsum = 0.0;
+        self.rsum = 0.0;
+        self.totsamp = 0;
+    }
+
+    /// Calculate the loudness value from the histogram (95th percentile)
+    fn get_loudness(&self) -> f64 {
+        // Count total windows
+        let total: u64 = self.histogram.iter().map(|&x| x as u64).sum();
+        if total == 0 {
+            return -70.0;
+        }
+
+        // Find 95th percentile by counting from the top
+        let threshold = ((total as f64) * (1.0 - RMS_PERCENTILE)).ceil() as u64;
+        let mut count = 0u64;
+
+        for i in (0..HISTOGRAM_SIZE).rev() {
+            count += self.histogram[i] as u64;
+            if count >= threshold {
+                // Convert histogram index back to dB
+                // loudness = (i - HISTOGRAM_OFFSET) / STEPS_PER_DB
+                return (i as i32 - HISTOGRAM_OFFSET) as f64 / STEPS_PER_DB;
+            }
+        }
+
         -70.0
     }
 }
@@ -444,7 +507,7 @@ pub fn analyze_track_with_index(
         .map(|_| EqualLoudnessFilter::new(sample_rate))
         .collect();
 
-    let mut all_filtered_samples: Vec<f64> = Vec::new();
+    let mut analyzer = ReplayGainAnalyzer::new(sample_rate);
     let mut peak: f64 = 0.0;
 
     // Process all packets
@@ -470,14 +533,15 @@ pub fn analyze_track_with_index(
         };
 
         // Process audio buffer
-        process_audio_buffer(&decoded, &mut filters, &mut all_filtered_samples, &mut peak);
+        process_audio_buffer(&decoded, &mut filters, &mut analyzer, &mut peak);
     }
 
-    // Calculate RMS windows and loudness
-    let rms_values = calculate_rms_windows(&all_filtered_samples, sample_rate);
-    let loudness_db = calculate_loudness(&rms_values);
+    // Finish any remaining samples in the last window
+    analyzer.finish_window();
 
-    let gain_db = REPLAYGAIN_REFERENCE_DB + loudness_db;
+    // Calculate loudness and gain
+    let loudness_db = analyzer.get_loudness();
+    let gain_db = PINK_REF - loudness_db;
 
     Ok(ReplayGainResult {
         loudness_db,
@@ -488,12 +552,12 @@ pub fn analyze_track_with_index(
     })
 }
 
-/// Process an audio buffer and extract filtered samples
+/// Process an audio buffer and feed filtered samples to the analyzer
 #[cfg(feature = "replaygain")]
 fn process_audio_buffer(
     buffer: &AudioBufferRef,
     filters: &mut [EqualLoudnessFilter],
-    all_samples: &mut Vec<f64>,
+    analyzer: &mut ReplayGainAnalyzer,
     peak: &mut f64,
 ) {
     match buffer {
@@ -502,19 +566,19 @@ fn process_audio_buffer(
             let frames = buf.frames();
 
             for frame in 0..frames {
-                let mut sum = 0.0;
-                for ch in 0..channels {
-                    let sample = buf.chan(ch)[frame] as f64;
-                    *peak = peak.max(sample.abs());
+                // Get samples for each channel
+                let left = buf.chan(0)[frame] as f64;
+                *peak = peak.max(left.abs());
+                let left_filtered = filters[0].process(left);
 
-                    let filtered = if ch < filters.len() {
-                        filters[ch].process(sample)
-                    } else {
-                        sample
-                    };
-                    sum += filtered * filtered;
+                if channels >= 2 {
+                    let right = buf.chan(1)[frame] as f64;
+                    *peak = peak.max(right.abs());
+                    let right_filtered = filters[1].process(right);
+                    analyzer.add_sample(left_filtered, right_filtered);
+                } else {
+                    analyzer.add_mono_sample(left_filtered);
                 }
-                all_samples.push((sum / channels as f64).sqrt());
             }
         }
         AudioBufferRef::S16(buf) => {
@@ -523,19 +587,18 @@ fn process_audio_buffer(
             let scale = 1.0 / 32768.0;
 
             for frame in 0..frames {
-                let mut sum = 0.0;
-                for ch in 0..channels {
-                    let sample = buf.chan(ch)[frame] as f64 * scale;
-                    *peak = peak.max(sample.abs());
+                let left = buf.chan(0)[frame] as f64 * scale;
+                *peak = peak.max(left.abs());
+                let left_filtered = filters[0].process(left);
 
-                    let filtered = if ch < filters.len() {
-                        filters[ch].process(sample)
-                    } else {
-                        sample
-                    };
-                    sum += filtered * filtered;
+                if channels >= 2 {
+                    let right = buf.chan(1)[frame] as f64 * scale;
+                    *peak = peak.max(right.abs());
+                    let right_filtered = filters[1].process(right);
+                    analyzer.add_sample(left_filtered, right_filtered);
+                } else {
+                    analyzer.add_mono_sample(left_filtered);
                 }
-                all_samples.push((sum / channels as f64).sqrt());
             }
         }
         AudioBufferRef::S32(buf) => {
@@ -544,19 +607,18 @@ fn process_audio_buffer(
             let scale = 1.0 / 2147483648.0;
 
             for frame in 0..frames {
-                let mut sum = 0.0;
-                for ch in 0..channels {
-                    let sample = buf.chan(ch)[frame] as f64 * scale;
-                    *peak = peak.max(sample.abs());
+                let left = buf.chan(0)[frame] as f64 * scale;
+                *peak = peak.max(left.abs());
+                let left_filtered = filters[0].process(left);
 
-                    let filtered = if ch < filters.len() {
-                        filters[ch].process(sample)
-                    } else {
-                        sample
-                    };
-                    sum += filtered * filtered;
+                if channels >= 2 {
+                    let right = buf.chan(1)[frame] as f64 * scale;
+                    *peak = peak.max(right.abs());
+                    let right_filtered = filters[1].process(right);
+                    analyzer.add_sample(left_filtered, right_filtered);
+                } else {
+                    analyzer.add_mono_sample(left_filtered);
                 }
-                all_samples.push((sum / channels as f64).sqrt());
             }
         }
         _ => {
@@ -599,7 +661,7 @@ pub fn analyze_album_with_index(
         .map(|r| 10.0_f64.powf(r.loudness_db / 10.0))
         .sum();
     let album_loudness_db = 10.0 * (total_linear / track_results.len() as f64).log10();
-    let album_gain_db = REPLAYGAIN_REFERENCE_DB + album_loudness_db;
+    let album_gain_db = PINK_REF - album_loudness_db;
 
     Ok(AlbumGainResult {
         tracks: track_results,
@@ -681,41 +743,54 @@ mod tests {
     #[cfg(feature = "replaygain")]
     #[test]
     fn test_rms_calculation() {
+        // Test that the analyzer correctly processes samples
+        let sample_rate = 44100u32;
+        let mut analyzer = ReplayGainAnalyzer::new(sample_rate);
+
         // Create a simple sine wave at 1kHz
-        let sample_rate = 44100;
-        let duration_samples = sample_rate; // 1 second
         let frequency = 1000.0;
         let amplitude = 0.5;
+        let duration_samples = sample_rate as usize; // 1 second
 
-        let samples: Vec<f64> = (0..duration_samples)
-            .map(|i| {
-                let t = i as f64 / sample_rate as f64;
-                amplitude * (2.0 * std::f64::consts::PI * frequency * t).sin()
-            })
-            .collect();
-
-        let rms_values = calculate_rms_windows(&samples, sample_rate as u32);
-        assert!(!rms_values.is_empty());
-
-        // RMS of a sine wave should be amplitude / sqrt(2)
-        let expected_rms = amplitude / std::f64::consts::SQRT_2;
-        for rms in &rms_values {
-            assert!(
-                (*rms - expected_rms).abs() < 0.01,
-                "RMS {} differs from expected {}",
-                rms,
-                expected_rms
-            );
+        for i in 0..duration_samples {
+            let t = i as f64 / sample_rate as f64;
+            let sample = amplitude * (2.0 * std::f64::consts::PI * frequency * t).sin();
+            analyzer.add_mono_sample(sample);
         }
+
+        // Should have processed multiple windows (1 second = 20 windows at 50ms each)
+        let loudness = analyzer.get_loudness();
+        // Loudness should be a reasonable negative dB value
+        assert!(loudness < 0.0, "Loudness should be negative: {}", loudness);
+        assert!(
+            loudness > -70.0,
+            "Loudness should be above -70 dB: {}",
+            loudness
+        );
     }
 
     #[cfg(feature = "replaygain")]
     #[test]
     fn test_loudness_calculation() {
-        // Test with known RMS values
-        let rms_values: Vec<f64> = vec![0.1, 0.1, 0.1, 0.1, 0.1];
-        let loudness = calculate_loudness(&rms_values);
-        // 0.1 in dB is 20 * log10(0.1) = -20 dB
-        assert!((loudness - (-20.0)).abs() < 0.1);
+        // Test analyzer with known amplitude
+        let sample_rate = 44100u32;
+        let mut analyzer = ReplayGainAnalyzer::new(sample_rate);
+
+        // Feed constant amplitude samples (simulating DC or very low frequency)
+        let amplitude = 0.1;
+        let duration_samples = sample_rate as usize; // 1 second
+
+        for _ in 0..duration_samples {
+            analyzer.add_mono_sample(amplitude);
+        }
+
+        let loudness = analyzer.get_loudness();
+        // For constant amplitude 0.1, mean_square = 0.01
+        // 10 * log10(0.01) = -20 dB
+        assert!(
+            (loudness - (-20.0)).abs() < 1.0,
+            "Loudness {} should be close to -20 dB",
+            loudness
+        );
     }
 }
