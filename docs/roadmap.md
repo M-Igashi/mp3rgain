@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current Status: v1.3.0 (Production Ready)
+## Current Status: v1.4.0 (Production Ready)
 
 All core functionality complete:
 - [x] MP3 frame parsing (MPEG 1/2/2.5 Layer III)
@@ -66,9 +66,18 @@ All core functionality complete:
 - [x] Code refactoring for better maintainability
 - [x] Documentation updates
 
+### v1.4.0 - Bug Fixes & mp3gain Compatibility
+
+- [x] Improved max amplitude detection (#51)
+- [x] Fixed global_gain range handling (#52)
+- [x] Handle last frame before APE/ID3 tags (#54)
+- [x] Fixed M4A info display (#55)
+- [x] Improved ReplayGain analysis accuracy (#48)
+- [x] Corrected ReplayGain calculation ~90dB offset (#50)
+
 ## Upcoming Goals
 
-### v1.4.0 - Distribution Expansion
+### v1.5.0 - Distribution Expansion
 
 - [ ] Homebrew core inclusion (currently in tap)
 - [ ] Fedora/RPM package
