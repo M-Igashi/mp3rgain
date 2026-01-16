@@ -309,6 +309,51 @@ const HISTOGRAM_OFFSET: i32 = 7000;
 /// RMS percentile for loudness calculation (95th percentile)
 const RMS_PERCENTILE: f64 = 0.95;
 
+/// Histogram data for ReplayGain analysis
+/// This can be accumulated across multiple tracks for album gain calculation
+#[cfg(feature = "replaygain")]
+#[derive(Clone)]
+struct LoudnessHistogram {
+    /// Histogram of loudness values (RMS windows bucketed by dB)
+    data: Vec<u32>,
+}
+
+#[cfg(feature = "replaygain")]
+impl LoudnessHistogram {
+    fn new() -> Self {
+        Self {
+            data: vec![0; HISTOGRAM_SIZE],
+        }
+    }
+
+    /// Accumulate another histogram into this one (for album gain calculation)
+    fn accumulate(&mut self, other: &LoudnessHistogram) {
+        for (i, &count) in other.data.iter().enumerate() {
+            self.data[i] += count;
+        }
+    }
+
+    /// Calculate loudness from histogram using 95th percentile
+    fn get_loudness(&self) -> f64 {
+        let total: u64 = self.data.iter().map(|&x| x as u64).sum();
+        if total == 0 {
+            return -70.0;
+        }
+
+        let threshold = ((total as f64) * (1.0 - RMS_PERCENTILE)).ceil() as u64;
+        let mut count = 0u64;
+
+        for i in (0..HISTOGRAM_SIZE).rev() {
+            count += self.data[i] as u64;
+            if count >= threshold {
+                return (i as i32 - HISTOGRAM_OFFSET) as f64 / STEPS_PER_DB;
+            }
+        }
+
+        -70.0
+    }
+}
+
 /// Analyzer state for accumulating samples across buffers
 #[cfg(feature = "replaygain")]
 struct ReplayGainAnalyzer {
@@ -321,7 +366,7 @@ struct ReplayGainAnalyzer {
     /// Window size in samples (50ms worth)
     window_samples: usize,
     /// Histogram of loudness values
-    histogram: Vec<u32>,
+    histogram: LoudnessHistogram,
 }
 
 #[cfg(feature = "replaygain")]
@@ -334,8 +379,13 @@ impl ReplayGainAnalyzer {
             rsum: 0.0,
             totsamp: 0,
             window_samples,
-            histogram: vec![0; HISTOGRAM_SIZE],
+            histogram: LoudnessHistogram::new(),
         }
+    }
+
+    /// Get a reference to the histogram for accumulation
+    fn get_histogram(&self) -> &LoudnessHistogram {
+        &self.histogram
     }
 
     /// Add a stereo sample pair (already filtered)
@@ -377,7 +427,7 @@ impl ReplayGainAnalyzer {
         let idx = (val as i32 + HISTOGRAM_OFFSET) as usize;
 
         if idx < HISTOGRAM_SIZE {
-            self.histogram[idx] += 1;
+            self.histogram.data[idx] += 1;
         }
 
         // Reset for next window
@@ -388,26 +438,7 @@ impl ReplayGainAnalyzer {
 
     /// Calculate the loudness value from the histogram (95th percentile)
     fn get_loudness(&self) -> f64 {
-        // Count total windows
-        let total: u64 = self.histogram.iter().map(|&x| x as u64).sum();
-        if total == 0 {
-            return -70.0;
-        }
-
-        // Find 95th percentile by counting from the top
-        let threshold = ((total as f64) * (1.0 - RMS_PERCENTILE)).ceil() as u64;
-        let mut count = 0u64;
-
-        for i in (0..HISTOGRAM_SIZE).rev() {
-            count += self.histogram[i] as u64;
-            if count >= threshold {
-                // Convert histogram index back to dB
-                // loudness = (i - HISTOGRAM_OFFSET) / STEPS_PER_DB
-                return (i as i32 - HISTOGRAM_OFFSET) as f64 / STEPS_PER_DB;
-            }
-        }
-
-        -70.0
+        self.histogram.get_loudness()
     }
 }
 
@@ -425,18 +456,19 @@ fn detect_file_type(file_path: &Path) -> AudioFileType {
     }
 }
 
-/// Analyze a single track and calculate ReplayGain
+/// Internal result containing both ReplayGainResult and histogram for album calculation
 #[cfg(feature = "replaygain")]
-pub fn analyze_track(file_path: &Path) -> Result<ReplayGainResult> {
-    analyze_track_with_index(file_path, None)
+struct TrackAnalysisInternal {
+    result: ReplayGainResult,
+    histogram: LoudnessHistogram,
 }
 
-/// Analyze a single track with optional track index selection
+/// Internal function to analyze a track and return both result and histogram
 #[cfg(feature = "replaygain")]
-pub fn analyze_track_with_index(
+fn analyze_track_internal(
     file_path: &Path,
     track_index: Option<u32>,
-) -> Result<ReplayGainResult> {
+) -> Result<TrackAnalysisInternal> {
     // Detect file type
     let file_type = detect_file_type(file_path);
 
@@ -543,13 +575,34 @@ pub fn analyze_track_with_index(
     let loudness_db = analyzer.get_loudness();
     let gain_db = PINK_REF - loudness_db;
 
-    Ok(ReplayGainResult {
+    let result = ReplayGainResult {
         loudness_db,
         gain_db,
         peak,
         sample_rate,
         file_type,
+    };
+
+    Ok(TrackAnalysisInternal {
+        result,
+        histogram: analyzer.get_histogram().clone(),
     })
+}
+
+/// Analyze a single track and calculate ReplayGain
+#[cfg(feature = "replaygain")]
+pub fn analyze_track(file_path: &Path) -> Result<ReplayGainResult> {
+    analyze_track_with_index(file_path, None)
+}
+
+/// Analyze a single track with optional track index selection
+#[cfg(feature = "replaygain")]
+pub fn analyze_track_with_index(
+    file_path: &Path,
+    track_index: Option<u32>,
+) -> Result<ReplayGainResult> {
+    let internal = analyze_track_internal(file_path, track_index)?;
+    Ok(internal.result)
 }
 
 /// Process an audio buffer and feed filtered samples to the analyzer
@@ -634,6 +687,11 @@ pub fn analyze_album(files: &[&Path]) -> Result<AlbumGainResult> {
 }
 
 /// Analyze multiple tracks for album gain with optional track index selection
+///
+/// This implements the same algorithm as the original mp3gain:
+/// - Accumulate all 50ms RMS window values from all tracks into a single histogram
+/// - Calculate album loudness from the combined histogram using 95th percentile
+/// - This properly weights each track by its duration (more windows = more influence)
 #[cfg(feature = "replaygain")]
 pub fn analyze_album_with_index(
     files: &[&Path],
@@ -641,26 +699,22 @@ pub fn analyze_album_with_index(
 ) -> Result<AlbumGainResult> {
     let mut track_results = Vec::with_capacity(files.len());
     let mut album_peak: f64 = 0.0;
+    // Album histogram accumulates all track histograms (like B[] in original mp3gain)
+    let mut album_histogram = LoudnessHistogram::new();
 
     for file in files {
-        // Analyze each track
-        let result = analyze_track_with_index(file, track_index)?;
-        album_peak = album_peak.max(result.peak);
+        // Analyze each track and get histogram
+        let internal = analyze_track_internal(file, track_index)?;
+        album_peak = album_peak.max(internal.result.peak);
 
-        // We need to re-analyze to get raw RMS values for album calculation
-        // This is a simplified approach - a more efficient implementation would
-        // cache the RMS values during track analysis
-        track_results.push(result);
+        // Accumulate track histogram into album histogram
+        album_histogram.accumulate(&internal.histogram);
+
+        track_results.push(internal.result);
     }
 
-    // For album gain, we combine all tracks' loudness measurements
-    // The proper way is to combine all RMS windows, but for simplicity
-    // we use a weighted average based on track loudness
-    let total_linear: f64 = track_results
-        .iter()
-        .map(|r| 10.0_f64.powf(r.loudness_db / 10.0))
-        .sum();
-    let album_loudness_db = 10.0 * (total_linear / track_results.len() as f64).log10();
+    // Calculate album loudness from combined histogram (95th percentile)
+    let album_loudness_db = album_histogram.get_loudness();
     let album_gain_db = PINK_REF - album_loudness_db;
 
     Ok(AlbumGainResult {
