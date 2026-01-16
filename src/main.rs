@@ -24,6 +24,13 @@ use std::time::SystemTime;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROGRESS_THRESHOLD: usize = 5;
 
+/// Extract filename from path, returning "unknown" if extraction fails
+fn get_filename(path: &Path) -> &str {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+}
+
 // =============================================================================
 // Options
 // =============================================================================
@@ -588,10 +595,7 @@ fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
     let mut json_results: Vec<JsonFileResult> = Vec::new();
 
     for file in files {
-        let filename = file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
+        let filename = get_filename(file);
         progress_set_message(&pb, filename);
 
         match find_max_amplitude(file) {
@@ -709,10 +713,7 @@ fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
     let mut failed = 0;
 
     for file in files {
-        let filename = file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
+        let filename = get_filename(file);
         progress_set_message(&pb, filename);
 
         if opts.dry_run {
@@ -807,10 +808,7 @@ fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
     let mut json_results: Vec<JsonFileResult> = Vec::new();
 
     for file in files {
-        let filename = file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
+        let filename = get_filename(file);
         progress_set_message(&pb, filename);
 
         match read_ape_tag_from_file(file) {
@@ -992,10 +990,7 @@ fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
     let mut failed = 0;
 
     for file in files {
-        let filename = file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
+        let filename = get_filename(file);
         progress_set_message(&pb, filename);
 
         let result = process_apply(file, steps, opts)?;
@@ -1089,10 +1084,7 @@ fn cmd_apply_channel(
     let mut failed = 0;
 
     for file in files {
-        let filename = file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
+        let filename = get_filename(file);
         progress_set_message(&pb, filename);
 
         let result = process_apply_channel(file, channel, steps, opts)?;
@@ -1136,10 +1128,7 @@ fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
     let mut json_results: Vec<JsonFileResult> = Vec::new();
 
     for file in files {
-        let filename = file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
+        let filename = get_filename(file);
         progress_set_message(&pb, filename);
 
         let result = process_info(file, opts)?;
@@ -1188,10 +1177,7 @@ fn cmd_undo(files: &[PathBuf], opts: &Options) -> Result<()> {
     let mut failed = 0;
 
     for file in files {
-        let filename = file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
+        let filename = get_filename(file);
         progress_set_message(&pb, filename);
 
         let result = process_undo(file, opts)?;
@@ -1262,10 +1248,7 @@ fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     let mut failed = 0;
 
     for file in files {
-        let filename = file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
+        let filename = get_filename(file);
         progress_set_message(&pb, filename);
 
         let result = process_track_gain(file, opts)?;
@@ -1399,10 +1382,7 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             let mut failed = 0;
 
             for (i, file) in files.iter().enumerate() {
-                let filename = file
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown");
+                let filename = get_filename(file);
                 progress_set_message(&pb, filename);
 
                 let track_result = &album_result.tracks[i];
@@ -1507,11 +1487,7 @@ where
 }
 
 fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileResult> {
-    let filename = file
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-
+    let filename = get_filename(file);
     let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
 
     // Save original timestamp if needed
@@ -1646,11 +1622,7 @@ fn process_apply_channel(
     steps: i32,
     opts: &Options,
 ) -> Result<JsonFileResult> {
-    let filename = file
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-
+    let filename = get_filename(file);
     let channel_name = match channel {
         Channel::Left => "left",
         Channel::Right => "right",
@@ -1726,10 +1698,7 @@ fn process_apply_channel(
 }
 
 fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
-    let filename = file
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
+    let filename = get_filename(file);
 
     // For TSV output (mp3gain compatible), perform ReplayGain analysis
     if opts.output_format == OutputFormat::Tsv && replaygain::is_available() {
@@ -1886,11 +1855,7 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
 }
 
 fn process_undo(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> {
-    let filename = file
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-
+    let filename = get_filename(file);
     let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
 
     // Save original timestamp if needed
@@ -1971,11 +1936,7 @@ fn process_undo(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> {
 }
 
 fn process_track_gain(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> {
-    let filename = file
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-
+    let filename = get_filename(file);
     let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
@@ -2056,11 +2017,7 @@ fn process_apply_replaygain_with_album(
     opts: &Options,
     album_info: Option<&AacAlbumInfo>,
 ) -> Result<JsonFileResult> {
-    let filename = file
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-
+    let filename = get_filename(file);
     let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
 
     // Save original timestamp if needed
@@ -2223,10 +2180,7 @@ fn process_apply_replaygain_aac_with_album(
     original_mtime: Option<std::time::SystemTime>,
     album_info: Option<&AacAlbumInfo>,
 ) -> Result<JsonFileResult> {
-    let filename = file
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
+    let filename = get_filename(file);
 
     // Create ReplayGain tags for AAC
     let mut tags = mp4meta::ReplayGainTags::new();

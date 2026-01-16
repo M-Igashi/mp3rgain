@@ -513,25 +513,38 @@ pub fn analyze(file_path: &Path) -> Result<Mp3Analysis> {
     })
 }
 
-/// Apply gain adjustment to MP3 file (lossless)
-///
-/// # Arguments
-/// * `file_path` - Path to MP3 file
-/// * `gain_steps` - Number of 1.5dB steps to apply (positive = louder)
-///
-/// # Returns
-/// * Number of frames modified
-pub fn apply_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
-    if gain_steps == 0 {
-        return Ok(0);
+/// Gain adjustment mode
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum GainMode {
+    /// Saturating mode: clamp to 0-255 range
+    Saturating,
+    /// Wrapping mode: wrap around 0-255 range
+    Wrapping,
+}
+
+/// Apply the gain adjustment to a single gain location
+fn adjust_gain_value(current: u8, steps: i32, mode: GainMode) -> u8 {
+    match mode {
+        GainMode::Saturating => {
+            if steps > 0 {
+                current.saturating_add(steps.min(255) as u8)
+            } else {
+                current.saturating_sub((-steps).min(255) as u8)
+            }
+        }
+        GainMode::Wrapping => {
+            let new_gain = (current as i32 + steps) % 256;
+            ((new_gain + 256) % 256) as u8
+        }
     }
+}
 
-    let mut data =
-        fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
-
+/// Internal function to apply gain to all frames in data
+/// Returns the number of modified frames
+fn apply_gain_to_data(data: &mut [u8], gain_steps: i32, mode: GainMode) -> usize {
+    let audio_end = find_audio_end(data);
+    let mut pos = skip_id3v2(data);
     let mut modified_frames = 0;
-    let audio_end = find_audio_end(&data);
-    let mut pos = skip_id3v2(&data);
 
     while pos + 4 <= audio_end {
         let header = match parse_header(&data[pos..]) {
@@ -558,8 +571,7 @@ pub fn apply_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
         }
 
         // Skip Xing/Info header frames (VBR metadata)
-        // This matches the behavior of the original mp3gain
-        if is_xing_frame(&data, pos, &header) {
+        if is_xing_frame(data, pos, &header) {
             pos = next_pos;
             continue;
         }
@@ -567,18 +579,35 @@ pub fn apply_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
         let locations = calculate_gain_locations(pos, &header);
 
         for loc in &locations {
-            let current_gain = read_gain_at(&data, loc);
-            let new_gain = if gain_steps > 0 {
-                current_gain.saturating_add(gain_steps.min(255) as u8)
-            } else {
-                current_gain.saturating_sub((-gain_steps).min(255) as u8)
-            };
-            write_gain_at(&mut data, loc, new_gain);
+            let current_gain = read_gain_at(data, loc);
+            let new_gain = adjust_gain_value(current_gain, gain_steps, mode);
+            write_gain_at(data, loc, new_gain);
         }
 
         modified_frames += 1;
         pos = next_pos;
     }
+
+    modified_frames
+}
+
+/// Apply gain adjustment to MP3 file (lossless)
+///
+/// # Arguments
+/// * `file_path` - Path to MP3 file
+/// * `gain_steps` - Number of 1.5dB steps to apply (positive = louder)
+///
+/// # Returns
+/// * Number of frames modified
+pub fn apply_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
+    if gain_steps == 0 {
+        return Ok(0);
+    }
+
+    let mut data =
+        fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
+
+    let modified_frames = apply_gain_to_data(&mut data, gain_steps, GainMode::Saturating);
 
     fs::write(file_path, &data)
         .with_context(|| format!("Failed to write: {}", file_path.display()))?;
@@ -643,35 +672,12 @@ pub fn is_mono(file_path: &Path) -> Result<bool> {
     Ok(analysis.channel_mode == "Mono")
 }
 
-/// Apply gain adjustment to a specific channel only (lossless)
-///
-/// # Arguments
-/// * `file_path` - Path to MP3 file
-/// * `channel` - Which channel to adjust (Left or Right)
-/// * `gain_steps` - Number of 1.5dB steps to apply (positive = louder)
-///
-/// # Returns
-/// * Number of frames modified
-///
-/// # Errors
-/// * Returns error if file is mono (no separate channels)
-pub fn apply_gain_channel(file_path: &Path, channel: Channel, gain_steps: i32) -> Result<usize> {
-    if gain_steps == 0 {
-        return Ok(0);
-    }
-
-    // Check if file is mono
-    let analysis = analyze(file_path)?;
-    if analysis.channel_mode == "Mono" {
-        anyhow::bail!("Cannot apply channel-specific gain to mono file. Use -g for mono files.");
-    }
-
-    let mut data =
-        fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
-
+/// Internal function to apply gain to a specific channel in data
+/// Returns the number of modified frames
+fn apply_gain_to_channel_data(data: &mut [u8], channel: Channel, gain_steps: i32) -> usize {
+    let audio_end = find_audio_end(data);
+    let mut pos = skip_id3v2(data);
     let mut modified_frames = 0;
-    let audio_end = find_audio_end(&data);
-    let mut pos = skip_id3v2(&data);
     let target_channel = channel.index();
 
     while pos + 4 <= audio_end {
@@ -699,7 +705,7 @@ pub fn apply_gain_channel(file_path: &Path, channel: Channel, gain_steps: i32) -
         }
 
         // Skip Xing/Info header frames (VBR metadata)
-        if is_xing_frame(&data, pos, &header) {
+        if is_xing_frame(data, pos, &header) {
             pos = next_pos;
             continue;
         }
@@ -714,19 +720,46 @@ pub fn apply_gain_channel(file_path: &Path, channel: Channel, gain_steps: i32) -
             let loc_index = gr * num_channels + target_channel;
             if loc_index < locations.len() {
                 let loc = &locations[loc_index];
-                let current_gain = read_gain_at(&data, loc);
-                let new_gain = if gain_steps > 0 {
-                    current_gain.saturating_add(gain_steps.min(255) as u8)
-                } else {
-                    current_gain.saturating_sub((-gain_steps).min(255) as u8)
-                };
-                write_gain_at(&mut data, loc, new_gain);
+                let current_gain = read_gain_at(data, loc);
+                let new_gain = adjust_gain_value(current_gain, gain_steps, GainMode::Saturating);
+                write_gain_at(data, loc, new_gain);
             }
         }
 
         modified_frames += 1;
         pos = next_pos;
     }
+
+    modified_frames
+}
+
+/// Apply gain adjustment to a specific channel only (lossless)
+///
+/// # Arguments
+/// * `file_path` - Path to MP3 file
+/// * `channel` - Which channel to adjust (Left or Right)
+/// * `gain_steps` - Number of 1.5dB steps to apply (positive = louder)
+///
+/// # Returns
+/// * Number of frames modified
+///
+/// # Errors
+/// * Returns error if file is mono (no separate channels)
+pub fn apply_gain_channel(file_path: &Path, channel: Channel, gain_steps: i32) -> Result<usize> {
+    if gain_steps == 0 {
+        return Ok(0);
+    }
+
+    // Check if file is mono
+    let analysis = analyze(file_path)?;
+    if analysis.channel_mode == "Mono" {
+        anyhow::bail!("Cannot apply channel-specific gain to mono file. Use -g for mono files.");
+    }
+
+    let mut data =
+        fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
+
+    let modified_frames = apply_gain_to_channel_data(&mut data, channel, gain_steps);
 
     fs::write(file_path, &data)
         .with_context(|| format!("Failed to write: {}", file_path.display()))?;
@@ -1204,52 +1237,7 @@ pub fn apply_gain_wrap(file_path: &Path, gain_steps: i32) -> Result<usize> {
     let mut data =
         fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
 
-    let mut modified_frames = 0;
-    let audio_end = find_audio_end(&data);
-    let mut pos = skip_id3v2(&data);
-
-    while pos + 4 <= audio_end {
-        let header = match parse_header(&data[pos..]) {
-            Some(h) => h,
-            None => {
-                pos += 1;
-                continue;
-            }
-        };
-
-        let next_pos = pos + header.frame_size;
-
-        // Validate frame: either next frame starts with sync word,
-        // or this frame ends at/near the audio data boundary
-        let valid_frame = if next_pos + 2 <= audio_end {
-            data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
-        } else {
-            next_pos <= audio_end
-        };
-
-        if !valid_frame {
-            pos += 1;
-            continue;
-        }
-
-        // Skip Xing/Info header frames (VBR metadata)
-        if is_xing_frame(&data, pos, &header) {
-            pos = next_pos;
-            continue;
-        }
-
-        let locations = calculate_gain_locations(pos, &header);
-
-        for loc in &locations {
-            let current_gain = read_gain_at(&data, loc) as i32;
-            // Wrap around instead of clamping
-            let new_gain = ((current_gain + gain_steps) % 256 + 256) % 256;
-            write_gain_at(&mut data, loc, new_gain as u8);
-        }
-
-        modified_frames += 1;
-        pos = next_pos;
-    }
+    let modified_frames = apply_gain_to_data(&mut data, gain_steps, GainMode::Wrapping);
 
     fs::write(file_path, &data)
         .with_context(|| format!("Failed to write: {}", file_path.display()))?;
