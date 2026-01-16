@@ -243,48 +243,41 @@ fn parse_freeform_tag(data: &[u8]) -> Option<FreeformTag> {
         let content_start = cursor.position() as usize;
         let content_size = header.content_size() as usize;
 
-        if content_start + content_size > data.len() {
-            break;
-        }
+        // Bounds check: ensure we don't read past the end of data
+        let content_end = match content_start.checked_add(content_size) {
+            Some(end) if end <= data.len() => end,
+            _ => break,
+        };
 
         match header.box_type {
             MEAN => {
                 // Skip 4-byte version/flags
-                if content_size > 4 {
-                    namespace = Some(
-                        String::from_utf8_lossy(
-                            &data[content_start + 4..content_start + content_size],
-                        )
-                        .to_string(),
-                    );
+                let string_start = content_start.saturating_add(4);
+                if string_start < content_end {
+                    namespace =
+                        Some(String::from_utf8_lossy(&data[string_start..content_end]).to_string());
                 }
             }
             NAME => {
                 // Skip 4-byte version/flags
-                if content_size > 4 {
-                    name = Some(
-                        String::from_utf8_lossy(
-                            &data[content_start + 4..content_start + content_size],
-                        )
-                        .to_string(),
-                    );
+                let string_start = content_start.saturating_add(4);
+                if string_start < content_end {
+                    name =
+                        Some(String::from_utf8_lossy(&data[string_start..content_end]).to_string());
                 }
             }
             DATA => {
                 // Skip 8-byte version/flags + type indicator
-                if content_size > 8 {
-                    value = Some(
-                        String::from_utf8_lossy(
-                            &data[content_start + 8..content_start + content_size],
-                        )
-                        .to_string(),
-                    );
+                let string_start = content_start.saturating_add(8);
+                if string_start < content_end {
+                    value =
+                        Some(String::from_utf8_lossy(&data[string_start..content_end]).to_string());
                 }
             }
             _ => {}
         }
 
-        cursor.set_position((content_start + content_size) as u64);
+        cursor.set_position(content_end as u64);
     }
 
     match (namespace, name, value) {
