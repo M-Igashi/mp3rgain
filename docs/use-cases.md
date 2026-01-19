@@ -4,6 +4,14 @@ This document describes real-world use cases for mp3rgain.
 
 ## Projects Using mp3rgain
 
+### beets - Music Library Manager
+
+[beets](https://beets.io/) is a popular command-line music library manager with a large user base. The ReplayGain plugin's command backend now supports mp3rgain as a secure, modern alternative to mp3gain/aacgain.
+
+- **GitHub**: [beetbox/beets](https://github.com/beetbox/beets)
+- **Integration**: [PR #6289](https://github.com/beetbox/beets/pull/6289)
+- **Documentation**: [ReplayGain plugin docs](https://beets.readthedocs.io/en/latest/plugins/replaygain.html)
+
 ### headroom - DJ Audio Loudness Optimizer
 
 [headroom](https://github.com/M-Igashi/headroom) is an audio loudness analyzer and gain adjustment tool designed for mastering and DJ workflows. It simulates Rekordbox's Auto Gain feature but with a key difference: it identifies files with available headroom and applies gain adjustment without using a limiter.
@@ -165,6 +173,45 @@ done
 - No runtime dependencies
 - Consistent volume across all locations
 - Changes are reversible if needed
+
+### beets - Music Library Manager
+
+[beets](https://beets.io/) is a popular command-line music library manager that organizes and manages your music collection. Its ReplayGain plugin now supports mp3rgain as a backend for volume normalization.
+
+**How to use mp3rgain with beets:**
+
+1. Install mp3rgain on your system
+2. Enable the ReplayGain plugin in your beets config (`~/.config/beets/config.yaml`):
+
+```yaml
+plugins: replaygain
+
+replaygain:
+    backend: command
+    command: mp3rgain
+```
+
+**Benefits of using mp3rgain with beets:**
+
+- **Security**: mp3rgain fixes critical vulnerabilities in the original mp3gain (CVE-2021-34085, CVE-2019-18359)
+- **Modern support**: Works on Windows 11 and macOS with Apple Silicon
+- **CLI compatible**: Same command-line interface as mp3gain
+- **MP3 + AAC support**: Handles both formats like aacgain
+
+**Workflow:**
+
+```bash
+# Import music with ReplayGain analysis
+beet import /path/to/music/
+
+# Update ReplayGain for existing library
+beet replaygain
+
+# Update specific album
+beet replaygain album:"Album Name"
+```
+
+For more details, see the [beets ReplayGain plugin documentation](https://beets.readthedocs.io/en/latest/plugins/replaygain.html).
 
 ---
 
