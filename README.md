@@ -26,7 +26,13 @@ mp3rgain adjusts MP3 volume without re-encoding by modifying the `global_gain` f
 brew install M-Igashi/tap/mp3rgain
 ```
 
-### Windows
+### Windows (recommended)
+
+```powershell
+winget install M-Igashi.mp3rgain
+```
+
+### Windows (alternative)
 
 ```powershell
 scoop bucket add mp3rgain https://github.com/M-Igashi/scoop-bucket
