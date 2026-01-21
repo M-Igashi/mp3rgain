@@ -11,6 +11,8 @@ on:
       - "packages/debian/**"
       - ".github/workflows/test-deb.yml"
 
+permissions: {}
+
 jobs:
   test-deb:
     name: Test on ${{ matrix.distro }}
