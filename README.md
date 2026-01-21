@@ -42,6 +42,10 @@ scoop install mp3rgain
 ### Linux
 
 ```bash
+# Debian/Ubuntu (.deb package from GitHub Releases)
+# Download from: https://github.com/M-Igashi/mp3rgain/releases
+sudo apt install ./mp3rgain_*_amd64.deb
+
 # Arch Linux (AUR)
 yay -S mp3rgain
 

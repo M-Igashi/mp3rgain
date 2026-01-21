@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current Status: v1.4.0 (Production Ready)
+## Current Status: v1.5.0 (Production Ready)
 
 All core functionality complete:
 - [x] MP3 frame parsing (MPEG 1/2/2.5 Layer III)
@@ -75,10 +75,18 @@ All core functionality complete:
 - [x] Improved ReplayGain analysis accuracy (#48)
 - [x] Corrected ReplayGain calculation ~90dB offset (#50)
 
+### v1.5.0 - Debian Packaging
+
+- [x] Man page (docs/man/mp3rgain.1)
+- [x] cargo-deb configuration
+- [x] .deb package build in release workflow
+- [x] .deb package test workflow (Debian 12/13, Ubuntu 22.04/24.04)
+
 ## Upcoming Goals
 
-### v1.5.0 - Distribution Expansion
+### v1.6.0 - Distribution Expansion
 
+- [ ] Official Debian repository (ITP submission)
 - [ ] Homebrew core inclusion (currently in tap)
 - [ ] Fedora/RPM package
 - [ ] Flatpak package
