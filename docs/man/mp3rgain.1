@@ -1,0 +1,267 @@
+.\" mp3rgain - Lossless MP3 volume adjustment
+.\" Copyright (c) 2025 M-Igashi
+.\" Licensed under MIT License
+.TH MP3RGAIN 1 "January 2025" "mp3rgain 1.4.0" "User Commands"
+.SH NAME
+mp3rgain \- lossless MP3 volume adjustment (modern mp3gain replacement)
+.SH SYNOPSIS
+.B mp3rgain
+[\fIOPTIONS\fR] \fIFILE\fR...
+.SH DESCRIPTION
+.B mp3rgain
+adjusts MP3 volume without re-encoding by modifying the
+.I global_gain
+field in each frame's side information.
+This preserves audio quality while achieving permanent volume changes.
+.PP
+All changes are lossless and reversible. Gain changes are stored in APEv2 tags
+to enable undo functionality.
+.PP
+.B mp3rgain
+is a modern, memory-safe replacement for the classic
+.BR mp3gain (1)
+tool, written in Rust. It provides full command-line compatibility with the
+original mp3gain while adding support for ReplayGain analysis and AAC/M4A files.
+.SH OPTIONS
+.SS "Gain Options"
+.TP
+.BI \-g " i"
+Apply gain of
+.I i
+steps. Each step equals 1.5 dB (fixed by MP3 specification).
+Positive values increase volume, negative values decrease it.
+.TP
+.BI \-d " n"
+Apply gain of
+.I n
+dB (rounded to nearest step). Can also be used with
+.B \-r
+or
+.B \-a
+to modify the target dB level relative to 89 dB reference.
+.TP
+.BI \-l " channel gain"
+Apply gain to a specific channel only.
+.I channel
+is 0 for left or 1 for right.
+.I gain
+is the number of steps.
+.TP
+.BI \-m " i"
+Modify suggested gain by integer
+.I i
+steps. Used with
+.B \-r
+or
+.BR \-a .
+.SS "ReplayGain Analysis"
+.TP
+.B \-r
+Analyze and apply Track gain using the ReplayGain 1.0 algorithm.
+Each file is normalized individually to the 89 dB reference level.
+.TP
+.B \-a
+Analyze and apply Album gain using the ReplayGain 1.0 algorithm.
+All files are treated as an album and normalized together.
+.TP
+.B \-e
+Skip album analysis even when processing multiple files.
+Apply track gain only.
+.TP
+.BI \-i " n"
+Specify which audio track to process in multi-track files (default: 0).
+.SS "Undo and Tag Operations"
+.TP
+.B \-u
+Undo gain changes by restoring original values from APEv2 tags.
+.TP
+.BI \-s " mode"
+Stored tag handling mode:
+.RS
+.TP
+.B c
+Check/show stored tag information.
+.TP
+.B d
+Delete stored tag information.
+.TP
+.B s
+Skip (ignore) stored tag information.
+.TP
+.B r
+Force recalculation, ignoring stored tags.
+.TP
+.B i
+Use ID3v2 tags (not fully supported, falls back to APEv2).
+.TP
+.B a
+Use APEv2 tags (default).
+.RE
+.SS "Analysis Options"
+.TP
+.B \-x
+Only find and display the maximum amplitude of the file.
+Does not apply any changes.
+.SS "Behavior Options"
+.TP
+.B \-p
+Preserve original file timestamp after modification.
+.TP
+.B \-c
+Ignore clipping warnings.
+.TP
+.B \-k
+Prevent clipping by automatically limiting gain.
+.TP
+.B \-w
+Wrap gain values around instead of clamping when they exceed the
+valid range (0-255).
+.TP
+.B \-t
+Use a temporary file for writing. Safer but slower.
+Required for some operations.
+.TP
+.B \-f
+Assume MPEG 2 Layer III. Accepted for compatibility but has no effect.
+.TP
+.B \-q
+Quiet mode. Suppress most output.
+.TP
+.B \-R
+Process directories recursively. Finds all MP3, M4A, AAC, and MP4 files.
+.TP
+.BR \-n ", " \-\-dry\-run
+Dry-run mode. Show what would be done without making changes.
+.TP
+.BI \-o " format"
+Output format:
+.BR text " (default),"
+.BR json ", or"
+.BR tsv " (tab-separated values)."
+.TP
+.BR \-v ", " \-\-version
+Show version information and exit.
+.TP
+.BR \-h ", " \-\-help
+Show help message and exit.
+.SH EXAMPLES
+.TP
+.B mp3rgain song.mp3
+Show file information (gain values, amplitude).
+.TP
+.B mp3rgain \-g 2 song.mp3
+Apply +2 steps (+3.0 dB).
+.TP
+.B mp3rgain \-g \-3 song.mp3
+Apply \-3 steps (\-4.5 dB).
+.TP
+.B mp3rgain \-r song.mp3
+Analyze and apply track gain (ReplayGain).
+.TP
+.B mp3rgain \-a *.mp3
+Analyze and apply album gain to all MP3 files.
+.TP
+.B mp3rgain \-u song.mp3
+Undo previous gain changes.
+.TP
+.B mp3rgain \-k \-g 5 song.mp3
+Apply gain with automatic clipping prevention.
+.TP
+.B mp3rgain \-n \-r *.mp3
+Preview track gain changes without modifying files.
+.TP
+.B mp3rgain \-o json song.mp3
+Output analysis results in JSON format.
+.TP
+.B mp3rgain \-R /path/to/music
+Process all audio files in directory recursively.
+.SH GAIN VALUES
+Each gain step corresponds to 1.5 dB, which is fixed by the MP3 specification.
+The
+.I global_gain
+field has a valid range of 0\-255, limiting the effective gain adjustment.
+.PP
+Common gain values:
+.RS
+.nf
+Steps  dB
+   1    +1.5
+   2    +3.0
+   3    +4.5
+  \-1    \-1.5
+  \-2    \-3.0
+.fi
+.RE
+.SH REPLAYGAIN
+.B mp3rgain
+implements the original ReplayGain 1.0 algorithm:
+.IP \(bu 2
+Equal-loudness filter (Yule-Walker + Butterworth high-pass)
+.IP \(bu 2
+RMS calculation in 50ms windows
+.IP \(bu 2
+95th percentile statistical analysis
+.IP \(bu 2
+89 dB reference level
+.PP
+This provides compatibility with the original mp3gain. Note that loudness values
+will differ from tools using EBU R128/LUFS-based analysis (such as foobar2000's
+ReplayGain scanner or ffmpeg's loudnorm filter), which use a \-23 LUFS reference.
+.SH SUPPORTED FORMATS
+.TP
+.B MP3
+Full support for reading, analyzing, and modifying gain.
+.TP
+.B AAC/M4A/MP4
+ReplayGain analysis supported. Gain is stored in metadata tags.
+.SH FILES
+Gain changes and undo information are stored in APEv2 tags appended to MP3 files:
+.TP
+.B REPLAYGAIN_TRACK_GAIN
+Track gain value in dB.
+.TP
+.B REPLAYGAIN_TRACK_PEAK
+Track peak amplitude (0.0\-1.0).
+.TP
+.B REPLAYGAIN_ALBUM_GAIN
+Album gain value in dB.
+.TP
+.B REPLAYGAIN_ALBUM_PEAK
+Album peak amplitude (0.0\-1.0).
+.TP
+.B MP3GAIN_UNDO
+Information required to restore original gain values.
+.TP
+.B MP3GAIN_MINMAX
+Original minimum and maximum gain values.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Error occurred (invalid arguments, file not found, etc.).
+.SH SECURITY
+.B mp3rgain
+is written in Rust, providing memory safety guarantees.
+It addresses known vulnerabilities in the original C implementation
+(CVE-2021-34085, CVE-2019-18359).
+.SH COMPATIBILITY
+.B mp3rgain
+is designed as a drop-in replacement for the original
+.BR mp3gain (1).
+Command-line options are compatible, allowing it to work with existing scripts
+and integrations (e.g., beets replaygain plugin).
+.SH SEE ALSO
+.BR mp3gain (1),
+.BR vorbisgain (1),
+.BR loudgain (1)
+.PP
+Project homepage: https://github.com/M-Igashi/mp3rgain
+.SH AUTHORS
+.B mp3rgain
+is written by M-Igashi.
+.PP
+Original mp3gain by Glen Sawyer.
+.SH LICENSE
+MIT License. See LICENSE file in the source distribution.
