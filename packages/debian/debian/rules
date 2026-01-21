@@ -10,6 +10,7 @@ override_dh_auto_build:
 
 override_dh_auto_install:
 	install -Dm755 target/release/mp3rgain debian/mp3rgain/usr/bin/mp3rgain
+	install -Dm644 docs/man/mp3rgain.1 debian/mp3rgain/usr/share/man/man1/mp3rgain.1
 
 override_dh_auto_test:
 	# Skip integration tests as test fixtures (MP3 files) are not available in source package
