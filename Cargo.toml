@@ -38,3 +38,29 @@ path = "src/main.rs"
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
+
+[package.metadata.deb]
+maintainer = "M-Igashi <M-Igashi@users.noreply.github.com>"
+copyright = "2025, M-Igashi"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+mp3rgain is a modern, memory-safe replacement for the classic mp3gain tool, \
+written in Rust. It adjusts MP3 volume without re-encoding by modifying the \
+global_gain field in each frame's side information, preserving audio quality \
+while achieving permanent volume changes.
+
+Features:
+ * Lossless and reversible volume adjustment
+ * ReplayGain track and album analysis
+ * Full command-line compatibility with original mp3gain
+ * Support for MP3, AAC/M4A formats
+ * Memory-safe implementation (addresses CVE-2021-34085, CVE-2019-18359)"""
+section = "sound"
+priority = "optional"
+depends = "$auto"
+assets = [
+    ["target/release/mp3rgain", "usr/bin/", "755"],
+    ["docs/man/mp3rgain.1", "usr/share/man/man1/", "644"],
+    ["README.md", "usr/share/doc/mp3rgain/README.md", "644"],
+    ["LICENSE", "usr/share/doc/mp3rgain/copyright", "644"],
+]
