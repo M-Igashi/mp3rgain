@@ -1,0 +1,58 @@
+To: scottnhardin@gmail.com
+Cc: sf@debian.org
+Subject: mp3rgain - a memory-safe alternative to mp3gain (re: CVE-2023-49356)
+
+Hi Scott,
+
+I'm the developer of mp3rgain, a Rust rewrite of the classic mp3gain tool.
+I'm reaching out because I'd like to discuss potential collaboration
+regarding the Debian mp3gain package.
+
+## Background
+
+I noticed that mp3gain 1.6.2 still has CVE-2023-49356 (stack buffer overflow
+in WriteMP3GainAPETag) listed as unpatched in the Debian Security Tracker.
+This motivated me to create mp3rgain as a memory-safe alternative.
+
+## About mp3rgain
+
+mp3rgain is a complete rewrite in Rust that provides:
+
+- Full CLI compatibility with original mp3gain (drop-in replacement)
+- Memory safety guarantees (immune to buffer overflow vulnerabilities)
+- ReplayGain track and album analysis
+- Support for MP3 and AAC/M4A formats
+- Active maintenance
+
+Repository: https://github.com/M-Igashi/mp3rgain
+crates.io: https://crates.io/crates/mp3rgain
+Version: 1.5.0 (MIT license)
+
+Pre-built .deb packages are available from GitHub releases, and cargo-deb
+configuration is ready for official Debian packaging.
+
+## Proposal
+
+I'd like to discuss a few options:
+
+1. **Add mp3rgain as a separate package**: mp3rgain could coexist with
+   mp3gain, giving users a choice. I could maintain it with the Debian
+   Rust Team.
+
+2. **Consider mp3rgain as a potential successor**: If maintaining mp3gain
+   becomes burdensome (especially regarding security patches), mp3rgain
+   could eventually provide `Provides: mp3gain` as a drop-in replacement.
+
+3. **Collaboration on security**: If you're working on patching
+   CVE-2023-49356, I'd be happy to help review or test.
+
+I'm not trying to take over your package - I respect your years of
+maintenance work. I just want to offer a potentially useful alternative
+and see if there's a way we can work together.
+
+What are your thoughts?
+
+Best regards,
+M-Igashi
+me@tyna.ninja
+https://github.com/M-Igashi/mp3rgain
