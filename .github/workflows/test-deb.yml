@@ -1,0 +1,70 @@
+name: Test Debian Package
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "packages/debian/**"
+      - ".github/workflows/test-deb.yml"
+  pull_request:
+    paths:
+      - "packages/debian/**"
+      - ".github/workflows/test-deb.yml"
+
+jobs:
+  test-deb:
+    name: Test on ${{ matrix.distro }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian:bookworm
+            name: Debian 12 (bookworm)
+          - distro: debian:trixie
+            name: Debian 13 (trixie)
+          - distro: ubuntu:22.04
+            name: Ubuntu 22.04 LTS
+          - distro: ubuntu:24.04
+            name: Ubuntu 24.04 LTS
+
+    container:
+      image: ${{ matrix.distro }}
+
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y curl ca-certificates
+
+      - name: Download .deb package
+        run: |
+          # Get the latest .deb filename from releases
+          DEB_URL=$(curl -sL https://api.github.com/repos/M-Igashi/mp3rgain/releases/latest \
+            | grep -o 'https://[^"]*\.deb"' | tr -d '"' | head -1)
+          echo "Downloading: $DEB_URL"
+          curl -sL -o mp3rgain.deb "$DEB_URL"
+          ls -la mp3rgain.deb
+
+      - name: Install package
+        run: |
+          apt-get install -y ./mp3rgain.deb
+          echo "Package installed successfully"
+
+      - name: Verify binary
+        run: |
+          which mp3rgain
+          mp3rgain --version
+          mp3rgain --help | head -20
+
+      - name: Verify man page
+        run: |
+          apt-get install -y man-db
+          man -w mp3rgain
+          man mp3rgain | head -30
+
+      - name: Test basic functionality
+        run: |
+          # Create a simple test (just verify the binary runs)
+          mp3rgain --version
+          echo "Basic functionality test passed"
