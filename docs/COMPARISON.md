@@ -252,6 +252,16 @@ If you apply `global_gain` adjustment with mp3rgain and later add ReplayGain tag
 
 For most modern listening setups, **ReplayGain tags are the cleaner solution**. Use `global_gain` adjustment when your playback device doesn't support ReplayGain tags.
 
+## Security
+
+See [Security Documentation](security.md) for detailed CVE analysis.
+
+| Tool | Security Status |
+|------|-----------------|
+| mp3rgain | Memory-safe (Rust), not affected by mp3gain/aacgain CVEs |
+| mp3gain 1.6.2 | Most CVEs fixed, CVE-2023-49356 unpatched |
+| aacgain 2.0.0 | **Still bundles vulnerable mpglibDBL** - CVE-2021-34085 and others unpatched |
+
 ## Known Limitations
 
 ### mp3rgain
@@ -259,12 +269,13 @@ For most modern listening setups, **ReplayGain tags are the cleaner solution**. 
 - ID3v2 tag storage not yet implemented (uses APEv2)
 
 ### aacgain
+- **Security**: Bundles vulnerable mpglibDBL (CVE-2021-34085 unpatched)
 - Limited Windows 11 compatibility
 - Requires C build environment on some platforms
 - faad2 dependency for AAC
 
 ### mp3gain
-- Unmaintained since ~2015
+- CVE-2023-49356 unpatched in 1.6.2
 - Limited modern OS support
 - No AAC support
 

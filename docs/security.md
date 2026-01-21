@@ -1,34 +1,38 @@
 # Security
 
-mp3rgain is a complete rewrite of the original mp3gain in Rust, eliminating known security vulnerabilities present in the C implementation.
+mp3rgain is a complete rewrite of the original mp3gain in Rust, providing memory safety guarantees and eliminating entire classes of vulnerabilities.
 
-## Known Vulnerabilities in Original mp3gain
+## Security Vulnerabilities in mp3gain and aacgain
 
-The original mp3gain has several unpatched security vulnerabilities:
+### mp3gain
 
-### CVE-2021-34085 (Critical)
+The original mp3gain has had numerous security vulnerabilities over its history. Many have been patched in recent versions (1.6.x) by replacing the bundled mpglibDBL with proper linking to the system libmpg123 library.
 
-- **CVSS Score**: 9.8 (Critical)
-- **Type**: Out-of-bounds Read (CWE-125)
-- **Location**: `III_dequantize_sample` function in `mpglibDBL/layer3.c`
-- **Impact**: Remote code execution, application crash
-- **Details**: A read access violation allows remote attackers to crash the application or potentially execute arbitrary code through a malformed MP3 file.
+| CVE | CVSS | Type | mp3gain 1.6.2 |
+|-----|------|------|---------------|
+| CVE-2021-34085 | 9.8 (Critical) | Out-of-bounds Read in `III_dequantize_sample` | **Fixed** |
+| CVE-2019-18359 | 5.5 (Medium) | Buffer over-read in `ReadMP3APETag` | **Fixed** (distro patches) |
+| CVE-2017-9872 | - | Buffer over-read in `III_dequantize_sample` | **Fixed** |
+| CVE-2017-14409 | 7.8 (High) | Buffer over-read in `III_i_stereo` | **Fixed** |
+| CVE-2018-10778 | - | Heap-based buffer over-read in `II_step_one` | **Fixed** |
+| CVE-2023-49356 | 7.5 (High) | Stack buffer overflow in `WriteMP3GainAPETag` | **Unpatched** |
 
-### CVE-2019-18359 (Medium)
+CVE-2023-49356 was discovered in December 2023 and affects mp3gain v1.6.2. It allows denial of service via specially crafted files.
 
-- **CVSS Score**: 5.5 (Medium)
-- **Type**: Out-of-bounds Read (CWE-125)
-- **Location**: `ReadMP3APETag` function in `apetag.c`
-- **Impact**: Denial of service (application crash)
-- **Details**: A heap-based buffer over-read in APE tag parsing causes crashes when processing malformed files.
+### aacgain
 
-### Other Known CVEs
+[aacgain](https://github.com/dgilman/aacgain) is a fork of mp3gain that adds AAC support. Unlike mp3gain 1.6.x, **aacgain still bundles the vulnerable mpglibDBL library** and has not migrated to libmpg123.
 
-- **CVE-2017-9872**: Buffer over-read in `III_dequantize_sample`
-- **CVE-2017-14409**: Buffer over-read in `III_i_stereo`
-- **CVE-2018-10778**: Heap-based buffer over-read in `II_step_one`
+| CVE | CVSS | Type | aacgain 2.0.0 |
+|-----|------|------|---------------|
+| CVE-2021-34085 | 9.8 (Critical) | Out-of-bounds Read in `III_dequantize_sample` | **Unpatched** |
+| CVE-2017-9872 | - | Buffer over-read in `III_dequantize_sample` | **Unpatched** |
+| CVE-2017-14409 | 7.8 (High) | Buffer over-read in `III_i_stereo` | **Unpatched** |
+| CVE-2017-14411 | - | Stack buffer overflow in `copy_mp` | **Unpatched** |
 
-## Why mp3rgain Is Not Affected
+The aacgain project bundles `mpglibDBL` (an outdated fork of mpglib from mpg123) and has not applied the security fixes that mp3gain 1.6.x received.
+
+## Why mp3rgain Is Safe
 
 ### 1. Different Architecture
 
@@ -37,10 +41,14 @@ mp3rgain uses a fundamentally different approach:
 | Operation | Original mp3gain | mp3rgain |
 |-----------|------------------|----------|
 | Gain adjustment | Full MP3 decode/encode via mpglib | Direct binary manipulation of `global_gain` field |
-| ReplayGain analysis | mpglib (C library) | symphonia (pure Rust) |
-| APE tag handling | Custom C code | Rust implementation |
+| ReplayGain analysis | mpglib/libmpg123 (C library) | symphonia (pure Rust) |
+| APE tag handling | Custom C code (apetag.c) | Rust implementation |
 
-The vulnerabilities in the original mp3gain exist in the `mpglibDBL` library, which mp3rgain does not use at all.
+The historical vulnerabilities in mp3gain existed in two places:
+1. **mpglibDBL** - A bundled, vulnerable fork of mpg123 (fixed in 1.6.x by linking to system libmpg123)
+2. **apetag.c** - Custom APE tag handling code (CVE-2023-49356 still affects this)
+
+mp3rgain uses neither of these components.
 
 ### 2. Memory Safety
 
@@ -89,7 +97,10 @@ Please do not open public issues for security vulnerabilities.
 
 ## References
 
-- [CVE-2021-34085](https://nvd.nist.gov/vuln/detail/CVE-2021-34085)
-- [CVE-2019-18359](https://nvd.nist.gov/vuln/detail/CVE-2019-18359)
+- [CVE-2021-34085](https://nvd.nist.gov/vuln/detail/CVE-2021-34085) - Fixed in mp3gain 1.6.2, unpatched in aacgain
+- [CVE-2019-18359](https://nvd.nist.gov/vuln/detail/CVE-2019-18359) - Fixed in mp3gain 1.6.2-2
+- [CVE-2023-49356](https://nvd.nist.gov/vuln/detail/CVE-2023-49356) - Unpatched in mp3gain 1.6.2
+- [Debian mp3gain Security Tracker](https://security-tracker.debian.org/tracker/source-package/mp3gain)
+- [aacgain repository](https://github.com/dgilman/aacgain) - Contains bundled mpglibDBL
 - [symphonia - Pure Rust audio decoding](https://github.com/pdeljanov/Symphonia)
 - [Rust Memory Safety](https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html)

@@ -129,7 +129,7 @@ replaygain:
 
 ## Documentation
 
-- [Security](docs/security.md) - Security improvements over original mp3gain (CVE-2021-34085, CVE-2019-18359)
+- [Security](docs/security.md) - Memory safety and CVE analysis (CVE-2023-49356, etc.)
 - [Compatibility Report](docs/compatibility-report.md) - Verification against original mp3gain
 - [Technical Comparison](docs/COMPARISON.md) - Comparison with similar tools
 

@@ -193,7 +193,7 @@ replaygain:
 
 **Benefits of using mp3rgain with beets:**
 
-- **Security**: mp3rgain fixes critical vulnerabilities in the original mp3gain (CVE-2021-34085, CVE-2019-18359)
+- **Security**: mp3rgain is memory-safe (Rust) and not affected by mp3gain CVEs including CVE-2023-49356
 - **Modern support**: Works on Windows 11 and macOS with Apple Silicon
 - **CLI compatible**: Same command-line interface as mp3gain
 - **MP3 + AAC support**: Handles both formats like aacgain
