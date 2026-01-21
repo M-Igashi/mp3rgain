@@ -1,0 +1,51 @@
+To: submit@bugs.debian.org
+Subject: ITP: mp3rgain -- Lossless MP3 volume adjustment tool written in Rust
+
+Package: wnpp
+Severity: wishlist
+Owner: me@tyna.ninja
+X-Debbugs-Cc: debian-devel@lists.debian.org, debian-rust@lists.debian.org
+
+* Package name    : mp3rgain
+  Version         : 1.5.0
+  Upstream Contact: M-Igashi <me@tyna.ninja>
+* URL             : https://github.com/M-Igashi/mp3rgain
+* License         : MIT
+  Programming Lang: Rust
+  Description     : Lossless MP3 volume adjustment - a modern mp3gain replacement
+
+mp3rgain is a modern, memory-safe replacement for the classic mp3gain tool,
+written in Rust. It adjusts MP3 volume without re-encoding by modifying the
+global_gain field in each frame's side information, preserving audio quality
+while achieving permanent volume changes.
+
+Features:
+ - Lossless and reversible volume adjustment
+ - ReplayGain track and album analysis
+ - Full command-line compatibility with original mp3gain
+ - Support for MP3, AAC/M4A formats
+ - Memory-safe implementation
+
+Relationship to mp3gain:
+
+mp3gain (1.6.2) is currently available in Debian repositories. However,
+according to the Debian Security Tracker, it has multiple known security
+vulnerabilities including CVE-2023-49356 (stack buffer overflow, unpatched).
+
+mp3rgain is a separate package that provides a memory-safe alternative:
+ - Written in Rust with compile-time memory safety guarantees
+ - Uses symphonia (pure Rust) for audio decoding instead of C libraries
+ - Implements APE tag handling in safe Rust
+ - Maintains full CLI compatibility with the original mp3gain
+
+This is intended as a complementary package, not a replacement for mp3gain.
+Users who prefer a memory-safe implementation can choose mp3rgain.
+
+Packaging Notes:
+
+This package is published on crates.io (https://crates.io/crates/mp3rgain)
+and can be built using debcargo. Pre-built .deb packages are also available
+from GitHub releases for testing.
+
+I intend to maintain this package with the Debian Rust Team. If you are
+interested in co-maintaining or sponsoring, please contact me.

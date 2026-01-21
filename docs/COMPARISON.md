@@ -7,9 +7,9 @@ This document provides a detailed comparison between mp3rgain and the original a
 | | mp3rgain | aacgain | mp3gain |
 |---|----------|---------|---------|
 | **Language** | Rust | C | C |
-| **Last Update** | Active (2026) | 2022 | ~2015 |
+| **Last Update** | Active (2026) | 2022 | 2018 |
 | **License** | MIT | LGPL | LGPL |
-| **Version** | 1.3.0 | 1.8.2 | 1.5.2.1 |
+| **Version** | 1.5.0 | 1.8.2 | 1.6.2 |
 | **Repository** | [M-Igashi/mp3rgain](https://github.com/M-Igashi/mp3rgain) | [dgilman/aacgain](https://github.com/dgilman/aacgain) | SourceForge |
 
 ## Feature Comparison
