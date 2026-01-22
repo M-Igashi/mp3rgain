@@ -168,7 +168,8 @@ impl Mp3rgainApp {
 
             match replaygain::analyze_track(&file.path) {
                 Ok(result) => {
-                    file.volume = Some(result.loudness_db);
+                    // Display volume relative to ReplayGain reference (89 dB) for MP3Gain compatibility
+                    file.volume = Some(REPLAYGAIN_REFERENCE_DB - result.gain_db);
                     file.clipping = result.peak >= 1.0;
                     let gain = self.target_volume - REPLAYGAIN_REFERENCE_DB + result.gain_db;
                     file.track_gain = Some(gain);
@@ -212,14 +213,16 @@ impl Mp3rgainApp {
 
                 for (i, file) in self.files.iter_mut().enumerate() {
                     if let Some(track_result) = result.tracks.get(i) {
-                        file.volume = Some(track_result.loudness_db);
+                        // Display volume relative to ReplayGain reference (89 dB) for MP3Gain compatibility
+                        file.volume = Some(REPLAYGAIN_REFERENCE_DB - track_result.gain_db);
                         file.clipping = track_result.peak >= 1.0;
                         let track_gain =
                             self.target_volume - REPLAYGAIN_REFERENCE_DB + track_result.gain_db;
                         file.track_gain = Some(track_gain);
                         file.track_clip = Self::would_clip(track_result.peak, track_gain);
                     }
-                    file.album_volume = Some(result.album_loudness_db);
+                    // Display album volume relative to ReplayGain reference (89 dB) for MP3Gain compatibility
+                    file.album_volume = Some(REPLAYGAIN_REFERENCE_DB - result.album_gain_db);
                     file.album_gain = Some(album_gain);
                     file.album_clip = Self::would_clip(result.album_peak, album_gain);
                     file.status = FileStatus::Analyzed;
