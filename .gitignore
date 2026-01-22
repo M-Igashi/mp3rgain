@@ -14,3 +14,5 @@
 **/strategy*.md
 **/NOTES.md
 **/notes*.md
+docs/debian/
+.gitignore
