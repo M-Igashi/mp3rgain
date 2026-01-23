@@ -2119,7 +2119,7 @@ dependencies = [
 
 [[package]]
 name = "mp3rgain"
-version = "1.2.0"
+version = "1.5.0"
 dependencies = [
  "anyhow",
  "colored",
@@ -2131,7 +2131,7 @@ dependencies = [
 
 [[package]]
 name = "mp3rgui"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "eframe",
  "egui",
