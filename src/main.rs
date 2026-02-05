@@ -524,15 +524,14 @@ fn run(mut opts: Options) -> Result<()> {
         return cmd_track_gain(&opts.files, &opts);
     }
 
-    if opts.channel_gain.is_some() {
+    if let Some((channel, steps)) = opts.channel_gain {
         // -l: apply channel-specific gain
-        let (channel, steps) = opts.channel_gain.unwrap();
         return cmd_apply_channel(&opts.files, channel, steps, &opts);
     }
 
-    if opts.gain_steps.is_some() {
+    if let Some(steps) = opts.gain_steps {
         // -g: apply fixed gain steps
-        cmd_apply(&opts.files, opts.gain_steps.unwrap(), &opts)
+        cmd_apply(&opts.files, steps, &opts)
     } else {
         // Default: analyze files (mp3gain compatible)
         // With -d modifier, perform ReplayGain analysis
