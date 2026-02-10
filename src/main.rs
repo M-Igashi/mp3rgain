@@ -1747,17 +1747,28 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
 
     // Check if this is an M4A/AAC file - if so, show appropriate message
     if mp4meta::is_mp4_file(file) {
+        let codec = mp4meta::detect_mp4_audio_codec(file);
+        let is_alac = matches!(codec, Some(mp4meta::Mp4AudioCodec::Alac));
+        let format_str = if is_alac { "M4A/ALAC" } else { "M4A/AAC" };
+
         match opts.output_format {
             OutputFormat::Text => {
                 if opts.quiet {
-                    println!("{}\tM4A/AAC\t-\t-\t-\t-\t-", filename);
+                    println!("{}\t{}\t-\t-\t-\t-\t-", filename, format_str);
                 } else {
                     println!("{}", filename.cyan().bold());
-                    println!("  Format:      M4A/AAC");
-                    println!(
-                        "  {}",
-                        "Note: Use -r or -a for ReplayGain analysis".yellow()
-                    );
+                    println!("  Format:      {}", format_str);
+                    if is_alac {
+                        println!(
+                            "  {}",
+                            "ALAC files are not supported for gain adjustment".yellow()
+                        );
+                    } else {
+                        println!(
+                            "  {}",
+                            "Note: Use -r or -a for ReplayGain analysis".yellow()
+                        );
+                    }
                     println!();
                 }
             }
