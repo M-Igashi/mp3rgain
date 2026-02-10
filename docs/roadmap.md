@@ -96,6 +96,21 @@ All core functionality complete:
 
 ## Upcoming Goals
 
+### v1.7.0 - Library API Stabilization (Issue #68)
+
+- [ ] Add `#[non_exhaustive]` to all public enums and structs
+- [ ] Replace `anyhow::Result` with custom error types (`thiserror`)
+- [ ] Make `Mp3Analysis.mpeg_version` / `channel_mode` proper enums instead of `String`
+- [ ] Replace `find_max_amplitude` tuple return with a named struct
+- [ ] Review public struct fields - consider private fields with accessor methods
+- [ ] Unify ReplayGain tag key constants across modules
+- [ ] Add `Display` trait implementations to public types
+- [ ] Add `Serialize` / `Deserialize` behind a feature flag
+- [ ] Add `ApeTag::iter()` method
+- [ ] Add missing standard trait implementations (`PartialEq`, `Eq`, `Hash`)
+- [ ] Consolidate `apply_gain*` function variants into builder/options pattern
+- [ ] Organize flat `lib.rs` exports into submodules
+
 ### v2.0.0 - AAC Lossless Bitstream Gain (Issue #64)
 
 - [ ] AAC bitstream parser for locating global_gain fields within MP4 samples
@@ -113,7 +128,6 @@ All core functionality complete:
 - [ ] Flatpak package
 - [ ] FLAC support
 - [ ] Ogg Vorbis support
-- [ ] Library API stabilization
 - [ ] Integration with music players/taggers
 
 ## Community Goals
