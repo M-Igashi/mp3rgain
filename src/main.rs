@@ -10,10 +10,10 @@ use mp3rgain::mp4meta;
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{
     analyze, apply_gain, apply_gain_channel_with_undo, apply_gain_with_undo,
-    apply_gain_with_undo_wrap, apply_gain_wrap, db_to_steps, delete_ape_tag, find_max_amplitude,
-    read_ape_tag_from_file, steps_to_db, undo_gain, Channel, GAIN_STEP_DB, TAG_MP3GAIN_MINMAX,
-    TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
-    TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
+    apply_gain_with_undo_wrap, apply_gain_wrap, db_to_steps, delete_ape_tag,
+    find_max_amplitude_detailed, read_ape_tag_from_file, steps_to_db, undo_gain, Channel,
+    GAIN_STEP_DB, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN,
+    TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use serde::Serialize;
 use std::env;
@@ -597,8 +597,11 @@ fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
         let filename = get_filename(file);
         progress_set_message(&pb, filename);
 
-        match find_max_amplitude(file) {
-            Ok((max_amp, max_gain, min_gain)) => {
+        match find_max_amplitude_detailed(file) {
+            Ok(amp_result) => {
+                let max_amp = amp_result.max_amplitude;
+                let max_gain = amp_result.max_global_gain;
+                let min_gain = amp_result.min_global_gain;
                 // Convert to PCM scale (like mp3gain: 0-32768+)
                 let max_pcm_sample = max_amp * 32768.0;
                 let headroom_db = if max_amp > 0.0 {
@@ -1057,6 +1060,7 @@ fn cmd_apply_channel(
     let channel_name = match channel {
         Channel::Left => "left",
         Channel::Right => "right",
+        _ => "unknown",
     };
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
@@ -1625,6 +1629,7 @@ fn process_apply_channel(
     let channel_name = match channel {
         Channel::Left => "left",
         Channel::Right => "right",
+        _ => "unknown",
     };
 
     // Save original timestamp if needed
@@ -1704,8 +1709,9 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
         match replaygain::analyze_track_with_index(file, opts.track_index) {
             Ok(rg_result) => {
                 // Get max amplitude info
-                let (max_amp, max_gain, min_gain) =
-                    find_max_amplitude(file).unwrap_or((1.0, 255, 0));
+                let (max_amp, max_gain, min_gain) = find_max_amplitude_detailed(file)
+                    .map(|r| (r.max_amplitude, r.max_global_gain, r.min_global_gain))
+                    .unwrap_or((1.0, 255, 0));
 
                 // Calculate gain with modifier (mp3gain compatible: -d modifies suggested gain)
                 let gain_db = rg_result.gain_db + opts.gain_modifier_db;
@@ -2093,6 +2099,7 @@ fn process_apply_replaygain_with_album(
             let format_info = match result.file_type {
                 AudioFileType::Aac => " (tags only)",
                 AudioFileType::Mp3 => "",
+                _ => "",
             };
             println!(
                 "  {} [DRY RUN] {} (would apply {:+.1} dB, {} steps{})",

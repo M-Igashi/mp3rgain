@@ -98,16 +98,22 @@ All core functionality complete:
 
 ### v1.7.0 - Library API Stabilization (Issue #68)
 
-- [ ] Add `#[non_exhaustive]` to all public enums and structs
+**Non-breaking additions (shipped in v1.7.0):**
+- [x] Add `#[non_exhaustive]` to all public enums and structs
+- [x] Add missing standard trait implementations (`PartialEq`, `Eq`, `Hash`)
+- [x] Add `Display` trait implementations to all public types
+- [x] Add `Serialize` / `Deserialize` behind a `serde` feature flag
+- [x] Add `ApeTag::iter()` and `ApeTag::len()` methods
+- [x] Make `MpegVersion` / `ChannelMode` enums public with typed accessors on `Mp3Analysis`
+- [x] Add `MaxAmplitudeResult` struct and `find_max_amplitude_detailed()` function
+- [x] Add `Channel::other()` convenience method
+- [x] Remove unnecessary `pub` from `filter_coeffs` internal constants
+
+**Breaking changes (deferred to v2.0):**
 - [ ] Replace `anyhow::Result` with custom error types (`thiserror`)
-- [ ] Make `Mp3Analysis.mpeg_version` / `channel_mode` proper enums instead of `String`
-- [ ] Replace `find_max_amplitude` tuple return with a named struct
+- [ ] Change `Mp3Analysis.mpeg_version` / `channel_mode` from `String` to enum
+- [ ] Remove old `find_max_amplitude` tuple return
 - [ ] Review public struct fields - consider private fields with accessor methods
-- [ ] Unify ReplayGain tag key constants across modules
-- [ ] Add `Display` trait implementations to public types
-- [ ] Add `Serialize` / `Deserialize` behind a feature flag
-- [ ] Add `ApeTag::iter()` method
-- [ ] Add missing standard trait implementations (`PartialEq`, `Eq`, `Hash`)
 - [ ] Consolidate `apply_gain*` function variants into builder/options pattern
 - [ ] Organize flat `lib.rs` exports into submodules
 
