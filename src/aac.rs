@@ -199,15 +199,14 @@ fn read_u64_be(data: &[u8], offset: usize) -> u64 {
     ])
 }
 
-/// Build sample table: for each AAC sample, compute (file_offset, size)
-fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize, usize)> {
-    // Navigate moov -> trak -> mdia -> minf -> stbl
+/// Build sample table: for each AAC sample, compute (file_offset, size).
+/// Returns (sample_entries, stsd_pos).
+fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
     let (moov_pos, moov_header) =
         mp4meta::find_box(data, mp4meta::MOOV).ok_or_else(|| anyhow::anyhow!("no moov box"))?;
     let moov_start = moov_pos + moov_header.header_size as usize;
     let moov_size = moov_header.content_size() as usize;
 
-    // Find first audio track (look for mp4a in stsd)
     let (stbl_start, stbl_size, stsd_pos) = find_audio_stbl(data, moov_start, moov_size)?;
 
     // Parse STSZ
@@ -285,7 +284,7 @@ fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize, usize)> {
         }
     }
 
-    Ok((entries, stsd_pos, stbl_start))
+    Ok((entries, stsd_pos))
 }
 
 fn find_audio_stbl(
@@ -293,7 +292,6 @@ fn find_audio_stbl(
     moov_start: usize,
     moov_size: usize,
 ) -> Result<(usize, usize, usize)> {
-    // Search through trak boxes for one with mp4a in stsd
     let mut search_pos = moov_start;
     let moov_end = moov_start + moov_size;
 
@@ -307,48 +305,59 @@ fn find_audio_stbl(
             Some(x) => x,
             None => break,
         };
-        let trak_start = trak_pos + trak_header.header_size as usize;
-        let trak_size = trak_header.content_size() as usize;
 
-        // Navigate: trak -> mdia -> minf -> stbl -> stsd
-        if let Some((mdia_pos, mdia_h)) =
-            mp4meta::find_box_in_container(data, trak_start, trak_size, mp4meta::MDIA)
-        {
-            let mdia_start = mdia_pos + mdia_h.header_size as usize;
-            let mdia_size = mdia_h.content_size() as usize;
-
-            if let Some((minf_pos, minf_h)) =
-                mp4meta::find_box_in_container(data, mdia_start, mdia_size, mp4meta::MINF)
-            {
-                let minf_start = minf_pos + minf_h.header_size as usize;
-                let minf_size = minf_h.content_size() as usize;
-
-                if let Some((stbl_pos, stbl_h)) =
-                    mp4meta::find_box_in_container(data, minf_start, minf_size, mp4meta::STBL)
-                {
-                    let stbl_start = stbl_pos + stbl_h.header_size as usize;
-                    let stbl_size = stbl_h.content_size() as usize;
-
-                    if let Some((stsd_pos, stsd_h)) =
-                        mp4meta::find_box_in_container(data, stbl_start, stbl_size, mp4meta::STSD)
-                    {
-                        // Check if this is mp4a
-                        let entries_start = stsd_pos + stsd_h.header_size as usize + 8;
-                        if entries_start + 8 <= data.len() {
-                            let entry_type = read_u32_be(data, entries_start + 4);
-                            if entry_type == mp4meta::MP4A {
-                                return Ok((stbl_start, stbl_size, stsd_pos));
-                            }
-                        }
-                    }
-                }
-            }
+        if let Some(result) = find_aac_stbl_in_trak(data, &trak_header, trak_pos) {
+            return Ok(result);
         }
 
         search_pos = trak_pos + trak_header.size as usize;
     }
 
     anyhow::bail!("no AAC audio track found");
+}
+
+/// Navigate trak -> mdia -> minf -> stbl -> stsd and check for mp4a codec.
+/// Returns (stbl_start, stbl_size, stsd_pos) if this trak contains AAC audio.
+fn find_aac_stbl_in_trak(
+    data: &[u8],
+    trak_header: &mp4meta::BoxHeader,
+    trak_pos: usize,
+) -> Option<(usize, usize, usize)> {
+    let trak_start = trak_pos + trak_header.header_size as usize;
+    let trak_size = trak_header.content_size() as usize;
+
+    let (mdia_pos, mdia_h) =
+        mp4meta::find_box_in_container(data, trak_start, trak_size, mp4meta::MDIA)?;
+    let (minf_pos, minf_h) = mp4meta::find_box_in_container(
+        data,
+        mdia_pos + mdia_h.header_size as usize,
+        mdia_h.content_size() as usize,
+        mp4meta::MINF,
+    )?;
+    let (stbl_pos, stbl_h) = mp4meta::find_box_in_container(
+        data,
+        minf_pos + minf_h.header_size as usize,
+        minf_h.content_size() as usize,
+        mp4meta::STBL,
+    )?;
+
+    let stbl_start = stbl_pos + stbl_h.header_size as usize;
+    let stbl_size = stbl_h.content_size() as usize;
+
+    let (stsd_pos, stsd_h) =
+        mp4meta::find_box_in_container(data, stbl_start, stbl_size, mp4meta::STSD)?;
+
+    let entries_start = stsd_pos + stsd_h.header_size as usize + 8;
+    if entries_start + 8 > data.len() {
+        return None;
+    }
+
+    let entry_type = read_u32_be(data, entries_start + 4);
+    if entry_type == mp4meta::MP4A {
+        Some((stbl_start, stbl_size, stsd_pos))
+    } else {
+        None
+    }
 }
 
 fn parse_chunk_offsets(data: &[u8], stbl_start: usize, stbl_size: usize) -> Result<Vec<u64>> {
@@ -404,16 +413,19 @@ fn parse_audio_config(data: &[u8], stsd_pos: usize) -> Result<u32> {
     let mp4a_start = entries_start;
     let mp4a_end = mp4a_start + mp4a_size;
 
-    // sample_rate at fixed offset within mp4a box
-    let sr_offset = mp4a_start + 8 + 6 + 2 + 2 + 2 + 4 + 2 + 2 + 2 + 2;
+    // sample_rate is at byte 32 within mp4a box:
+    //   size(4) + type(4) + reserved(6) + data_ref_index(2) + version(2) +
+    //   revision(2) + vendor(4) + channel_count(2) + sample_size(2) +
+    //   compression_id(2) + packet_size(2) = 32
+    let sr_offset = mp4a_start + 32;
     if sr_offset + 4 > data.len() {
         anyhow::bail!("mp4a too short for sample rate");
     }
     let sr_fixed = read_u32_be(data, sr_offset);
     let sample_rate = sr_fixed >> 16; // 16.16 fixed point -> integer part
 
-    // Try to get more precise sample rate from esds AudioSpecificConfig
-    let esds_search_start = mp4a_start + 8 + 28;
+    // Child boxes (esds, etc.) start after the 36-byte mp4a fixed fields
+    let esds_search_start = mp4a_start + 36;
     if esds_search_start < mp4a_end {
         if let Some(asc_sr) = parse_esds_sample_rate(data, esds_search_start, mp4a_end) {
             return Ok(asc_sr);
@@ -625,35 +637,21 @@ fn parse_scale_factor_data(
     for g in 0..info.window_groups {
         for sfb in 0..info.max_sfb {
             let cb = section.sfb_cb[g][sfb];
-            match cb {
-                ZERO_HCB => {} // no bits
-                INTENSITY_HCB | INTENSITY_HCB2 => {
-                    decode_huffman(
-                        reader,
-                        &aac_codebooks::SCF_CB_LENS,
-                        &aac_codebooks::SCF_CB_CODES,
-                    )?;
-                }
-                NOISE_HCB => {
-                    if noise_pcm_flag {
-                        reader.read_bits(9)?; // noise PCM
-                        noise_pcm_flag = false;
-                    } else {
-                        decode_huffman(
-                            reader,
-                            &aac_codebooks::SCF_CB_LENS,
-                            &aac_codebooks::SCF_CB_CODES,
-                        )?;
-                    }
-                }
-                _ => {
-                    decode_huffman(
-                        reader,
-                        &aac_codebooks::SCF_CB_LENS,
-                        &aac_codebooks::SCF_CB_CODES,
-                    )?;
-                }
+            if cb == ZERO_HCB {
+                continue;
             }
+            if cb == NOISE_HCB && noise_pcm_flag {
+                reader.read_bits(9)?;
+                noise_pcm_flag = false;
+                continue;
+            }
+            // INTENSITY, NOISE (after first), and regular scalefactors all
+            // use the same Huffman codebook
+            decode_huffman(
+                reader,
+                &aac_codebooks::SCF_CB_LENS,
+                &aac_codebooks::SCF_CB_CODES,
+            )?;
         }
     }
     Ok(())
@@ -673,12 +671,11 @@ fn parse_spectral_data(
         for _w in 0..info.window_group_len[g] {
             for sfb in 0..info.max_sfb {
                 let cb_idx = section.sfb_cb[g][sfb];
-                if cb_idx == ZERO_HCB
-                    || cb_idx == NOISE_HCB
-                    || cb_idx == INTENSITY_HCB
-                    || cb_idx == INTENSITY_HCB2
-                {
-                    continue; // no spectral data
+                if matches!(
+                    cb_idx,
+                    ZERO_HCB | NOISE_HCB | INTENSITY_HCB | INTENSITY_HCB2
+                ) {
+                    continue;
                 }
 
                 let start = bands[sfb];
@@ -974,7 +971,7 @@ pub fn analyze_aac_gains(file_path: &Path) -> Result<AacAnalysis> {
         anyhow::bail!("not an MP4 file: {}", file_path.display());
     }
 
-    let (sample_table, stsd_pos, _stbl_start) = build_sample_table(&data)?;
+    let (sample_table, stsd_pos) = build_sample_table(&data)?;
     let sample_rate = parse_audio_config(&data, stsd_pos)?;
 
     let sample_count = sample_table.len() as u32;
