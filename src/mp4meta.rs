@@ -34,14 +34,14 @@ const ITUNES_NAMESPACE: &str = "com.apple.iTunes";
 /// MP4 box/atom types
 #[allow(dead_code)]
 const FTYP: u32 = u32::from_be_bytes(*b"ftyp");
-const MOOV: u32 = u32::from_be_bytes(*b"moov");
+pub(crate) const MOOV: u32 = u32::from_be_bytes(*b"moov");
 const UDTA: u32 = u32::from_be_bytes(*b"udta");
 const META: u32 = u32::from_be_bytes(*b"meta");
 const ILST: u32 = u32::from_be_bytes(*b"ilst");
 #[allow(dead_code)]
 const FREE: u32 = u32::from_be_bytes(*b"free");
 #[allow(dead_code)]
-const MDAT: u32 = u32::from_be_bytes(*b"mdat");
+pub(crate) const MDAT: u32 = u32::from_be_bytes(*b"mdat");
 #[allow(dead_code)]
 const HDLR: u32 = u32::from_be_bytes(*b"hdlr");
 const FREEFORM: u32 = u32::from_be_bytes(*b"----");
@@ -51,14 +51,14 @@ const DATA: u32 = u32::from_be_bytes(*b"data");
 
 /// MP4 box header
 #[derive(Debug, Clone)]
-struct BoxHeader {
-    size: u64,
-    box_type: u32,
-    header_size: u8, // 8 for normal, 16 for extended size
+pub(crate) struct BoxHeader {
+    pub(crate) size: u64,
+    pub(crate) box_type: u32,
+    pub(crate) header_size: u8, // 8 for normal, 16 for extended size
 }
 
 impl BoxHeader {
-    fn read<R: Read>(reader: &mut R) -> Result<Option<Self>> {
+    pub(crate) fn read<R: Read>(reader: &mut R) -> Result<Option<Self>> {
         let mut buf = [0u8; 8];
         match reader.read_exact(&mut buf) {
             Ok(()) => {}
@@ -88,7 +88,7 @@ impl BoxHeader {
         }))
     }
 
-    fn content_size(&self) -> u64 {
+    pub(crate) fn content_size(&self) -> u64 {
         if self.size == 0 {
             0 // Unknown/extends to EOF
         } else {
@@ -198,7 +198,7 @@ impl ReplayGainTags {
 }
 
 /// Find box position in data
-fn find_box(data: &[u8], box_type: u32) -> Option<(usize, BoxHeader)> {
+pub(crate) fn find_box(data: &[u8], box_type: u32) -> Option<(usize, BoxHeader)> {
     let mut cursor = Cursor::new(data);
 
     while let Ok(Some(header)) = BoxHeader::read(&mut cursor) {
@@ -224,7 +224,7 @@ fn find_box(data: &[u8], box_type: u32) -> Option<(usize, BoxHeader)> {
 }
 
 /// Find box within a container (searches inside the container's content)
-fn find_box_in_container(
+pub(crate) fn find_box_in_container(
     data: &[u8],
     container_start: usize,
     container_size: usize,
@@ -868,12 +868,12 @@ fn update_chunk_offsets(
     Ok(())
 }
 
-const STCO: u32 = u32::from_be_bytes(*b"stco");
-const CO64: u32 = u32::from_be_bytes(*b"co64");
-const TRAK: u32 = u32::from_be_bytes(*b"trak");
-const MDIA: u32 = u32::from_be_bytes(*b"mdia");
-const MINF: u32 = u32::from_be_bytes(*b"minf");
-const STBL: u32 = u32::from_be_bytes(*b"stbl");
+pub(crate) const STCO: u32 = u32::from_be_bytes(*b"stco");
+pub(crate) const CO64: u32 = u32::from_be_bytes(*b"co64");
+pub(crate) const TRAK: u32 = u32::from_be_bytes(*b"trak");
+pub(crate) const MDIA: u32 = u32::from_be_bytes(*b"mdia");
+pub(crate) const MINF: u32 = u32::from_be_bytes(*b"minf");
+pub(crate) const STBL: u32 = u32::from_be_bytes(*b"stbl");
 
 fn update_offsets_recursive(
     data: &mut [u8],
@@ -1023,9 +1023,9 @@ pub fn is_mp4_file(file_path: &Path) -> bool {
     false
 }
 
-const MP4A: u32 = u32::from_be_bytes(*b"mp4a");
+pub(crate) const MP4A: u32 = u32::from_be_bytes(*b"mp4a");
 const ALAC: u32 = u32::from_be_bytes(*b"alac");
-const STSD: u32 = u32::from_be_bytes(*b"stsd");
+pub(crate) const STSD: u32 = u32::from_be_bytes(*b"stsd");
 
 /// Audio codec detected in an MP4 file
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
