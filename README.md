@@ -114,39 +114,19 @@ A native GUI application (`mp3rgui`) is available for users who prefer a graphic
 
 Run `mp3rgain -h` for the full list of options.
 
-## Integration
-
-### beets
-
-mp3rgain works as a drop-in replacement for mp3gain in the [beets](https://beets.io/) replaygain plugin:
-
-```yaml
-# config.yaml
-replaygain:
-  backend: command
-  command: mp3rgain
-```
-
 ## Documentation
 
+- [Roadmap](docs/roadmap.md) - Development plans and upcoming features
 - [Security](docs/security.md) - Memory safety and CVE analysis (CVE-2023-49356, etc.)
 - [Compatibility Report](docs/compatibility-report.md) - Verification against original mp3gain
 - [Technical Comparison](docs/COMPARISON.md) - Comparison with similar tools
+- [Use Cases](docs/use-cases.md) - Integration examples (beets, headroom, etc.)
 
 ## Why mp3rgain?
 
-The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained since ~2015. mp3rgain is a modern, memory-safe replacement that works on current systems including Windows 11, macOS, and Linux.
+The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained since ~2015 and has [unpatched security vulnerabilities](docs/security.md). mp3rgain is a modern, memory-safe replacement written in Rust.
 
-## ReplayGain Algorithm
-
-mp3rgain implements the **original ReplayGain 1.0 algorithm**, the same as the classic mp3gain/aacgain:
-
-- Equal-loudness filter (Yule-Walker + Butterworth high-pass)
-- RMS calculation in 50ms windows
-- 95th percentile statistical analysis
-- **89 dB reference level**
-
-This is a deliberate choice to maintain full compatibility with the original mp3gain. Loudness values will differ from tools using EBU R128/LUFS-based analysis (such as foobar2000's ReplayGain scanner, loudgain, or ffmpeg's loudnorm filter), which use a -23 LUFS reference level.
+mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) for full compatibility with the original mp3gain. Loudness values will differ from EBU R128/LUFS-based tools (foobar2000, loudgain, ffmpeg loudnorm).
 
 ## Library Usage
 
