@@ -777,7 +777,7 @@ impl ReplayGainAnalyzer {
 /// Detect file type from path
 #[cfg(feature = "replaygain")]
 fn detect_file_type(file_path: &Path) -> AudioFileType {
-    if mp4meta::is_mp4_file(file_path) {
+    if mp4meta::is_aac_file(file_path) {
         AudioFileType::Aac
     } else {
         AudioFileType::Mp3

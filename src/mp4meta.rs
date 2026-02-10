@@ -40,6 +40,7 @@ const META: u32 = u32::from_be_bytes(*b"meta");
 const ILST: u32 = u32::from_be_bytes(*b"ilst");
 #[allow(dead_code)]
 const FREE: u32 = u32::from_be_bytes(*b"free");
+#[allow(dead_code)]
 const MDAT: u32 = u32::from_be_bytes(*b"mdat");
 #[allow(dead_code)]
 const HDLR: u32 = u32::from_be_bytes(*b"hdlr");
@@ -416,15 +417,29 @@ pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
     Ok(tags)
 }
 
-/// Write ReplayGain tags to MP4/M4A file
+/// Write ReplayGain tags to MP4/M4A file.
+/// Uses atomic write (temp file + rename) to prevent corruption on interruption.
 pub fn write_replaygain_tags(file_path: &Path, tags: &ReplayGainTags) -> Result<()> {
     let data =
         fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
 
     let new_data = update_mp4_metadata(&data, tags)?;
 
-    fs::write(file_path, &new_data)
-        .with_context(|| format!("Failed to write: {}", file_path.display()))?;
+    // Atomic write: write to temp file, then rename over original
+    let parent = file_path.parent().unwrap_or(Path::new("."));
+    let temp_path = parent.join(format!(".mp3rgain_temp_{}.m4a", std::process::id()));
+
+    if let Err(e) = fs::write(&temp_path, &new_data) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(e).with_context(|| format!("Failed to write temp: {}", temp_path.display()));
+    }
+
+    if let Err(_rename_err) = fs::rename(&temp_path, file_path) {
+        // rename can fail across filesystems; fall back to direct write
+        let _ = fs::remove_file(&temp_path);
+        fs::write(file_path, &new_data)
+            .with_context(|| format!("Failed to write: {}", file_path.display()))?;
+    }
 
     Ok(())
 }
@@ -453,21 +468,71 @@ fn update_mp4_metadata(data: &[u8], tags: &ReplayGainTags) -> Result<Vec<u8>> {
             meta_pos,
             udta_pos,
         } => {
-            // Calculate size differences
-            let old_ilst_size = ilst_size;
-            let new_ilst_size = new_ilst.len();
-            let size_diff = new_ilst_size as i64 - old_ilst_size as i64;
+            let new_ilst_is_empty = new_ilst.len() <= 8; // header-only = no tags
 
-            // Write data before ilst
-            result.extend_from_slice(&data[..ilst_pos]);
+            if new_ilst_is_empty {
+                // Determine what to remove: ilst, or meta, or udta
+                let meta_size = read_box_size(data, meta_pos);
+                let udta_size = read_box_size(data, udta_pos);
 
-            // Write new ilst
+                // meta content = version/flags(4) + hdlr + ilst; if removing ilst
+                // leaves only hdlr, the meta is effectively empty for our purposes.
+                let meta_content_without_ilst = meta_size - ilst_size;
+                let hdlr_size = create_hdlr_box().len();
+                let meta_only_has_hdlr_and_ilst = meta_content_without_ilst == 8 + 4 + hdlr_size; // header + ver/flags + hdlr
+
+                if meta_only_has_hdlr_and_ilst && udta_size == meta_size + 8 {
+                    // udta contains only meta, and meta contains only hdlr+ilst
+                    // Remove entire udta
+                    let size_diff = -(udta_size as i64);
+                    result.extend_from_slice(&data[..udta_pos]);
+                    result.extend_from_slice(&data[udta_pos + udta_size..]);
+                    update_box_size(&mut result, moov_pos, size_diff);
+                } else if meta_only_has_hdlr_and_ilst {
+                    // meta contains only hdlr+ilst but udta has other boxes too
+                    // Remove entire meta
+                    let size_diff = -(meta_size as i64);
+                    result.extend_from_slice(&data[..meta_pos]);
+                    result.extend_from_slice(&data[meta_pos + meta_size..]);
+                    update_box_size(&mut result, moov_pos, size_diff);
+                    update_box_size(&mut result, udta_pos, size_diff);
+                } else {
+                    // meta has other boxes besides hdlr+ilst; just remove ilst
+                    let size_diff = -(ilst_size as i64);
+                    result.extend_from_slice(&data[..ilst_pos]);
+                    result.extend_from_slice(&data[ilst_pos + ilst_size..]);
+                    update_box_size(&mut result, moov_pos, size_diff);
+                    update_box_size(&mut result, udta_pos, size_diff);
+                    update_box_size(&mut result, meta_pos, size_diff);
+                }
+            } else {
+                // Normal case: replace ilst with new content
+                let old_ilst_size = ilst_size;
+                let new_ilst_size = new_ilst.len();
+                let size_diff = new_ilst_size as i64 - old_ilst_size as i64;
+
+                result.extend_from_slice(&data[..ilst_pos]);
+                result.extend_from_slice(&new_ilst);
+                result.extend_from_slice(&data[ilst_pos + old_ilst_size..]);
+
+                update_box_size(&mut result, moov_pos, size_diff);
+                update_box_size(&mut result, udta_pos, size_diff);
+                update_box_size(&mut result, meta_pos, size_diff);
+            }
+        }
+        IlstLocation::NeedsIlst {
+            meta_pos,
+            meta_size,
+            udta_pos,
+        } => {
+            // meta exists but has no ilst — append ilst at end of existing meta
+            let meta_end = meta_pos + meta_size;
+            let size_diff = new_ilst.len() as i64;
+
+            result.extend_from_slice(&data[..meta_end]);
             result.extend_from_slice(&new_ilst);
+            result.extend_from_slice(&data[meta_end..]);
 
-            // Write data after old ilst
-            result.extend_from_slice(&data[ilst_pos + old_ilst_size..]);
-
-            // Update sizes in headers
             update_box_size(&mut result, moov_pos, size_diff);
             update_box_size(&mut result, udta_pos, size_diff);
             update_box_size(&mut result, meta_pos, size_diff);
@@ -515,16 +580,12 @@ fn update_mp4_metadata(data: &[u8], tags: &ReplayGainTags) -> Result<Vec<u8>> {
         }
     }
 
-    // Update mdat offset if needed (stco/co64 atoms)
-    // For simplicity, we'll handle this by checking if moov comes before mdat
-    if let Some((mdat_pos, _)) = find_box(data, MDAT) {
-        if mdat_pos > moov_pos {
-            // moov is before mdat, need to update chunk offsets
-            let size_diff = result.len() as i64 - data.len() as i64;
-            if size_diff != 0 {
-                update_chunk_offsets(&mut result, moov_pos, size_diff)?;
-            }
-        }
+    // Update stco/co64 chunk offsets if the file size changed.
+    // Any chunk offset pointing beyond the original moov end needs adjustment,
+    // regardless of moov/mdat ordering or multiple mdat boxes.
+    let size_diff = result.len() as i64 - data.len() as i64;
+    if size_diff != 0 {
+        update_chunk_offsets(&mut result, moov_pos, moov_end, size_diff)?;
     }
 
     Ok(result)
@@ -536,6 +597,11 @@ enum IlstLocation {
         ilst_pos: usize,
         ilst_size: usize,
         meta_pos: usize,
+        udta_pos: usize,
+    },
+    NeedsIlst {
+        meta_pos: usize,
+        meta_size: usize,
         udta_pos: usize,
     },
     NeedsMeta {
@@ -589,12 +655,14 @@ fn create_or_update_ilst(
         match find_box_in_container(data, meta_content_start, meta_content_size, ILST) {
             Some(x) => x,
             None => {
+                // meta exists but has no ilst — insert ilst into existing meta
                 let ilst = create_ilst_box(tags, &[]);
                 return Ok((
                     ilst,
-                    IlstLocation::NeedsMeta {
+                    IlstLocation::NeedsIlst {
+                        meta_pos,
+                        meta_size: meta_header.size as usize,
                         udta_pos,
-                        udta_size: udta_header.size as usize,
                     },
                 ));
             }
@@ -725,6 +793,15 @@ fn create_udta_box(content: &[u8]) -> Vec<u8> {
     udta
 }
 
+fn read_box_size(data: &[u8], box_pos: usize) -> usize {
+    u32::from_be_bytes([
+        data[box_pos],
+        data[box_pos + 1],
+        data[box_pos + 2],
+        data[box_pos + 3],
+    ]) as usize
+}
+
 fn update_box_size(data: &mut [u8], box_pos: usize, size_diff: i64) {
     if box_pos + 4 > data.len() {
         return;
@@ -746,8 +823,16 @@ fn update_box_size(data: &mut [u8], box_pos: usize, size_diff: i64) {
     data[box_pos..box_pos + 4].copy_from_slice(&new_size.to_be_bytes());
 }
 
-/// Update stco/co64 chunk offsets after modifying moov size
-fn update_chunk_offsets(data: &mut [u8], moov_pos: usize, size_diff: i64) -> Result<()> {
+/// Update stco/co64 chunk offsets after modifying moov size.
+/// `original_moov_end` is the end of moov in the original (unmodified) data.
+/// Only offsets pointing at or beyond `original_moov_end` are adjusted, so
+/// data before moov (e.g., an earlier mdat) is left untouched.
+fn update_chunk_offsets(
+    data: &mut [u8],
+    moov_pos: usize,
+    original_moov_end: usize,
+    size_diff: i64,
+) -> Result<()> {
     // Find moov box again in the modified data
     let (_, moov_header) = match find_box(data, MOOV) {
         Some(x) => x,
@@ -757,7 +842,7 @@ fn update_chunk_offsets(data: &mut [u8], moov_pos: usize, size_diff: i64) -> Res
     let moov_end = moov_pos + moov_header.size as usize;
 
     // Recursively find and update stco/co64 boxes within moov
-    update_offsets_recursive(data, moov_pos + 8, moov_end, size_diff)?;
+    update_offsets_recursive(data, moov_pos + 8, moov_end, size_diff, original_moov_end)?;
 
     Ok(())
 }
@@ -774,6 +859,7 @@ fn update_offsets_recursive(
     start: usize,
     end: usize,
     size_diff: i64,
+    threshold: usize,
 ) -> Result<()> {
     let mut pos = start;
 
@@ -788,7 +874,7 @@ fn update_offsets_recursive(
 
         match box_type {
             STCO => {
-                // Update 32-bit chunk offsets
+                // Update 32-bit chunk offsets that point beyond the insertion point
                 let version_flags_pos = pos + 8;
                 let entry_count_pos = version_flags_pos + 4;
                 if entry_count_pos + 4 <= data.len() {
@@ -810,14 +896,17 @@ fn update_offsets_recursive(
                             data[offset_pos + 2],
                             data[offset_pos + 3],
                         ]);
-                        let new_offset = (offset as i64 + size_diff) as u32;
-                        data[offset_pos..offset_pos + 4].copy_from_slice(&new_offset.to_be_bytes());
+                        if (offset as usize) >= threshold {
+                            let new_offset = (offset as i64 + size_diff) as u32;
+                            data[offset_pos..offset_pos + 4]
+                                .copy_from_slice(&new_offset.to_be_bytes());
+                        }
                         offset_pos += 4;
                     }
                 }
             }
             CO64 => {
-                // Update 64-bit chunk offsets
+                // Update 64-bit chunk offsets that point beyond the insertion point
                 let version_flags_pos = pos + 8;
                 let entry_count_pos = version_flags_pos + 4;
                 if entry_count_pos + 4 <= data.len() {
@@ -843,15 +932,18 @@ fn update_offsets_recursive(
                             data[offset_pos + 6],
                             data[offset_pos + 7],
                         ]);
-                        let new_offset = (offset as i64 + size_diff) as u64;
-                        data[offset_pos..offset_pos + 8].copy_from_slice(&new_offset.to_be_bytes());
+                        if (offset as usize) >= threshold {
+                            let new_offset = (offset as i64 + size_diff) as u64;
+                            data[offset_pos..offset_pos + 8]
+                                .copy_from_slice(&new_offset.to_be_bytes());
+                        }
                         offset_pos += 8;
                     }
                 }
             }
             TRAK | MDIA | MINF | STBL | MOOV | UDTA => {
                 // Container boxes - recurse into them
-                update_offsets_recursive(data, pos + 8, pos + size as usize, size_diff)?;
+                update_offsets_recursive(data, pos + 8, pos + size as usize, size_diff, threshold)?;
             }
             _ => {}
         }
@@ -868,24 +960,136 @@ pub fn delete_replaygain_tags(file_path: &Path) -> Result<()> {
     write_replaygain_tags(file_path, &empty_tags)
 }
 
-/// Check if file is an MP4/M4A file
+/// Check if a 4-byte brand is a recognized MP4/M4A audio brand.
+/// Note: M4P (DRM-protected) is intentionally excluded.
+fn is_accepted_brand(brand: &[u8]) -> bool {
+    matches!(
+        brand,
+        b"M4A " | b"M4B " | b"M4V " | b"mp41" | b"mp42" | b"isom" | b"iso2"
+    )
+}
+
+/// Check if file is an MP4/M4A file by reading only the ftyp header.
+/// Checks both the major brand and the compatible brands list.
 pub fn is_mp4_file(file_path: &Path) -> bool {
-    if let Ok(data) = fs::read(file_path) {
-        if data.len() >= 12 {
-            // Check for ftyp box
-            let size = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
-            let box_type = &data[4..8];
-            if box_type == b"ftyp" && size >= 12 {
-                // Check compatible brands
-                let brand = &data[8..12];
-                return matches!(
-                    brand,
-                    b"M4A " | b"M4B " | b"M4P " | b"M4V " | b"mp41" | b"mp42" | b"isom" | b"iso2"
-                );
-            }
+    let mut file = match fs::File::open(file_path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    // 128 bytes is enough for a typical ftyp box (major brand + ~28 compatible brands)
+    let mut buf = [0u8; 128];
+    let bytes_read = match file.read(&mut buf) {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    if bytes_read < 12 {
+        return false;
+    }
+    let size = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    if &buf[4..8] != b"ftyp" || size < 12 {
+        return false;
+    }
+    let check_end = size.min(bytes_read);
+    // Check major brand at offset 8, then compatible brands at offset 16, 20, 24, ...
+    // (offset 12 is the minor_version field, not a brand)
+    let mut offset = 8;
+    while offset + 4 <= check_end {
+        if is_accepted_brand(&buf[offset..offset + 4]) {
+            return true;
         }
+        offset = if offset == 8 { 16 } else { offset + 4 };
     }
     false
+}
+
+const MP4A: u32 = u32::from_be_bytes(*b"mp4a");
+const ALAC: u32 = u32::from_be_bytes(*b"alac");
+const STSD: u32 = u32::from_be_bytes(*b"stsd");
+
+/// Audio codec detected in an MP4 file
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mp4AudioCodec {
+    Aac,
+    Alac,
+    Unknown,
+}
+
+/// Detect the audio codec in an MP4 file by inspecting the stsd box.
+/// Navigates moov → trak → mdia → minf → stbl → stsd to find the codec.
+pub fn detect_mp4_audio_codec(file_path: &Path) -> Option<Mp4AudioCodec> {
+    let data = fs::read(file_path).ok()?;
+
+    let (moov_pos, moov_header) = find_box(&data, MOOV)?;
+    let moov_start = moov_pos + moov_header.header_size as usize;
+    let moov_size = moov_header.content_size() as usize;
+
+    // Search through all trak boxes for an audio track
+    let mut trak_search_pos = moov_start;
+    let moov_end = moov_start + moov_size;
+
+    while trak_search_pos < moov_end {
+        let (trak_pos, trak_header) =
+            find_box_in_container(&data, trak_search_pos, moov_end - trak_search_pos, TRAK)?;
+        let trak_start = trak_pos + trak_header.header_size as usize;
+        let trak_size = trak_header.content_size() as usize;
+
+        if let Some(codec) = detect_codec_in_trak(&data, trak_start, trak_size) {
+            return Some(codec);
+        }
+
+        trak_search_pos = trak_pos + trak_header.size as usize;
+    }
+
+    None
+}
+
+fn detect_codec_in_trak(data: &[u8], trak_start: usize, trak_size: usize) -> Option<Mp4AudioCodec> {
+    let (mdia_pos, mdia_header) = find_box_in_container(data, trak_start, trak_size, MDIA)?;
+    let mdia_start = mdia_pos + mdia_header.header_size as usize;
+    let mdia_size = mdia_header.content_size() as usize;
+
+    let (minf_pos, minf_header) = find_box_in_container(data, mdia_start, mdia_size, MINF)?;
+    let minf_start = minf_pos + minf_header.header_size as usize;
+    let minf_size = minf_header.content_size() as usize;
+
+    let (stbl_pos, stbl_header) = find_box_in_container(data, minf_start, minf_size, STBL)?;
+    let stbl_start = stbl_pos + stbl_header.header_size as usize;
+    let stbl_size = stbl_header.content_size() as usize;
+
+    let (stsd_pos, stsd_header) = find_box_in_container(data, stbl_start, stbl_size, STSD)?;
+    // stsd has 4-byte version/flags + 4-byte entry count before entries
+    let entries_start = stsd_pos + stsd_header.header_size as usize + 8;
+    let stsd_end = stsd_pos + stsd_header.size as usize;
+
+    if entries_start + 8 > stsd_end {
+        return None;
+    }
+
+    // Read the first sample entry's box type (the codec identifier)
+    let entry_type = u32::from_be_bytes([
+        data[entries_start + 4],
+        data[entries_start + 5],
+        data[entries_start + 6],
+        data[entries_start + 7],
+    ]);
+
+    match entry_type {
+        MP4A => Some(Mp4AudioCodec::Aac),
+        ALAC => Some(Mp4AudioCodec::Alac),
+        _ => Some(Mp4AudioCodec::Unknown),
+    }
+}
+
+/// Check if file is an MP4/M4A file containing AAC audio.
+/// Returns false for ALAC, DRM-protected, and non-MP4 files.
+pub fn is_aac_file(file_path: &Path) -> bool {
+    if !is_mp4_file(file_path) {
+        return false;
+    }
+    matches!(
+        detect_mp4_audio_codec(file_path),
+        Some(Mp4AudioCodec::Aac) | None
+    )
 }
 
 #[cfg(test)]
@@ -929,16 +1133,61 @@ mod tests {
 
     #[test]
     fn test_is_mp4_detection() {
-        // Minimal valid ftyp header for M4A
-        let m4a_header: Vec<u8> = vec![
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join("mp3rgain_test_mp4_detection");
+        let _ = std::fs::create_dir_all(&dir);
+
+        // M4A major brand -> accepted
+        let path = dir.join("test_m4a.m4a");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(&[
             0x00, 0x00, 0x00, 0x14, // size = 20
             b'f', b't', b'y', b'p', // type = ftyp
-            b'M', b'4', b'A', b' ', // brand = M4A
+            b'M', b'4', b'A', b' ', // major brand = M4A
             0x00, 0x00, 0x00, 0x00, // minor version
             b'M', b'4', b'A', b' ', // compatible brand
-        ];
+        ])
+        .unwrap();
+        drop(f);
+        assert!(is_mp4_file(&path));
 
-        // This test would need a temp file, but we can verify the logic
-        assert!(matches!(&m4a_header[8..12], b"M4A "));
+        // M4P (DRM) major brand -> rejected
+        let path = dir.join("test_m4p.m4a");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(&[
+            0x00, 0x00, 0x00, 0x14, // size = 20
+            b'f', b't', b'y', b'p', // type = ftyp
+            b'M', b'4', b'P', b' ', // major brand = M4P (DRM)
+            0x00, 0x00, 0x00, 0x00, // minor version
+            b'M', b'4', b'P', b' ', // compatible brand
+        ])
+        .unwrap();
+        drop(f);
+        assert!(!is_mp4_file(&path));
+
+        // isom major brand with M4A in compatible brands -> accepted
+        let path = dir.join("test_compat.m4a");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(&[
+            0x00, 0x00, 0x00, 0x1c, // size = 28
+            b'f', b't', b'y', b'p', // type = ftyp
+            b'd', b'a', b's', b'h', // major brand = dash (not accepted)
+            0x00, 0x00, 0x00, 0x00, // minor version
+            b'i', b's', b'o', b'6', // compatible brand = iso6 (not accepted)
+            b'M', b'4', b'A', b' ', // compatible brand = M4A (accepted!)
+        ])
+        .unwrap();
+        drop(f);
+        assert!(is_mp4_file(&path));
+
+        // Non-MP4 file -> rejected
+        let path = dir.join("test_mp3.mp3");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"ID3\x04\x00\x00\x00\x00\x00\x00").unwrap();
+        drop(f);
+        assert!(!is_mp4_file(&path));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
