@@ -142,38 +142,23 @@ impl ReplayGainTags {
     }
 
     fn to_freeform_tags(&self) -> Vec<FreeformTag> {
-        let mut tags = Vec::new();
+        let entries: [(&str, &Option<String>); 4] = [
+            (RG_TRACK_GAIN, &self.track_gain),
+            (RG_TRACK_PEAK, &self.track_peak),
+            (RG_ALBUM_GAIN, &self.album_gain),
+            (RG_ALBUM_PEAK, &self.album_peak),
+        ];
 
-        if let Some(ref v) = self.track_gain {
-            tags.push(FreeformTag {
-                namespace: ITUNES_NAMESPACE.to_string(),
-                name: RG_TRACK_GAIN.to_string(),
-                value: v.clone(),
-            });
-        }
-        if let Some(ref v) = self.track_peak {
-            tags.push(FreeformTag {
-                namespace: ITUNES_NAMESPACE.to_string(),
-                name: RG_TRACK_PEAK.to_string(),
-                value: v.clone(),
-            });
-        }
-        if let Some(ref v) = self.album_gain {
-            tags.push(FreeformTag {
-                namespace: ITUNES_NAMESPACE.to_string(),
-                name: RG_ALBUM_GAIN.to_string(),
-                value: v.clone(),
-            });
-        }
-        if let Some(ref v) = self.album_peak {
-            tags.push(FreeformTag {
-                namespace: ITUNES_NAMESPACE.to_string(),
-                name: RG_ALBUM_PEAK.to_string(),
-                value: v.clone(),
-            });
-        }
-
-        tags
+        entries
+            .into_iter()
+            .filter_map(|(name, value)| {
+                value.as_ref().map(|v| FreeformTag {
+                    namespace: ITUNES_NAMESPACE.to_string(),
+                    name: name.to_string(),
+                    value: v.clone(),
+                })
+            })
+            .collect()
     }
 }
 
@@ -686,6 +671,24 @@ fn create_or_update_ilst(
     ))
 }
 
+/// Check if a box at the given position is a ReplayGain freeform tag
+fn is_replaygain_freeform(data: &[u8], pos: usize, header: &BoxHeader) -> bool {
+    if header.box_type != FREEFORM {
+        return false;
+    }
+    let inner_data = &data[pos + header.header_size as usize..pos + header.size as usize];
+    match parse_freeform_tag(inner_data) {
+        Some(tag) => {
+            tag.namespace == ITUNES_NAMESPACE
+                && (tag.name.eq_ignore_ascii_case(RG_TRACK_GAIN)
+                    || tag.name.eq_ignore_ascii_case(RG_TRACK_PEAK)
+                    || tag.name.eq_ignore_ascii_case(RG_ALBUM_GAIN)
+                    || tag.name.eq_ignore_ascii_case(RG_ALBUM_PEAK))
+        }
+        None => false,
+    }
+}
+
 fn create_ilst_box(tags: &ReplayGainTags, existing_content: &[u8]) -> Vec<u8> {
     let mut content = Vec::new();
 
@@ -700,24 +703,7 @@ fn create_ilst_box(tags: &ReplayGainTags, existing_content: &[u8]) -> Vec<u8> {
 
             let tag_data = &existing_content[pos..pos + header.size as usize];
 
-            // Check if this is a ReplayGain freeform tag
-            let is_replaygain = if header.box_type == FREEFORM {
-                let inner_data = &existing_content
-                    [pos + header.header_size as usize..pos + header.size as usize];
-                if let Some(tag) = parse_freeform_tag(inner_data) {
-                    tag.namespace == ITUNES_NAMESPACE
-                        && (tag.name.eq_ignore_ascii_case(RG_TRACK_GAIN)
-                            || tag.name.eq_ignore_ascii_case(RG_TRACK_PEAK)
-                            || tag.name.eq_ignore_ascii_case(RG_ALBUM_GAIN)
-                            || tag.name.eq_ignore_ascii_case(RG_ALBUM_PEAK))
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-
-            if !is_replaygain {
+            if !is_replaygain_freeform(existing_content, pos, &header) {
                 content.extend_from_slice(tag_data);
             }
 

@@ -131,9 +131,9 @@ impl Mp3rgainApp {
     }
 
     pub fn remove_selected(&mut self) {
-        let mut indices: Vec<usize> = self.selected_indices.clone();
-        indices.sort_by(|a, b| b.cmp(a));
-        for idx in indices {
+        let mut indices = self.selected_indices.clone();
+        indices.sort_unstable();
+        for &idx in indices.iter().rev() {
             if idx < self.files.len() {
                 self.files.remove(idx);
             }
