@@ -103,15 +103,25 @@ impl BoxHeader {
 }
 
 /// Freeform tag (---- box) for ReplayGain
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FreeformTag {
     pub namespace: String,
     pub name: String,
     pub value: String,
 }
 
+impl std::fmt::Display for FreeformTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}={}", self.namespace, self.name, self.value)
+    }
+}
+
 /// Collection of ReplayGain tags
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReplayGainTags {
     pub track_gain: Option<String>,
     pub track_peak: Option<String>,
@@ -140,7 +150,32 @@ impl ReplayGainTags {
             && self.album_gain.is_none()
             && self.album_peak.is_none()
     }
+}
 
+impl std::fmt::Display for ReplayGainTags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut parts = Vec::new();
+        if let Some(ref g) = self.track_gain {
+            parts.push(format!("Track: {}", g));
+        }
+        if let Some(ref p) = self.track_peak {
+            parts.push(format!("Peak: {}", p));
+        }
+        if let Some(ref g) = self.album_gain {
+            parts.push(format!("Album: {}", g));
+        }
+        if let Some(ref p) = self.album_peak {
+            parts.push(format!("Album Peak: {}", p));
+        }
+        if parts.is_empty() {
+            f.write_str("(no tags)")
+        } else {
+            write!(f, "{}", parts.join(", "))
+        }
+    }
+}
+
+impl ReplayGainTags {
     fn to_freeform_tags(&self) -> Vec<FreeformTag> {
         let entries: [(&str, &Option<String>); 4] = [
             (RG_TRACK_GAIN, &self.track_gain),
@@ -993,11 +1028,23 @@ const ALAC: u32 = u32::from_be_bytes(*b"alac");
 const STSD: u32 = u32::from_be_bytes(*b"stsd");
 
 /// Audio codec detected in an MP4 file
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Mp4AudioCodec {
     Aac,
     Alac,
     Unknown,
+}
+
+impl std::fmt::Display for Mp4AudioCodec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Mp4AudioCodec::Aac => f.write_str("AAC"),
+            Mp4AudioCodec::Alac => f.write_str("ALAC"),
+            Mp4AudioCodec::Unknown => f.write_str("Unknown"),
+        }
+    }
 }
 
 /// Detect the audio codec in an MP4 file by inspecting the stsd box.

@@ -54,7 +54,9 @@ pub const MAX_GAIN: u8 = 255;
 pub const MIN_GAIN: u8 = 0;
 
 /// Result of MP3 file analysis
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Mp3Analysis {
     /// Number of audio frames in the file
     pub frame_count: usize,
@@ -75,15 +77,18 @@ pub struct Mp3Analysis {
 }
 
 /// MPEG version
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum MpegVersion {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum MpegVersion {
     Mpeg1,
     Mpeg2,
     Mpeg25,
 }
 
 impl MpegVersion {
-    fn as_str(&self) -> &'static str {
+    /// Get the string representation of this MPEG version
+    pub fn as_str(&self) -> &'static str {
         match self {
             MpegVersion::Mpeg1 => "MPEG1",
             MpegVersion::Mpeg2 => "MPEG2",
@@ -93,8 +98,10 @@ impl MpegVersion {
 }
 
 /// Channel mode
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ChannelMode {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ChannelMode {
     Stereo,
     JointStereo,
     DualChannel,
@@ -102,14 +109,16 @@ enum ChannelMode {
 }
 
 impl ChannelMode {
-    fn channel_count(&self) -> usize {
+    /// Get the number of audio channels for this mode
+    pub fn channel_count(&self) -> usize {
         match self {
             ChannelMode::Mono => 1,
             _ => 2,
         }
     }
 
-    fn as_str(&self) -> &'static str {
+    /// Get the string representation of this channel mode
+    pub fn as_str(&self) -> &'static str {
         match self {
             ChannelMode::Stereo => "Stereo",
             ChannelMode::JointStereo => "Joint Stereo",
@@ -117,6 +126,99 @@ impl ChannelMode {
             ChannelMode::Mono => "Mono",
         }
     }
+}
+
+impl Mp3Analysis {
+    /// Get the MPEG version as a typed enum
+    pub fn mpeg_version_parsed(&self) -> Option<MpegVersion> {
+        match self.mpeg_version.as_str() {
+            "MPEG1" => Some(MpegVersion::Mpeg1),
+            "MPEG2" => Some(MpegVersion::Mpeg2),
+            "MPEG2.5" => Some(MpegVersion::Mpeg25),
+            _ => None,
+        }
+    }
+
+    /// Get the channel mode as a typed enum
+    pub fn channel_mode_parsed(&self) -> Option<ChannelMode> {
+        match self.channel_mode.as_str() {
+            "Stereo" => Some(ChannelMode::Stereo),
+            "Joint Stereo" => Some(ChannelMode::JointStereo),
+            "Dual Channel" => Some(ChannelMode::DualChannel),
+            "Mono" => Some(ChannelMode::Mono),
+            _ => None,
+        }
+    }
+}
+
+// =============================================================================
+// Display implementations
+// =============================================================================
+
+impl std::fmt::Display for MpegVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::fmt::Display for ChannelMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::fmt::Display for Mp3Analysis {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {}, {} frames, headroom: {:+.1} dB",
+            self.mpeg_version, self.channel_mode, self.frame_count, self.headroom_db
+        )
+    }
+}
+
+impl std::fmt::Display for Channel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Channel::Left => f.write_str("Left"),
+            Channel::Right => f.write_str("Right"),
+        }
+    }
+}
+
+impl std::fmt::Display for MaxAmplitudeResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "amplitude: {:.6}, gain range: {}-{}",
+            self.max_amplitude, self.min_global_gain, self.max_global_gain
+        )
+    }
+}
+
+impl std::fmt::Display for ApeItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}={}", self.key, self.value)
+    }
+}
+
+impl std::fmt::Display for ApeTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ApeTag({} items)", self.items.len())
+    }
+}
+
+/// Result of maximum amplitude analysis
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct MaxAmplitudeResult {
+    /// Maximum amplitude (normalized, 0.0 to 1.0+, where >1.0 indicates clipping)
+    pub max_amplitude: f64,
+    /// Maximum global_gain value found across all granules
+    pub max_global_gain: u8,
+    /// Minimum global_gain value found across all granules
+    pub min_global_gain: u8,
 }
 
 /// Parsed MP3 frame header
@@ -639,7 +741,9 @@ pub fn steps_to_db(steps: i32) -> f64 {
 }
 
 /// Channel selection for independent gain adjustment
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Channel {
     /// Left channel (channel 0)
     Left,
@@ -662,6 +766,14 @@ impl Channel {
             0 => Some(Channel::Left),
             1 => Some(Channel::Right),
             _ => None,
+        }
+    }
+
+    /// Get the opposite channel
+    pub fn other(&self) -> Self {
+        match self {
+            Channel::Left => Channel::Right,
+            Channel::Right => Channel::Left,
         }
     }
 }
@@ -856,14 +968,18 @@ pub const TAG_REPLAYGAIN_ALBUM_GAIN: &str = "REPLAYGAIN_ALBUM_GAIN";
 pub const TAG_REPLAYGAIN_ALBUM_PEAK: &str = "REPLAYGAIN_ALBUM_PEAK";
 
 /// APEv2 tag item
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ApeItem {
     pub key: String,
     pub value: String,
 }
 
 /// APEv2 tag collection
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ApeTag {
     items: Vec<ApeItem>,
 }
@@ -910,6 +1026,16 @@ impl ApeTag {
     /// Check if tag is empty
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
+    }
+
+    /// Get the number of items in this tag
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    /// Iterate over all items in this tag
+    pub fn iter(&self) -> impl Iterator<Item = &ApeItem> {
+        self.items.iter()
     }
 
     /// Get MP3GAIN_UNDO value as gain steps
@@ -1226,6 +1352,31 @@ pub fn find_max_amplitude(file_path: &Path) -> Result<(f64, u8, u8)> {
     let max_amplitude = 10.0_f64.powf(-headroom_db / 20.0);
 
     Ok((max_amplitude, max_gain, min_gain))
+}
+
+/// Find maximum amplitude in an MP3 file and return a named struct.
+///
+/// This is the preferred alternative to [`find_max_amplitude`] which returns
+/// a tuple. The tuple variant will be removed in a future major release.
+#[cfg(feature = "replaygain")]
+pub fn find_max_amplitude_detailed(file_path: &Path) -> Result<MaxAmplitudeResult> {
+    let (max_amplitude, max_global_gain, min_global_gain) = find_max_amplitude(file_path)?;
+    Ok(MaxAmplitudeResult {
+        max_amplitude,
+        max_global_gain,
+        min_global_gain,
+    })
+}
+
+/// Find maximum amplitude (fallback without replaygain feature), returning a named struct.
+#[cfg(not(feature = "replaygain"))]
+pub fn find_max_amplitude_detailed(file_path: &Path) -> Result<MaxAmplitudeResult> {
+    let (max_amplitude, max_global_gain, min_global_gain) = find_max_amplitude(file_path)?;
+    Ok(MaxAmplitudeResult {
+        max_amplitude,
+        max_global_gain,
+        min_global_gain,
+    })
 }
 
 /// Apply gain with wrapping (values wrap around instead of clamping)

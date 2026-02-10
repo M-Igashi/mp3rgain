@@ -44,7 +44,9 @@ pub const REPLAYGAIN_REFERENCE_DB: f64 = 89.0;
 const PINK_REF: f64 = 64.82;
 
 /// Audio file type
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AudioFileType {
     /// MP3 file
     Mp3,
@@ -52,8 +54,19 @@ pub enum AudioFileType {
     Aac,
 }
 
+impl std::fmt::Display for AudioFileType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AudioFileType::Mp3 => f.write_str("MP3"),
+            AudioFileType::Aac => f.write_str("AAC"),
+        }
+    }
+}
+
 /// Result of ReplayGain analysis for a single track
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReplayGainResult {
     /// Calculated loudness in dB
     pub loudness_db: f64,
@@ -74,8 +87,16 @@ impl ReplayGainResult {
     }
 }
 
+impl std::fmt::Display for ReplayGainResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:+.2} dB (peak: {:.6})", self.gain_db, self.peak)
+    }
+}
+
 /// Result of album gain analysis
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AlbumGainResult {
     /// Individual track results
     pub tracks: Vec<ReplayGainResult>,
@@ -94,6 +115,18 @@ impl AlbumGainResult {
     }
 }
 
+impl std::fmt::Display for AlbumGainResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Album: {:+.2} dB (peak: {:.6}, {} tracks)",
+            self.album_gain_db,
+            self.album_peak,
+            self.tracks.len()
+        )
+    }
+}
+
 // =============================================================================
 // Equal-loudness filter coefficients
 // =============================================================================
@@ -107,7 +140,7 @@ mod filter_coeffs {
     // =========================================================================
     // 96000 Hz coefficients (ABYule[0], ABButter[0])
     // =========================================================================
-    pub const YULE_A_96000: [f64; 11] = [
+    pub(super) const YULE_A_96000: [f64; 11] = [
         1.0,
         -7.22103125152679,
         24.7034187975904,
@@ -121,7 +154,7 @@ mod filter_coeffs {
         0.340344741393305,
     ];
 
-    pub const YULE_B_96000: [f64; 11] = [
+    pub(super) const YULE_B_96000: [f64; 11] = [
         0.006471345933032,
         -0.02567678242161,
         0.049805860704367,
@@ -135,14 +168,15 @@ mod filter_coeffs {
         -0.000261819276949,
     ];
 
-    pub const BUTTER_A_96000: [f64; 3] = [1.0, -1.98611621154089, 0.986211929160751];
+    pub(super) const BUTTER_A_96000: [f64; 3] = [1.0, -1.98611621154089, 0.986211929160751];
 
-    pub const BUTTER_B_96000: [f64; 3] = [0.99308203517541, -1.98616407035082, 0.99308203517541];
+    pub(super) const BUTTER_B_96000: [f64; 3] =
+        [0.99308203517541, -1.98616407035082, 0.99308203517541];
 
     // =========================================================================
     // 88200 Hz coefficients (ABYule[1], ABButter[1])
     // =========================================================================
-    pub const YULE_A_88200: [f64; 11] = [
+    pub(super) const YULE_A_88200: [f64; 11] = [
         1.0,
         -7.19001570087017,
         24.4109412087159,
@@ -156,7 +190,7 @@ mod filter_coeffs {
         0.223619893831468,
     ];
 
-    pub const YULE_B_88200: [f64; 11] = [
+    pub(super) const YULE_B_88200: [f64; 11] = [
         0.015415414474287,
         -0.07691359399407,
         0.196677418516518,
@@ -170,14 +204,15 @@ mod filter_coeffs {
         0.001748085184539,
     ];
 
-    pub const BUTTER_A_88200: [f64; 3] = [1.0, -1.98488843762334, 0.979389350028798];
+    pub(super) const BUTTER_A_88200: [f64; 3] = [1.0, -1.98488843762334, 0.979389350028798];
 
-    pub const BUTTER_B_88200: [f64; 3] = [0.992472550461293, -1.98494510092258, 0.992472550461293];
+    pub(super) const BUTTER_B_88200: [f64; 3] =
+        [0.992472550461293, -1.98494510092258, 0.992472550461293];
 
     // =========================================================================
     // 64000 Hz coefficients (ABYule[2], ABButter[2])
     // =========================================================================
-    pub const YULE_A_64000: [f64; 11] = [
+    pub(super) const YULE_A_64000: [f64; 11] = [
         1.0,
         -5.74819833657784,
         16.246507961894,
@@ -191,7 +226,7 @@ mod filter_coeffs {
         0.223619893831468,
     ];
 
-    pub const YULE_B_64000: [f64; 11] = [
+    pub(super) const YULE_B_64000: [f64; 11] = [
         0.021776466467053,
         -0.062376961003801,
         0.107731165328514,
@@ -205,14 +240,15 @@ mod filter_coeffs {
         0.00117925454213,
     ];
 
-    pub const BUTTER_A_64000: [f64; 3] = [1.0, -1.97917472731008, 0.979389350028798];
+    pub(super) const BUTTER_A_64000: [f64; 3] = [1.0, -1.97917472731008, 0.979389350028798];
 
-    pub const BUTTER_B_64000: [f64; 3] = [0.989641019334721, -1.97928203866944, 0.989641019334721];
+    pub(super) const BUTTER_B_64000: [f64; 3] =
+        [0.989641019334721, -1.97928203866944, 0.989641019334721];
 
     // =========================================================================
     // 48000 Hz coefficients (ABYule[3], ABButter[3])
     // =========================================================================
-    pub const YULE_A_48000: [f64; 11] = [
+    pub(super) const YULE_A_48000: [f64; 11] = [
         1.0,
         -3.84664617118067,
         7.81501653005538,
@@ -226,7 +262,7 @@ mod filter_coeffs {
         0.13919314567432,
     ];
 
-    pub const YULE_B_48000: [f64; 11] = [
+    pub(super) const YULE_B_48000: [f64; 11] = [
         0.03857599435200,
         -0.02160367184185,
         -0.00123395316851,
@@ -240,14 +276,15 @@ mod filter_coeffs {
         0.00288463683916,
     ];
 
-    pub const BUTTER_A_48000: [f64; 3] = [1.0, -1.97223372919527, 0.97261396931306];
+    pub(super) const BUTTER_A_48000: [f64; 3] = [1.0, -1.97223372919527, 0.97261396931306];
 
-    pub const BUTTER_B_48000: [f64; 3] = [0.98621192462708, -1.97242384925416, 0.98621192462708];
+    pub(super) const BUTTER_B_48000: [f64; 3] =
+        [0.98621192462708, -1.97242384925416, 0.98621192462708];
 
     // =========================================================================
     // 44100 Hz coefficients (ABYule[4], ABButter[4])
     // =========================================================================
-    pub const YULE_A_44100: [f64; 11] = [
+    pub(super) const YULE_A_44100: [f64; 11] = [
         1.0,
         -3.47845948550071,
         6.36317777566148,
@@ -261,7 +298,7 @@ mod filter_coeffs {
         0.13149317958808,
     ];
 
-    pub const YULE_B_44100: [f64; 11] = [
+    pub(super) const YULE_B_44100: [f64; 11] = [
         0.05418656406430,
         -0.02911007808948,
         -0.00848709379851,
@@ -275,14 +312,15 @@ mod filter_coeffs {
         -0.00187763777362,
     ];
 
-    pub const BUTTER_A_44100: [f64; 3] = [1.0, -1.96977855582618, 0.97022847566350];
+    pub(super) const BUTTER_A_44100: [f64; 3] = [1.0, -1.96977855582618, 0.97022847566350];
 
-    pub const BUTTER_B_44100: [f64; 3] = [0.98500175787242, -1.97000351574484, 0.98500175787242];
+    pub(super) const BUTTER_B_44100: [f64; 3] =
+        [0.98500175787242, -1.97000351574484, 0.98500175787242];
 
     // =========================================================================
     // 32000 Hz coefficients (ABYule[5], ABButter[5])
     // =========================================================================
-    pub const YULE_A_32000: [f64; 11] = [
+    pub(super) const YULE_A_32000: [f64; 11] = [
         1.0,
         -2.37898834973084,
         2.84868151156327,
@@ -296,7 +334,7 @@ mod filter_coeffs {
         0.02347897407020,
     ];
 
-    pub const YULE_B_32000: [f64; 11] = [
+    pub(super) const YULE_B_32000: [f64; 11] = [
         0.15457299681924,
         -0.09331049056315,
         -0.06247880153653,
@@ -310,14 +348,15 @@ mod filter_coeffs {
         -0.00881362733839,
     ];
 
-    pub const BUTTER_A_32000: [f64; 3] = [1.0, -1.95835380975398, 0.95920349965459];
+    pub(super) const BUTTER_A_32000: [f64; 3] = [1.0, -1.95835380975398, 0.95920349965459];
 
-    pub const BUTTER_B_32000: [f64; 3] = [0.97938932735214, -1.95877865470428, 0.97938932735214];
+    pub(super) const BUTTER_B_32000: [f64; 3] =
+        [0.97938932735214, -1.95877865470428, 0.97938932735214];
 
     // =========================================================================
     // 24000 Hz coefficients (ABYule[6], ABButter[6])
     // =========================================================================
-    pub const YULE_A_24000: [f64; 11] = [
+    pub(super) const YULE_A_24000: [f64; 11] = [
         1.0,
         -1.61273165137247,
         1.07977492259970,
@@ -331,7 +370,7 @@ mod filter_coeffs {
         0.00302439095741,
     ];
 
-    pub const YULE_B_24000: [f64; 11] = [
+    pub(super) const YULE_B_24000: [f64; 11] = [
         0.30296907319327,
         -0.22613988682123,
         -0.08587323730772,
@@ -345,14 +384,15 @@ mod filter_coeffs {
         -0.02950134983287,
     ];
 
-    pub const BUTTER_A_24000: [f64; 3] = [1.0, -1.95002759149878, 0.95124613669835];
+    pub(super) const BUTTER_A_24000: [f64; 3] = [1.0, -1.95002759149878, 0.95124613669835];
 
-    pub const BUTTER_B_24000: [f64; 3] = [0.97531843204928, -1.95063686409857, 0.97531843204928];
+    pub(super) const BUTTER_B_24000: [f64; 3] =
+        [0.97531843204928, -1.95063686409857, 0.97531843204928];
 
     // =========================================================================
     // 22050 Hz coefficients (ABYule[7], ABButter[7])
     // =========================================================================
-    pub const YULE_A_22050: [f64; 11] = [
+    pub(super) const YULE_A_22050: [f64; 11] = [
         1.0,
         -1.49858979367799,
         0.87350271418188,
@@ -366,7 +406,7 @@ mod filter_coeffs {
         0.02977207319925,
     ];
 
-    pub const YULE_B_22050: [f64; 11] = [
+    pub(super) const YULE_B_22050: [f64; 11] = [
         0.33642304856132,
         -0.25572241425570,
         -0.11828570177555,
@@ -380,14 +420,15 @@ mod filter_coeffs {
         -0.01760176568150,
     ];
 
-    pub const BUTTER_A_22050: [f64; 3] = [1.0, -1.94561023566527, 0.94705070426118];
+    pub(super) const BUTTER_A_22050: [f64; 3] = [1.0, -1.94561023566527, 0.94705070426118];
 
-    pub const BUTTER_B_22050: [f64; 3] = [0.97316523498161, -1.94633046996323, 0.97316523498161];
+    pub(super) const BUTTER_B_22050: [f64; 3] =
+        [0.97316523498161, -1.94633046996323, 0.97316523498161];
 
     // =========================================================================
     // 16000 Hz coefficients (ABYule[8], ABButter[8])
     // =========================================================================
-    pub const YULE_A_16000: [f64; 11] = [
+    pub(super) const YULE_A_16000: [f64; 11] = [
         1.0,
         -0.62820619233671,
         0.29661783706366,
@@ -401,7 +442,7 @@ mod filter_coeffs {
         0.03222754072173,
     ];
 
-    pub const YULE_B_16000: [f64; 11] = [
+    pub(super) const YULE_B_16000: [f64; 11] = [
         0.44915256608450,
         -0.14351757464547,
         -0.22784394429749,
@@ -415,14 +456,15 @@ mod filter_coeffs {
         0.00541907748707,
     ];
 
-    pub const BUTTER_A_16000: [f64; 3] = [1.0, -1.92783286977036, 0.93034775234268];
+    pub(super) const BUTTER_A_16000: [f64; 3] = [1.0, -1.92783286977036, 0.93034775234268];
 
-    pub const BUTTER_B_16000: [f64; 3] = [0.96454515552826, -1.92909031105652, 0.96454515552826];
+    pub(super) const BUTTER_B_16000: [f64; 3] =
+        [0.96454515552826, -1.92909031105652, 0.96454515552826];
 
     // =========================================================================
     // 12000 Hz coefficients (ABYule[9], ABButter[9])
     // =========================================================================
-    pub const YULE_A_12000: [f64; 11] = [
+    pub(super) const YULE_A_12000: [f64; 11] = [
         1.0,
         -1.04800335126349,
         0.29156311971249,
@@ -436,7 +478,7 @@ mod filter_coeffs {
         0.01807364323573,
     ];
 
-    pub const YULE_B_12000: [f64; 11] = [
+    pub(super) const YULE_B_12000: [f64; 11] = [
         0.56619470757641,
         -0.75464456939302,
         0.16242137742230,
@@ -450,14 +492,15 @@ mod filter_coeffs {
         -0.00588215443421,
     ];
 
-    pub const BUTTER_A_12000: [f64; 3] = [1.0, -1.91858953033784, 0.92177618768381];
+    pub(super) const BUTTER_A_12000: [f64; 3] = [1.0, -1.91858953033784, 0.92177618768381];
 
-    pub const BUTTER_B_12000: [f64; 3] = [0.96009142950541, -1.92018285901082, 0.96009142950541];
+    pub(super) const BUTTER_B_12000: [f64; 3] =
+        [0.96009142950541, -1.92018285901082, 0.96009142950541];
 
     // =========================================================================
     // 11025 Hz coefficients (ABYule[10], ABButter[10])
     // =========================================================================
-    pub const YULE_A_11025: [f64; 11] = [
+    pub(super) const YULE_A_11025: [f64; 11] = [
         1.0,
         -0.51035327095184,
         -0.31863563325245,
@@ -471,7 +514,7 @@ mod filter_coeffs {
         0.01818801111503,
     ];
 
-    pub const YULE_B_11025: [f64; 11] = [
+    pub(super) const YULE_B_11025: [f64; 11] = [
         0.58100494960553,
         -0.53174909058578,
         -0.14289799034253,
@@ -485,14 +528,15 @@ mod filter_coeffs {
         -0.00749618797172,
     ];
 
-    pub const BUTTER_A_11025: [f64; 3] = [1.0, -1.91542108074780, 0.91885558323625];
+    pub(super) const BUTTER_A_11025: [f64; 3] = [1.0, -1.91542108074780, 0.91885558323625];
 
-    pub const BUTTER_B_11025: [f64; 3] = [0.95856916599601, -1.91713833199203, 0.95856916599601];
+    pub(super) const BUTTER_B_11025: [f64; 3] =
+        [0.95856916599601, -1.91713833199203, 0.95856916599601];
 
     // =========================================================================
     // 8000 Hz coefficients (ABYule[11], ABButter[11])
     // =========================================================================
-    pub const YULE_A_8000: [f64; 11] = [
+    pub(super) const YULE_A_8000: [f64; 11] = [
         1.0,
         -0.25049871956020,
         -0.43193942311114,
@@ -506,7 +550,7 @@ mod filter_coeffs {
         0.04704409688120,
     ];
 
-    pub const YULE_B_8000: [f64; 11] = [
+    pub(super) const YULE_B_8000: [f64; 11] = [
         0.53648789255105,
         -0.42163034350696,
         -0.00275953611929,
@@ -520,9 +564,10 @@ mod filter_coeffs {
         -0.02217936801134,
     ];
 
-    pub const BUTTER_A_8000: [f64; 3] = [1.0, -1.88903307939452, 0.89487434461664];
+    pub(super) const BUTTER_A_8000: [f64; 3] = [1.0, -1.88903307939452, 0.89487434461664];
 
-    pub const BUTTER_B_8000: [f64; 3] = [0.94597685600279, -1.89195371200558, 0.94597685600279];
+    pub(super) const BUTTER_B_8000: [f64; 3] =
+        [0.94597685600279, -1.89195371200558, 0.94597685600279];
 }
 
 /// Small constant to prevent denormal float slowdowns
@@ -1121,7 +1166,9 @@ pub fn is_available() -> bool {
 }
 
 /// Result of peak amplitude analysis
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeakAmplitudeResult {
     /// Maximum peak amplitude (normalized, can exceed 1.0 for clipping audio)
     pub peak: f64,
@@ -1129,6 +1176,12 @@ pub struct PeakAmplitudeResult {
     pub peak_pcm: f64,
     /// Sample rate of the audio
     pub sample_rate: u32,
+}
+
+impl std::fmt::Display for PeakAmplitudeResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "peak: {:.6} ({:.1} PCM)", self.peak, self.peak_pcm)
+    }
 }
 
 /// Find the peak amplitude of an audio file by decoding the audio.
