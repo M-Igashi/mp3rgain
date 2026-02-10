@@ -1358,18 +1358,6 @@ pub fn find_max_amplitude(file_path: &Path) -> Result<(f64, u8, u8)> {
 ///
 /// This is the preferred alternative to [`find_max_amplitude`] which returns
 /// a tuple. The tuple variant will be removed in a future major release.
-#[cfg(feature = "replaygain")]
-pub fn find_max_amplitude_detailed(file_path: &Path) -> Result<MaxAmplitudeResult> {
-    let (max_amplitude, max_global_gain, min_global_gain) = find_max_amplitude(file_path)?;
-    Ok(MaxAmplitudeResult {
-        max_amplitude,
-        max_global_gain,
-        min_global_gain,
-    })
-}
-
-/// Find maximum amplitude (fallback without replaygain feature), returning a named struct.
-#[cfg(not(feature = "replaygain"))]
 pub fn find_max_amplitude_detailed(file_path: &Path) -> Result<MaxAmplitudeResult> {
     let (max_amplitude, max_global_gain, min_global_gain) = find_max_amplitude(file_path)?;
     Ok(MaxAmplitudeResult {

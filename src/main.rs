@@ -1060,7 +1060,7 @@ fn cmd_apply_channel(
     let channel_name = match channel {
         Channel::Left => "left",
         Channel::Right => "right",
-        _ => "unknown",
+        _ => unreachable!(),
     };
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
@@ -1629,7 +1629,7 @@ fn process_apply_channel(
     let channel_name = match channel {
         Channel::Left => "left",
         Channel::Right => "right",
-        _ => "unknown",
+        _ => unreachable!(),
     };
 
     // Save original timestamp if needed
@@ -2000,7 +2000,7 @@ fn process_track_gain(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> 
                 });
             }
 
-            process_apply_replaygain(file, modified_steps, &result, opts)
+            process_apply_replaygain_with_album(file, modified_steps, &result, opts, None)
         }
         Err(e) => {
             if opts.output_format == OutputFormat::Text && !opts.quiet {
@@ -2015,15 +2015,6 @@ fn process_track_gain(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> 
             })
         }
     }
-}
-
-fn process_apply_replaygain(
-    file: &PathBuf,
-    steps: i32,
-    result: &ReplayGainResult,
-    opts: &Options,
-) -> Result<JsonFileResult> {
-    process_apply_replaygain_with_album(file, steps, result, opts, None)
 }
 
 fn process_apply_replaygain_with_album(
