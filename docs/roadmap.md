@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current Status: v1.6.0 (Production Ready)
+## Current Status: v1.7.0 (Production Ready)
 
 All core functionality complete:
 - [x] MP3 frame parsing (MPEG 1/2/2.5 Layer III)
@@ -12,6 +12,7 @@ All core functionality complete:
 - [x] AAC/M4A support (ReplayGain tags)
 - [x] Full mp3gain command-line compatibility
 - [x] Cross-platform support (Windows, macOS, Linux)
+- [x] Stabilized library API with `#[non_exhaustive]`, `Display`, `serde` support
 
 ## Completed Milestones
 
@@ -94,11 +95,8 @@ All core functionality complete:
 - [x] Fixed GUI volume display to use 89 dB ReplayGain reference (#62)
 - [x] Code quality improvements (clippy, iterator patterns, helper extraction)
 
-## Upcoming Goals
+### v1.7.0 - Library API Stabilization & AAC Parser (Issues #68, #64)
 
-### v1.7.0 - Library API Stabilization (Issue #68)
-
-**Non-breaking additions (shipped in v1.7.0):**
 - [x] Add `#[non_exhaustive]` to all public enums and structs
 - [x] Add missing standard trait implementations (`PartialEq`, `Eq`, `Hash`)
 - [x] Add `Display` trait implementations to all public types
@@ -108,23 +106,42 @@ All core functionality complete:
 - [x] Add `MaxAmplitudeResult` struct and `find_max_amplitude_detailed()` function
 - [x] Add `Channel::other()` convenience method
 - [x] Remove unnecessary `pub` from `filter_coeffs` internal constants
+- [x] AAC bitstream parser for locating `global_gain` fields (Issue #64 Phase 1)
 
-**Breaking changes (deferred to v2.0):**
+## Upcoming Goals
+
+### v2.0.0 - AAC Lossless Gain & Breaking API Changes (Issues #64, #68)
+
+**Phase 1: AAC gain application — bitstream write (Issue #64 Phase 2)**
+- [ ] Bit-level write operation handling byte-boundary crossing
+- [ ] Locate sample file offsets via `stco`/`co64` + `stsz` atoms
+- [ ] In-place `global_gain` modification within MP4 container
+- [ ] Saturating clamp to 0-255 range, skip `global_gain == 0` (silence)
+
+**Phase 2: AAC undo support (Issue #64 Phase 3)**
+- [ ] Save original `global_gain` values in iTunes freeform metadata tags
+- [ ] Implement undo/restore from saved values
+
+**Phase 3: AAC essential validation (Issue #64 Phase 4 — part 1)**
+- [ ] Classify parse errors as fatal vs. non-fatal (skip SBR extension data etc.)
+- [ ] Apply `global_gain` to HE-AAC base layer where possible
+- [ ] Detect and reject DRM-protected files / non-AAC tracks
+- [ ] Report when adjustment rounds to 0 steps
+- [ ] Validate against aacgain output on test files
+
+**Phase 4: AAC extended support (Issue #64 Phase 4 — part 2)**
+- [ ] Multi-channel layout support beyond stereo (5.1 etc.)
+- [ ] Multiple audio track handling (default to first, warn)
+
+**Phase 5: Breaking API changes (Issue #68)**
 - [ ] Replace `anyhow::Result` with custom error types (`thiserror`)
 - [ ] Change `Mp3Analysis.mpeg_version` / `channel_mode` from `String` to enum
 - [ ] Remove old `find_max_amplitude` tuple return
-- [ ] Review public struct fields - consider private fields with accessor methods
+- [ ] Make struct fields private with accessor methods
+
+**Phase 6: API polish (Issue #68 — lower priority)**
 - [ ] Consolidate `apply_gain*` function variants into builder/options pattern
 - [ ] Organize flat `lib.rs` exports into submodules
-
-### v2.0.0 - AAC Lossless Bitstream Gain (Issue #64)
-
-- [ ] AAC bitstream parser for locating global_gain fields within MP4 samples
-- [ ] In-place byte modification of global_gain (no container rewriting)
-- [ ] Undo support via iTunes freeform metadata tags
-- [ ] HE-AAC (SBR) detection and rejection
-- [ ] Multi-channel support beyond stereo
-- [ ] Full aacgain feature parity in pure Rust
 
 ### Future Enhancements
 
