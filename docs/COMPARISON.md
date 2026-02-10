@@ -9,7 +9,7 @@ This document provides a detailed comparison between mp3rgain and the original a
 | **Language** | Rust | C | C |
 | **Last Update** | Active (2026) | 2022 | 2018 |
 | **License** | MIT | LGPL | LGPL |
-| **Version** | 1.5.0 | 1.8.2 | 1.6.2 |
+| **Version** | 1.6.0 | 1.8.2 | 1.6.2 |
 | **Repository** | [M-Igashi/mp3rgain](https://github.com/M-Igashi/mp3rgain) | [dgilman/aacgain](https://github.com/dgilman/aacgain) | SourceForge |
 
 ## Feature Comparison
@@ -26,7 +26,7 @@ This document provides a detailed comparison between mp3rgain and the original a
 | HE-AAC/SBR | No | No | No |
 | Apple Lossless | No | No | No |
 
-Note: For AAC files, mp3rgain writes ReplayGain metadata tags. aacgain can modify the audio data losslessly using iTunes-style Sound Check.
+Note: For AAC files, mp3rgain writes ReplayGain metadata tags. aacgain can modify the audio data losslessly using iTunes-style Sound Check. As of v1.6.0, mp3rgain detects and rejects ALAC and DRM-protected M4P files with clear error messages.
 
 ### Command-Line Options
 
@@ -265,7 +265,7 @@ See [Security Documentation](security.md) for detailed CVE analysis.
 ## Known Limitations
 
 ### mp3rgain
-- AAC: Writes tags only, does not modify audio data
+- AAC: Writes tags only, does not modify audio data (bitstream modification planned for v2.0.0)
 - ID3v2 tag storage not yet implemented (uses APEv2)
 
 ### aacgain

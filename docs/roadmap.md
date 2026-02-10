@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current Status: v1.5.0 (Production Ready)
+## Current Status: v1.6.0 (Production Ready)
 
 All core functionality complete:
 - [x] MP3 frame parsing (MPEG 1/2/2.5 Layer III)
@@ -82,18 +82,35 @@ All core functionality complete:
 - [x] .deb package build in release workflow
 - [x] .deb package test workflow (Debian 12/13, Ubuntu 22.04/24.04)
 
+### v1.6.0 - MP4/M4A Hardening & GUI Fixes
+
+- [x] Hardened MP4/M4A metadata handling and file detection (#67)
+- [x] Atomic write (temp file + rename) for M4A tag updates
+- [x] ALAC file detection and proper rejection
+- [x] DRM-protected M4P file rejection
+- [x] Compatible brands list checking in ftyp box
+- [x] Improved ilst box management (empty container cleanup, NeedsIlst)
+- [x] Fixed chunk offset (stco/co64) updates with threshold-based adjustment
+- [x] Fixed GUI volume display to use 89 dB ReplayGain reference (#62)
+- [x] Code quality improvements (clippy, iterator patterns, helper extraction)
+
 ## Upcoming Goals
 
-### v1.6.0 - Distribution Expansion
+### v2.0.0 - AAC Lossless Bitstream Gain (Issue #64)
+
+- [ ] AAC bitstream parser for locating global_gain fields within MP4 samples
+- [ ] In-place byte modification of global_gain (no container rewriting)
+- [ ] Undo support via iTunes freeform metadata tags
+- [ ] HE-AAC (SBR) detection and rejection
+- [ ] Multi-channel support beyond stereo
+- [ ] Full aacgain feature parity in pure Rust
+
+### Future Enhancements
 
 - [ ] Official Debian repository (ITP submission)
 - [ ] Homebrew core inclusion (currently in tap)
 - [ ] Fedora/RPM package
 - [ ] Flatpak package
-
-### Future Enhancements
-
-- [ ] GUI application (cross-platform)
 - [ ] FLAC support
 - [ ] Ogg Vorbis support
 - [ ] Library API stabilization
