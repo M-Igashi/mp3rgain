@@ -117,14 +117,14 @@ Run `mp3rgain -h` for the full list of options.
 ## Documentation
 
 - [Roadmap](docs/roadmap.md) - Development plans and upcoming features
-- [Security](docs/security.md) - Memory safety and CVE analysis (CVE-2023-49356, etc.)
+- [Security](docs/security.md) - Memory safety and CVE analysis
 - [Compatibility Report](docs/compatibility-report.md) - Verification against original mp3gain
 - [Technical Comparison](docs/COMPARISON.md) - Comparison with similar tools
 - [Use Cases](docs/use-cases.md) - Integration examples (beets, headroom, etc.)
 
 ## Why mp3rgain?
 
-The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained since ~2015 and has [unpatched security vulnerabilities](docs/security.md). mp3rgain is a modern, memory-safe replacement written in Rust.
+The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained upstream since ~2015 (though distribution maintainers continue to apply security patches). mp3rgain is a modern, memory-safe replacement written in Rust.
 
 mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) for full compatibility with the original mp3gain. Loudness values will differ from EBU R128/LUFS-based tools (foobar2000, loudgain, ffmpeg loudnorm).
 

@@ -15,9 +15,9 @@ The original mp3gain has had numerous security vulnerabilities over its history.
 | CVE-2017-9872 | - | Buffer over-read in `III_dequantize_sample` | **Fixed** |
 | CVE-2017-14409 | 7.8 (High) | Buffer over-read in `III_i_stereo` | **Fixed** |
 | CVE-2018-10778 | - | Heap-based buffer over-read in `II_step_one` | **Fixed** |
-| CVE-2023-49356 | 7.5 (High) | Stack buffer overflow in `WriteMP3GainAPETag` | **Unpatched** |
+| CVE-2023-49356 | 7.5 (High) | Stack buffer overflow in `WriteMP3GainAPETag` | **Fixed** (Debian 1.6.2-2) |
 
-CVE-2023-49356 was discovered in December 2023 and affects mp3gain v1.6.2. It allows denial of service via specially crafted files.
+CVE-2023-49356 was discovered in December 2023 and affects the upstream mp3gain v1.6.2 release. Debian has patched this vulnerability in their 1.6.2-2 package.
 
 ### aacgain
 
@@ -46,7 +46,7 @@ mp3rgain uses a fundamentally different approach:
 
 The historical vulnerabilities in mp3gain existed in two places:
 1. **mpglibDBL** - A bundled, vulnerable fork of mpg123 (fixed in 1.6.x by linking to system libmpg123)
-2. **apetag.c** - Custom APE tag handling code (CVE-2023-49356 still affects this)
+2. **apetag.c** - Custom APE tag handling code (CVE-2023-49356, fixed in Debian 1.6.2-2)
 
 mp3rgain uses neither of these components.
 
@@ -99,7 +99,7 @@ Please do not open public issues for security vulnerabilities.
 
 - [CVE-2021-34085](https://nvd.nist.gov/vuln/detail/CVE-2021-34085) - Fixed in mp3gain 1.6.2, unpatched in aacgain
 - [CVE-2019-18359](https://nvd.nist.gov/vuln/detail/CVE-2019-18359) - Fixed in mp3gain 1.6.2-2
-- [CVE-2023-49356](https://nvd.nist.gov/vuln/detail/CVE-2023-49356) - Unpatched in mp3gain 1.6.2
+- [CVE-2023-49356](https://nvd.nist.gov/vuln/detail/CVE-2023-49356) - Fixed in Debian mp3gain 1.6.2-2 (unpatched in upstream 1.6.2)
 - [Debian mp3gain Security Tracker](https://security-tracker.debian.org/tracker/source-package/mp3gain)
 - [aacgain repository](https://github.com/dgilman/aacgain) - Contains bundled mpglibDBL
 - [symphonia - Pure Rust audio decoding](https://github.com/pdeljanov/Symphonia)

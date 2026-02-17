@@ -259,7 +259,7 @@ See [Security Documentation](security.md) for detailed CVE analysis.
 | Tool | Security Status |
 |------|-----------------|
 | mp3rgain | Memory-safe (Rust), not affected by mp3gain/aacgain CVEs |
-| mp3gain 1.6.2 | Most CVEs fixed, CVE-2023-49356 unpatched |
+| mp3gain 1.6.2 | All known CVEs fixed (CVE-2023-49356 patched in Debian 1.6.2-2) |
 | aacgain 2.0.0 | **Still bundles vulnerable mpglibDBL** - CVE-2021-34085 and others unpatched |
 
 ## Known Limitations
@@ -275,7 +275,7 @@ See [Security Documentation](security.md) for detailed CVE analysis.
 - faad2 dependency for AAC
 
 ### mp3gain
-- CVE-2023-49356 unpatched in 1.6.2
+- Upstream unmaintained (security patches applied by distribution maintainers)
 - Limited modern OS support
 - No AAC support
 
