@@ -360,9 +360,9 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-  # Update AUR packages (CLI + GUI)
+  # Update AUR package (mp3rgui)
   update-aur:
-    name: Update AUR Packages
+    name: Update AUR Package
     needs: release
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -379,18 +379,9 @@ jobs:
           ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
           printf 'Host aur.archlinux.org\n  User aur\n  IdentityFile ~/.ssh/aur\n  IdentitiesOnly yes\n' >> ~/.ssh/config
 
-      - name: Update AUR package versions
+      - name: Update GUI PKGBUILD version
         run: |
           VERSION=${{ needs.release.outputs.version }}
-
-          # Update CLI PKGBUILD and .SRCINFO
-          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packages/aur/PKGBUILD
-          sed -i "s/^pkgrel=.*/pkgrel=1/" packages/aur/PKGBUILD
-          sed -i "s/pkgver = .*/pkgver = ${VERSION}/" packages/aur/.SRCINFO
-          sed -i "s/pkgrel = .*/pkgrel = 1/" packages/aur/.SRCINFO
-          sed -i "s|source = https://github.com/M-Igashi/mp3rgain/archive/v.*.tar.gz|source = https://github.com/M-Igashi/mp3rgain/archive/v${VERSION}.tar.gz|" packages/aur/.SRCINFO
-
-          # Update GUI PKGBUILD and .SRCINFO
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packages/aur-gui/PKGBUILD
           sed -i "s/^pkgrel=.*/pkgrel=1/" packages/aur-gui/PKGBUILD
           sed -i "s/pkgver = .*/pkgver = ${VERSION}/" packages/aur-gui/.SRCINFO
@@ -401,8 +392,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packages/aur/ packages/aur-gui/
-          git commit -m "Update AUR packages to ${{ needs.release.outputs.version }}" || exit 0
+          git add packages/aur-gui/
+          git commit -m "Update AUR mp3rgui to ${{ needs.release.outputs.version }}" || exit 0
           git push
 
       - name: Push to AUR (mp3rgui)

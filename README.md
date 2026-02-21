@@ -47,7 +47,6 @@ scoop install mp3rgain
 sudo apt install ./mp3rgain_*_amd64.deb
 
 # Arch Linux (AUR)
-yay -S mp3rgain      # CLI (source build)
 yay -S mp3rgain-bin  # CLI (pre-built binary)
 yay -S mp3rgui       # GUI application
 
