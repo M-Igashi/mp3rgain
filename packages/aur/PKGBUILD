@@ -1,6 +1,6 @@
 # Maintainer: Jesse Pinkman <M-Igashi@users.noreply.github.com>
 pkgname=mp3rgain
-pkgver=1.1.1
+pkgver=1.7.0
 pkgrel=1
 pkgdesc='Lossless MP3 volume adjustment - a modern mp3gain replacement written in Rust'
 arch=('x86_64' 'aarch64')
