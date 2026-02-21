@@ -371,6 +371,14 @@ jobs:
         with:
           ref: master
 
+      - name: Setup SSH for AUR
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AUR_SSH_KEY }}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host aur.archlinux.org\n  User aur\n  IdentityFile ~/.ssh/aur\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+
       - name: Update AUR package versions
         run: |
           VERSION=${{ needs.release.outputs.version }}
@@ -389,10 +397,24 @@ jobs:
           sed -i "s/pkgrel = .*/pkgrel = 1/" packages/aur-gui/.SRCINFO
           sed -i "s|source = https://github.com/M-Igashi/mp3rgain/archive/v.*.tar.gz|source = https://github.com/M-Igashi/mp3rgain/archive/v${VERSION}.tar.gz|" packages/aur-gui/.SRCINFO
 
-      - name: Commit and push
+      - name: Commit and push to GitHub
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add packages/aur/ packages/aur-gui/
           git commit -m "Update AUR packages to ${{ needs.release.outputs.version }}" || exit 0
+          git push
+
+      - name: Push to AUR (mp3rgui)
+        run: |
+          VERSION=${{ needs.release.outputs.version }}
+          git clone ssh://aur@aur.archlinux.org/mp3rgui.git /tmp/aur-mp3rgui
+          cp packages/aur-gui/PKGBUILD /tmp/aur-mp3rgui/
+          cp packages/aur-gui/.SRCINFO /tmp/aur-mp3rgui/
+          cp packages/aur-gui/mp3rgui.desktop /tmp/aur-mp3rgui/
+          cd /tmp/aur-mp3rgui
+          git config user.name "M-Igashi"
+          git config user.email "M-Igashi@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO mp3rgui.desktop
+          git commit -m "Update to version ${VERSION}" || exit 0
           git push

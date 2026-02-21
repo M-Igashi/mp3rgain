@@ -107,6 +107,8 @@ All core functionality complete:
 - [x] Add `Channel::other()` convenience method
 - [x] Remove unnecessary `pub` from `filter_coeffs` internal constants
 - [x] AAC bitstream parser for locating `global_gain` fields (Issue #64 Phase 1)
+- [x] AUR package for mp3rgui (GUI application)
+- [x] Automated AUR package publishing in release workflow
 
 ## Upcoming Goals
 
