@@ -11,10 +11,10 @@ use mp3rgain::mp4meta;
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{
     analyze, apply_gain, apply_gain_channel_with_undo, apply_gain_with_undo,
-    apply_gain_with_undo_wrap, apply_gain_wrap, db_to_steps, delete_ape_tag,
-    find_max_amplitude, read_ape_tag_from_file, steps_to_db, undo_gain, Channel,
-    GAIN_STEP_DB, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN,
-    TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
+    apply_gain_with_undo_wrap, apply_gain_wrap, db_to_steps, delete_ape_tag, find_max_amplitude,
+    read_ape_tag_from_file, steps_to_db, undo_gain, Channel, GAIN_STEP_DB, TAG_MP3GAIN_MINMAX,
+    TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
+    TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use serde::Serialize;
 use std::env;
@@ -148,7 +148,7 @@ struct JsonFileResult {
     dry_run: Option<bool>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Copy)]
 struct JsonAlbumResult {
     loudness_db: f64,
     gain_db: f64,
@@ -1072,7 +1072,12 @@ fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
             if let Ok(info) = analyze(file) {
                 println!(
                     "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
-                    filename, steps, db_value, 1.0, info.max_gain(), info.min_gain()
+                    filename,
+                    steps,
+                    db_value,
+                    1.0,
+                    info.max_gain(),
+                    info.min_gain()
                 );
             }
         }
@@ -1393,9 +1398,24 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             // Apply gain modifier
             let modified_gain_steps = album_result.album_gain_steps() + opts.gain_modifier;
 
+            let json_album = JsonAlbumResult {
+                loudness_db: album_result.album_loudness_db(),
+                gain_db: album_result.album_gain_db(),
+                gain_steps: modified_gain_steps,
+                peak: album_result.album_peak(),
+            };
+
+            let album_info = AacAlbumInfo {
+                album_gain_db: album_result.album_gain_db(),
+                album_peak: album_result.album_peak(),
+            };
+
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 println!();
-                println!("  Album loudness: {:.1} dB", album_result.album_loudness_db());
+                println!(
+                    "  Album loudness: {:.1} dB",
+                    album_result.album_loudness_db()
+                );
                 println!(
                     "  Album gain:     {:+.1} dB ({} steps{})",
                     album_result.album_gain_db(),
@@ -1434,12 +1454,7 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
                     let output = JsonOutput {
                         files: Some(json_results),
-                        album: Some(JsonAlbumResult {
-                            loudness_db: album_result.album_loudness_db(),
-                            gain_db: album_result.album_gain_db(),
-                            gain_steps: modified_gain_steps,
-                            peak: album_result.album_peak(),
-                        }),
+                        album: Some(json_album),
                         summary: Some(create_json_summary(files.len(), 0, 0, opts.dry_run)),
                     };
                     println!("{}", serde_json::to_string_pretty(&output)?);
@@ -1459,10 +1474,6 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 progress_set_message(&pb, filename);
 
                 let track_result = &album_result.tracks()[i];
-                let album_info = AacAlbumInfo {
-                    album_gain_db: album_result.album_gain_db(),
-                    album_peak: album_result.album_peak(),
-                };
                 let result = process_apply_replaygain_with_album(
                     file,
                     steps,
@@ -1484,12 +1495,7 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             if opts.output_format == OutputFormat::Json {
                 let output = JsonOutput {
                     files: Some(json_results),
-                    album: Some(JsonAlbumResult {
-                        loudness_db: album_result.album_loudness_db(),
-                        gain_db: album_result.album_gain_db(),
-                        gain_steps: modified_gain_steps,
-                        peak: album_result.album_peak(),
-                    }),
+                    album: Some(json_album),
                     summary: Some(create_json_summary(
                         files.len(),
                         successful,
@@ -1680,7 +1686,11 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
             apply_with_temp_file(file, |f| Ok(apply_gain(f, actual_steps)?), opts)
         }
     } else if opts.wrap_gain {
-        apply_with_temp_file(file, |f| Ok(apply_gain_with_undo_wrap(f, actual_steps)?), opts)
+        apply_with_temp_file(
+            file,
+            |f| Ok(apply_gain_with_undo_wrap(f, actual_steps)?),
+            opts,
+        )
     } else {
         apply_with_temp_file(file, |f| Ok(apply_gain_with_undo(f, actual_steps)?), opts)
     };
@@ -1923,12 +1933,15 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
                         println!("{}", filename.cyan().bold());
                         println!(
                             "  Format:      {} Layer III, {}",
-                            info.mpeg_version(), info.channel_mode()
+                            info.mpeg_version(),
+                            info.channel_mode()
                         );
                         println!("  Frames:      {}", info.frame_count());
                         println!(
                             "  Gain range:  {} - {} (avg: {:.1})",
-                            info.min_gain(), info.max_gain(), info.avg_gain()
+                            info.min_gain(),
+                            info.max_gain(),
+                            info.avg_gain()
                         );
                         println!(
                             "  Headroom:    {} steps ({:+.1} dB)",
@@ -2180,7 +2193,9 @@ fn process_apply_replaygain_with_album(
                 }
                 warning_msg = Some(format!(
                     "gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
-                    steps, actual_steps, result.peak()
+                    steps,
+                    actual_steps,
+                    result.peak()
                 ));
             } else if !opts.ignore_clipping && !opts.quiet {
                 if opts.output_format == OutputFormat::Text {
@@ -2205,18 +2220,12 @@ fn process_apply_replaygain_with_album(
     // Dry run: don't actually modify
     if opts.dry_run {
         if opts.output_format == OutputFormat::Text && !opts.quiet {
-            let format_info = match result.file_type() {
-                AudioFileType::Aac => "",
-                AudioFileType::Mp3 => "",
-                _ => "",
-            };
             println!(
-                "  {} [DRY RUN] {} (would apply {:+.1} dB, {} steps{})",
+                "  {} [DRY RUN] {} (would apply {:+.1} dB, {} steps)",
                 "~".cyan(),
                 filename,
                 steps_to_db(actual_steps),
                 actual_steps,
-                format_info
             );
         }
         return Ok(JsonFileResult {
@@ -2247,7 +2256,11 @@ fn process_apply_replaygain_with_album(
 
     // MP3: Apply gain to audio frames
     let apply_result = if opts.wrap_gain {
-        apply_with_temp_file(file, |f| Ok(apply_gain_with_undo_wrap(f, actual_steps)?), opts)
+        apply_with_temp_file(
+            file,
+            |f| Ok(apply_gain_with_undo_wrap(f, actual_steps)?),
+            opts,
+        )
     } else {
         apply_with_temp_file(file, |f| Ok(apply_gain_with_undo(f, actual_steps)?), opts)
     };

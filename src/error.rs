@@ -1,6 +1,6 @@
 //! Custom error types for mp3rgain.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -8,9 +8,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    // -------------------------------------------------------------------------
-    // I/O errors
-    // -------------------------------------------------------------------------
+    // I/O
     #[error("Failed to read '{path}': {source}")]
     IoRead {
         path: PathBuf,
@@ -32,9 +30,7 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    // -------------------------------------------------------------------------
-    // MP3 errors
-    // -------------------------------------------------------------------------
+    // MP3
     #[error("No valid MP3 frames found")]
     NoMp3Frames,
 
@@ -47,9 +43,7 @@ pub enum Error {
     #[error("No MP3GAIN_UNDO tag found - cannot undo")]
     NoUndoTag,
 
-    // -------------------------------------------------------------------------
-    // ReplayGain / decoder errors
-    // -------------------------------------------------------------------------
+    // ReplayGain / decoder
     #[error("No audio track found")]
     NoAudioTrack,
 
@@ -75,9 +69,7 @@ pub enum Error {
     #[error("Audio decode error: {0}")]
     Decode(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    // -------------------------------------------------------------------------
-    // MP4 / AAC errors
-    // -------------------------------------------------------------------------
+    // MP4 / AAC
     #[error("No moov box found in MP4 file")]
     NoMoovBox,
 
@@ -94,27 +86,25 @@ pub enum Error {
     AacParseFailure { warnings: u32 },
 }
 
-// -----------------------------------------------------------------------------
-// Convenience constructors for I/O errors
-// -----------------------------------------------------------------------------
-
-pub fn io_read(path: &std::path::Path, source: std::io::Error) -> Error {
-    Error::IoRead {
-        path: path.to_path_buf(),
-        source,
+impl Error {
+    pub fn io_read(path: &Path, source: std::io::Error) -> Self {
+        Self::IoRead {
+            path: path.to_path_buf(),
+            source,
+        }
     }
-}
 
-pub fn io_write(path: &std::path::Path, source: std::io::Error) -> Error {
-    Error::IoWrite {
-        path: path.to_path_buf(),
-        source,
+    pub fn io_write(path: &Path, source: std::io::Error) -> Self {
+        Self::IoWrite {
+            path: path.to_path_buf(),
+            source,
+        }
     }
-}
 
-pub fn io_open(path: &std::path::Path, source: std::io::Error) -> Error {
-    Error::IoOpen {
-        path: path.to_path_buf(),
-        source,
+    pub fn io_open(path: &Path, source: std::io::Error) -> Self {
+        Self::IoOpen {
+            path: path.to_path_buf(),
+            source,
+        }
     }
 }

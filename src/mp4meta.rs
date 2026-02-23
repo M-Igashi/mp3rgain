@@ -17,7 +17,7 @@
 //! mdat (media data)
 //! ```
 
-use crate::error::{self, Error, Result};
+use crate::error::{Error, Result};
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;
@@ -118,12 +118,22 @@ pub struct FreeformTag {
 
 impl FreeformTag {
     pub(crate) fn new(namespace: String, name: String, value: String) -> Self {
-        Self { namespace, name, value }
+        Self {
+            namespace,
+            name,
+            value,
+        }
     }
 
-    pub fn namespace(&self) -> &str { &self.namespace }
-    pub fn name(&self) -> &str { &self.name }
-    pub fn value(&self) -> &str { &self.value }
+    pub fn namespace(&self) -> &str {
+        &self.namespace
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn value(&self) -> &str {
+        &self.value
+    }
 }
 
 impl std::fmt::Display for FreeformTag {
@@ -144,10 +154,18 @@ pub struct ReplayGainTags {
 }
 
 impl ReplayGainTags {
-    pub fn track_gain(&self) -> Option<&str> { self.track_gain.as_deref() }
-    pub fn track_peak(&self) -> Option<&str> { self.track_peak.as_deref() }
-    pub fn album_gain(&self) -> Option<&str> { self.album_gain.as_deref() }
-    pub fn album_peak(&self) -> Option<&str> { self.album_peak.as_deref() }
+    pub fn track_gain(&self) -> Option<&str> {
+        self.track_gain.as_deref()
+    }
+    pub fn track_peak(&self) -> Option<&str> {
+        self.track_peak.as_deref()
+    }
+    pub fn album_gain(&self) -> Option<&str> {
+        self.album_gain.as_deref()
+    }
+    pub fn album_peak(&self) -> Option<&str> {
+        self.album_peak.as_deref()
+    }
 
     pub fn set_track(&mut self, gain_db: f64, peak: f64) {
         self.track_gain = Some(format!("{:+.2} dB", gain_db));
@@ -202,11 +220,9 @@ impl ReplayGainTags {
         entries
             .into_iter()
             .filter_map(|(name, value)| {
-                value.as_ref().map(|v| FreeformTag::new(
-                    ITUNES_NAMESPACE.to_string(),
-                    name.to_string(),
-                    v.clone(),
-                ))
+                value.as_ref().map(|v| {
+                    FreeformTag::new(ITUNES_NAMESPACE.to_string(), name.to_string(), v.clone())
+                })
             })
             .collect()
     }
@@ -229,8 +245,12 @@ impl UndoTags {
         Self { undo, minmax }
     }
 
-    pub fn undo(&self) -> Option<&str> { self.undo.as_deref() }
-    pub fn minmax(&self) -> Option<&str> { self.minmax.as_deref() }
+    pub fn undo(&self) -> Option<&str> {
+        self.undo.as_deref()
+    }
+    pub fn minmax(&self) -> Option<&str> {
+        self.minmax.as_deref()
+    }
 
     pub fn is_empty(&self) -> bool {
         self.undo.is_none() && self.minmax.is_none()
@@ -243,11 +263,9 @@ impl UndoTags {
         entries
             .into_iter()
             .filter_map(|(name, value)| {
-                value.as_ref().map(|v| FreeformTag::new(
-                    ITUNES_NAMESPACE.to_string(),
-                    name.to_string(),
-                    v.clone(),
-                ))
+                value.as_ref().map(|v| {
+                    FreeformTag::new(ITUNES_NAMESPACE.to_string(), name.to_string(), v.clone())
+                })
             })
             .collect()
     }
@@ -404,7 +422,7 @@ fn serialize_freeform_tag(tag: &FreeformTag) -> Vec<u8> {
 
 /// Read ReplayGain tags from MP4/M4A file
 pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
-    let data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
 
     let mut tags = ReplayGainTags::default();
 
@@ -490,7 +508,7 @@ pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
 
 /// Read undo tags from MP4/M4A file
 pub fn read_undo_tags(file_path: &Path) -> Result<UndoTags> {
-    let data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
 
     let mut tags = UndoTags::default();
 
@@ -565,52 +583,38 @@ pub fn read_undo_tags(file_path: &Path) -> Result<UndoTags> {
 /// Write undo tags to MP4/M4A file.
 /// Uses atomic write (temp file + rename) to prevent corruption on interruption.
 pub fn write_undo_tags(file_path: &Path, tags: &UndoTags) -> Result<()> {
-    let data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
-
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
     let new_data = update_mp4_undo_metadata(&data, tags)?;
-
-    let parent = file_path.parent().unwrap_or(Path::new("."));
-    let temp_path = parent.join(format!(".mp3rgain_temp_{}.m4a", std::process::id()));
-
-    if let Err(e) = fs::write(&temp_path, &new_data) {
-        let _ = fs::remove_file(&temp_path);
-        return Err(error::io_write(&temp_path, e));
-    }
-
-    if let Err(_rename_err) = fs::rename(&temp_path, file_path) {
-        let _ = fs::remove_file(&temp_path);
-        fs::write(file_path, &new_data).map_err(|e| error::io_write(file_path, e))?;
-    }
-
-    Ok(())
+    atomic_write(file_path, &new_data)
 }
 
 /// Delete undo tags from MP4/M4A file
 pub fn delete_undo_tags(file_path: &Path) -> Result<()> {
-    let empty_tags = UndoTags::default();
-    write_undo_tags(file_path, &empty_tags)
+    write_undo_tags(file_path, &UndoTags::default())
 }
 
 /// Write ReplayGain tags to MP4/M4A file.
 /// Uses atomic write (temp file + rename) to prevent corruption on interruption.
 pub fn write_replaygain_tags(file_path: &Path, tags: &ReplayGainTags) -> Result<()> {
-    let data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
-
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
     let new_data = update_mp4_metadata(&data, tags)?;
+    atomic_write(file_path, &new_data)
+}
 
-    // Atomic write: write to temp file, then rename over original
+/// Atomic write: write to a temp file then rename over the original.
+/// Falls back to direct write if rename fails (e.g., cross-filesystem).
+fn atomic_write(file_path: &Path, data: &[u8]) -> Result<()> {
     let parent = file_path.parent().unwrap_or(Path::new("."));
     let temp_path = parent.join(format!(".mp3rgain_temp_{}.m4a", std::process::id()));
 
-    if let Err(e) = fs::write(&temp_path, &new_data) {
+    if let Err(e) = fs::write(&temp_path, data) {
         let _ = fs::remove_file(&temp_path);
-        return Err(error::io_write(&temp_path, e));
+        return Err(Error::io_write(&temp_path, e));
     }
 
     if let Err(_rename_err) = fs::rename(&temp_path, file_path) {
-        // rename can fail across filesystems; fall back to direct write
         let _ = fs::remove_file(&temp_path);
-        fs::write(file_path, &new_data).map_err(|e| error::io_write(file_path, e))?;
+        fs::write(file_path, data).map_err(|e| Error::io_write(file_path, e))?;
     }
 
     Ok(())
@@ -874,16 +878,13 @@ fn is_replaygain_freeform(data: &[u8], pos: usize, header: &BoxHeader) -> bool {
         return false;
     }
     let inner_data = &data[pos + header.header_size as usize..pos + header.size as usize];
-    match parse_freeform_tag(inner_data) {
-        Some(tag) => {
-            tag.namespace() == ITUNES_NAMESPACE
-                && (tag.name().eq_ignore_ascii_case(RG_TRACK_GAIN)
-                    || tag.name().eq_ignore_ascii_case(RG_TRACK_PEAK)
-                    || tag.name().eq_ignore_ascii_case(RG_ALBUM_GAIN)
-                    || tag.name().eq_ignore_ascii_case(RG_ALBUM_PEAK))
-        }
-        None => false,
-    }
+    parse_freeform_tag(inner_data).is_some_and(|tag| {
+        tag.namespace() == ITUNES_NAMESPACE
+            && (tag.name().eq_ignore_ascii_case(RG_TRACK_GAIN)
+                || tag.name().eq_ignore_ascii_case(RG_TRACK_PEAK)
+                || tag.name().eq_ignore_ascii_case(RG_ALBUM_GAIN)
+                || tag.name().eq_ignore_ascii_case(RG_ALBUM_PEAK))
+    })
 }
 
 /// Check if a box at the given position is an undo freeform tag
@@ -892,14 +893,11 @@ fn is_undo_freeform(data: &[u8], pos: usize, header: &BoxHeader) -> bool {
         return false;
     }
     let inner_data = &data[pos + header.header_size as usize..pos + header.size as usize];
-    match parse_freeform_tag(inner_data) {
-        Some(tag) => {
-            tag.namespace() == ITUNES_NAMESPACE
-                && (tag.name().eq_ignore_ascii_case(UNDO_TAG)
-                    || tag.name().eq_ignore_ascii_case(MINMAX_TAG))
-        }
-        None => false,
-    }
+    parse_freeform_tag(inner_data).is_some_and(|tag| {
+        tag.namespace() == ITUNES_NAMESPACE
+            && (tag.name().eq_ignore_ascii_case(UNDO_TAG)
+                || tag.name().eq_ignore_ascii_case(MINMAX_TAG))
+    })
 }
 
 fn create_ilst_box_filtered(
@@ -1171,8 +1169,7 @@ fn update_offsets_recursive(
 
 /// Delete ReplayGain tags from MP4/M4A file
 pub fn delete_replaygain_tags(file_path: &Path) -> Result<()> {
-    let empty_tags = ReplayGainTags::default();
-    write_replaygain_tags(file_path, &empty_tags)
+    write_replaygain_tags(file_path, &ReplayGainTags::default())
 }
 
 /// Check if a 4-byte brand is a recognized MP4/M4A audio brand.
@@ -1364,11 +1361,11 @@ mod tests {
 
     #[test]
     fn test_freeform_tag_serialization() {
-        let tag = FreeformTag {
-            namespace: "com.apple.iTunes".to_string(),
-            name: "replaygain_track_gain".to_string(),
-            value: "+3.50 dB".to_string(),
-        };
+        let tag = FreeformTag::new(
+            "com.apple.iTunes".to_string(),
+            "replaygain_track_gain".to_string(),
+            "+3.50 dB".to_string(),
+        );
 
         let serialized = serialize_freeform_tag(&tag);
 
@@ -1377,9 +1374,9 @@ mod tests {
 
         // Parse it back
         let parsed = parse_freeform_tag(&serialized[8..]).unwrap();
-        assert_eq!(parsed.namespace, tag.namespace);
-        assert_eq!(parsed.name, tag.name);
-        assert_eq!(parsed.value, tag.value);
+        assert_eq!(parsed.namespace(), tag.namespace());
+        assert_eq!(parsed.name(), tag.name());
+        assert_eq!(parsed.value(), tag.value());
     }
 
     #[test]
@@ -1388,10 +1385,10 @@ mod tests {
         tags.set_track(3.5, 0.98765);
         tags.set_album(2.0, 0.99999);
 
-        assert_eq!(tags.track_gain, Some("+3.50 dB".to_string()));
-        assert_eq!(tags.track_peak, Some("0.987650".to_string()));
-        assert_eq!(tags.album_gain, Some("+2.00 dB".to_string()));
-        assert_eq!(tags.album_peak, Some("0.999990".to_string()));
+        assert_eq!(tags.track_gain(), Some("+3.50 dB"));
+        assert_eq!(tags.track_peak(), Some("0.987650"));
+        assert_eq!(tags.album_gain(), Some("+2.00 dB"));
+        assert_eq!(tags.album_peak(), Some("0.999990"));
 
         let freeform_tags = tags.to_freeform_tags();
         assert_eq!(freeform_tags.len(), 4);
@@ -1402,69 +1399,59 @@ mod tests {
         let tags = UndoTags::default();
         assert!(tags.is_empty());
 
-        let tags = UndoTags::new(
-            Some("+003,+003,N".to_string()),
-            Some("80,120".to_string()),
-        );
+        let tags = UndoTags::new(Some("+003,+003,N".to_string()), Some("80,120".to_string()));
         assert!(!tags.is_empty());
 
         let freeform_tags = tags.to_freeform_tags();
         assert_eq!(freeform_tags.len(), 2);
-        assert_eq!(freeform_tags[0].name, UNDO_TAG);
-        assert_eq!(freeform_tags[0].value, "+003,+003,N");
-        assert_eq!(freeform_tags[1].name, MINMAX_TAG);
-        assert_eq!(freeform_tags[1].value, "80,120");
+        assert_eq!(freeform_tags[0].name(), UNDO_TAG);
+        assert_eq!(freeform_tags[0].value(), "+003,+003,N");
+        assert_eq!(freeform_tags[1].name(), MINMAX_TAG);
+        assert_eq!(freeform_tags[1].value(), "80,120");
     }
 
     #[test]
     fn test_undo_tag_serialization_roundtrip() {
-        let tag = FreeformTag {
-            namespace: "com.apple.iTunes".to_string(),
-            name: UNDO_TAG.to_string(),
-            value: "+005,+005,N".to_string(),
-        };
+        let tag = FreeformTag::new(
+            "com.apple.iTunes".to_string(),
+            UNDO_TAG.to_string(),
+            "+005,+005,N".to_string(),
+        );
 
         let serialized = serialize_freeform_tag(&tag);
         let parsed = parse_freeform_tag(&serialized[8..]).unwrap();
-        assert_eq!(parsed.namespace, tag.namespace);
-        assert_eq!(parsed.name, tag.name);
-        assert_eq!(parsed.value, tag.value);
+        assert_eq!(parsed.namespace(), tag.namespace());
+        assert_eq!(parsed.name(), tag.name());
+        assert_eq!(parsed.value(), tag.value());
     }
 
     #[test]
     fn test_ilst_box_filtered_preserves_other_tags() {
         // Create an ilst with one RG tag and one undo tag
-        let rg_tag = FreeformTag {
-            namespace: ITUNES_NAMESPACE.to_string(),
-            name: RG_TRACK_GAIN.to_string(),
-            value: "+3.50 dB".to_string(),
-        };
-        let undo_tag = FreeformTag {
-            namespace: ITUNES_NAMESPACE.to_string(),
-            name: UNDO_TAG.to_string(),
-            value: "+002,+002,N".to_string(),
-        };
+        let rg_tag = FreeformTag::new(
+            ITUNES_NAMESPACE.to_string(),
+            RG_TRACK_GAIN.to_string(),
+            "+3.50 dB".to_string(),
+        );
+        let undo_tag = FreeformTag::new(
+            ITUNES_NAMESPACE.to_string(),
+            UNDO_TAG.to_string(),
+            "+002,+002,N".to_string(),
+        );
 
         let mut existing = Vec::new();
         existing.extend_from_slice(&serialize_freeform_tag(&rg_tag));
         existing.extend_from_slice(&serialize_freeform_tag(&undo_tag));
 
         // Writing new RG tags should preserve the undo tag
-        let new_rg = ReplayGainTags {
-            track_gain: Some("+5.00 dB".to_string()),
-            track_peak: None,
-            album_gain: None,
-            album_peak: None,
-        };
+        let mut new_rg = ReplayGainTags::default();
+        new_rg.set_track(5.0, 0.0);
         let result = create_ilst_box(&new_rg, &existing);
         // Result should contain the new RG tag AND the preserved undo tag
         assert!(result.len() > 8); // more than just the ilst header
 
         // Writing new undo tags should preserve the RG tag
-        let new_undo = UndoTags {
-            undo: Some("+005,+005,N".to_string()),
-            minmax: None,
-        };
+        let new_undo = UndoTags::new(Some("+005,+005,N".to_string()), None);
         let result = create_ilst_box_undo(&new_undo, &existing);
         assert!(result.len() > 8);
     }

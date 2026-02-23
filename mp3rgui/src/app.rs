@@ -1,4 +1,4 @@
-use mp3rgain::replaygain::{self, REPLAYGAIN_REFERENCE_DB};
+use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use std::path::PathBuf;
 
 #[derive(Default, Clone, PartialEq)]
@@ -168,12 +168,7 @@ impl Mp3rgainApp {
 
             match replaygain::analyze_track(&file.path) {
                 Ok(result) => {
-                    // Display volume relative to ReplayGain reference (89 dB) for MP3Gain compatibility
-                    file.volume = Some(REPLAYGAIN_REFERENCE_DB - result.gain_db());
-                    file.clipping = result.peak() >= 1.0;
-                    let gain = self.target_volume - REPLAYGAIN_REFERENCE_DB + result.gain_db();
-                    file.track_gain = Some(gain);
-                    file.track_clip = Self::would_clip(result.peak(), gain);
+                    Self::populate_track_analysis(file, &result, self.target_volume);
                     file.status = FileStatus::Analyzed;
                     analyzed += 1;
                 }
@@ -186,11 +181,7 @@ impl Mp3rgainApp {
 
         self.total_progress = 1.0;
         self.is_processing = false;
-        self.status_message = if errors > 0 {
-            format!("Analyzed {} file(s), {} error(s)", analyzed, errors)
-        } else {
-            format!("Analyzed {} file(s)", analyzed)
-        };
+        self.status_message = Self::format_result_message("Analyzed", analyzed, errors);
     }
 
     pub fn analyze_album(&mut self) {
@@ -210,21 +201,16 @@ impl Mp3rgainApp {
             Ok(result) => {
                 let album_gain =
                     self.target_volume - REPLAYGAIN_REFERENCE_DB + result.album_gain_db();
+                let album_volume = REPLAYGAIN_REFERENCE_DB - result.album_gain_db();
+                let album_clip = Self::would_clip(result.album_peak(), album_gain);
 
                 for (i, file) in self.files.iter_mut().enumerate() {
                     if let Some(track_result) = result.tracks().get(i) {
-                        // Display volume relative to ReplayGain reference (89 dB) for MP3Gain compatibility
-                        file.volume = Some(REPLAYGAIN_REFERENCE_DB - track_result.gain_db());
-                        file.clipping = track_result.peak() >= 1.0;
-                        let track_gain =
-                            self.target_volume - REPLAYGAIN_REFERENCE_DB + track_result.gain_db();
-                        file.track_gain = Some(track_gain);
-                        file.track_clip = Self::would_clip(track_result.peak(), track_gain);
+                        Self::populate_track_analysis(file, track_result, self.target_volume);
                     }
-                    // Display album volume relative to ReplayGain reference (89 dB) for MP3Gain compatibility
-                    file.album_volume = Some(REPLAYGAIN_REFERENCE_DB - result.album_gain_db());
+                    file.album_volume = Some(album_volume);
                     file.album_gain = Some(album_gain);
-                    file.album_clip = Self::would_clip(result.album_peak(), album_gain);
+                    file.album_clip = album_clip;
                     file.status = FileStatus::Analyzed;
                 }
                 self.status_message =
@@ -237,6 +223,28 @@ impl Mp3rgainApp {
 
         self.total_progress = 1.0;
         self.is_processing = false;
+    }
+
+    /// Populate a file entry with track-level analysis results.
+    /// Volume is displayed relative to ReplayGain reference (89 dB) for MP3Gain compatibility.
+    fn populate_track_analysis(
+        file: &mut FileEntry,
+        result: &ReplayGainResult,
+        target_volume: f64,
+    ) {
+        file.volume = Some(REPLAYGAIN_REFERENCE_DB - result.gain_db());
+        file.clipping = result.peak() >= 1.0;
+        let gain = target_volume - REPLAYGAIN_REFERENCE_DB + result.gain_db();
+        file.track_gain = Some(gain);
+        file.track_clip = Self::would_clip(result.peak(), gain);
+    }
+
+    fn format_result_message(action: &str, count: usize, errors: usize) -> String {
+        if errors > 0 {
+            format!("{} {} file(s), {} error(s)", action, count, errors)
+        } else {
+            format!("{} {} file(s)", action, count)
+        }
     }
 
     fn would_clip(peak: f64, gain_db: f64) -> bool {
@@ -276,14 +284,8 @@ impl Mp3rgainApp {
 
         self.total_progress = 1.0;
         self.is_processing = false;
-        self.status_message = if errors > 0 {
-            format!(
-                "Applied track gain to {} file(s), {} error(s)",
-                applied, errors
-            )
-        } else {
-            format!("Applied track gain to {} file(s)", applied)
-        };
+        self.status_message =
+            Self::format_result_message("Applied track gain to", applied, errors);
     }
 
     pub fn apply_album_gain(&mut self) {
@@ -318,14 +320,8 @@ impl Mp3rgainApp {
 
         self.total_progress = 1.0;
         self.is_processing = false;
-        self.status_message = if errors > 0 {
-            format!(
-                "Applied album gain to {} file(s), {} error(s)",
-                applied, errors
-            )
-        } else {
-            format!("Applied album gain to {} file(s)", applied)
-        };
+        self.status_message =
+            Self::format_result_message("Applied album gain to", applied, errors);
     }
 }
 

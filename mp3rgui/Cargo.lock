@@ -2119,7 +2119,7 @@ dependencies = [
 
 [[package]]
 name = "mp3rgain"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "colored",
@@ -2127,6 +2127,7 @@ dependencies = [
  "serde",
  "serde_json",
  "symphonia",
+ "thiserror 2.0.17",
 ]
 
 [[package]]

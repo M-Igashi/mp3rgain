@@ -12,8 +12,6 @@
 //! Reference: https://wiki.hydrogenaud.io/index.php?title=ReplayGain_specification
 
 use crate::error::{Error, Result};
-#[cfg(feature = "replaygain")]
-use crate::error;
 use std::path::Path;
 
 #[cfg(feature = "replaygain")]
@@ -77,15 +75,37 @@ pub struct ReplayGainResult {
 
 impl ReplayGainResult {
     #[allow(dead_code)]
-    pub(crate) fn new(loudness_db: f64, gain_db: f64, peak: f64, sample_rate: u32, file_type: AudioFileType) -> Self {
-        Self { loudness_db, gain_db, peak, sample_rate, file_type }
+    pub(crate) fn new(
+        loudness_db: f64,
+        gain_db: f64,
+        peak: f64,
+        sample_rate: u32,
+        file_type: AudioFileType,
+    ) -> Self {
+        Self {
+            loudness_db,
+            gain_db,
+            peak,
+            sample_rate,
+            file_type,
+        }
     }
 
-    pub fn loudness_db(&self) -> f64 { self.loudness_db }
-    pub fn gain_db(&self) -> f64 { self.gain_db }
-    pub fn peak(&self) -> f64 { self.peak }
-    pub fn sample_rate(&self) -> u32 { self.sample_rate }
-    pub fn file_type(&self) -> AudioFileType { self.file_type }
+    pub fn loudness_db(&self) -> f64 {
+        self.loudness_db
+    }
+    pub fn gain_db(&self) -> f64 {
+        self.gain_db
+    }
+    pub fn peak(&self) -> f64 {
+        self.peak
+    }
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+    pub fn file_type(&self) -> AudioFileType {
+        self.file_type
+    }
 
     /// Convert gain in dB to MP3 gain steps (1.5 dB per step)
     pub fn gain_steps(&self) -> i32 {
@@ -112,14 +132,32 @@ pub struct AlbumGainResult {
 
 impl AlbumGainResult {
     #[allow(dead_code)]
-    pub(crate) fn new(tracks: Vec<ReplayGainResult>, album_loudness_db: f64, album_gain_db: f64, album_peak: f64) -> Self {
-        Self { tracks, album_loudness_db, album_gain_db, album_peak }
+    pub(crate) fn new(
+        tracks: Vec<ReplayGainResult>,
+        album_loudness_db: f64,
+        album_gain_db: f64,
+        album_peak: f64,
+    ) -> Self {
+        Self {
+            tracks,
+            album_loudness_db,
+            album_gain_db,
+            album_peak,
+        }
     }
 
-    pub fn tracks(&self) -> &[ReplayGainResult] { &self.tracks }
-    pub fn album_loudness_db(&self) -> f64 { self.album_loudness_db }
-    pub fn album_gain_db(&self) -> f64 { self.album_gain_db }
-    pub fn album_peak(&self) -> f64 { self.album_peak }
+    pub fn tracks(&self) -> &[ReplayGainResult] {
+        &self.tracks
+    }
+    pub fn album_loudness_db(&self) -> f64 {
+        self.album_loudness_db
+    }
+    pub fn album_gain_db(&self) -> f64 {
+        self.album_gain_db
+    }
+    pub fn album_peak(&self) -> f64 {
+        self.album_peak
+    }
 
     /// Convert album gain in dB to MP3 gain steps
     pub fn album_gain_steps(&self) -> i32 {
@@ -858,8 +896,7 @@ fn analyze_track_internal(
     let file_type = detect_file_type(file_path);
 
     // Open the media source
-    let file = std::fs::File::open(file_path)
-        .map_err(|e| error::io_open(file_path, e))?;
+    let file = std::fs::File::open(file_path).map_err(|e| Error::io_open(file_path, e))?;
 
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
@@ -924,8 +961,7 @@ fn analyze_track_internal(
     // Create filter for each channel
     let mut filters: Vec<EqualLoudnessFilter> = (0..channels)
         .map(|_| {
-            EqualLoudnessFilter::new(sample_rate)
-                .ok_or(Error::UnsupportedSampleRate(sample_rate))
+            EqualLoudnessFilter::new(sample_rate).ok_or(Error::UnsupportedSampleRate(sample_rate))
         })
         .collect::<Result<Vec<_>>>()?;
 
@@ -1114,7 +1150,12 @@ pub fn analyze_album_with_index(
     let album_loudness_db = album_histogram.get_loudness();
     let album_gain_db = PINK_REF - album_loudness_db;
 
-    Ok(AlbumGainResult::new(track_results, album_loudness_db, album_gain_db, album_peak))
+    Ok(AlbumGainResult::new(
+        track_results,
+        album_loudness_db,
+        album_gain_db,
+        album_peak,
+    ))
 }
 
 // =============================================================================
@@ -1177,12 +1218,22 @@ pub struct PeakAmplitudeResult {
 impl PeakAmplitudeResult {
     #[allow(dead_code)]
     pub(crate) fn new(peak: f64, peak_pcm: f64, sample_rate: u32) -> Self {
-        Self { peak, peak_pcm, sample_rate }
+        Self {
+            peak,
+            peak_pcm,
+            sample_rate,
+        }
     }
 
-    pub fn peak(&self) -> f64 { self.peak }
-    pub fn peak_pcm(&self) -> f64 { self.peak_pcm }
-    pub fn sample_rate(&self) -> u32 { self.sample_rate }
+    pub fn peak(&self) -> f64 {
+        self.peak
+    }
+    pub fn peak_pcm(&self) -> f64 {
+        self.peak_pcm
+    }
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
 }
 
 impl std::fmt::Display for PeakAmplitudeResult {
@@ -1198,8 +1249,7 @@ impl std::fmt::Display for PeakAmplitudeResult {
 /// Returns peak amplitude that can exceed 1.0 for clipping audio.
 #[cfg(feature = "replaygain")]
 pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
-    let file = std::fs::File::open(file_path)
-        .map_err(|e| error::io_open(file_path, e))?;
+    let file = std::fs::File::open(file_path).map_err(|e| Error::io_open(file_path, e))?;
 
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
@@ -1304,7 +1354,11 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
         }
     }
 
-    Ok(PeakAmplitudeResult::new(max_peak, max_peak * SAMPLE_SCALE_16BIT, sample_rate))
+    Ok(PeakAmplitudeResult::new(
+        max_peak,
+        max_peak * SAMPLE_SCALE_16BIT,
+        sample_rate,
+    ))
 }
 
 #[cfg(not(feature = "replaygain"))]

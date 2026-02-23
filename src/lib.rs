@@ -75,6 +75,7 @@ pub struct Mp3Analysis {
 }
 
 impl Mp3Analysis {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         frame_count: usize,
         mpeg_version: MpegVersion,
@@ -85,17 +86,42 @@ impl Mp3Analysis {
         headroom_steps: i32,
         headroom_db: f64,
     ) -> Self {
-        Self { frame_count, mpeg_version, channel_mode, min_gain, max_gain, avg_gain, headroom_steps, headroom_db }
+        Self {
+            frame_count,
+            mpeg_version,
+            channel_mode,
+            min_gain,
+            max_gain,
+            avg_gain,
+            headroom_steps,
+            headroom_db,
+        }
     }
 
-    pub fn frame_count(&self) -> usize { self.frame_count }
-    pub fn mpeg_version(&self) -> MpegVersion { self.mpeg_version }
-    pub fn channel_mode(&self) -> ChannelMode { self.channel_mode }
-    pub fn min_gain(&self) -> u8 { self.min_gain }
-    pub fn max_gain(&self) -> u8 { self.max_gain }
-    pub fn avg_gain(&self) -> f64 { self.avg_gain }
-    pub fn headroom_steps(&self) -> i32 { self.headroom_steps }
-    pub fn headroom_db(&self) -> f64 { self.headroom_db }
+    pub fn frame_count(&self) -> usize {
+        self.frame_count
+    }
+    pub fn mpeg_version(&self) -> MpegVersion {
+        self.mpeg_version
+    }
+    pub fn channel_mode(&self) -> ChannelMode {
+        self.channel_mode
+    }
+    pub fn min_gain(&self) -> u8 {
+        self.min_gain
+    }
+    pub fn max_gain(&self) -> u8 {
+        self.max_gain
+    }
+    pub fn avg_gain(&self) -> f64 {
+        self.avg_gain
+    }
+    pub fn headroom_steps(&self) -> i32 {
+        self.headroom_steps
+    }
+    pub fn headroom_db(&self) -> f64 {
+        self.headroom_db
+    }
 }
 
 /// MPEG version
@@ -149,7 +175,6 @@ impl ChannelMode {
         }
     }
 }
-
 
 // =============================================================================
 // Display implementations
@@ -220,12 +245,22 @@ pub struct MaxAmplitudeResult {
 
 impl MaxAmplitudeResult {
     pub(crate) fn new(max_amplitude: f64, max_global_gain: u8, min_global_gain: u8) -> Self {
-        Self { max_amplitude, max_global_gain, min_global_gain }
+        Self {
+            max_amplitude,
+            max_global_gain,
+            min_global_gain,
+        }
     }
 
-    pub fn max_amplitude(&self) -> f64 { self.max_amplitude }
-    pub fn max_global_gain(&self) -> u8 { self.max_global_gain }
-    pub fn min_global_gain(&self) -> u8 { self.min_global_gain }
+    pub fn max_amplitude(&self) -> f64 {
+        self.max_amplitude
+    }
+    pub fn max_global_gain(&self) -> u8 {
+        self.max_global_gain
+    }
+    pub fn min_global_gain(&self) -> u8 {
+        self.min_global_gain
+    }
 }
 
 /// Parsed MP3 frame header
@@ -577,7 +612,7 @@ where
 /// # Returns
 /// * Analysis results including frame count, gain range, and headroom
 pub fn analyze(file_path: &Path) -> Result<Mp3Analysis> {
-    let data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
 
     let mut min_gain = 255u8;
     let mut max_gain = 0u8;
@@ -712,11 +747,11 @@ pub fn apply_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
         return Ok(0);
     }
 
-    let mut data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
+    let mut data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
 
     let modified_frames = apply_gain_to_data(&mut data, gain_steps, GainMode::Saturating);
 
-    fs::write(file_path, &data).map_err(|e| error::io_write(file_path, e))?;
+    fs::write(file_path, &data).map_err(|e| Error::io_write(file_path, e))?;
 
     Ok(modified_frames)
 }
@@ -872,11 +907,11 @@ pub fn apply_gain_channel(file_path: &Path, channel: Channel, gain_steps: i32) -
         return Err(Error::ChannelGainOnMono);
     }
 
-    let mut data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
+    let mut data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
 
     let modified_frames = apply_gain_to_channel_data(&mut data, channel, gain_steps);
 
-    fs::write(file_path, &data).map_err(|e| error::io_write(file_path, e))?;
+    fs::write(file_path, &data).map_err(|e| Error::io_write(file_path, e))?;
 
     Ok(modified_frames)
 }
@@ -983,8 +1018,12 @@ impl ApeItem {
         Self { key, value }
     }
 
-    pub fn key(&self) -> &str { &self.key }
-    pub fn value(&self) -> &str { &self.value }
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+    pub fn value(&self) -> &str {
+        &self.value
+    }
 }
 
 /// APEv2 tag collection
@@ -1162,7 +1201,7 @@ pub fn read_ape_tag(data: &[u8]) -> Option<ApeTag> {
 
 /// Read APEv2 tag from file
 pub fn read_ape_tag_from_file(file_path: &Path) -> Result<Option<ApeTag>> {
-    let data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
     Ok(read_ape_tag(&data))
 }
 
@@ -1253,7 +1292,7 @@ fn remove_ape_tag(data: &[u8]) -> Vec<u8> {
 
 /// Write APEv2 tag to file
 pub fn write_ape_tag(file_path: &Path, tag: &ApeTag) -> Result<()> {
-    let data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
 
     // Remove existing APE tag
     let mut audio_data = remove_ape_tag(&data);
@@ -1275,20 +1314,40 @@ pub fn write_ape_tag(file_path: &Path, tag: &ApeTag) -> Result<()> {
         audio_data.extend_from_slice(&tag_data);
     }
 
-    fs::write(file_path, &audio_data).map_err(|e| error::io_write(file_path, e))?;
+    fs::write(file_path, &audio_data).map_err(|e| Error::io_write(file_path, e))?;
 
     Ok(())
 }
 
 /// Delete APEv2 tag from file
 pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
-    let data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
 
     let audio_data = remove_ape_tag(&data);
 
-    fs::write(file_path, &audio_data).map_err(|e| error::io_write(file_path, e))?;
+    fs::write(file_path, &audio_data).map_err(|e| Error::io_write(file_path, e))?;
 
     Ok(())
+}
+
+/// Scan gain range (min/max global_gain) across all frames in file data.
+fn scan_gain_range(data: &[u8]) -> Result<(u8, u8)> {
+    let mut min_gain = 255u8;
+    let mut max_gain = 0u8;
+
+    let frame_count = iterate_frames(data, |_pos, _header, locations| {
+        for loc in locations {
+            let gain = read_gain_at(data, loc);
+            min_gain = min_gain.min(gain);
+            max_gain = max_gain.max(gain);
+        }
+    })?;
+
+    if frame_count == 0 {
+        return Err(Error::NoMp3Frames);
+    }
+
+    Ok((min_gain, max_gain))
 }
 
 /// Find maximum amplitude in an MP3 file by decoding the audio.
@@ -1300,51 +1359,25 @@ pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
 /// To get the value in 16-bit PCM scale (like mp3gain), multiply by 32768.
 #[cfg(feature = "replaygain")]
 pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
-    // Get global_gain range from frame analysis (now skips Xing frames)
-    let data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    let (min_gain, max_gain) = scan_gain_range(&data)?;
 
-    let mut min_gain = 255u8;
-    let mut max_gain = 0u8;
-
-    let frame_count = iterate_frames(&data, |_pos, _header, locations| {
-        for loc in locations {
-            let gain = read_gain_at(&data, loc);
-            min_gain = min_gain.min(gain);
-            max_gain = max_gain.max(gain);
-        }
-    })?;
-
-    if frame_count == 0 {
-        return Err(Error::NoMp3Frames);
-    }
-
-    // Get actual peak amplitude by decoding audio
     let peak_result = replaygain::find_peak_amplitude(file_path)?;
 
-    Ok(MaxAmplitudeResult::new(peak_result.peak(), max_gain, min_gain))
+    Ok(MaxAmplitudeResult::new(
+        peak_result.peak(),
+        max_gain,
+        min_gain,
+    ))
 }
 
 /// Find maximum amplitude in an MP3 file (fallback without replaygain feature)
 #[cfg(not(feature = "replaygain"))]
 pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
-    let data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    let (min_gain, max_gain) = scan_gain_range(&data)?;
 
-    let mut min_gain = 255u8;
-    let mut max_gain = 0u8;
-
-    let frame_count = iterate_frames(&data, |_pos, _header, locations| {
-        for loc in locations {
-            let gain = read_gain_at(&data, loc);
-            min_gain = min_gain.min(gain);
-            max_gain = max_gain.max(gain);
-        }
-    })?;
-
-    if frame_count == 0 {
-        return Err(Error::NoMp3Frames);
-    }
-
-    // Fallback: estimate amplitude from global_gain (less accurate)
+    // Estimate amplitude from global_gain (less accurate than decoding)
     let headroom_steps = (MAX_GAIN - max_gain) as i32;
     let headroom_db = headroom_steps as f64 * GAIN_STEP_DB;
     let max_amplitude = 10.0_f64.powf(-headroom_db / 20.0);
@@ -1358,11 +1391,11 @@ pub fn apply_gain_wrap(file_path: &Path, gain_steps: i32) -> Result<usize> {
         return Ok(0);
     }
 
-    let mut data = fs::read(file_path).map_err(|e| error::io_read(file_path, e))?;
+    let mut data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
 
     let modified_frames = apply_gain_to_data(&mut data, gain_steps, GainMode::Wrapping);
 
-    fs::write(file_path, &data).map_err(|e| error::io_write(file_path, e))?;
+    fs::write(file_path, &data).map_err(|e| Error::io_write(file_path, e))?;
 
     Ok(modified_frames)
 }
@@ -1431,12 +1464,9 @@ pub fn apply_gain_with_undo(file_path: &Path, gain_steps: i32) -> Result<usize> 
 
 /// Undo gain changes based on APEv2 tag information
 pub fn undo_gain(file_path: &Path) -> Result<usize> {
-    let tag = read_ape_tag_from_file(file_path)?
-        .ok_or(Error::NoApeTag)?;
+    let tag = read_ape_tag_from_file(file_path)?.ok_or(Error::NoApeTag)?;
 
-    let undo_gain = tag
-        .get_undo_gain()
-        .ok_or(Error::NoUndoTag)?;
+    let undo_gain = tag.get_undo_gain().ok_or(Error::NoUndoTag)?;
 
     if undo_gain == 0 {
         return Ok(0);
