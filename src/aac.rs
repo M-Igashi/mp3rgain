@@ -959,8 +959,103 @@ fn parse_raw_data_block(reader: &mut BitReader, sample_rate: u32) -> Result<Vec<
 }
 
 // =============================================================================
+// Gain write helpers
+// =============================================================================
+
+/// Read 8-bit value at bit-unaligned position in file data
+fn read_aac_gain_at(data: &[u8], loc: &AacGainLocation) -> u8 {
+    let idx = loc.file_offset as usize;
+    if idx >= data.len() {
+        return 0;
+    }
+    if loc.bit_offset == 0 {
+        data[idx]
+    } else if idx + 1 < data.len() {
+        let shift = loc.bit_offset;
+        let high = data[idx] << shift;
+        let low = data[idx + 1] >> (8 - shift);
+        high | low
+    } else {
+        data[idx] << loc.bit_offset
+    }
+}
+
+/// Write 8-bit value at bit-unaligned position in file data
+fn write_aac_gain_at(data: &mut [u8], loc: &AacGainLocation, value: u8) {
+    let idx = loc.file_offset as usize;
+    if idx >= data.len() {
+        return;
+    }
+    if loc.bit_offset == 0 {
+        data[idx] = value;
+    } else if idx + 1 < data.len() {
+        let shift = loc.bit_offset;
+        let mask_high = 0xFFu8 << (8 - shift);
+        let mask_low = 0xFFu8 >> shift;
+        data[idx] = (data[idx] & mask_high) | (value >> shift);
+        data[idx + 1] = (data[idx + 1] & mask_low) | (value << (8 - shift));
+    } else {
+        let shift = loc.bit_offset;
+        let mask_high = 0xFFu8 << (8 - shift);
+        data[idx] = (data[idx] & mask_high) | (value >> shift);
+    }
+}
+
+/// Adjust gain with saturating clamp to 0-255
+fn adjust_aac_gain_value(current: u8, steps: i32) -> u8 {
+    if steps > 0 {
+        current.saturating_add(steps.min(255) as u8)
+    } else {
+        current.saturating_sub((-steps).min(255) as u8)
+    }
+}
+
+/// Apply gain adjustment to all gain locations in a file buffer.
+/// Skips locations where current gain is 0 (silence).
+/// Returns the number of modified gain locations.
+fn apply_aac_gain_to_data(data: &mut [u8], analysis: &AacAnalysis, gain_steps: i32) -> usize {
+    let mut modified = 0usize;
+    for loc in &analysis.gain_locations {
+        let current = read_aac_gain_at(data, loc);
+        if current == 0 {
+            continue;
+        }
+        let new_value = adjust_aac_gain_value(current, gain_steps);
+        if new_value != current {
+            write_aac_gain_at(data, loc, new_value);
+            modified += 1;
+        }
+    }
+    modified
+}
+
+// =============================================================================
 // Public API
 // =============================================================================
+
+/// Apply gain adjustment to AAC/M4A file (lossless, in-place modification).
+///
+/// Modifies `global_gain` values directly in the file without container rewriting.
+/// Each gain step is approximately 1.5 dB. Values are clamped to 0-255 range.
+///
+/// Returns the number of modified gain locations.
+pub fn apply_aac_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
+    if gain_steps == 0 {
+        return Ok(0);
+    }
+
+    let analysis = analyze_aac_gains(file_path)?;
+
+    let mut data = std::fs::read(file_path)
+        .with_context(|| format!("Failed to read: {}", file_path.display()))?;
+
+    let modified = apply_aac_gain_to_data(&mut data, &analysis, gain_steps);
+
+    std::fs::write(file_path, &data)
+        .with_context(|| format!("Failed to write: {}", file_path.display()))?;
+
+    Ok(modified)
+}
 
 /// Analyze AAC/M4A file and locate all global_gain fields (read-only)
 pub fn analyze_aac_gains(file_path: &Path) -> Result<AacAnalysis> {
@@ -1094,5 +1189,114 @@ mod tests {
         assert!(info.long_win);
         assert_eq!(info.max_sfb, 10);
         assert_eq!(info.window_groups, 1);
+    }
+
+    // =========================================================================
+    // Gain write tests
+    // =========================================================================
+
+    fn make_loc(file_offset: u64, bit_offset: u8, original_gain: u8) -> AacGainLocation {
+        AacGainLocation {
+            sample_index: 0,
+            file_offset,
+            sample_byte_offset: 0,
+            bit_offset,
+            channel: 0,
+            original_gain,
+        }
+    }
+
+    #[test]
+    fn test_read_write_aac_gain_aligned() {
+        let mut data = vec![0xAB, 0xCD, 0xEF];
+        let loc = make_loc(1, 0, 0xCD);
+        assert_eq!(read_aac_gain_at(&data, &loc), 0xCD);
+        write_aac_gain_at(&mut data, &loc, 0x42);
+        assert_eq!(data[1], 0x42);
+        assert_eq!(data[0], 0xAB); // unchanged
+        assert_eq!(data[2], 0xEF); // unchanged
+    }
+
+    #[test]
+    fn test_read_write_aac_gain_unaligned() {
+        let mut data = vec![0xAB, 0xCD, 0xEF];
+        let loc = make_loc(1, 4, 0);
+        // Read: high = 0xCD << 4 = 0xD0, low = 0xEF >> 4 = 0x0E -> 0xDE
+        assert_eq!(read_aac_gain_at(&data, &loc), 0xDE);
+        write_aac_gain_at(&mut data, &loc, 0x99);
+        // data[1]: upper nibble preserved (0xC_), lower = 0x99 >> 4 = 0x09 -> 0xC9
+        assert_eq!(data[1], 0xC9);
+        // data[2]: lower nibble preserved (0x_F), upper = 0x99 << 4 = 0x90 -> 0x9F
+        assert_eq!(data[2], 0x9F);
+        assert_eq!(data[0], 0xAB); // unchanged
+    }
+
+    #[test]
+    fn test_read_write_roundtrip_all_offsets() {
+        for bit_off in 0..8u8 {
+            let mut data = vec![0x00; 4];
+            let loc = make_loc(1, bit_off, 0);
+            write_aac_gain_at(&mut data, &loc, 0xA5);
+            assert_eq!(
+                read_aac_gain_at(&data, &loc),
+                0xA5,
+                "roundtrip failed at bit_offset={}",
+                bit_off
+            );
+        }
+    }
+
+    #[test]
+    fn test_adjust_aac_gain_saturating() {
+        assert_eq!(adjust_aac_gain_value(100, 10), 110);
+        assert_eq!(adjust_aac_gain_value(100, -10), 90);
+        assert_eq!(adjust_aac_gain_value(250, 10), 255);
+        assert_eq!(adjust_aac_gain_value(5, -10), 0);
+        assert_eq!(adjust_aac_gain_value(0, 10), 10);
+        assert_eq!(adjust_aac_gain_value(128, 0), 128);
+    }
+
+    #[test]
+    fn test_apply_aac_gain_skips_silence() {
+        let mut data = vec![0x00; 100];
+        data[10] = 0x00; // silence
+        data[20] = 80; // non-silence
+        data[30] = 80; // non-silence
+
+        let analysis = AacAnalysis {
+            gain_locations: vec![make_loc(10, 0, 0), make_loc(20, 0, 80), make_loc(30, 0, 80)],
+            sample_count: 3,
+            channel_count: 1,
+            min_gain: 0,
+            max_gain: 80,
+            sample_rate: 44100,
+            parse_warnings: 0,
+        };
+
+        let modified = apply_aac_gain_to_data(&mut data, &analysis, 5);
+        assert_eq!(modified, 2);
+        assert_eq!(data[10], 0); // silence unchanged
+        assert_eq!(data[20], 85); // 80 + 5
+        assert_eq!(data[30], 85); // 80 + 5
+    }
+
+    #[test]
+    fn test_apply_aac_gain_zero_steps() {
+        let mut data = vec![0x00; 50];
+        data[10] = 80;
+
+        let analysis = AacAnalysis {
+            gain_locations: vec![make_loc(10, 0, 80)],
+            sample_count: 1,
+            channel_count: 1,
+            min_gain: 80,
+            max_gain: 80,
+            sample_rate: 44100,
+            parse_warnings: 0,
+        };
+
+        let modified = apply_aac_gain_to_data(&mut data, &analysis, 0);
+        assert_eq!(modified, 0);
+        assert_eq!(data[10], 80); // unchanged
     }
 }

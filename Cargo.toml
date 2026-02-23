@@ -13,7 +13,7 @@ categories = ["multimedia::audio", "command-line-utilities"]
 exclude = ["mp3rgui/", "target/", "packages/", "docs/", "scripts/", ".github/", ".claude/", "tests/", "CLAUDE.md", "REPLY_DRAFT.md"]
 
 [features]
-default = ["replaygain"]
+default = ["replaygain", "aac"]
 replaygain = ["symphonia"]
 aac = ["symphonia-aac"]
 symphonia-aac = ["symphonia"]
