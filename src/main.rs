@@ -6,6 +6,7 @@
 use anyhow::Result;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
+use mp3rgain::aac;
 use mp3rgain::mp4meta;
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{
@@ -1500,17 +1501,26 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
         None
     };
 
+    let is_aac = mp4meta::is_aac_file(file);
+
     // Check for clipping and possibly prevent it
     let mut actual_steps = steps;
     let mut warning_msg: Option<String> = None;
 
     if steps > 0 && !opts.wrap_gain {
-        if let Ok(info) = analyze(file) {
-            if steps > info.headroom_steps {
+        let headroom = if is_aac {
+            aac::analyze_aac_gains(file)
+                .ok()
+                .map(|a| (255u8.saturating_sub(a.max_gain)) as i32)
+        } else {
+            analyze(file).ok().map(|info| info.headroom_steps)
+        };
+
+        if let Some(headroom_steps) = headroom {
+            if steps > headroom_steps {
                 if opts.prevent_clipping {
-                    // -k: automatically reduce gain to prevent clipping
                     let original_steps = steps;
-                    actual_steps = info.headroom_steps;
+                    actual_steps = headroom_steps;
                     if opts.output_format == OutputFormat::Text && !opts.quiet {
                         eprintln!(
                             "  {} {}{} - gain reduced from {} to {} steps to prevent clipping",
@@ -1526,7 +1536,6 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
                         original_steps, actual_steps
                     ));
                 } else if !opts.ignore_clipping && !opts.quiet {
-                    // Show warning but continue
                     if opts.output_format == OutputFormat::Text {
                         eprintln!(
                             "  {} {}{} - clipping warning: requested {} steps but only {} headroom",
@@ -1534,7 +1543,7 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
                             dry_run_prefix,
                             filename,
                             steps,
-                            info.headroom_steps
+                            headroom_steps
                         );
                         eprintln!(
                             "      Use -c to ignore clipping warnings or -k to prevent clipping"
@@ -1542,7 +1551,7 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
                     }
                     warning_msg = Some(format!(
                         "clipping warning: requested {} steps but only {} headroom",
-                        steps, info.headroom_steps
+                        steps, headroom_steps
                     ));
                 }
             }
@@ -1570,8 +1579,10 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
         });
     }
 
-    let apply_result = if opts.stored_tag_mode == StoredTagMode::Skip {
-        // -s s: Skip tag writing, just apply gain
+    // Apply gain
+    let apply_result = if is_aac {
+        apply_with_temp_file(file, |f| aac::apply_aac_gain(f, actual_steps), opts)
+    } else if opts.stored_tag_mode == StoredTagMode::Skip {
         if opts.wrap_gain {
             apply_with_temp_file(file, |f| apply_gain_wrap(f, actual_steps), opts)
         } else {
@@ -1584,20 +1595,29 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
     };
 
     match apply_result {
-        Ok(frames) => {
+        Ok(modified) => {
             // Restore timestamp if needed
             if let Some(mtime) = original_mtime {
                 restore_timestamp(file, mtime);
             }
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
-                println!("  {} {} ({} frames)", "v".green(), filename, frames);
+                if is_aac {
+                    println!(
+                        "  {} {} ({} gains modified)",
+                        "v".green(),
+                        filename,
+                        modified
+                    );
+                } else {
+                    println!("  {} {} ({} frames)", "v".green(), filename, modified);
+                }
             }
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
                 status: Some("success".to_string()),
-                frames: Some(frames),
+                frames: Some(modified),
                 gain_applied_steps: Some(actual_steps),
                 gain_applied_db: Some(steps_to_db(actual_steps)),
                 warning: warning_msg,
@@ -2088,7 +2108,7 @@ fn process_apply_replaygain_with_album(
     if opts.dry_run {
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             let format_info = match result.file_type {
-                AudioFileType::Aac => " (tags only)",
+                AudioFileType::Aac => "",
                 AudioFileType::Mp3 => "",
                 _ => "",
             };
@@ -2181,7 +2201,7 @@ fn process_apply_replaygain_with_album(
 /// Apply ReplayGain to AAC/M4A files with optional album info
 fn process_apply_replaygain_aac_with_album(
     file: &Path,
-    _actual_steps: i32,
+    actual_steps: i32,
     result: &ReplayGainResult,
     opts: &Options,
     warning_msg: Option<String>,
@@ -2189,6 +2209,26 @@ fn process_apply_replaygain_aac_with_album(
     album_info: Option<&AacAlbumInfo>,
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
+
+    // Apply bitstream gain modification
+    let gain_modified = if actual_steps != 0 {
+        match aac::apply_aac_gain(file, actual_steps) {
+            Ok(n) => n,
+            Err(e) => {
+                if opts.output_format == OutputFormat::Text && !opts.quiet {
+                    eprintln!(
+                        "  {} {} - bitstream gain failed: {} (tags still written)",
+                        "!".yellow(),
+                        filename,
+                        e
+                    );
+                }
+                0
+            }
+        }
+    } else {
+        0
+    };
 
     // Create ReplayGain tags for AAC
     let mut tags = mp4meta::ReplayGainTags::new();
@@ -2214,13 +2254,24 @@ fn process_apply_replaygain_aac_with_album(
             };
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
-                println!(
-                    "  {} {} ({} written, {:+.1} dB)",
-                    "v".green(),
-                    filename,
-                    tag_type,
-                    result.gain_db
-                );
+                if gain_modified > 0 {
+                    println!(
+                        "  {} {} ({} gains modified + {} written, {:+.1} dB)",
+                        "v".green(),
+                        filename,
+                        gain_modified,
+                        tag_type,
+                        result.gain_db
+                    );
+                } else {
+                    println!(
+                        "  {} {} ({} written, {:+.1} dB)",
+                        "v".green(),
+                        filename,
+                        tag_type,
+                        result.gain_db
+                    );
+                }
             }
 
             Ok(JsonFileResult {
@@ -2228,8 +2279,8 @@ fn process_apply_replaygain_aac_with_album(
                 status: Some("success".to_string()),
                 loudness_db: Some(result.loudness_db),
                 peak: Some(result.peak),
-                gain_applied_steps: Some(result.gain_steps()),
-                gain_applied_db: Some(result.gain_db),
+                gain_applied_steps: Some(actual_steps),
+                gain_applied_db: Some(steps_to_db(actual_steps)),
                 warning: warning_msg,
                 ..Default::default()
             })
