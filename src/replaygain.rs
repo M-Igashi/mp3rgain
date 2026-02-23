@@ -11,9 +11,7 @@
 //!
 //! Reference: https://wiki.hydrogenaud.io/index.php?title=ReplayGain_specification
 
-#[cfg(feature = "replaygain")]
-use anyhow::Context;
-use anyhow::Result;
+use crate::error::{Error, Result};
 use std::path::Path;
 
 #[cfg(feature = "replaygain")]
@@ -68,19 +66,47 @@ impl std::fmt::Display for AudioFileType {
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReplayGainResult {
-    /// Calculated loudness in dB
-    pub loudness_db: f64,
-    /// Recommended gain adjustment to reach reference level (in dB)
-    pub gain_db: f64,
-    /// Peak amplitude (0.0 to 1.0)
-    pub peak: f64,
-    /// Sample rate of the audio
-    pub sample_rate: u32,
-    /// File type (MP3 or AAC)
-    pub file_type: AudioFileType,
+    loudness_db: f64,
+    gain_db: f64,
+    peak: f64,
+    sample_rate: u32,
+    file_type: AudioFileType,
 }
 
 impl ReplayGainResult {
+    #[allow(dead_code)]
+    pub(crate) fn new(
+        loudness_db: f64,
+        gain_db: f64,
+        peak: f64,
+        sample_rate: u32,
+        file_type: AudioFileType,
+    ) -> Self {
+        Self {
+            loudness_db,
+            gain_db,
+            peak,
+            sample_rate,
+            file_type,
+        }
+    }
+
+    pub fn loudness_db(&self) -> f64 {
+        self.loudness_db
+    }
+    pub fn gain_db(&self) -> f64 {
+        self.gain_db
+    }
+    pub fn peak(&self) -> f64 {
+        self.peak
+    }
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+    pub fn file_type(&self) -> AudioFileType {
+        self.file_type
+    }
+
     /// Convert gain in dB to MP3 gain steps (1.5 dB per step)
     pub fn gain_steps(&self) -> i32 {
         (self.gain_db / crate::GAIN_STEP_DB).round() as i32
@@ -98,17 +124,41 @@ impl std::fmt::Display for ReplayGainResult {
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AlbumGainResult {
-    /// Individual track results
-    pub tracks: Vec<ReplayGainResult>,
-    /// Combined album loudness in dB
-    pub album_loudness_db: f64,
-    /// Recommended album gain adjustment (in dB)
-    pub album_gain_db: f64,
-    /// Album peak amplitude
-    pub album_peak: f64,
+    tracks: Vec<ReplayGainResult>,
+    album_loudness_db: f64,
+    album_gain_db: f64,
+    album_peak: f64,
 }
 
 impl AlbumGainResult {
+    #[allow(dead_code)]
+    pub(crate) fn new(
+        tracks: Vec<ReplayGainResult>,
+        album_loudness_db: f64,
+        album_gain_db: f64,
+        album_peak: f64,
+    ) -> Self {
+        Self {
+            tracks,
+            album_loudness_db,
+            album_gain_db,
+            album_peak,
+        }
+    }
+
+    pub fn tracks(&self) -> &[ReplayGainResult] {
+        &self.tracks
+    }
+    pub fn album_loudness_db(&self) -> f64 {
+        self.album_loudness_db
+    }
+    pub fn album_gain_db(&self) -> f64 {
+        self.album_gain_db
+    }
+    pub fn album_peak(&self) -> f64 {
+        self.album_peak
+    }
+
     /// Convert album gain in dB to MP3 gain steps
     pub fn album_gain_steps(&self) -> i32 {
         (self.album_gain_db / crate::GAIN_STEP_DB).round() as i32
@@ -846,8 +896,7 @@ fn analyze_track_internal(
     let file_type = detect_file_type(file_path);
 
     // Open the media source
-    let file = std::fs::File::open(file_path)
-        .with_context(|| format!("Failed to open: {}", file_path.display()))?;
+    let file = std::fs::File::open(file_path).map_err(|e| Error::io_open(file_path, e))?;
 
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
@@ -864,7 +913,10 @@ fn analyze_track_internal(
             &FormatOptions::default(),
             &MetadataOptions::default(),
         )
-        .with_context(|| format!("Failed to probe format: {}", file_path.display()))?;
+        .map_err(|e| Error::ProbeFailed {
+            path: file_path.to_path_buf(),
+            source: Box::new(e),
+        })?;
 
     let mut format = probed.format;
 
@@ -876,7 +928,7 @@ fn analyze_track_internal(
         .collect();
 
     if audio_tracks.is_empty() {
-        anyhow::bail!("No audio track found");
+        return Err(Error::NoAudioTrack);
     }
 
     // Select track by index or default to first
@@ -884,11 +936,10 @@ fn analyze_track_internal(
         Some(idx) => {
             let idx = idx as usize;
             if idx >= audio_tracks.len() {
-                anyhow::bail!(
-                    "Track index {} out of range (file has {} audio track(s))",
-                    idx,
-                    audio_tracks.len()
-                );
+                return Err(Error::TrackIndexOutOfRange {
+                    index: idx as u32,
+                    count: audio_tracks.len(),
+                });
             }
             audio_tracks[idx]
         }
@@ -899,23 +950,18 @@ fn analyze_track_internal(
     let sample_rate = track
         .codec_params
         .sample_rate
-        .ok_or_else(|| anyhow::anyhow!("Unknown sample rate"))?;
+        .ok_or(Error::UnsupportedSampleRate(0))?;
     let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(2);
 
     // Create decoder
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
-        .with_context(|| "Failed to create decoder")?;
+        .map_err(|e| Error::Decode(Box::new(e)))?;
 
     // Create filter for each channel
     let mut filters: Vec<EqualLoudnessFilter> = (0..channels)
         .map(|_| {
-            EqualLoudnessFilter::new(sample_rate).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Unsupported sample rate: {} Hz. Supported rates: 96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000",
-                    sample_rate
-                )
-            })
+            EqualLoudnessFilter::new(sample_rate).ok_or(Error::UnsupportedSampleRate(sample_rate))
         })
         .collect::<Result<Vec<_>>>()?;
 
@@ -931,7 +977,7 @@ fn analyze_track_internal(
             {
                 break;
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(Error::Decode(Box::new(e))),
         };
 
         if packet.track_id() != track_id {
@@ -941,7 +987,7 @@ fn analyze_track_internal(
         let decoded = match decoder.decode(&packet) {
             Ok(d) => d,
             Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(Error::Decode(Box::new(e))),
         };
 
         // Process audio buffer
@@ -955,13 +1001,7 @@ fn analyze_track_internal(
     let loudness_db = analyzer.get_loudness();
     let gain_db = PINK_REF - loudness_db;
 
-    let result = ReplayGainResult {
-        loudness_db,
-        gain_db,
-        peak,
-        sample_rate,
-        file_type,
-    };
+    let result = ReplayGainResult::new(loudness_db, gain_db, peak, sample_rate, file_type);
 
     Ok(TrackAnalysisInternal {
         result,
@@ -1110,12 +1150,12 @@ pub fn analyze_album_with_index(
     let album_loudness_db = album_histogram.get_loudness();
     let album_gain_db = PINK_REF - album_loudness_db;
 
-    Ok(AlbumGainResult {
-        tracks: track_results,
+    Ok(AlbumGainResult::new(
+        track_results,
         album_loudness_db,
         album_gain_db,
         album_peak,
-    })
+    ))
 }
 
 // =============================================================================
@@ -1124,10 +1164,10 @@ pub fn analyze_album_with_index(
 
 #[cfg(not(feature = "replaygain"))]
 pub fn analyze_track(_file_path: &Path) -> Result<ReplayGainResult> {
-    anyhow::bail!(
-        "ReplayGain analysis requires the 'replaygain' feature.\n\
-        Install with: cargo install mp3rgain --features replaygain"
-    )
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
 }
 
 #[cfg(not(feature = "replaygain"))]
@@ -1135,18 +1175,18 @@ pub fn analyze_track_with_index(
     _file_path: &Path,
     _track_index: Option<u32>,
 ) -> Result<ReplayGainResult> {
-    anyhow::bail!(
-        "ReplayGain analysis requires the 'replaygain' feature.\n\
-        Install with: cargo install mp3rgain --features replaygain"
-    )
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
 }
 
 #[cfg(not(feature = "replaygain"))]
 pub fn analyze_album(_files: &[&Path]) -> Result<AlbumGainResult> {
-    anyhow::bail!(
-        "ReplayGain analysis requires the 'replaygain' feature.\n\
-        Install with: cargo install mp3rgain --features replaygain"
-    )
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
 }
 
 #[cfg(not(feature = "replaygain"))]
@@ -1154,10 +1194,10 @@ pub fn analyze_album_with_index(
     _files: &[&Path],
     _track_index: Option<u32>,
 ) -> Result<AlbumGainResult> {
-    anyhow::bail!(
-        "ReplayGain analysis requires the 'replaygain' feature.\n\
-        Install with: cargo install mp3rgain --features replaygain"
-    )
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
 }
 
 /// Check if ReplayGain feature is available
@@ -1170,12 +1210,30 @@ pub fn is_available() -> bool {
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeakAmplitudeResult {
-    /// Maximum peak amplitude (normalized, can exceed 1.0 for clipping audio)
-    pub peak: f64,
-    /// Maximum peak in 16-bit PCM scale (0-32768+)
-    pub peak_pcm: f64,
-    /// Sample rate of the audio
-    pub sample_rate: u32,
+    peak: f64,
+    peak_pcm: f64,
+    sample_rate: u32,
+}
+
+impl PeakAmplitudeResult {
+    #[allow(dead_code)]
+    pub(crate) fn new(peak: f64, peak_pcm: f64, sample_rate: u32) -> Self {
+        Self {
+            peak,
+            peak_pcm,
+            sample_rate,
+        }
+    }
+
+    pub fn peak(&self) -> f64 {
+        self.peak
+    }
+    pub fn peak_pcm(&self) -> f64 {
+        self.peak_pcm
+    }
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
 }
 
 impl std::fmt::Display for PeakAmplitudeResult {
@@ -1191,8 +1249,7 @@ impl std::fmt::Display for PeakAmplitudeResult {
 /// Returns peak amplitude that can exceed 1.0 for clipping audio.
 #[cfg(feature = "replaygain")]
 pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
-    let file = std::fs::File::open(file_path)
-        .with_context(|| format!("Failed to open: {}", file_path.display()))?;
+    let file = std::fs::File::open(file_path).map_err(|e| Error::io_open(file_path, e))?;
 
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
@@ -1208,7 +1265,10 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
             &FormatOptions::default(),
             &MetadataOptions::default(),
         )
-        .with_context(|| format!("Failed to probe format: {}", file_path.display()))?;
+        .map_err(|e| Error::ProbeFailed {
+            path: file_path.to_path_buf(),
+            source: Box::new(e),
+        })?;
 
     let mut format = probed.format;
 
@@ -1216,17 +1276,17 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
         .tracks()
         .iter()
         .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .ok_or_else(|| anyhow::anyhow!("No audio track found"))?;
+        .ok_or(Error::NoAudioTrack)?;
 
     let track_id = track.id;
     let sample_rate = track
         .codec_params
         .sample_rate
-        .ok_or_else(|| anyhow::anyhow!("Unknown sample rate"))?;
+        .ok_or(Error::UnsupportedSampleRate(0))?;
 
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
-        .with_context(|| "Failed to create decoder")?;
+        .map_err(|e| Error::Decode(Box::new(e)))?;
 
     let mut max_peak: f64 = 0.0;
 
@@ -1238,7 +1298,7 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
             {
                 break;
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(Error::Decode(Box::new(e))),
         };
 
         if packet.track_id() != track_id {
@@ -1248,7 +1308,7 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
         let decoded = match decoder.decode(&packet) {
             Ok(d) => d,
             Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(Error::Decode(Box::new(e))),
         };
 
         // Process each sample format and track peak
@@ -1294,19 +1354,19 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
         }
     }
 
-    Ok(PeakAmplitudeResult {
-        peak: max_peak,
-        peak_pcm: max_peak * SAMPLE_SCALE_16BIT,
+    Ok(PeakAmplitudeResult::new(
+        max_peak,
+        max_peak * SAMPLE_SCALE_16BIT,
         sample_rate,
-    })
+    ))
 }
 
 #[cfg(not(feature = "replaygain"))]
 pub fn find_peak_amplitude(_file_path: &Path) -> Result<PeakAmplitudeResult> {
-    anyhow::bail!(
-        "Peak amplitude analysis requires the 'replaygain' feature.\n\
-        Install with: cargo install mp3rgain --features replaygain"
-    )
+    Err(Error::FeatureNotAvailable {
+        feature: "Peak amplitude analysis",
+        feature_flag: "replaygain",
+    })
 }
 
 #[cfg(test)]
