@@ -1264,11 +1264,7 @@ mod tests {
         data[30] = 80; // non-silence
 
         let analysis = AacAnalysis {
-            gain_locations: vec![
-                make_loc(10, 0, 0),
-                make_loc(20, 0, 80),
-                make_loc(30, 0, 80),
-            ],
+            gain_locations: vec![make_loc(10, 0, 0), make_loc(20, 0, 80), make_loc(30, 0, 80)],
             sample_count: 3,
             channel_count: 1,
             min_gain: 0,
