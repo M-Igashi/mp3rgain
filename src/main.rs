@@ -741,7 +741,14 @@ fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
                 None
             };
 
-            match delete_ape_tag(file) {
+            let delete_result = if mp4meta::is_aac_file(file) {
+                // AAC: delete both ReplayGain and undo freeform tags
+                mp4meta::delete_replaygain_tags(file).and_then(|()| mp4meta::delete_undo_tags(file))
+            } else {
+                delete_ape_tag(file)
+            };
+
+            match delete_result {
                 Ok(()) => {
                     if let Some(mtime) = original_mtime {
                         restore_timestamp(file, mtime);
@@ -814,91 +821,153 @@ fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
         let filename = get_filename(file);
         progress_set_message(&pb, filename);
 
-        match read_ape_tag_from_file(file) {
-            Ok(Some(tag)) => {
-                let undo = tag.get(TAG_MP3GAIN_UNDO);
-                let minmax = tag.get(TAG_MP3GAIN_MINMAX);
-                let track_gain = tag.get(TAG_REPLAYGAIN_TRACK_GAIN);
-                let track_peak = tag.get(TAG_REPLAYGAIN_TRACK_PEAK);
-                let album_gain = tag.get(TAG_REPLAYGAIN_ALBUM_GAIN);
-                let album_peak = tag.get(TAG_REPLAYGAIN_ALBUM_PEAK);
+        let is_aac = mp4meta::is_aac_file(file);
 
-                match opts.output_format {
-                    OutputFormat::Text => {
-                        println!("{}", filename.cyan().bold());
-                        if let Some(v) = undo {
-                            println!("  MP3GAIN_UNDO:         {}", v);
-                        }
-                        if let Some(v) = minmax {
-                            println!("  MP3GAIN_MINMAX:       {}", v);
-                        }
-                        if let Some(v) = track_gain {
-                            println!("  REPLAYGAIN_TRACK_GAIN: {}", v);
-                        }
-                        if let Some(v) = track_peak {
-                            println!("  REPLAYGAIN_TRACK_PEAK: {}", v);
-                        }
-                        if let Some(v) = album_gain {
-                            println!("  REPLAYGAIN_ALBUM_GAIN: {}", v);
-                        }
-                        if let Some(v) = album_peak {
-                            println!("  REPLAYGAIN_ALBUM_PEAK: {}", v);
-                        }
-                        if undo.is_none() && minmax.is_none() && track_gain.is_none() {
-                            println!("  (no mp3gain tags found)");
-                        }
-                        println!();
-                    }
-                    OutputFormat::Tsv => {
-                        println!(
-                            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                            filename,
-                            undo.unwrap_or("-"),
-                            minmax.unwrap_or("-"),
-                            track_gain.unwrap_or("-"),
-                            track_peak.unwrap_or("-"),
-                            album_gain.unwrap_or("-"),
-                            album_peak.unwrap_or("-")
-                        );
-                    }
-                    OutputFormat::Json => {
-                        let result = JsonFileResult {
-                            file: file.display().to_string(),
-                            status: Some("success".to_string()),
-                            ..Default::default()
-                        };
-                        // Note: we can add tag info to JSON if needed
-                        json_results.push(result);
-                    }
-                }
-            }
-            Ok(None) => match opts.output_format {
+        if is_aac {
+            // AAC: read iTunes freeform tags
+            let undo_tags = mp4meta::read_undo_tags(file).unwrap_or_default();
+            let rg_tags = mp4meta::read_replaygain_tags(file).unwrap_or_default();
+
+            let undo = undo_tags.undo.as_deref();
+            let minmax = undo_tags.minmax.as_deref();
+            let track_gain = rg_tags.track_gain.as_deref();
+            let track_peak = rg_tags.track_peak.as_deref();
+            let album_gain = rg_tags.album_gain.as_deref();
+            let album_peak = rg_tags.album_peak.as_deref();
+
+            match opts.output_format {
                 OutputFormat::Text => {
                     println!("{}", filename.cyan().bold());
-                    println!("  (no APE tag found)");
+                    if let Some(v) = undo {
+                        println!("  MP3RGAIN_UNDO:        {}", v);
+                    }
+                    if let Some(v) = minmax {
+                        println!("  MP3RGAIN_MINMAX:      {}", v);
+                    }
+                    if let Some(v) = track_gain {
+                        println!("  REPLAYGAIN_TRACK_GAIN: {}", v);
+                    }
+                    if let Some(v) = track_peak {
+                        println!("  REPLAYGAIN_TRACK_PEAK: {}", v);
+                    }
+                    if let Some(v) = album_gain {
+                        println!("  REPLAYGAIN_ALBUM_GAIN: {}", v);
+                    }
+                    if let Some(v) = album_peak {
+                        println!("  REPLAYGAIN_ALBUM_PEAK: {}", v);
+                    }
+                    if undo.is_none() && minmax.is_none() && track_gain.is_none() {
+                        println!("  (no tags found)");
+                    }
                     println!();
                 }
                 OutputFormat::Tsv => {
-                    println!("{}\t-\t-\t-\t-\t-\t-", filename);
+                    println!(
+                        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                        filename,
+                        undo.unwrap_or("-"),
+                        minmax.unwrap_or("-"),
+                        track_gain.unwrap_or("-"),
+                        track_peak.unwrap_or("-"),
+                        album_gain.unwrap_or("-"),
+                        album_peak.unwrap_or("-")
+                    );
                 }
                 OutputFormat::Json => {
                     json_results.push(JsonFileResult {
                         file: file.display().to_string(),
-                        status: Some("no_tag".to_string()),
+                        status: Some("success".to_string()),
                         ..Default::default()
                     });
                 }
-            },
-            Err(e) => {
-                if opts.output_format != OutputFormat::Json {
-                    eprintln!("{} - {}", filename.red(), e);
-                } else {
-                    json_results.push(JsonFileResult {
-                        file: file.display().to_string(),
-                        status: Some("error".to_string()),
-                        error: Some(e.to_string()),
-                        ..Default::default()
-                    });
+            }
+        } else {
+            // MP3: read APEv2 tags
+            match read_ape_tag_from_file(file) {
+                Ok(Some(tag)) => {
+                    let undo = tag.get(TAG_MP3GAIN_UNDO);
+                    let minmax = tag.get(TAG_MP3GAIN_MINMAX);
+                    let track_gain = tag.get(TAG_REPLAYGAIN_TRACK_GAIN);
+                    let track_peak = tag.get(TAG_REPLAYGAIN_TRACK_PEAK);
+                    let album_gain = tag.get(TAG_REPLAYGAIN_ALBUM_GAIN);
+                    let album_peak = tag.get(TAG_REPLAYGAIN_ALBUM_PEAK);
+
+                    match opts.output_format {
+                        OutputFormat::Text => {
+                            println!("{}", filename.cyan().bold());
+                            if let Some(v) = undo {
+                                println!("  MP3GAIN_UNDO:         {}", v);
+                            }
+                            if let Some(v) = minmax {
+                                println!("  MP3GAIN_MINMAX:       {}", v);
+                            }
+                            if let Some(v) = track_gain {
+                                println!("  REPLAYGAIN_TRACK_GAIN: {}", v);
+                            }
+                            if let Some(v) = track_peak {
+                                println!("  REPLAYGAIN_TRACK_PEAK: {}", v);
+                            }
+                            if let Some(v) = album_gain {
+                                println!("  REPLAYGAIN_ALBUM_GAIN: {}", v);
+                            }
+                            if let Some(v) = album_peak {
+                                println!("  REPLAYGAIN_ALBUM_PEAK: {}", v);
+                            }
+                            if undo.is_none() && minmax.is_none() && track_gain.is_none() {
+                                println!("  (no mp3gain tags found)");
+                            }
+                            println!();
+                        }
+                        OutputFormat::Tsv => {
+                            println!(
+                                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                                filename,
+                                undo.unwrap_or("-"),
+                                minmax.unwrap_or("-"),
+                                track_gain.unwrap_or("-"),
+                                track_peak.unwrap_or("-"),
+                                album_gain.unwrap_or("-"),
+                                album_peak.unwrap_or("-")
+                            );
+                        }
+                        OutputFormat::Json => {
+                            let result = JsonFileResult {
+                                file: file.display().to_string(),
+                                status: Some("success".to_string()),
+                                ..Default::default()
+                            };
+                            json_results.push(result);
+                        }
+                    }
+                }
+                Ok(None) => match opts.output_format {
+                    OutputFormat::Text => {
+                        println!("{}", filename.cyan().bold());
+                        println!("  (no APE tag found)");
+                        println!();
+                    }
+                    OutputFormat::Tsv => {
+                        println!("{}\t-\t-\t-\t-\t-\t-", filename);
+                    }
+                    OutputFormat::Json => {
+                        json_results.push(JsonFileResult {
+                            file: file.display().to_string(),
+                            status: Some("no_tag".to_string()),
+                            ..Default::default()
+                        });
+                    }
+                },
+                Err(e) => {
+                    if opts.output_format != OutputFormat::Json {
+                        eprintln!("{} - {}", filename.red(), e);
+                    } else {
+                        json_results.push(JsonFileResult {
+                            file: file.display().to_string(),
+                            status: Some("error".to_string()),
+                            error: Some(e.to_string()),
+                            ..Default::default()
+                        });
+                    }
                 }
             }
         }
@@ -1503,6 +1572,20 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
 
     let is_aac = mp4meta::is_aac_file(file);
 
+    // Multi-track warning for AAC files
+    if is_aac && opts.output_format == OutputFormat::Text && !opts.quiet {
+        let track_count = mp4meta::count_audio_tracks(file);
+        if track_count > 1 {
+            eprintln!(
+                "  {} {}{} - {} audio tracks detected, processing first track only",
+                "!".yellow(),
+                dry_run_prefix,
+                filename,
+                track_count
+            );
+        }
+    }
+
     // Check for clipping and possibly prevent it
     let mut actual_steps = steps;
     let mut warning_msg: Option<String> = None;
@@ -1581,7 +1664,15 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
 
     // Apply gain
     let apply_result = if is_aac {
-        apply_with_temp_file(file, |f| aac::apply_aac_gain(f, actual_steps), opts)
+        if opts.stored_tag_mode == StoredTagMode::Skip {
+            apply_with_temp_file(file, |f| aac::apply_aac_gain(f, actual_steps), opts)
+        } else {
+            apply_with_temp_file(
+                file,
+                |f| aac::apply_aac_gain_with_undo(f, actual_steps),
+                opts,
+            )
+        }
     } else if opts.stored_tag_mode == StoredTagMode::Skip {
         if opts.wrap_gain {
             apply_with_temp_file(file, |f| apply_gain_wrap(f, actual_steps), opts)
@@ -1915,7 +2006,14 @@ fn process_undo(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> {
         });
     }
 
-    match undo_gain(file) {
+    let is_aac = mp4meta::is_aac_file(file);
+    let undo_result = if is_aac {
+        aac::undo_aac_gain(file)
+    } else {
+        undo_gain(file)
+    };
+
+    match undo_result {
         Ok(frames) => {
             if frames == 0 {
                 if opts.output_format == OutputFormat::Text && !opts.quiet {
@@ -2210,9 +2308,22 @@ fn process_apply_replaygain_aac_with_album(
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
 
-    // Apply bitstream gain modification
+    // Multi-track warning
+    if opts.output_format == OutputFormat::Text && !opts.quiet {
+        let track_count = mp4meta::count_audio_tracks(file);
+        if track_count > 1 {
+            eprintln!(
+                "  {} {} - {} audio tracks detected, processing first track only",
+                "!".yellow(),
+                filename,
+                track_count
+            );
+        }
+    }
+
+    // Apply bitstream gain modification with undo support
     let gain_modified = if actual_steps != 0 {
-        match aac::apply_aac_gain(file, actual_steps) {
+        match aac::apply_aac_gain_with_undo(file, actual_steps) {
             Ok(n) => n,
             Err(e) => {
                 if opts.output_format == OutputFormat::Text && !opts.quiet {

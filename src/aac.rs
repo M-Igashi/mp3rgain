@@ -51,8 +51,10 @@ pub struct AacAnalysis {
 
 const ID_SCE: u32 = 0; // Single Channel Element
 const ID_CPE: u32 = 1; // Channel Pair Element
+const ID_CCE: u32 = 2; // Coupling Channel Element
 const ID_LFE: u32 = 3; // LFE Channel Element
 const ID_DSE: u32 = 4; // Data Stream Element
+const ID_PCE: u32 = 5; // Program Config Element
 const ID_FIL: u32 = 6; // Fill Element
 const ID_END: u32 = 7; // End
 
@@ -920,11 +922,67 @@ fn skip_dse(reader: &mut BitReader) -> Result<()> {
 }
 
 fn skip_fil(reader: &mut BitReader) -> Result<()> {
+    // FIL carries extension data including SBR (HE-AAC).
+    // Skipping it is safe — the base layer global_gain is in SCE/CPE elements.
     let mut count = reader.read_bits(4)? as usize;
     if count == 15 {
         count += reader.read_bits(8)? as usize - 1;
     }
     reader.skip_bits(count * 8)?;
+    Ok(())
+}
+
+/// Skip program_config_element (ISO 14496-3 Table 4.2).
+/// PCE describes channel configuration but contains no audio data or global_gain.
+fn skip_pce(reader: &mut BitReader) -> Result<()> {
+    let _element_instance_tag = reader.read_bits(4)?;
+    let _object_type = reader.read_bits(2)?;
+    let _sampling_frequency_index = reader.read_bits(4)?;
+    let num_front = reader.read_bits(4)? as usize;
+    let num_side = reader.read_bits(4)? as usize;
+    let num_back = reader.read_bits(4)? as usize;
+    let num_lfe = reader.read_bits(2)? as usize;
+    let num_assoc_data = reader.read_bits(3)? as usize;
+    let num_valid_cc = reader.read_bits(4)? as usize;
+    let mono_mixdown_present = reader.read_bit()?;
+    if mono_mixdown_present {
+        reader.read_bits(4)?;
+    }
+    let stereo_mixdown_present = reader.read_bit()?;
+    if stereo_mixdown_present {
+        reader.read_bits(4)?;
+    }
+    let matrix_mixdown_idx_present = reader.read_bit()?;
+    if matrix_mixdown_idx_present {
+        reader.read_bits(3)?;
+    }
+    // front: is_cpe(1) + tag(4) = 5 bits each
+    for _ in 0..num_front {
+        reader.read_bits(5)?;
+    }
+    // side: is_cpe(1) + tag(4) = 5 bits each
+    for _ in 0..num_side {
+        reader.read_bits(5)?;
+    }
+    // back: is_cpe(1) + tag(4) = 5 bits each
+    for _ in 0..num_back {
+        reader.read_bits(5)?;
+    }
+    // LFE: tag(4) only
+    for _ in 0..num_lfe {
+        reader.read_bits(4)?;
+    }
+    // assoc_data: tag(4)
+    for _ in 0..num_assoc_data {
+        reader.read_bits(4)?;
+    }
+    // valid_cc: is_ind_sw(1) + tag(4) = 5 bits each
+    for _ in 0..num_valid_cc {
+        reader.read_bits(5)?;
+    }
+    reader.byte_align();
+    let comment_len = reader.read_bits(8)? as usize;
+    reader.skip_bits(comment_len * 8)?;
     Ok(())
 }
 
@@ -946,7 +1004,13 @@ fn parse_raw_data_block(reader: &mut BitReader, sample_rate: u32) -> Result<Vec<
                 let locs = parse_cpe(reader, sample_rate)?;
                 locations.extend(locs);
             }
+            ID_CCE => {
+                // Coupling channel — complex interactions with other channels,
+                // skip this sample to avoid unintended effects
+                anyhow::bail!("CCE element found - sample skipped");
+            }
             ID_DSE => skip_dse(reader)?,
+            ID_PCE => skip_pce(reader)?,
             ID_FIL => skip_fil(reader)?,
             ID_END => break,
             _ => {
@@ -1055,6 +1119,96 @@ pub fn apply_aac_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
         .with_context(|| format!("Failed to write: {}", file_path.display()))?;
 
     Ok(modified)
+}
+
+/// Apply gain adjustment and store undo information in iTunes freeform tags.
+///
+/// Undo tags are stored cumulatively: each application adds to the existing
+/// undo value, so multiple gain changes can be fully reversed with a single undo.
+///
+/// Returns the number of modified gain locations.
+pub fn apply_aac_gain_with_undo(file_path: &Path, gain_steps: i32) -> Result<usize> {
+    if gain_steps == 0 {
+        return Ok(0);
+    }
+
+    let analysis = analyze_aac_gains(file_path)?;
+
+    // Read existing undo tags
+    let existing_undo = mp4meta::read_undo_tags(file_path)?;
+
+    // Parse existing undo value and accumulate
+    let existing_gain = parse_undo_gain(existing_undo.undo.as_deref());
+    let new_undo_gain = existing_gain + gain_steps;
+
+    // Apply gain to bitstream (in-place, no container change)
+    let mut data = std::fs::read(file_path)
+        .with_context(|| format!("Failed to read: {}", file_path.display()))?;
+
+    let modified = apply_aac_gain_to_data(&mut data, &analysis, gain_steps);
+
+    std::fs::write(file_path, &data)
+        .with_context(|| format!("Failed to write: {}", file_path.display()))?;
+
+    // Write undo tags (may change container structure)
+    let mut undo_tags = mp4meta::UndoTags::new();
+    undo_tags.undo = Some(format!("{:+04},{:+04},N", new_undo_gain, new_undo_gain));
+    undo_tags.minmax = if existing_undo.minmax.is_some() {
+        existing_undo.minmax
+    } else {
+        Some(format!("{},{}", analysis.min_gain, analysis.max_gain))
+    };
+    mp4meta::write_undo_tags(file_path, &undo_tags)?;
+
+    Ok(modified)
+}
+
+/// Undo gain changes on AAC/M4A file using stored undo information.
+///
+/// Reads the cumulative gain adjustment from undo tags, applies the inverse,
+/// and removes the undo tags. Note: the result is functionally equivalent to the
+/// original but may not be bit-for-bit identical due to MP4 container restructuring.
+///
+/// Returns the number of modified gain locations.
+pub fn undo_aac_gain(file_path: &Path) -> Result<usize> {
+    let undo_tags = mp4meta::read_undo_tags(file_path)?;
+    let undo_str = undo_tags
+        .undo
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("No undo tag found - cannot undo"))?;
+
+    let undo_gain = parse_undo_gain(Some(undo_str));
+
+    if undo_gain == 0 {
+        return Ok(0);
+    }
+
+    // Apply inverse gain
+    let analysis = analyze_aac_gains(file_path)?;
+    let mut data = std::fs::read(file_path)
+        .with_context(|| format!("Failed to read: {}", file_path.display()))?;
+
+    let modified = apply_aac_gain_to_data(&mut data, &analysis, -undo_gain);
+
+    std::fs::write(file_path, &data)
+        .with_context(|| format!("Failed to write: {}", file_path.display()))?;
+
+    // Remove undo tags
+    mp4meta::delete_undo_tags(file_path)?;
+
+    Ok(modified)
+}
+
+/// Parse undo gain value from tag string (e.g., "+003,+003,N" -> 3)
+fn parse_undo_gain(undo_str: Option<&str>) -> i32 {
+    match undo_str {
+        Some(v) => v
+            .split(',')
+            .next()
+            .and_then(|s| s.trim().parse::<i32>().ok())
+            .unwrap_or(0),
+        None => 0,
+    }
 }
 
 /// Analyze AAC/M4A file and locate all global_gain fields (read-only)
@@ -1298,5 +1452,14 @@ mod tests {
         let modified = apply_aac_gain_to_data(&mut data, &analysis, 0);
         assert_eq!(modified, 0);
         assert_eq!(data[10], 80); // unchanged
+    }
+
+    #[test]
+    fn test_parse_undo_gain() {
+        assert_eq!(parse_undo_gain(None), 0);
+        assert_eq!(parse_undo_gain(Some("+003,+003,N")), 3);
+        assert_eq!(parse_undo_gain(Some("-005,-005,N")), -5);
+        assert_eq!(parse_undo_gain(Some("+000,+000,N")), 0);
+        assert_eq!(parse_undo_gain(Some("invalid")), 0);
     }
 }

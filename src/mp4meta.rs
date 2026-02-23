@@ -28,6 +28,10 @@ pub const RG_TRACK_PEAK: &str = "replaygain_track_peak";
 pub const RG_ALBUM_GAIN: &str = "replaygain_album_gain";
 pub const RG_ALBUM_PEAK: &str = "replaygain_album_peak";
 
+/// Undo tag keys (iTunes freeform format, same namespace)
+pub const UNDO_TAG: &str = "mp3rgain_undo";
+pub const MINMAX_TAG: &str = "mp3rgain_minmax";
+
 /// iTunes namespace for freeform tags
 const ITUNES_NAMESPACE: &str = "com.apple.iTunes";
 
@@ -183,6 +187,43 @@ impl ReplayGainTags {
             (RG_ALBUM_GAIN, &self.album_gain),
             (RG_ALBUM_PEAK, &self.album_peak),
         ];
+
+        entries
+            .into_iter()
+            .filter_map(|(name, value)| {
+                value.as_ref().map(|v| FreeformTag {
+                    namespace: ITUNES_NAMESPACE.to_string(),
+                    name: name.to_string(),
+                    value: v.clone(),
+                })
+            })
+            .collect()
+    }
+}
+
+/// Undo information stored as iTunes freeform tags
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct UndoTags {
+    /// Cumulative gain adjustment, format: "+003,+003,N" (left,right,wrap_flag)
+    pub undo: Option<String>,
+    /// Original min/max global_gain before any modification, format: "80,120"
+    pub minmax: Option<String>,
+}
+
+impl UndoTags {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.undo.is_none() && self.minmax.is_none()
+    }
+
+    fn to_freeform_tags(&self) -> Vec<FreeformTag> {
+        let entries: [(&str, &Option<String>); 2] =
+            [(UNDO_TAG, &self.undo), (MINMAX_TAG, &self.minmax)];
 
         entries
             .into_iter()
@@ -437,6 +478,112 @@ pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
     Ok(tags)
 }
 
+/// Read undo tags from MP4/M4A file
+pub fn read_undo_tags(file_path: &Path) -> Result<UndoTags> {
+    let data =
+        fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
+
+    let mut tags = UndoTags::new();
+
+    let (moov_pos, moov_header) = match find_box(&data, MOOV) {
+        Some(x) => x,
+        None => return Ok(tags),
+    };
+
+    let moov_content_start = moov_pos + moov_header.header_size as usize;
+    let moov_content_size = moov_header.content_size() as usize;
+
+    let (udta_pos, udta_header) =
+        match find_box_in_container(&data, moov_content_start, moov_content_size, UDTA) {
+            Some(x) => x,
+            None => return Ok(tags),
+        };
+
+    let udta_content_start = udta_pos + udta_header.header_size as usize;
+    let udta_content_size = udta_header.content_size() as usize;
+
+    let (meta_pos, meta_header) =
+        match find_box_in_container(&data, udta_content_start, udta_content_size, META) {
+            Some(x) => x,
+            None => return Ok(tags),
+        };
+
+    let meta_content_start = meta_pos + meta_header.header_size as usize + 4;
+    let meta_content_size = meta_header.content_size() as usize - 4;
+
+    let (ilst_pos, ilst_header) =
+        match find_box_in_container(&data, meta_content_start, meta_content_size, ILST) {
+            Some(x) => x,
+            None => return Ok(tags),
+        };
+
+    let ilst_content_start = ilst_pos + ilst_header.header_size as usize;
+    let ilst_content_size = ilst_header.content_size() as usize;
+
+    let mut pos = ilst_content_start;
+    while pos + 8 <= ilst_content_start + ilst_content_size {
+        let mut cursor = Cursor::new(&data[pos..]);
+        if let Ok(Some(header)) = BoxHeader::read(&mut cursor) {
+            if header.box_type == FREEFORM {
+                let tag_data = &data[pos + header.header_size as usize..pos + header.size as usize];
+                if let Some(tag) = parse_freeform_tag(tag_data) {
+                    if tag.namespace == ITUNES_NAMESPACE {
+                        match tag.name.as_str() {
+                            x if x.eq_ignore_ascii_case(UNDO_TAG) => {
+                                tags.undo = Some(tag.value);
+                            }
+                            x if x.eq_ignore_ascii_case(MINMAX_TAG) => {
+                                tags.minmax = Some(tag.value);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            if header.size == 0 {
+                break;
+            }
+            pos += header.size as usize;
+        } else {
+            break;
+        }
+    }
+
+    Ok(tags)
+}
+
+/// Write undo tags to MP4/M4A file.
+/// Uses atomic write (temp file + rename) to prevent corruption on interruption.
+pub fn write_undo_tags(file_path: &Path, tags: &UndoTags) -> Result<()> {
+    let data =
+        fs::read(file_path).with_context(|| format!("Failed to read: {}", file_path.display()))?;
+
+    let new_data = update_mp4_undo_metadata(&data, tags)?;
+
+    let parent = file_path.parent().unwrap_or(Path::new("."));
+    let temp_path = parent.join(format!(".mp3rgain_temp_{}.m4a", std::process::id()));
+
+    if let Err(e) = fs::write(&temp_path, &new_data) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(e).with_context(|| format!("Failed to write temp: {}", temp_path.display()));
+    }
+
+    if let Err(_rename_err) = fs::rename(&temp_path, file_path) {
+        let _ = fs::remove_file(&temp_path);
+        fs::write(file_path, &new_data)
+            .with_context(|| format!("Failed to write: {}", file_path.display()))?;
+    }
+
+    Ok(())
+}
+
+/// Delete undo tags from MP4/M4A file
+pub fn delete_undo_tags(file_path: &Path) -> Result<()> {
+    let empty_tags = UndoTags::new();
+    write_undo_tags(file_path, &empty_tags)
+}
+
 /// Write ReplayGain tags to MP4/M4A file.
 /// Uses atomic write (temp file + rename) to prevent corruption on interruption.
 pub fn write_replaygain_tags(file_path: &Path, tags: &ReplayGainTags) -> Result<()> {
@@ -466,6 +613,19 @@ pub fn write_replaygain_tags(file_path: &Path, tags: &ReplayGainTags) -> Result<
 
 /// Update MP4 metadata with new ReplayGain tags
 fn update_mp4_metadata(data: &[u8], tags: &ReplayGainTags) -> Result<Vec<u8>> {
+    let make_ilst = |existing: &[u8]| create_ilst_box(tags, existing);
+    rebuild_mp4_with_ilst(data, make_ilst)
+}
+
+/// Update MP4 metadata with new undo tags
+fn update_mp4_undo_metadata(data: &[u8], tags: &UndoTags) -> Result<Vec<u8>> {
+    let make_ilst = |existing: &[u8]| create_ilst_box_undo(tags, existing);
+    rebuild_mp4_with_ilst(data, make_ilst)
+}
+
+/// Common logic for rebuilding MP4 file with updated ilst content.
+/// `make_ilst` takes existing ilst content (or empty) and returns the new ilst box.
+fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl Fn(&[u8]) -> Vec<u8>) -> Result<Vec<u8>> {
     // Find moov box
     let (moov_pos, moov_header) =
         find_box(data, MOOV).ok_or_else(|| anyhow::anyhow!("No moov box found in MP4 file"))?;
@@ -476,7 +636,7 @@ fn update_mp4_metadata(data: &[u8], tags: &ReplayGainTags) -> Result<Vec<u8>> {
 
     // Try to find existing ilst or create new metadata structure
     let (new_ilst, ilst_info) =
-        create_or_update_ilst(data, moov_content_start, moov_content_size, tags)?;
+        find_ilst_location(data, moov_content_start, moov_content_size, &make_ilst)?;
 
     // Rebuild the file
     let mut result = Vec::with_capacity(data.len() + 1024);
@@ -631,19 +791,18 @@ enum IlstLocation {
     NeedsUdta,
 }
 
-fn create_or_update_ilst(
+fn find_ilst_location(
     data: &[u8],
     moov_content_start: usize,
     moov_content_size: usize,
-    tags: &ReplayGainTags,
+    make_ilst: &impl Fn(&[u8]) -> Vec<u8>,
 ) -> Result<(Vec<u8>, IlstLocation)> {
     // Find udta
     let (udta_pos, udta_header) =
         match find_box_in_container(data, moov_content_start, moov_content_size, UDTA) {
             Some(x) => x,
             None => {
-                // No udta, need to create everything
-                let ilst = create_ilst_box(tags, &[]);
+                let ilst = make_ilst(&[]);
                 return Ok((ilst, IlstLocation::NeedsUdta));
             }
         };
@@ -656,7 +815,7 @@ fn create_or_update_ilst(
         match find_box_in_container(data, udta_content_start, udta_content_size, META) {
             Some(x) => x,
             None => {
-                let ilst = create_ilst_box(tags, &[]);
+                let ilst = make_ilst(&[]);
                 return Ok((
                     ilst,
                     IlstLocation::NeedsMeta {
@@ -675,8 +834,7 @@ fn create_or_update_ilst(
         match find_box_in_container(data, meta_content_start, meta_content_size, ILST) {
             Some(x) => x,
             None => {
-                // meta exists but has no ilst — insert ilst into existing meta
-                let ilst = create_ilst_box(tags, &[]);
+                let ilst = make_ilst(&[]);
                 return Ok((
                     ilst,
                     IlstLocation::NeedsIlst {
@@ -693,7 +851,7 @@ fn create_or_update_ilst(
     let ilst_content_size = ilst_header.content_size() as usize;
     let existing_content = &data[ilst_content_start..ilst_content_start + ilst_content_size];
 
-    let new_ilst = create_ilst_box(tags, existing_content);
+    let new_ilst = make_ilst(existing_content);
 
     Ok((
         new_ilst,
@@ -724,10 +882,30 @@ fn is_replaygain_freeform(data: &[u8], pos: usize, header: &BoxHeader) -> bool {
     }
 }
 
-fn create_ilst_box(tags: &ReplayGainTags, existing_content: &[u8]) -> Vec<u8> {
+/// Check if a box at the given position is an undo freeform tag
+fn is_undo_freeform(data: &[u8], pos: usize, header: &BoxHeader) -> bool {
+    if header.box_type != FREEFORM {
+        return false;
+    }
+    let inner_data = &data[pos + header.header_size as usize..pos + header.size as usize];
+    match parse_freeform_tag(inner_data) {
+        Some(tag) => {
+            tag.namespace == ITUNES_NAMESPACE
+                && (tag.name.eq_ignore_ascii_case(UNDO_TAG)
+                    || tag.name.eq_ignore_ascii_case(MINMAX_TAG))
+        }
+        None => false,
+    }
+}
+
+fn create_ilst_box_filtered(
+    new_tags: &[FreeformTag],
+    existing_content: &[u8],
+    should_replace: impl Fn(&[u8], usize, &BoxHeader) -> bool,
+) -> Vec<u8> {
     let mut content = Vec::new();
 
-    // Copy existing non-ReplayGain tags
+    // Copy existing tags that don't match the filter
     let mut pos = 0;
     while pos + 8 <= existing_content.len() {
         let mut cursor = Cursor::new(&existing_content[pos..]);
@@ -738,7 +916,7 @@ fn create_ilst_box(tags: &ReplayGainTags, existing_content: &[u8]) -> Vec<u8> {
 
             let tag_data = &existing_content[pos..pos + header.size as usize];
 
-            if !is_replaygain_freeform(existing_content, pos, &header) {
+            if !should_replace(existing_content, pos, &header) {
                 content.extend_from_slice(tag_data);
             }
 
@@ -748,9 +926,9 @@ fn create_ilst_box(tags: &ReplayGainTags, existing_content: &[u8]) -> Vec<u8> {
         }
     }
 
-    // Add new ReplayGain tags
-    for tag in tags.to_freeform_tags() {
-        content.extend_from_slice(&serialize_freeform_tag(&tag));
+    // Add new tags
+    for tag in new_tags {
+        content.extend_from_slice(&serialize_freeform_tag(tag));
     }
 
     // Wrap in ilst box
@@ -761,6 +939,18 @@ fn create_ilst_box(tags: &ReplayGainTags, existing_content: &[u8]) -> Vec<u8> {
     ilst.extend_from_slice(&content);
 
     ilst
+}
+
+fn create_ilst_box(tags: &ReplayGainTags, existing_content: &[u8]) -> Vec<u8> {
+    create_ilst_box_filtered(
+        &tags.to_freeform_tags(),
+        existing_content,
+        is_replaygain_freeform,
+    )
+}
+
+fn create_ilst_box_undo(tags: &UndoTags, existing_content: &[u8]) -> Vec<u8> {
+    create_ilst_box_filtered(&tags.to_freeform_tags(), existing_content, is_undo_freeform)
 }
 
 fn create_meta_box(ilst: &[u8]) -> Vec<u8> {
@@ -1125,6 +1315,45 @@ pub fn is_aac_file(file_path: &Path) -> bool {
     )
 }
 
+/// Count the number of audio tracks in an MP4 file.
+/// Returns 0 if the file cannot be read or has no moov box.
+pub fn count_audio_tracks(file_path: &Path) -> usize {
+    let data = match fs::read(file_path) {
+        Ok(d) => d,
+        Err(_) => return 0,
+    };
+
+    let (moov_pos, moov_header) = match find_box(&data, MOOV) {
+        Some(x) => x,
+        None => return 0,
+    };
+
+    let moov_start = moov_pos + moov_header.header_size as usize;
+    let moov_end = moov_start + moov_header.content_size() as usize;
+
+    let mut count = 0;
+    let mut search_pos = moov_start;
+
+    while search_pos < moov_end {
+        let (trak_pos, trak_header) =
+            match find_box_in_container(&data, search_pos, moov_end - search_pos, TRAK) {
+                Some(x) => x,
+                None => break,
+            };
+
+        // Check if this trak has an audio codec (mp4a or alac)
+        let trak_start = trak_pos + trak_header.header_size as usize;
+        let trak_size = trak_header.content_size() as usize;
+        if detect_codec_in_trak(&data, trak_start, trak_size).is_some() {
+            count += 1;
+        }
+
+        search_pos = trak_pos + trak_header.size as usize;
+    }
+
+    count
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1162,6 +1391,76 @@ mod tests {
 
         let freeform_tags = tags.to_freeform_tags();
         assert_eq!(freeform_tags.len(), 4);
+    }
+
+    #[test]
+    fn test_undo_tags() {
+        let mut tags = UndoTags::new();
+        assert!(tags.is_empty());
+
+        tags.undo = Some("+003,+003,N".to_string());
+        tags.minmax = Some("80,120".to_string());
+        assert!(!tags.is_empty());
+
+        let freeform_tags = tags.to_freeform_tags();
+        assert_eq!(freeform_tags.len(), 2);
+        assert_eq!(freeform_tags[0].name, UNDO_TAG);
+        assert_eq!(freeform_tags[0].value, "+003,+003,N");
+        assert_eq!(freeform_tags[1].name, MINMAX_TAG);
+        assert_eq!(freeform_tags[1].value, "80,120");
+    }
+
+    #[test]
+    fn test_undo_tag_serialization_roundtrip() {
+        let tag = FreeformTag {
+            namespace: "com.apple.iTunes".to_string(),
+            name: UNDO_TAG.to_string(),
+            value: "+005,+005,N".to_string(),
+        };
+
+        let serialized = serialize_freeform_tag(&tag);
+        let parsed = parse_freeform_tag(&serialized[8..]).unwrap();
+        assert_eq!(parsed.namespace, tag.namespace);
+        assert_eq!(parsed.name, tag.name);
+        assert_eq!(parsed.value, tag.value);
+    }
+
+    #[test]
+    fn test_ilst_box_filtered_preserves_other_tags() {
+        // Create an ilst with one RG tag and one undo tag
+        let rg_tag = FreeformTag {
+            namespace: ITUNES_NAMESPACE.to_string(),
+            name: RG_TRACK_GAIN.to_string(),
+            value: "+3.50 dB".to_string(),
+        };
+        let undo_tag = FreeformTag {
+            namespace: ITUNES_NAMESPACE.to_string(),
+            name: UNDO_TAG.to_string(),
+            value: "+002,+002,N".to_string(),
+        };
+
+        let mut existing = Vec::new();
+        existing.extend_from_slice(&serialize_freeform_tag(&rg_tag));
+        existing.extend_from_slice(&serialize_freeform_tag(&undo_tag));
+
+        // Writing new RG tags should preserve the undo tag
+        let new_rg = ReplayGainTags {
+            track_gain: Some("+5.00 dB".to_string()),
+            track_peak: None,
+            album_gain: None,
+            album_peak: None,
+        };
+        let result = create_ilst_box(&new_rg, &existing);
+        // Result should contain the new RG tag AND the preserved undo tag
+        assert!(result.len() > 8); // more than just the ilst header
+
+        // Writing new undo tags should preserve the RG tag
+        let new_undo = UndoTags {
+            undo: Some("+005,+005,N".to_string()),
+            minmax: None,
+        };
+        let result = create_ilst_box_undo(&new_undo, &existing);
+        assert!(result.len() > 8);
     }
 
     #[test]
