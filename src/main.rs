@@ -12,7 +12,7 @@ use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult, REPLAYGAIN_REF
 use mp3rgain::{
     analyze, apply_gain, apply_gain_channel_with_undo, apply_gain_with_undo,
     apply_gain_with_undo_wrap, apply_gain_wrap, db_to_steps, delete_ape_tag,
-    find_max_amplitude_detailed, read_ape_tag_from_file, steps_to_db, undo_gain, Channel,
+    find_max_amplitude, read_ape_tag_from_file, steps_to_db, undo_gain, Channel,
     GAIN_STEP_DB, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN,
     TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
@@ -598,11 +598,11 @@ fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
         let filename = get_filename(file);
         progress_set_message(&pb, filename);
 
-        match find_max_amplitude_detailed(file) {
+        match find_max_amplitude(file) {
             Ok(amp_result) => {
-                let max_amp = amp_result.max_amplitude;
-                let max_gain = amp_result.max_global_gain;
-                let min_gain = amp_result.min_global_gain;
+                let max_amp = amp_result.max_amplitude();
+                let max_gain = amp_result.max_global_gain();
+                let min_gain = amp_result.min_global_gain();
                 // Convert to PCM scale (like mp3gain: 0-32768+)
                 let max_pcm_sample = max_amp * 32768.0;
                 let headroom_db = if max_amp > 0.0 {
@@ -828,12 +828,12 @@ fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
             let undo_tags = mp4meta::read_undo_tags(file).unwrap_or_default();
             let rg_tags = mp4meta::read_replaygain_tags(file).unwrap_or_default();
 
-            let undo = undo_tags.undo.as_deref();
-            let minmax = undo_tags.minmax.as_deref();
-            let track_gain = rg_tags.track_gain.as_deref();
-            let track_peak = rg_tags.track_peak.as_deref();
-            let album_gain = rg_tags.album_gain.as_deref();
-            let album_peak = rg_tags.album_peak.as_deref();
+            let undo = undo_tags.undo();
+            let minmax = undo_tags.minmax();
+            let track_gain = rg_tags.track_gain();
+            let track_peak = rg_tags.track_peak();
+            let album_gain = rg_tags.album_gain();
+            let album_peak = rg_tags.album_peak();
 
             match opts.output_format {
                 OutputFormat::Text => {
@@ -1072,7 +1072,7 @@ fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
             if let Ok(info) = analyze(file) {
                 println!(
                     "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
-                    filename, steps, db_value, 1.0, info.max_gain, info.min_gain
+                    filename, steps, db_value, 1.0, info.max_gain(), info.min_gain()
                 );
             }
         }
@@ -1395,10 +1395,10 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 println!();
-                println!("  Album loudness: {:.1} dB", album_result.album_loudness_db);
+                println!("  Album loudness: {:.1} dB", album_result.album_loudness_db());
                 println!(
                     "  Album gain:     {:+.1} dB ({} steps{})",
-                    album_result.album_gain_db,
+                    album_result.album_gain_db(),
                     album_result.album_gain_steps(),
                     if opts.gain_modifier != 0 {
                         format!(" + {} = {}", opts.gain_modifier, modified_gain_steps)
@@ -1406,7 +1406,7 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                         String::new()
                     }
                 );
-                println!("  Album peak:     {:.4}", album_result.album_peak);
+                println!("  Album peak:     {:.4}", album_result.album_peak());
                 println!();
             }
 
@@ -1419,12 +1419,12 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                         .iter()
                         .enumerate()
                         .map(|(i, file)| {
-                            let track = &album_result.tracks[i];
+                            let track = &album_result.tracks()[i];
                             JsonFileResult {
                                 file: file.display().to_string(),
                                 status: Some("skipped".to_string()),
-                                loudness_db: Some(track.loudness_db),
-                                peak: Some(track.peak),
+                                loudness_db: Some(track.loudness_db()),
+                                peak: Some(track.peak()),
                                 gain_applied_steps: Some(0),
                                 gain_applied_db: Some(0.0),
                                 ..Default::default()
@@ -1435,10 +1435,10 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                     let output = JsonOutput {
                         files: Some(json_results),
                         album: Some(JsonAlbumResult {
-                            loudness_db: album_result.album_loudness_db,
-                            gain_db: album_result.album_gain_db,
+                            loudness_db: album_result.album_loudness_db(),
+                            gain_db: album_result.album_gain_db(),
                             gain_steps: modified_gain_steps,
-                            peak: album_result.album_peak,
+                            peak: album_result.album_peak(),
                         }),
                         summary: Some(create_json_summary(files.len(), 0, 0, opts.dry_run)),
                     };
@@ -1458,10 +1458,10 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 let filename = get_filename(file);
                 progress_set_message(&pb, filename);
 
-                let track_result = &album_result.tracks[i];
+                let track_result = &album_result.tracks()[i];
                 let album_info = AacAlbumInfo {
-                    album_gain_db: album_result.album_gain_db,
-                    album_peak: album_result.album_peak,
+                    album_gain_db: album_result.album_gain_db(),
+                    album_peak: album_result.album_peak(),
                 };
                 let result = process_apply_replaygain_with_album(
                     file,
@@ -1485,10 +1485,10 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 let output = JsonOutput {
                     files: Some(json_results),
                     album: Some(JsonAlbumResult {
-                        loudness_db: album_result.album_loudness_db,
-                        gain_db: album_result.album_gain_db,
+                        loudness_db: album_result.album_loudness_db(),
+                        gain_db: album_result.album_gain_db(),
                         gain_steps: modified_gain_steps,
-                        peak: album_result.album_peak,
+                        peak: album_result.album_peak(),
                     }),
                     summary: Some(create_json_summary(
                         files.len(),
@@ -1594,9 +1594,9 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
         let headroom = if is_aac {
             aac::analyze_aac_gains(file)
                 .ok()
-                .map(|a| (255u8.saturating_sub(a.max_gain)) as i32)
+                .map(|a| (255u8.saturating_sub(a.max_gain())) as i32)
         } else {
-            analyze(file).ok().map(|info| info.headroom_steps)
+            analyze(file).ok().map(|info| info.headroom_steps())
         };
 
         if let Some(headroom_steps) = headroom {
@@ -1665,24 +1665,24 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
     // Apply gain
     let apply_result = if is_aac {
         if opts.stored_tag_mode == StoredTagMode::Skip {
-            apply_with_temp_file(file, |f| aac::apply_aac_gain(f, actual_steps), opts)
+            apply_with_temp_file(file, |f| Ok(aac::apply_aac_gain(f, actual_steps)?), opts)
         } else {
             apply_with_temp_file(
                 file,
-                |f| aac::apply_aac_gain_with_undo(f, actual_steps),
+                |f| Ok(aac::apply_aac_gain_with_undo(f, actual_steps)?),
                 opts,
             )
         }
     } else if opts.stored_tag_mode == StoredTagMode::Skip {
         if opts.wrap_gain {
-            apply_with_temp_file(file, |f| apply_gain_wrap(f, actual_steps), opts)
+            apply_with_temp_file(file, |f| Ok(apply_gain_wrap(f, actual_steps)?), opts)
         } else {
-            apply_with_temp_file(file, |f| apply_gain(f, actual_steps), opts)
+            apply_with_temp_file(file, |f| Ok(apply_gain(f, actual_steps)?), opts)
         }
     } else if opts.wrap_gain {
-        apply_with_temp_file(file, |f| apply_gain_with_undo_wrap(f, actual_steps), opts)
+        apply_with_temp_file(file, |f| Ok(apply_gain_with_undo_wrap(f, actual_steps)?), opts)
     } else {
-        apply_with_temp_file(file, |f| apply_gain_with_undo(f, actual_steps), opts)
+        apply_with_temp_file(file, |f| Ok(apply_gain_with_undo(f, actual_steps)?), opts)
     };
 
     match apply_result {
@@ -1820,17 +1820,17 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
         match replaygain::analyze_track_with_index(file, opts.track_index) {
             Ok(rg_result) => {
                 // Get max amplitude info
-                let (max_amp, max_gain, min_gain) = find_max_amplitude_detailed(file)
-                    .map(|r| (r.max_amplitude, r.max_global_gain, r.min_global_gain))
+                let (max_amp, max_gain, min_gain) = find_max_amplitude(file)
+                    .map(|r| (r.max_amplitude(), r.max_global_gain(), r.min_global_gain()))
                     .unwrap_or((1.0, 255, 0));
 
                 // Calculate gain with modifier (mp3gain compatible: -d modifies suggested gain)
-                let gain_db = rg_result.gain_db + opts.gain_modifier_db;
+                let gain_db = rg_result.gain_db() + opts.gain_modifier_db;
                 let gain_steps = db_to_steps(gain_db);
 
                 // Max Amplitude scaled to 32768 (mp3gain format for beets)
                 // beets divides by 32768, so we output peak * 32768
-                let max_amplitude_scaled = rg_result.peak * 32768.0;
+                let max_amplitude_scaled = rg_result.peak() * 32768.0;
 
                 // mp3gain compatible TSV: File, MP3 gain, dB gain, Max Amplitude, Max global_gain, Min global_gain
                 println!(
@@ -1840,10 +1840,10 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
 
                 return Ok(JsonFileResult {
                     file: file.display().to_string(),
-                    loudness_db: Some(rg_result.loudness_db),
+                    loudness_db: Some(rg_result.loudness_db()),
                     gain_applied_db: Some(gain_db),
                     gain_applied_steps: Some(gain_steps),
-                    peak: Some(rg_result.peak),
+                    peak: Some(rg_result.peak()),
                     max_amplitude: Some(max_amp),
                     max_gain: Some(max_gain),
                     min_gain: Some(min_gain),
@@ -1912,28 +1912,28 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
                         println!(
                             "{}\t{}\t{}\t{}\t{:.1}\t{}\t{:.1}",
                             filename,
-                            info.frame_count,
-                            info.min_gain,
-                            info.max_gain,
-                            info.avg_gain,
-                            info.headroom_steps,
-                            info.headroom_db
+                            info.frame_count(),
+                            info.min_gain(),
+                            info.max_gain(),
+                            info.avg_gain(),
+                            info.headroom_steps(),
+                            info.headroom_db()
                         );
                     } else {
                         println!("{}", filename.cyan().bold());
                         println!(
                             "  Format:      {} Layer III, {}",
-                            info.mpeg_version, info.channel_mode
+                            info.mpeg_version(), info.channel_mode()
                         );
-                        println!("  Frames:      {}", info.frame_count);
+                        println!("  Frames:      {}", info.frame_count());
                         println!(
                             "  Gain range:  {} - {} (avg: {:.1})",
-                            info.min_gain, info.max_gain, info.avg_gain
+                            info.min_gain(), info.max_gain(), info.avg_gain()
                         );
                         println!(
                             "  Headroom:    {} steps ({:+.1} dB)",
-                            info.headroom_steps.to_string().green(),
-                            info.headroom_db
+                            info.headroom_steps().to_string().green(),
+                            info.headroom_db()
                         );
                         println!();
                     }
@@ -1943,11 +1943,11 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
                     println!(
                         "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
                         filename,
-                        info.headroom_steps,
-                        info.headroom_db,
+                        info.headroom_steps(),
+                        info.headroom_db(),
                         1.0,
-                        info.max_gain,
-                        info.min_gain
+                        info.max_gain(),
+                        info.min_gain()
                     );
                 }
                 OutputFormat::Json => {}
@@ -1955,14 +1955,14 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
-                mpeg_version: Some(info.mpeg_version),
-                channel_mode: Some(info.channel_mode),
-                frames: Some(info.frame_count),
-                min_gain: Some(info.min_gain),
-                max_gain: Some(info.max_gain),
-                avg_gain: Some(info.avg_gain),
-                headroom_steps: Some(info.headroom_steps),
-                headroom_db: Some(info.headroom_db),
+                mpeg_version: Some(info.mpeg_version().to_string()),
+                channel_mode: Some(info.channel_mode().to_string()),
+                frames: Some(info.frame_count()),
+                min_gain: Some(info.min_gain()),
+                max_gain: Some(info.max_gain()),
+                avg_gain: Some(info.avg_gain()),
+                headroom_steps: Some(info.headroom_steps()),
+                headroom_db: Some(info.headroom_db()),
                 ..Default::default()
             })
         }
@@ -2091,15 +2091,15 @@ fn process_track_gain(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 println!(
                     "      Loudness: {:.1} dB, Gain: {:+.1} dB ({} steps{}), Peak: {:.4}",
-                    result.loudness_db,
-                    result.gain_db,
+                    result.loudness_db(),
+                    result.gain_db(),
                     base_steps,
                     if opts.gain_modifier != 0 {
                         format!(" + {} = {}", opts.gain_modifier, modified_steps)
                     } else {
                         String::new()
                     },
-                    result.peak
+                    result.peak()
                 );
             }
 
@@ -2110,8 +2110,8 @@ fn process_track_gain(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> 
                 return Ok(JsonFileResult {
                     file: file.display().to_string(),
                     status: Some("skipped".to_string()),
-                    loudness_db: Some(result.loudness_db),
-                    peak: Some(result.peak),
+                    loudness_db: Some(result.loudness_db()),
+                    peak: Some(result.peak()),
                     gain_applied_steps: Some(0),
                     gain_applied_db: Some(0.0),
                     ..Default::default()
@@ -2158,12 +2158,12 @@ fn process_apply_replaygain_with_album(
 
     if steps > 0 && !opts.wrap_gain {
         // Check if applying this gain would cause clipping
-        let gain_linear = 10.0_f64.powf(result.gain_db / 20.0);
-        let new_peak = result.peak * gain_linear;
+        let gain_linear = 10.0_f64.powf(result.gain_db() / 20.0);
+        let new_peak = result.peak() * gain_linear;
         if new_peak > 1.0 {
             if opts.prevent_clipping {
                 // Calculate the maximum safe gain
-                let max_safe_db = -20.0 * result.peak.log10();
+                let max_safe_db = -20.0 * result.peak().log10();
                 let max_safe_steps = db_to_steps(max_safe_db);
                 actual_steps = max_safe_steps.max(0);
 
@@ -2175,12 +2175,12 @@ fn process_apply_replaygain_with_album(
                         filename,
                         steps,
                         actual_steps,
-                        result.peak
+                        result.peak()
                     );
                 }
                 warning_msg = Some(format!(
                     "gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
-                    steps, actual_steps, result.peak
+                    steps, actual_steps, result.peak()
                 ));
             } else if !opts.ignore_clipping && !opts.quiet {
                 if opts.output_format == OutputFormat::Text {
@@ -2205,7 +2205,7 @@ fn process_apply_replaygain_with_album(
     // Dry run: don't actually modify
     if opts.dry_run {
         if opts.output_format == OutputFormat::Text && !opts.quiet {
-            let format_info = match result.file_type {
+            let format_info = match result.file_type() {
                 AudioFileType::Aac => "",
                 AudioFileType::Mp3 => "",
                 _ => "",
@@ -2222,8 +2222,8 @@ fn process_apply_replaygain_with_album(
         return Ok(JsonFileResult {
             file: file.display().to_string(),
             status: Some("dry_run".to_string()),
-            loudness_db: Some(result.loudness_db),
-            peak: Some(result.peak),
+            loudness_db: Some(result.loudness_db()),
+            peak: Some(result.peak()),
             gain_applied_steps: Some(actual_steps),
             gain_applied_db: Some(steps_to_db(actual_steps)),
             warning: warning_msg,
@@ -2233,7 +2233,7 @@ fn process_apply_replaygain_with_album(
     }
 
     // Handle AAC/M4A files differently - only write ReplayGain tags
-    if result.file_type == AudioFileType::Aac {
+    if result.file_type() == AudioFileType::Aac {
         return process_apply_replaygain_aac_with_album(
             file,
             actual_steps,
@@ -2247,9 +2247,9 @@ fn process_apply_replaygain_with_album(
 
     // MP3: Apply gain to audio frames
     let apply_result = if opts.wrap_gain {
-        apply_with_temp_file(file, |f| apply_gain_with_undo_wrap(f, actual_steps), opts)
+        apply_with_temp_file(file, |f| Ok(apply_gain_with_undo_wrap(f, actual_steps)?), opts)
     } else {
-        apply_with_temp_file(file, |f| apply_gain_with_undo(f, actual_steps), opts)
+        apply_with_temp_file(file, |f| Ok(apply_gain_with_undo(f, actual_steps)?), opts)
     };
 
     match apply_result {
@@ -2273,8 +2273,8 @@ fn process_apply_replaygain_with_album(
                 file: file.display().to_string(),
                 status: Some("success".to_string()),
                 frames: Some(frames),
-                loudness_db: Some(result.loudness_db),
-                peak: Some(result.peak),
+                loudness_db: Some(result.loudness_db()),
+                peak: Some(result.peak()),
                 gain_applied_steps: Some(actual_steps),
                 gain_applied_db: Some(steps_to_db(actual_steps)),
                 warning: warning_msg,
@@ -2342,8 +2342,8 @@ fn process_apply_replaygain_aac_with_album(
     };
 
     // Create ReplayGain tags for AAC
-    let mut tags = mp4meta::ReplayGainTags::new();
-    tags.set_track(result.gain_db, result.peak);
+    let mut tags = mp4meta::ReplayGainTags::default();
+    tags.set_track(result.gain_db(), result.peak());
 
     // Add album tags if available
     if let Some(album) = album_info {
@@ -2372,7 +2372,7 @@ fn process_apply_replaygain_aac_with_album(
                         filename,
                         gain_modified,
                         tag_type,
-                        result.gain_db
+                        result.gain_db()
                     );
                 } else {
                     println!(
@@ -2380,7 +2380,7 @@ fn process_apply_replaygain_aac_with_album(
                         "v".green(),
                         filename,
                         tag_type,
-                        result.gain_db
+                        result.gain_db()
                     );
                 }
             }
@@ -2388,8 +2388,8 @@ fn process_apply_replaygain_aac_with_album(
             Ok(JsonFileResult {
                 file: file.display().to_string(),
                 status: Some("success".to_string()),
-                loudness_db: Some(result.loudness_db),
-                peak: Some(result.peak),
+                loudness_db: Some(result.loudness_db()),
+                peak: Some(result.peak()),
                 gain_applied_steps: Some(actual_steps),
                 gain_applied_db: Some(steps_to_db(actual_steps)),
                 warning: warning_msg,

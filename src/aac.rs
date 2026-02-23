@@ -8,7 +8,7 @@
 //! elements (CPE), and LFE elements. Unsupported element types (CCE, PCE)
 //! cause the individual sample to be skipped with a warning count increment.
 
-use anyhow::{Context, Result};
+use crate::error::{self, Error, Result};
 use std::path::Path;
 
 use crate::aac_codebooks;
@@ -23,12 +23,25 @@ use crate::mp4meta;
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AacGainLocation {
-    pub sample_index: u32,
-    pub file_offset: u64,
-    pub sample_byte_offset: u32,
-    pub bit_offset: u8,
-    pub channel: u8,
-    pub original_gain: u8,
+    sample_index: u32,
+    file_offset: u64,
+    sample_byte_offset: u32,
+    bit_offset: u8,
+    channel: u8,
+    original_gain: u8,
+}
+
+impl AacGainLocation {
+    pub(crate) fn new(sample_index: u32, file_offset: u64, sample_byte_offset: u32, bit_offset: u8, channel: u8, original_gain: u8) -> Self {
+        Self { sample_index, file_offset, sample_byte_offset, bit_offset, channel, original_gain }
+    }
+
+    pub fn sample_index(&self) -> u32 { self.sample_index }
+    pub fn file_offset(&self) -> u64 { self.file_offset }
+    pub fn sample_byte_offset(&self) -> u32 { self.sample_byte_offset }
+    pub fn bit_offset(&self) -> u8 { self.bit_offset }
+    pub fn channel(&self) -> u8 { self.channel }
+    pub fn original_gain(&self) -> u8 { self.original_gain }
 }
 
 /// Result of AAC gain analysis
@@ -36,13 +49,27 @@ pub struct AacGainLocation {
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AacAnalysis {
-    pub gain_locations: Vec<AacGainLocation>,
-    pub sample_count: u32,
-    pub channel_count: u8,
-    pub min_gain: u8,
-    pub max_gain: u8,
-    pub sample_rate: u32,
-    pub parse_warnings: u32,
+    gain_locations: Vec<AacGainLocation>,
+    sample_count: u32,
+    channel_count: u8,
+    min_gain: u8,
+    max_gain: u8,
+    sample_rate: u32,
+    parse_warnings: u32,
+}
+
+impl AacAnalysis {
+    pub(crate) fn new(gain_locations: Vec<AacGainLocation>, sample_count: u32, channel_count: u8, min_gain: u8, max_gain: u8, sample_rate: u32, parse_warnings: u32) -> Self {
+        Self { gain_locations, sample_count, channel_count, min_gain, max_gain, sample_rate, parse_warnings }
+    }
+
+    pub fn gain_locations(&self) -> &[AacGainLocation] { &self.gain_locations }
+    pub fn sample_count(&self) -> u32 { self.sample_count }
+    pub fn channel_count(&self) -> u8 { self.channel_count }
+    pub fn min_gain(&self) -> u8 { self.min_gain }
+    pub fn max_gain(&self) -> u8 { self.max_gain }
+    pub fn sample_rate(&self) -> u32 { self.sample_rate }
+    pub fn parse_warnings(&self) -> u32 { self.parse_warnings }
 }
 
 // =============================================================================
@@ -109,7 +136,7 @@ impl<'a> BitReader<'a> {
         let mut val = 0u32;
         for _ in 0..n {
             if self.byte_pos >= self.data.len() {
-                anyhow::bail!("unexpected end of bitstream");
+                return Err(Error::AacParse { message: "unexpected end of bitstream".into() });
             }
             val = (val << 1) | ((self.data[self.byte_pos] >> (7 - self.bit_pos)) & 1) as u32;
             self.bit_pos += 1;
@@ -131,7 +158,7 @@ impl<'a> BitReader<'a> {
         self.bit_pos = (total_bits % 8) as u8;
         if self.byte_pos > self.data.len() || (self.byte_pos == self.data.len() && self.bit_pos > 0)
         {
-            anyhow::bail!("unexpected end of bitstream");
+            return Err(Error::AacParse { message: "unexpected end of bitstream".into() });
         }
         Ok(())
     }
@@ -166,7 +193,7 @@ fn decode_huffman(reader: &mut BitReader, lens: &[u8], codes: &[u32]) -> Result<
         }
     }
 
-    anyhow::bail!("invalid Huffman code");
+    Err(Error::AacParse { message: "invalid Huffman code".into() })
 }
 
 // =============================================================================
@@ -205,7 +232,7 @@ fn read_u64_be(data: &[u8], offset: usize) -> u64 {
 /// Returns (sample_entries, stsd_pos).
 fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
     let (moov_pos, moov_header) =
-        mp4meta::find_box(data, mp4meta::MOOV).ok_or_else(|| anyhow::anyhow!("no moov box"))?;
+        mp4meta::find_box(data, mp4meta::MOOV).ok_or(Error::NoMoovBox)?;
     let moov_start = moov_pos + moov_header.header_size as usize;
     let moov_size = moov_header.content_size() as usize;
 
@@ -213,7 +240,7 @@ fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
 
     // Parse STSZ
     let (stsz_pos, stsz_header) = mp4meta::find_box_in_container(data, stbl_start, stbl_size, STSZ)
-        .ok_or_else(|| anyhow::anyhow!("no stsz box"))?;
+        .ok_or_else(|| Error::AacParse { message: "no stsz box".into() })?;
     let stsz_content = stsz_pos + stsz_header.header_size as usize;
     let _version = read_u32_be(data, stsz_content);
     let default_size = read_u32_be(data, stsz_content + 4);
@@ -231,7 +258,7 @@ fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
 
     // Parse STSC (sample-to-chunk)
     let (stsc_pos, stsc_header) = mp4meta::find_box_in_container(data, stbl_start, stbl_size, STSC)
-        .ok_or_else(|| anyhow::anyhow!("no stsc box"))?;
+        .ok_or_else(|| Error::AacParse { message: "no stsc box".into() })?;
     let stsc_content = stsc_pos + stsc_header.header_size as usize;
     let stsc_count = read_u32_be(data, stsc_content + 4) as usize;
     let stsc_entries_start = stsc_content + 8;
@@ -315,7 +342,7 @@ fn find_audio_stbl(
         search_pos = trak_pos + trak_header.size as usize;
     }
 
-    anyhow::bail!("no AAC audio track found");
+    return Err(Error::NoAacTrack);
 }
 
 /// Navigate trak -> mdia -> minf -> stbl -> stsd and check for mp4a codec.
@@ -388,7 +415,7 @@ fn parse_chunk_offsets(data: &[u8], stbl_start: usize, stbl_size: usize) -> Resu
         return Ok(offsets);
     }
 
-    anyhow::bail!("no stco or co64 box found");
+    Err(Error::AacParse { message: "no stco or co64 box found".into() })
 }
 
 // =============================================================================
@@ -409,7 +436,7 @@ fn parse_audio_config(data: &[u8], stsd_pos: usize) -> Result<u32> {
     let entries_start = stsd_header_end + 8; // after version/flags + entry_count
 
     if entries_start + 4 > data.len() {
-        anyhow::bail!("stsd too short");
+        return Err(Error::AacParse { message: "stsd too short".into() });
     }
     let mp4a_size = read_u32_be(data, entries_start) as usize;
     let mp4a_start = entries_start;
@@ -421,7 +448,7 @@ fn parse_audio_config(data: &[u8], stsd_pos: usize) -> Result<u32> {
     //   compression_id(2) + packet_size(2) = 32
     let sr_offset = mp4a_start + 32;
     if sr_offset + 4 > data.len() {
-        anyhow::bail!("mp4a too short for sample rate");
+        return Err(Error::AacParse { message: "mp4a too short for sample rate".into() });
     }
     let sr_fixed = read_u32_be(data, sr_offset);
     let sample_rate = sr_fixed >> 16; // 16.16 fixed point -> integer part
@@ -569,7 +596,7 @@ fn parse_ics_info(reader: &mut BitReader) -> Result<IcsInfo> {
         let max_sfb = reader.read_bits(6)? as usize;
         let predictor_data_present = reader.read_bit()?;
         if predictor_data_present {
-            anyhow::bail!("predictor data not supported for AAC-LC");
+            return Err(Error::AacParse { message: "predictor data not supported for AAC-LC".into() });
         }
         let mut group_len = [0usize; MAX_WINDOWS];
         group_len[0] = 1;
@@ -603,7 +630,7 @@ fn parse_section_data(reader: &mut BitReader, info: &IcsInfo) -> Result<SectionD
         while k < info.max_sfb {
             let cb = reader.read_bits(4)? as u8;
             if cb == 12 {
-                anyhow::bail!("reserved codebook 12");
+                return Err(Error::AacParse { message: "reserved codebook 12".into() });
             }
 
             let mut sect_len = 0usize;
@@ -744,7 +771,7 @@ fn read_escape(reader: &mut BitReader) -> Result<()> {
     while reader.read_bit()? {
         n += 1;
         if n >= 9 {
-            anyhow::bail!("escape sequence too long");
+            return Err(Error::AacParse { message: "escape sequence too long".into() });
         }
     }
     // Skip the N+4 data bits
@@ -813,14 +840,14 @@ fn parse_ics(
     let (byte_off, bit_off) = reader.position();
     let global_gain = reader.read_bits(8)? as u8;
 
-    let gain_loc = AacGainLocation {
-        sample_index: 0, // filled in by caller
-        file_offset: 0,  // filled in by caller
-        sample_byte_offset: byte_off as u32,
-        bit_offset: bit_off,
+    let gain_loc = AacGainLocation::new(
+        0, // sample_index: filled in by caller
+        0, // file_offset: filled in by caller
+        byte_off as u32,
+        bit_off,
         channel,
-        original_gain: global_gain,
-    };
+        global_gain,
+    );
 
     let info = if common_window {
         shared_info.unwrap().clone()
@@ -838,11 +865,9 @@ fn parse_ics(
 
     // Validate max_sfb against available bands
     if info.max_sfb >= bands.len() {
-        anyhow::bail!(
-            "max_sfb {} exceeds available bands {}",
-            info.max_sfb,
-            bands.len() - 1
-        );
+        return Err(Error::AacParse {
+            message: format!("max_sfb {} exceeds available bands {}", info.max_sfb, bands.len() - 1),
+        });
     }
 
     let section = parse_section_data(reader, &info)?;
@@ -851,7 +876,7 @@ fn parse_ics(
     // pulse_data
     if reader.read_bit()? {
         if !info.long_win {
-            anyhow::bail!("pulse data in short window");
+            return Err(Error::AacParse { message: "pulse data in short window".into() });
         }
         parse_pulse_data(reader)?;
     }
@@ -863,7 +888,7 @@ fn parse_ics(
 
     // gain_control_data (SSR only, should be 0 for AAC-LC)
     if reader.read_bit()? {
-        anyhow::bail!("gain control data not supported for AAC-LC");
+        return Err(Error::AacParse { message: "gain control data not supported for AAC-LC".into() });
     }
 
     parse_spectral_data(reader, &info, &section, bands)?;
@@ -1007,14 +1032,14 @@ fn parse_raw_data_block(reader: &mut BitReader, sample_rate: u32) -> Result<Vec<
             ID_CCE => {
                 // Coupling channel — complex interactions with other channels,
                 // skip this sample to avoid unintended effects
-                anyhow::bail!("CCE element found - sample skipped");
+                return Err(Error::AacParse { message: "CCE element found - sample skipped".into() });
             }
             ID_DSE => skip_dse(reader)?,
             ID_PCE => skip_pce(reader)?,
             ID_FIL => skip_fil(reader)?,
             ID_END => break,
             _ => {
-                anyhow::bail!("unsupported element type {}", id);
+                return Err(Error::AacParse { message: format!("unsupported element type {}", id) });
             }
         }
     }
@@ -1111,12 +1136,12 @@ pub fn apply_aac_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
     let analysis = analyze_aac_gains(file_path)?;
 
     let mut data = std::fs::read(file_path)
-        .with_context(|| format!("Failed to read: {}", file_path.display()))?;
+        .map_err(|e| error::io_read(file_path, e))?;
 
     let modified = apply_aac_gain_to_data(&mut data, &analysis, gain_steps);
 
     std::fs::write(file_path, &data)
-        .with_context(|| format!("Failed to write: {}", file_path.display()))?;
+        .map_err(|e| error::io_write(file_path, e))?;
 
     Ok(modified)
 }
@@ -1138,26 +1163,28 @@ pub fn apply_aac_gain_with_undo(file_path: &Path, gain_steps: i32) -> Result<usi
     let existing_undo = mp4meta::read_undo_tags(file_path)?;
 
     // Parse existing undo value and accumulate
-    let existing_gain = parse_undo_gain(existing_undo.undo.as_deref());
+    let existing_gain = parse_undo_gain(existing_undo.undo());
     let new_undo_gain = existing_gain + gain_steps;
 
     // Apply gain to bitstream (in-place, no container change)
     let mut data = std::fs::read(file_path)
-        .with_context(|| format!("Failed to read: {}", file_path.display()))?;
+        .map_err(|e| error::io_read(file_path, e))?;
 
     let modified = apply_aac_gain_to_data(&mut data, &analysis, gain_steps);
 
     std::fs::write(file_path, &data)
-        .with_context(|| format!("Failed to write: {}", file_path.display()))?;
+        .map_err(|e| error::io_write(file_path, e))?;
 
     // Write undo tags (may change container structure)
-    let mut undo_tags = mp4meta::UndoTags::new();
-    undo_tags.undo = Some(format!("{:+04},{:+04},N", new_undo_gain, new_undo_gain));
-    undo_tags.minmax = if existing_undo.minmax.is_some() {
-        existing_undo.minmax
+    let minmax = if existing_undo.minmax().is_some() {
+        existing_undo.minmax().map(|s| s.to_string())
     } else {
         Some(format!("{},{}", analysis.min_gain, analysis.max_gain))
     };
+    let undo_tags = mp4meta::UndoTags::new(
+        Some(format!("{:+04},{:+04},N", new_undo_gain, new_undo_gain)),
+        minmax,
+    );
     mp4meta::write_undo_tags(file_path, &undo_tags)?;
 
     Ok(modified)
@@ -1173,9 +1200,8 @@ pub fn apply_aac_gain_with_undo(file_path: &Path, gain_steps: i32) -> Result<usi
 pub fn undo_aac_gain(file_path: &Path) -> Result<usize> {
     let undo_tags = mp4meta::read_undo_tags(file_path)?;
     let undo_str = undo_tags
-        .undo
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("No undo tag found - cannot undo"))?;
+        .undo()
+        .ok_or(Error::NoUndoTag)?;
 
     let undo_gain = parse_undo_gain(Some(undo_str));
 
@@ -1186,12 +1212,12 @@ pub fn undo_aac_gain(file_path: &Path) -> Result<usize> {
     // Apply inverse gain
     let analysis = analyze_aac_gains(file_path)?;
     let mut data = std::fs::read(file_path)
-        .with_context(|| format!("Failed to read: {}", file_path.display()))?;
+        .map_err(|e| error::io_read(file_path, e))?;
 
     let modified = apply_aac_gain_to_data(&mut data, &analysis, -undo_gain);
 
     std::fs::write(file_path, &data)
-        .with_context(|| format!("Failed to write: {}", file_path.display()))?;
+        .map_err(|e| error::io_write(file_path, e))?;
 
     // Remove undo tags
     mp4meta::delete_undo_tags(file_path)?;
@@ -1214,10 +1240,10 @@ fn parse_undo_gain(undo_str: Option<&str>) -> i32 {
 /// Analyze AAC/M4A file and locate all global_gain fields (read-only)
 pub fn analyze_aac_gains(file_path: &Path) -> Result<AacAnalysis> {
     let data = std::fs::read(file_path)
-        .with_context(|| format!("Failed to read: {}", file_path.display()))?;
+        .map_err(|e| error::io_read(file_path, e))?;
 
     if !mp4meta::is_mp4_file(file_path) {
-        anyhow::bail!("not an MP4 file: {}", file_path.display());
+        return Err(Error::NotMp4File { path: file_path.to_path_buf() });
     }
 
     let (sample_table, stsd_pos) = build_sample_table(&data)?;
@@ -1260,21 +1286,18 @@ pub fn analyze_aac_gains(file_path: &Path) -> Result<AacAnalysis> {
     }
 
     if all_locations.is_empty() && parse_warnings > 0 {
-        anyhow::bail!(
-            "failed to parse any AAC samples ({} errors)",
-            parse_warnings
-        );
+        return Err(Error::AacParseFailure { warnings: parse_warnings });
     }
 
-    Ok(AacAnalysis {
-        gain_locations: all_locations,
+    Ok(AacAnalysis::new(
+        all_locations,
         sample_count,
-        channel_count: max_channel + 1,
+        max_channel + 1,
         min_gain,
         max_gain,
         sample_rate,
         parse_warnings,
-    })
+    ))
 }
 
 // =============================================================================
