@@ -84,6 +84,13 @@ pub enum Error {
 
     #[error("Failed to parse any AAC samples ({warnings} errors)")]
     AacParseFailure { warnings: u32 },
+
+    // ID3v2
+    #[error("ID3v2 tag error: {message}")]
+    Id3v2Error { message: String },
+
+    #[error("No ID3v2 undo tag found - cannot undo")]
+    NoId3v2UndoTag,
 }
 
 impl Error {

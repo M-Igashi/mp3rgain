@@ -7,6 +7,7 @@ use anyhow::Result;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use mp3rgain::aac;
+use mp3rgain::id3v2;
 use mp3rgain::mp4meta;
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{
@@ -51,7 +52,6 @@ enum StoredTagMode {
     Delete,   // -s d: Delete stored tag info
     Skip,     // -s s: Skip (ignore) stored tag info
     Recalc,   // -s r: Force recalculation
-    UseId3v2, // -s i: Use ID3v2 tags (not fully implemented, show warning)
     UseApev2, // -s a: Use APEv2 tags (default)
 }
 
@@ -72,6 +72,7 @@ struct Options {
     // Mode options
     undo: bool,                     // -u
     stored_tag_mode: StoredTagMode, // -s <mode>
+    use_id3v2: bool,                // -s i: use ID3v2 tags instead of APEv2
     track_gain: bool,               // -r (apply track gain)
     album_gain: bool,               // -a (apply album gain)
     skip_album: bool,               // -e: skip album analysis
@@ -253,11 +254,7 @@ fn parse_args(args: &[String]) -> Result<Options> {
                         "s" => opts.stored_tag_mode = StoredTagMode::Skip,
                         "r" => opts.stored_tag_mode = StoredTagMode::Recalc,
                         "i" => {
-                            opts.stored_tag_mode = StoredTagMode::UseId3v2;
-                            eprintln!(
-                                "{}: -s i (ID3v2 tags) not fully supported, using APEv2",
-                                "warning".yellow().bold()
-                            );
+                            opts.use_id3v2 = true;
                         }
                         "a" => opts.stored_tag_mode = StoredTagMode::UseApev2,
                         other => {
@@ -743,6 +740,8 @@ fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
             let delete_result = if mp4meta::is_aac_file(file) {
                 // AAC: delete both ReplayGain and undo freeform tags
                 mp4meta::delete_replaygain_tags(file).and_then(|()| mp4meta::delete_undo_tags(file))
+            } else if opts.use_id3v2 {
+                id3v2::delete_id3v2_replaygain(file)
             } else {
                 delete_ape_tag(file)
             };
@@ -878,6 +877,86 @@ fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
                         status: Some("success".to_string()),
                         ..Default::default()
                     });
+                }
+            }
+        } else if opts.use_id3v2 {
+            // MP3 with -s i: read ID3v2 TXXX frames
+            match id3v2::read_id3v2_replaygain(file) {
+                Ok(rg) => {
+                    let undo = rg.undo.as_deref();
+                    let minmax = rg.minmax.as_deref();
+                    let track_gain = rg.track_gain.as_deref();
+                    let track_peak = rg.track_peak.as_deref();
+                    let album_gain = rg.album_gain.as_deref();
+                    let album_peak = rg.album_peak.as_deref();
+
+                    let has_any = undo.is_some()
+                        || minmax.is_some()
+                        || track_gain.is_some()
+                        || track_peak.is_some()
+                        || album_gain.is_some()
+                        || album_peak.is_some();
+
+                    match opts.output_format {
+                        OutputFormat::Text => {
+                            println!("{}", filename.cyan().bold());
+                            if let Some(v) = undo {
+                                println!("  MP3GAIN_UNDO:         {}", v);
+                            }
+                            if let Some(v) = minmax {
+                                println!("  MP3GAIN_MINMAX:       {}", v);
+                            }
+                            if let Some(v) = track_gain {
+                                println!("  REPLAYGAIN_TRACK_GAIN: {}", v);
+                            }
+                            if let Some(v) = track_peak {
+                                println!("  REPLAYGAIN_TRACK_PEAK: {}", v);
+                            }
+                            if let Some(v) = album_gain {
+                                println!("  REPLAYGAIN_ALBUM_GAIN: {}", v);
+                            }
+                            if let Some(v) = album_peak {
+                                println!("  REPLAYGAIN_ALBUM_PEAK: {}", v);
+                            }
+                            if !has_any {
+                                println!("  (no ID3v2 ReplayGain tags found)");
+                            }
+                            println!();
+                        }
+                        OutputFormat::Tsv => {
+                            println!(
+                                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                                filename,
+                                undo.unwrap_or("-"),
+                                minmax.unwrap_or("-"),
+                                track_gain.unwrap_or("-"),
+                                track_peak.unwrap_or("-"),
+                                album_gain.unwrap_or("-"),
+                                album_peak.unwrap_or("-")
+                            );
+                        }
+                        OutputFormat::Json => {
+                            json_results.push(JsonFileResult {
+                                file: file.display().to_string(),
+                                status: Some(
+                                    if has_any { "success" } else { "no_tag" }.to_string(),
+                                ),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    if opts.output_format != OutputFormat::Json {
+                        eprintln!("{} - {}", filename.red(), e);
+                    } else {
+                        json_results.push(JsonFileResult {
+                            file: file.display().to_string(),
+                            status: Some("error".to_string()),
+                            error: Some(e.to_string()),
+                            ..Default::default()
+                        });
+                    }
                 }
             }
         } else {
@@ -1678,6 +1757,35 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
                 opts,
             )
         }
+    } else if opts.use_id3v2 {
+        // MP3 with -s i: apply gain without APE undo, write undo to ID3v2
+        let skip_undo = opts.stored_tag_mode == StoredTagMode::Skip;
+        let result = apply_with_temp_file(
+            file,
+            |f| {
+                Ok(GainOptions::new(actual_steps)
+                    .wrap(opts.wrap_gain)
+                    .undo(false)
+                    .apply(f)?)
+            },
+            opts,
+        );
+        if !skip_undo && result.is_ok() {
+            let analysis = analyze(file)?;
+            let existing_rg = id3v2::read_id3v2_replaygain(file).unwrap_or_default();
+            let (existing_left, _) =
+                mp3rgain::ape::parse_undo_values(existing_rg.undo.as_deref());
+            let new_undo = existing_left + actual_steps;
+            id3v2::write_id3v2_undo(
+                file,
+                new_undo,
+                new_undo,
+                opts.wrap_gain,
+                analysis.min_gain(),
+                analysis.max_gain(),
+            )?;
+        }
+        result
     } else {
         let use_undo = opts.stored_tag_mode != StoredTagMode::Skip;
         apply_with_temp_file(
@@ -1778,11 +1886,40 @@ fn process_apply_channel(
         });
     }
 
-    match GainOptions::new(steps)
-        .channel(channel)
-        .undo(true)
-        .apply(file)
-    {
+    let apply_result = if opts.use_id3v2 {
+        // Apply gain without APE undo, then write undo to ID3v2
+        let result = GainOptions::new(steps)
+            .channel(channel)
+            .undo(false)
+            .apply(file);
+        if result.is_ok() {
+            let analysis = analyze(file)?;
+            let existing_rg = id3v2::read_id3v2_replaygain(file).unwrap_or_default();
+            let (existing_left, existing_right) =
+                mp3rgain::ape::parse_undo_values(existing_rg.undo.as_deref());
+            let (new_left, new_right) = match channel {
+                Channel::Left => (existing_left + steps, existing_right),
+                Channel::Right => (existing_left, existing_right + steps),
+                _ => unreachable!(),
+            };
+            id3v2::write_id3v2_undo(
+                file,
+                new_left,
+                new_right,
+                false,
+                analysis.min_gain(),
+                analysis.max_gain(),
+            )?;
+        }
+        result
+    } else {
+        GainOptions::new(steps)
+            .channel(channel)
+            .undo(true)
+            .apply(file)
+    };
+
+    match apply_result {
         Ok(frames) => {
             // Restore timestamp if needed
             if let Some(mtime) = original_mtime {
@@ -2023,6 +2160,8 @@ fn process_undo(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> {
     let is_aac = mp4meta::is_aac_file(file);
     let undo_result = if is_aac {
         aac::undo_aac_gain(file)
+    } else if opts.use_id3v2 {
+        id3v2::undo_gain_id3v2(file)
     } else {
         undo_gain(file)
     };
@@ -2256,12 +2395,13 @@ fn process_apply_replaygain_with_album(
     }
 
     // MP3: Apply gain to audio frames
+    let use_id3v2_undo = opts.use_id3v2;
     let apply_result = apply_with_temp_file(
         file,
         |f| {
             Ok(GainOptions::new(actual_steps)
                 .wrap(opts.wrap_gain)
-                .undo(true)
+                .undo(!use_id3v2_undo) // APE undo only when not using ID3v2
                 .apply(f)?)
         },
         opts,
@@ -2269,6 +2409,36 @@ fn process_apply_replaygain_with_album(
 
     match apply_result {
         Ok(frames) => {
+            // Write ID3v2 tags if -s i mode
+            if opts.use_id3v2 {
+                let analysis = analyze(file)?;
+                let existing_rg = id3v2::read_id3v2_replaygain(file).unwrap_or_default();
+                let (existing_left, _) =
+                    mp3rgain::ape::parse_undo_values(existing_rg.undo.as_deref());
+                let new_undo = existing_left + actual_steps;
+
+                // Write undo data
+                id3v2::write_id3v2_undo(
+                    file,
+                    new_undo,
+                    new_undo,
+                    opts.wrap_gain,
+                    analysis.min_gain(),
+                    analysis.max_gain(),
+                )?;
+
+                // Write ReplayGain metadata tags
+                let rg = mp3rgain::Id3v2ReplayGain {
+                    track_gain: Some(format!("{:+.2} dB", result.gain_db())),
+                    track_peak: Some(format!("{:.6}", result.peak())),
+                    album_gain: album_info
+                        .map(|a| format!("{:+.2} dB", a.album_gain_db)),
+                    album_peak: album_info.map(|a| format!("{:.6}", a.album_peak)),
+                    ..Default::default()
+                };
+                id3v2::write_id3v2_replaygain(file, &rg)?;
+            }
+
             // Restore timestamp if needed
             if let Some(mtime) = original_mtime {
                 restore_timestamp(file, mtime);

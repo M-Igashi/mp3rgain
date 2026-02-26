@@ -54,7 +54,7 @@ All options from the original mp3gain are fully implemented in mp3rgain:
 | `-s d` | Delete stored tag info | Yes | Yes | Yes |
 | `-s s` | Skip stored tag info | Yes | Yes | Yes |
 | `-s r` | Force recalculation | Yes | Yes | Yes |
-| `-s i` | Use ID3v2 tags | Partial | Yes | Yes |
+| `-s i` | Use ID3v2 tags | Yes | Yes | Yes |
 | `-s a` | Use APEv2 tags | Yes | Yes | Yes |
 | `-v` | Show version | Yes | Yes | Yes |
 | `-h` | Show help | Yes | Yes | Yes |
@@ -90,7 +90,7 @@ All options from the original mp3gain are fully implemented in mp3rgain:
 | Tag Type | mp3rgain | aacgain | mp3gain |
 |----------|----------|---------|---------|
 | APEv2 (default for MP3) | Yes | Yes | Yes |
-| ID3v2 | Planned | Yes | Yes |
+| ID3v2 | Yes (`-s i`) | Yes | Yes |
 | iTunes freeform (M4A) | Yes | Yes | - |
 
 ### Undo Information
@@ -266,7 +266,7 @@ See [Security Documentation](security.md) for detailed CVE analysis.
 
 ### mp3rgain
 - AAC: Writes tags only, does not modify audio data (bitstream modification planned for v2.0.0)
-- ID3v2 tag storage not yet implemented (uses APEv2)
+- ID3v2 tag storage supported via `-s i` option
 
 ### aacgain
 - **Security**: Bundles vulnerable mpglibDBL (CVE-2021-34085 unpatched)
