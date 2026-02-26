@@ -1773,8 +1773,7 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
         if !skip_undo && result.is_ok() {
             let analysis = analyze(file)?;
             let existing_rg = id3v2::read_id3v2_replaygain(file).unwrap_or_default();
-            let (existing_left, _) =
-                mp3rgain::ape::parse_undo_values(existing_rg.undo.as_deref());
+            let (existing_left, _) = mp3rgain::ape::parse_undo_values(existing_rg.undo.as_deref());
             let new_undo = existing_left + actual_steps;
             id3v2::write_id3v2_undo(
                 file,
@@ -2431,8 +2430,7 @@ fn process_apply_replaygain_with_album(
                 let rg = mp3rgain::Id3v2ReplayGain {
                     track_gain: Some(format!("{:+.2} dB", result.gain_db())),
                     track_peak: Some(format!("{:.6}", result.peak())),
-                    album_gain: album_info
-                        .map(|a| format!("{:+.2} dB", a.album_gain_db)),
+                    album_gain: album_info.map(|a| format!("{:+.2} dB", a.album_gain_db)),
                     album_peak: album_info.map(|a| format!("{:.6}", a.album_peak)),
                     ..Default::default()
                 };
