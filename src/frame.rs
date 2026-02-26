@@ -29,7 +29,11 @@ impl FrameHeader {
     }
 
     pub fn side_info_offset(&self) -> usize {
-        if self.has_crc { 6 } else { 4 }
+        if self.has_crc {
+            6
+        } else {
+            4
+        }
     }
 }
 

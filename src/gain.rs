@@ -241,11 +241,7 @@ fn apply_gain_simple(file_path: &Path, gain_steps: i32, mode: GainMode) -> Resul
 }
 
 /// Apply gain with undo tag support (unified for both saturating and wrapping)
-fn apply_gain_with_undo_impl(
-    file_path: &Path,
-    gain_steps: i32,
-    mode: GainMode,
-) -> Result<usize> {
+fn apply_gain_with_undo_impl(file_path: &Path, gain_steps: i32, mode: GainMode) -> Result<usize> {
     let analysis = analyze(file_path)?;
 
     let mut tag = read_ape_tag_from_file(file_path)?.unwrap_or_else(ApeTag::new);
@@ -267,11 +263,7 @@ fn apply_gain_with_undo_impl(
 }
 
 /// Apply gain to a specific channel (no undo)
-fn apply_gain_channel_impl(
-    file_path: &Path,
-    channel: Channel,
-    gain_steps: i32,
-) -> Result<usize> {
+fn apply_gain_channel_impl(file_path: &Path, channel: Channel, gain_steps: i32) -> Result<usize> {
     let analysis = analyze(file_path)?;
     if analysis.channel_mode() == ChannelMode::Mono {
         return Err(Error::ChannelGainOnMono);

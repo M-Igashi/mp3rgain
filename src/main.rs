@@ -10,10 +10,10 @@ use mp3rgain::aac;
 use mp3rgain::mp4meta;
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{
-    analyze, db_to_steps, delete_ape_tag, find_max_amplitude, read_ape_tag_from_file,
-    steps_to_db, undo_gain, Channel, GainOptions, GAIN_STEP_DB, TAG_MP3GAIN_MINMAX,
-    TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
-    TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
+    analyze, db_to_steps, delete_ape_tag, find_max_amplitude, read_ape_tag_from_file, steps_to_db,
+    undo_gain, Channel, GainOptions, GAIN_STEP_DB, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
+    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN,
+    TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use serde::Serialize;
 use std::env;
@@ -1778,7 +1778,11 @@ fn process_apply_channel(
         });
     }
 
-    match GainOptions::new(steps).channel(channel).undo(true).apply(file) {
+    match GainOptions::new(steps)
+        .channel(channel)
+        .undo(true)
+        .apply(file)
+    {
         Ok(frames) => {
             // Restore timestamp if needed
             if let Some(mtime) = original_mtime {

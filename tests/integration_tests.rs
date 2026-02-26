@@ -3,9 +3,7 @@
 //! These tests use real MP3 files in tests/fixtures/ to verify
 //! the correctness of gain application, undo, and channel-specific operations.
 
-use mp3rgain::{
-    analyze, apply_gain, undo_gain, Channel, ChannelMode, GainOptions, MpegVersion,
-};
+use mp3rgain::{analyze, apply_gain, undo_gain, Channel, ChannelMode, GainOptions, MpegVersion};
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
