@@ -453,10 +453,16 @@ fn collect_audio_files(dir: &Path, result: &mut Vec<PathBuf>) -> Result<()> {
         if path.is_dir() {
             collect_audio_files(&path, result)?;
         } else if let Some(ext) = path.extension() {
-            if ext.eq_ignore_ascii_case("mp3")
-                || ext.eq_ignore_ascii_case("m4a")
-                || ext.eq_ignore_ascii_case("aac")
-                || ext.eq_ignore_ascii_case("mp4")
+            // Skip macOS resource fork files (._*)
+            let is_resource_fork = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("._"));
+            if !is_resource_fork
+                && (ext.eq_ignore_ascii_case("mp3")
+                    || ext.eq_ignore_ascii_case("m4a")
+                    || ext.eq_ignore_ascii_case("aac")
+                    || ext.eq_ignore_ascii_case("mp4"))
             {
                 result.push(path);
             }
@@ -1288,14 +1294,88 @@ fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
         progress_set_message(&pb, filename);
 
         let result = process_info(file, opts)?;
-        if opts.output_format == OutputFormat::Json {
-            json_results.push(result);
-        }
+        json_results.push(result);
 
         progress_inc(&pb);
     }
 
     progress_finish(pb);
+
+    // Print album summary (mp3gain compatible)
+    let do_album_summary = !files.is_empty() && replaygain::is_available();
+    if do_album_summary
+        && (opts.output_format == OutputFormat::Tsv || opts.output_format == OutputFormat::Text)
+    {
+        // Collect valid results for album calculation
+        let valid_results: Vec<&JsonFileResult> = json_results
+            .iter()
+            .filter(|r| r.gain_applied_db.is_some())
+            .collect();
+
+        if !valid_results.is_empty() {
+            // Perform album-level ReplayGain analysis
+            let mp3_files: Vec<&PathBuf> =
+                files.iter().filter(|f| !mp4meta::is_mp4_file(f)).collect();
+            let aac_files: Vec<&PathBuf> =
+                files.iter().filter(|f| mp4meta::is_mp4_file(f)).collect();
+
+            // Analyze album gain
+            let album_result = if !mp3_files.is_empty() {
+                let paths: Vec<&Path> = mp3_files.iter().map(|p| p.as_path()).collect();
+                replaygain::analyze_album(&paths).ok()
+            } else if !aac_files.is_empty() {
+                let paths: Vec<&Path> = aac_files.iter().map(|p| p.as_path()).collect();
+                replaygain::analyze_album(&paths).ok()
+            } else {
+                None
+            };
+
+            if let Some(album_rg) = album_result {
+                let album_gain_db = album_rg.album_gain_db() + opts.gain_modifier_db;
+                let album_gain_steps = db_to_steps(album_gain_db);
+                let album_max_amp = album_rg.album_peak() * 32768.0;
+
+                // Find max/min global gain across all files
+                let album_max_gain = valid_results
+                    .iter()
+                    .filter_map(|r| r.max_gain)
+                    .max()
+                    .unwrap_or(255);
+                let album_min_gain = valid_results
+                    .iter()
+                    .filter_map(|r| r.min_gain)
+                    .min()
+                    .unwrap_or(0);
+
+                match opts.output_format {
+                    OutputFormat::Tsv => {
+                        println!(
+                            "\"Album\"\t{}\t{:.6}\t{:.6}\t{}\t{}",
+                            album_gain_steps,
+                            album_gain_db,
+                            album_max_amp,
+                            album_max_gain,
+                            album_min_gain
+                        );
+                    }
+                    OutputFormat::Text => {
+                        if !opts.quiet {
+                            println!();
+                            println!(
+                                "Recommended \"Album\" dB change for all files: {:.6}",
+                                album_gain_db
+                            );
+                            println!(
+                                "Recommended \"Album\" mp3 gain change for all files: {}",
+                                album_gain_steps
+                            );
+                        }
+                    }
+                    OutputFormat::Json => {}
+                }
+            }
+        }
+    }
 
     if opts.output_format == OutputFormat::Json {
         let output = JsonOutput {
@@ -1857,6 +1937,20 @@ fn process_apply_channel(
         _ => unreachable!(),
     };
 
+    // Warn if file is Joint Stereo (mp3gain only supports Stereo for -l)
+    if let Ok(info) = analyze(file) {
+        if info.channel_mode() == mp3rgain::ChannelMode::JointStereo
+            && opts.output_format == OutputFormat::Text
+            && !opts.quiet
+        {
+            eprintln!(
+                "  {} {} - Joint Stereo file: channel-specific gain may not work as expected",
+                "!".yellow(),
+                filename
+            );
+        }
+    }
+
     // Save original timestamp if needed
     let original_mtime = if opts.preserve_timestamp && !opts.dry_run {
         std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
@@ -1962,8 +2056,11 @@ fn process_apply_channel(
 fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
     let filename = get_filename(file);
 
-    // For TSV output (mp3gain compatible), perform ReplayGain analysis
-    if opts.output_format == OutputFormat::Tsv && replaygain::is_available() {
+    // Perform ReplayGain analysis for TSV/Text output (mp3gain compatible)
+    let do_replaygain = (opts.output_format == OutputFormat::Tsv
+        || opts.output_format == OutputFormat::Text)
+        && replaygain::is_available();
+    if do_replaygain {
         match replaygain::analyze_track_with_index(file, opts.track_index) {
             Ok(rg_result) => {
                 // Get max amplitude info
@@ -1979,11 +2076,29 @@ fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
                 // beets divides by 32768, so we output peak * 32768
                 let max_amplitude_scaled = rg_result.peak() * 32768.0;
 
-                // mp3gain compatible TSV: File, MP3 gain, dB gain, Max Amplitude, Max global_gain, Min global_gain
-                println!(
-                    "{}\t{}\t{:.6}\t{:.6}\t{}\t{}",
-                    filename, gain_steps, gain_db, max_amplitude_scaled, max_gain, min_gain
-                );
+                match opts.output_format {
+                    OutputFormat::Tsv => {
+                        println!(
+                            "{}\t{}\t{:.6}\t{:.6}\t{}\t{}",
+                            filename, gain_steps, gain_db, max_amplitude_scaled, max_gain, min_gain
+                        );
+                    }
+                    OutputFormat::Text => {
+                        if !opts.quiet {
+                            println!("{}", filename.cyan().bold());
+                            println!("  Recommended \"Track\" dB change: {:.6}", gain_db);
+                            println!("  Recommended \"Track\" mp3 gain change: {}", gain_steps);
+                            println!(
+                                "  Max PCM sample at current gain: {:.6}",
+                                max_amplitude_scaled
+                            );
+                            println!("  Max mp3 global gain field: {}", max_gain);
+                            println!("  Min mp3 global gain field: {}", min_gain);
+                            println!();
+                        }
+                    }
+                    OutputFormat::Json => {}
+                }
 
                 return Ok(JsonFileResult {
                     file: file.display().to_string(),
