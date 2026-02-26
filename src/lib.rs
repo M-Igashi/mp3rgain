@@ -68,6 +68,7 @@ pub mod ape;
 pub mod error;
 mod frame;
 pub mod gain;
+pub mod id3v2;
 pub mod mp4meta;
 pub mod replaygain;
 
@@ -84,4 +85,8 @@ pub use error::{Error, Result};
 pub use gain::{
     apply_gain, apply_gain_db, db_to_steps, steps_to_db, undo_gain, Channel, GainOptions,
     GAIN_STEP_DB, MAX_GAIN, MIN_GAIN,
+};
+pub use id3v2::{
+    delete_id3v2_replaygain, read_id3v2_replaygain, undo_gain_id3v2, write_id3v2_replaygain,
+    write_id3v2_undo, Id3v2ReplayGain,
 };

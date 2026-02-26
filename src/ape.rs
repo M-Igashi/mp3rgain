@@ -333,7 +333,7 @@ pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
 }
 
 /// Parse MP3GAIN_UNDO tag value into (left_gain, right_gain)
-pub(crate) fn parse_undo_values(undo_str: Option<&str>) -> (i32, i32) {
+pub fn parse_undo_values(undo_str: Option<&str>) -> (i32, i32) {
     match undo_str {
         Some(v) => {
             let parts: Vec<&str> = v.split(',').collect();
