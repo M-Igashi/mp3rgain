@@ -141,9 +141,9 @@ All core functionality complete:
 - [ ] Remove old `find_max_amplitude` tuple return
 - [ ] Make struct fields private with accessor methods
 
-**Phase 6: API polish (Issue #68 — lower priority)**
-- [ ] Consolidate `apply_gain*` function variants into builder/options pattern
-- [ ] Organize flat `lib.rs` exports into submodules
+**Phase 6: API polish (Issue #68)**
+- [x] Consolidate `apply_gain*` function variants into `GainOptions` builder pattern
+- [x] Organize flat `lib.rs` exports into submodules (`analysis`, `gain`, `ape`, `frame`)
 
 ### Future Enhancements
 

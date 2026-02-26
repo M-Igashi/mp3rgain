@@ -4,8 +4,7 @@
 //! the correctness of gain application, undo, and channel-specific operations.
 
 use mp3rgain::{
-    analyze, apply_gain, apply_gain_channel, apply_gain_with_undo, undo_gain, Channel, ChannelMode,
-    MpegVersion,
+    analyze, apply_gain, undo_gain, Channel, ChannelMode, GainOptions, MpegVersion,
 };
 use std::fs;
 use std::path::Path;
@@ -210,7 +209,7 @@ fn test_apply_and_undo_gain() {
     let original = analyze(&path).unwrap();
 
     // Apply gain with undo support
-    let result = apply_gain_with_undo(&path, 3);
+    let result = GainOptions::new(3).undo(true).apply(&path);
     assert!(
         result.is_ok(),
         "Failed to apply gain with undo: {:?}",
@@ -258,8 +257,8 @@ fn test_cumulative_gain_undo() {
     let original = analyze(&path).unwrap();
 
     // Apply gain twice
-    apply_gain_with_undo(&path, 2).unwrap();
-    apply_gain_with_undo(&path, 3).unwrap();
+    GainOptions::new(2).undo(true).apply(&path).unwrap();
+    GainOptions::new(3).undo(true).apply(&path).unwrap();
 
     let after = analyze(&path).unwrap();
     assert!(
@@ -286,7 +285,7 @@ fn test_apply_gain_left_channel() {
     let path = copy_test_file("test_stereo.mp3");
 
     // Apply gain to left channel only
-    let result = apply_gain_channel(&path, Channel::Left, 2);
+    let result = GainOptions::new(2).channel(Channel::Left).apply(&path);
     assert!(
         result.is_ok(),
         "Failed to apply left channel gain: {:?}",
@@ -302,7 +301,7 @@ fn test_apply_gain_right_channel() {
     let path = copy_test_file("test_stereo.mp3");
 
     // Apply gain to right channel only
-    let result = apply_gain_channel(&path, Channel::Right, -2);
+    let result = GainOptions::new(-2).channel(Channel::Right).apply(&path);
     assert!(
         result.is_ok(),
         "Failed to apply right channel gain: {:?}",
@@ -318,7 +317,7 @@ fn test_channel_gain_fails_on_mono() {
     let path = copy_test_file("test_mono.mp3");
 
     // Should fail on mono file
-    let result = apply_gain_channel(&path, Channel::Left, 2);
+    let result = GainOptions::new(2).channel(Channel::Left).apply(&path);
     assert!(result.is_err(), "Should fail on mono file");
 
     let error_msg = result.err().unwrap().to_string();
@@ -332,7 +331,7 @@ fn test_channel_zero_gain() {
     let path = copy_test_file("test_stereo.mp3");
 
     // Zero gain should do nothing
-    let result = apply_gain_channel(&path, Channel::Left, 0);
+    let result = GainOptions::new(0).channel(Channel::Left).apply(&path);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 0, "Zero gain should modify 0 frames");
 
