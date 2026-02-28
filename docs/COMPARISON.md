@@ -9,7 +9,7 @@ This document provides a detailed comparison between mp3rgain and the original a
 | **Language** | Rust | C | C |
 | **Last Update** | Active (2026) | 2022 | 2018 |
 | **License** | MIT | LGPL | LGPL |
-| **Version** | 1.6.0 | 1.8.2 | 1.6.2 |
+| **Version** | 2.0.0 | 1.8.2 | 1.6.2 |
 | **Repository** | [M-Igashi/mp3rgain](https://github.com/M-Igashi/mp3rgain) | [dgilman/aacgain](https://github.com/dgilman/aacgain) | SourceForge |
 
 ## Feature Comparison
@@ -21,12 +21,12 @@ This document provides a detailed comparison between mp3rgain and the original a
 | MP3 (MPEG1 Layer III) | Yes | Yes | Yes |
 | MP3 (MPEG2 Layer III) | Yes | Yes | Yes |
 | MP3 (MPEG2.5 Layer III) | Yes | Yes | Yes |
-| AAC (M4A/MP4) | Yes (tags only) | Yes (lossless) | No |
+| AAC (M4A/MP4) | Yes (lossless) | Yes (lossless) | No |
 | AAC (raw .aac) | No | No | No |
-| HE-AAC/SBR | No | No | No |
+| HE-AAC/SBR | Yes (base layer) | No | No |
 | Apple Lossless | No | No | No |
 
-Note: For AAC files, mp3rgain writes ReplayGain metadata tags. aacgain can modify the audio data losslessly using iTunes-style Sound Check. As of v1.6.0, mp3rgain detects and rejects ALAC and DRM-protected M4P files with clear error messages.
+Note: As of v2.0.0, mp3rgain supports lossless AAC bitstream gain adjustment (modifying `global_gain` fields), matching aacgain's approach. Both tools also store undo information in iTunes freeform metadata tags. mp3rgain additionally supports HE-AAC/SBR files (base layer gain adjustment). ALAC and DRM-protected M4P files are detected and rejected with clear error messages.
 
 ### Command-Line Options
 
@@ -95,9 +95,11 @@ All options from the original mp3gain are fully implemented in mp3rgain:
 
 ### Undo Information
 
-Both tools store undo data in APEv2 tags:
+For MP3 files, both tools store undo data in APEv2 tags:
 - `MP3GAIN_MINMAX` - Original min/max gain values
 - `MP3GAIN_UNDO` - Gain adjustment applied
+
+For AAC/M4A files, both mp3rgain and aacgain store undo data in iTunes freeform metadata tags.
 
 ## Platform Support
 
@@ -189,14 +191,15 @@ mp3rgain -o json *.mp3
 
 For MP3 files, commands are identical.
 
-For AAC/M4A files, mp3rgain writes ReplayGain tags that compatible players will read:
+For AAC/M4A files, mp3rgain v2.0.0+ provides the same lossless bitstream gain adjustment as aacgain:
 ```bash
-# Analyze and tag M4A files
+# Analyze and apply gain to M4A files
 mp3rgain -r *.m4a
 mp3rgain -a *.m4a
-```
 
-Note: aacgain can modify AAC audio data losslessly (similar to MP3 global_gain), while mp3rgain only writes metadata tags for AAC files. Most modern players support ReplayGain tags.
+# Undo AAC gain changes
+mp3rgain -u *.m4a
+```
 
 ## Binary Size Comparison
 
@@ -265,7 +268,6 @@ See [Security Documentation](security.md) for detailed CVE analysis.
 ## Known Limitations
 
 ### mp3rgain
-- AAC: Writes tags only, does not modify audio data (bitstream modification planned for v2.0.0)
 - ID3v2 tag storage supported via `-s i` option
 
 ### aacgain

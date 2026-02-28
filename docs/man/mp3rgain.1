@@ -1,27 +1,27 @@
 .\" mp3rgain - Lossless MP3 volume adjustment
 .\" Copyright (c) 2025 M-Igashi
 .\" Licensed under MIT License
-.TH MP3RGAIN 1 "January 2025" "mp3rgain 1.4.0" "User Commands"
+.TH MP3RGAIN 1 "February 2026" "mp3rgain 2.0.0" "User Commands"
 .SH NAME
-mp3rgain \- lossless MP3 volume adjustment (modern mp3gain replacement)
+mp3rgain \- lossless MP3/AAC volume adjustment (modern mp3gain replacement)
 .SH SYNOPSIS
 .B mp3rgain
 [\fIOPTIONS\fR] \fIFILE\fR...
 .SH DESCRIPTION
 .B mp3rgain
-adjusts MP3 volume without re-encoding by modifying the
+adjusts MP3 and AAC volume without re-encoding by modifying the
 .I global_gain
-field in each frame's side information.
+field in each frame.
 This preserves audio quality while achieving permanent volume changes.
 .PP
-All changes are lossless and reversible. Gain changes are stored in APEv2 tags
-to enable undo functionality.
+All changes are lossless and reversible. For MP3, undo data is stored in APEv2 tags.
+For AAC/M4A, undo data is stored in iTunes freeform metadata tags.
 .PP
 .B mp3rgain
 is a modern, memory-safe replacement for the classic
 .BR mp3gain (1)
 tool, written in Rust. It provides full command-line compatibility with the
-original mp3gain while adding support for ReplayGain analysis and AAC/M4A files.
+original mp3gain while adding lossless AAC/M4A gain adjustment and ReplayGain analysis.
 .SH OPTIONS
 .SS "Gain Options"
 .TP
@@ -213,7 +213,7 @@ ReplayGain scanner or ffmpeg's loudnorm filter), which use a \-23 LUFS reference
 Full support for reading, analyzing, and modifying gain.
 .TP
 .B AAC/M4A/MP4
-ReplayGain analysis supported. Gain is stored in metadata tags.
+Full lossless bitstream gain adjustment and undo. HE-AAC/SBR supported (base layer).
 .SH FILES
 Gain changes and undo information are stored in APEv2 tags appended to MP3 files:
 .TP
