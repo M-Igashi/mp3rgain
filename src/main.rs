@@ -454,11 +454,11 @@ fn collect_audio_files(dir: &Path, result: &mut Vec<PathBuf>) -> Result<()> {
             collect_audio_files(&path, result)?;
         } else if let Some(ext) = path.extension() {
             // Skip macOS resource fork files (._*)
-            let is_resource_fork = path
+            if path
                 .file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("._"));
-            if is_resource_fork {
+                .is_some_and(|n| n.starts_with("._"))
+            {
                 continue;
             }
             if ext.eq_ignore_ascii_case("mp3")
@@ -1311,16 +1311,10 @@ fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
 
     if show_album_summary {
         // Prefer MP3 files for album analysis; fall back to MP4/AAC
-        let mp3_files: Vec<&Path> = files
+        let (aac_files, mp3_files): (Vec<&Path>, Vec<&Path>) = files
             .iter()
-            .filter(|f| !mp4meta::is_mp4_file(f))
             .map(|f| f.as_path())
-            .collect();
-        let aac_files: Vec<&Path> = files
-            .iter()
-            .filter(|f| mp4meta::is_mp4_file(f))
-            .map(|f| f.as_path())
-            .collect();
+            .partition(|f| mp4meta::is_mp4_file(f));
         let album_paths = if !mp3_files.is_empty() {
             &mp3_files
         } else {
