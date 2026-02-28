@@ -2,7 +2,12 @@ name: Test Debian Package
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   push:
+    tags-ignore:
+      - "v*"
     paths:
       - "packages/debian/**"
       - ".github/workflows/test-deb.yml"
@@ -15,6 +20,7 @@ permissions: {}
 
 jobs:
   test-deb:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     name: Test on ${{ matrix.distro }}
     runs-on: ubuntu-latest
     strategy:
