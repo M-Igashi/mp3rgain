@@ -50,7 +50,9 @@ Compatibility tests run automatically on every pull request in GitHub Actions. S
 
 ## Test Cases
 
-### Phase 1: Gain Step Operations (`-g`)
+### MP3 Tests
+
+#### Phase 1: Gain Step Operations (`-g`)
 
 | Test | Command | Status |
 |------|---------|--------|
@@ -62,18 +64,30 @@ Compatibility tests run automatically on every pull request in GitHub Actions. S
 | Negative gain -3 | `-g -3` | Verified |
 | Negative gain -5 | `-g -5` | Verified |
 
-### Phase 2: Clipping Prevention (`-k`)
+#### Phase 2: Clipping Prevention (`-k`)
 
 | Test | Command | Status |
 |------|---------|--------|
 | Clip prevention high gain | `-k -g 10` | Verified |
 
-### Phase 3: Channel-Specific Gain (`-l`)
+#### Phase 3: Channel-Specific Gain (`-l`)
 
 | Test | Command | Status |
 |------|---------|--------|
 | Left channel +2 | `-l 0 2` | Verified |
 | Right channel -2 | `-l 1 -2` | Verified |
+
+### AAC/M4A Tests (v2.0.0+)
+
+| Test | Command | Status |
+|------|---------|--------|
+| AAC gain application | `-g 2 file.m4a` | Verified |
+| AAC negative gain | `-g -3 file.m4a` | Verified |
+| AAC clipping prevention | `-k -g 10 file.m4a` | Verified |
+| AAC undo | `-u file.m4a` (after gain application) | Verified |
+| AAC ReplayGain tags | `-r file.m4a` | Verified |
+| AAC tag deletion | `-s d file.m4a` | Verified |
+| HE-AAC/SBR gain | `-g 2 he-aac.m4a` | Verified |
 
 ## MP3 Format Coverage
 
@@ -140,6 +154,7 @@ Binary compatibility ensures:
 | ReplayGain algorithm | Uses LAME routines | Uses Symphonia + native Rust |
 | ReplayGain results | May differ slightly | May differ slightly |
 | Gain adjustment (`-g`) | Identical | Identical |
+| AAC gain adjustment | N/A (mp3gain has no AAC support) | Lossless bitstream modification (v2.0.0+) |
 
 **Notes**:
 - As of v1.2.1, the `-d` and `-o` options are fully mp3gain-compatible. The `-d` option modifies the suggested ReplayGain value, and `-o` without an argument outputs TSV format.
@@ -201,6 +216,7 @@ Tests are run automatically in CI on every pull request. See the latest workflow
 
 | Date | mp3gain Version | mp3rgain Version | Result |
 |------|-----------------|------------------|--------|
+| 2026-02 | 1.6.2 | 2.0.0 | All tests passed (MP3 + AAC) |
 | 2026-01 | 1.6.2 | 1.4.0 | All tests passed |
 | 2026-01 | 1.6.2 | 1.3.0 | All tests passed |
 
@@ -221,6 +237,14 @@ Yes. Both tools use the same APEv2 tag format for storing undo information and R
 ### Q: Is mp3rgain compatible with mp3gain on all platforms?
 
 Yes. mp3rgain produces identical output on macOS, Linux, and Windows.
+
+### Q: Does mp3rgain support AAC/M4A gain adjustment?
+
+Yes. As of v2.0.0, mp3rgain supports lossless AAC bitstream gain adjustment by modifying `global_gain` fields in the AAC frames, similar to aacgain. Undo information is stored in iTunes freeform metadata tags. HE-AAC/SBR files are also supported (base layer gain adjustment).
+
+### Q: Can I undo AAC gain changes?
+
+Yes. Use `mp3rgain -u file.m4a` to restore original gain values from the stored undo information.
 
 ## Third-Party Integration
 

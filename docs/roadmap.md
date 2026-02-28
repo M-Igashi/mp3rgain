@@ -1,18 +1,18 @@
 # mp3rgain Roadmap
 
-## Current Status: v1.7.0 (Production Ready)
+## Current Status: v2.0.0 (Production Ready)
 
 All core functionality complete:
 - [x] MP3 frame parsing (MPEG 1/2/2.5 Layer III)
-- [x] Global gain modification
+- [x] Global gain modification (MP3 and AAC)
 - [x] ID3v2 tag preservation
 - [x] VBR/CBR support
 - [x] CLI interface (apply/info/undo commands)
 - [x] ReplayGain analysis (track and album gain)
-- [x] AAC/M4A support (ReplayGain tags)
+- [x] AAC/M4A lossless bitstream gain adjustment and undo
 - [x] Full mp3gain command-line compatibility
 - [x] Cross-platform support (Windows, macOS, Linux)
-- [x] Stabilized library API with `#[non_exhaustive]`, `Display`, `serde` support
+- [x] Stabilized library API with custom error types, builder pattern, submodules
 
 ## Completed Milestones
 
@@ -110,40 +110,19 @@ All core functionality complete:
 - [x] AUR package for mp3rgui (GUI application)
 - [x] Automated AUR package publishing in release workflow
 
-## Upcoming Goals
-
 ### v2.0.0 - AAC Lossless Gain & Breaking API Changes (Issues #64, #68)
 
-**Phase 1: AAC gain application — bitstream write (Issue #64 Phase 2)**
-- [ ] Bit-level write operation handling byte-boundary crossing
-- [ ] Locate sample file offsets via `stco`/`co64` + `stsz` atoms
-- [ ] In-place `global_gain` modification within MP4 container
-- [ ] Saturating clamp to 0-255 range, skip `global_gain == 0` (silence)
+- [x] AAC lossless bitstream gain adjustment (`global_gain` modification)
+- [x] AAC undo support (iTunes freeform metadata tags)
+- [x] HE-AAC/SBR support (base layer gain adjustment)
+- [x] Multi-track detection and warnings
+- [x] Custom error types (`thiserror`) replacing `anyhow::Result`
+- [x] `MpegVersion` / `ChannelMode` changed from `String` to enum
+- [x] Private struct fields with accessor methods
+- [x] `GainOptions` builder pattern
+- [x] Submodule organization (`analysis`, `gain`, `ape`, `frame`)
 
-**Phase 2: AAC undo support (Issue #64 Phase 3)**
-- [ ] Save original `global_gain` values in iTunes freeform metadata tags
-- [ ] Implement undo/restore from saved values
-
-**Phase 3: AAC essential validation (Issue #64 Phase 4 — part 1)**
-- [ ] Classify parse errors as fatal vs. non-fatal (skip SBR extension data etc.)
-- [ ] Apply `global_gain` to HE-AAC base layer where possible
-- [ ] Detect and reject DRM-protected files / non-AAC tracks
-- [ ] Report when adjustment rounds to 0 steps
-- [ ] Validate against aacgain output on test files
-
-**Phase 4: AAC extended support (Issue #64 Phase 4 — part 2)**
-- [ ] Multi-channel layout support beyond stereo (5.1 etc.)
-- [ ] Multiple audio track handling (default to first, warn)
-
-**Phase 5: Breaking API changes (Issue #68)**
-- [ ] Replace `anyhow::Result` with custom error types (`thiserror`)
-- [ ] Change `Mp3Analysis.mpeg_version` / `channel_mode` from `String` to enum
-- [ ] Remove old `find_max_amplitude` tuple return
-- [ ] Make struct fields private with accessor methods
-
-**Phase 6: API polish (Issue #68)**
-- [x] Consolidate `apply_gain*` function variants into `GainOptions` builder pattern
-- [x] Organize flat `lib.rs` exports into submodules (`analysis`, `gain`, `ape`, `frame`)
+## Upcoming Goals
 
 ### Future Enhancements
 

@@ -5,14 +5,14 @@
 [![crates.io](https://img.shields.io/crates/v/mp3rgain.svg)](https://crates.io/crates/mp3rgain)
 [![mp3gain compatible](https://img.shields.io/badge/mp3gain-compatible-brightgreen.svg)](docs/compatibility-report.md)
 
-**Lossless MP3 volume adjustment - a modern mp3gain replacement written in Rust**
+**Lossless MP3/AAC volume adjustment - a modern mp3gain replacement written in Rust**
 
-mp3rgain adjusts MP3 volume without re-encoding by modifying the `global_gain` field in each frame's side information. This preserves audio quality while achieving permanent volume changes.
+mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global_gain` field in each frame. This preserves audio quality while achieving permanent volume changes.
 
 ## Features
 
-- **Lossless & Reversible**: No re-encoding, all changes can be undone
-- **ReplayGain**: Track and album gain analysis with AAC/M4A support
+- **Lossless & Reversible**: No re-encoding, all changes can be undone (MP3 and AAC)
+- **ReplayGain**: Track and album gain analysis for MP3 and AAC/M4A
 - **Zero dependencies**: Single static binary (no ffmpeg, no mp3gain)
 - **Cross-platform**: macOS, Linux, Windows (x86_64 and ARM64)
 - **mp3gain compatible**: Drop-in replacement with identical CLI
