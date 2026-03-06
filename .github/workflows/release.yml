@@ -205,66 +205,6 @@ jobs:
           draft: false
           generate_release_notes: true
 
-  # Update Scoop bucket
-  update-scoop:
-    name: Update Scoop Bucket
-    needs: release
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - name: Checkout scoop-bucket
-        uses: actions/checkout@v6
-        with:
-          repository: M-Igashi/scoop-bucket
-          token: ${{ secrets.SCOOP_BUCKET_TOKEN }}
-          path: scoop-bucket
-
-      - name: Update manifest
-        run: |
-          cd scoop-bucket
-          cat > mp3rgain.json << 'EOF'
-          {
-              "version": "${{ needs.release.outputs.version }}",
-              "description": "Lossless MP3 volume adjustment - a modern mp3gain replacement written in Rust",
-              "homepage": "https://github.com/M-Igashi/mp3rgain",
-              "license": "MIT",
-              "architecture": {
-                  "64bit": {
-                      "url": "https://github.com/M-Igashi/mp3rgain/releases/download/${{ github.ref_name }}/mp3rgain-${{ github.ref_name }}-windows-x86_64.zip",
-                      "hash": "${{ needs.release.outputs.windows_x64_sha256 }}"
-                  },
-                  "arm64": {
-                      "url": "https://github.com/M-Igashi/mp3rgain/releases/download/${{ github.ref_name }}/mp3rgain-${{ github.ref_name }}-windows-arm64.zip",
-                      "hash": "${{ needs.release.outputs.windows_arm64_sha256 }}"
-                  }
-              },
-              "bin": "mp3rgain.exe",
-              "checkver": "github",
-              "autoupdate": {
-                  "architecture": {
-                      "64bit": {
-                          "url": "https://github.com/M-Igashi/mp3rgain/releases/download/v$version/mp3rgain-v$version-windows-x86_64.zip"
-                      },
-                      "arm64": {
-                          "url": "https://github.com/M-Igashi/mp3rgain/releases/download/v$version/mp3rgain-v$version-windows-arm64.zip"
-                      }
-                  },
-                  "hash": {
-                      "url": "$url.sha256"
-                  }
-              }
-          }
-          EOF
-
-      - name: Commit and push
-        run: |
-          cd scoop-bucket
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add mp3rgain.json
-          git commit -m "Update mp3rgain to ${{ needs.release.outputs.version }}" || exit 0
-          git push
-
   # Update Homebrew tap
   update-homebrew:
     name: Update Homebrew Tap

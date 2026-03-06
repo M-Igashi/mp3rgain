@@ -26,17 +26,10 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 brew install M-Igashi/tap/mp3rgain
 ```
 
-### Windows (recommended)
+### Windows
 
 ```powershell
 winget install M-Igashi.mp3rgain
-```
-
-### Windows (alternative)
-
-```powershell
-scoop bucket add mp3rgain https://github.com/M-Igashi/scoop-bucket
-scoop install mp3rgain
 ```
 
 ### Linux
