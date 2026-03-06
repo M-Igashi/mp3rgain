@@ -57,7 +57,13 @@ jobs:
 
       - name: Install ffmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg
+        shell: pwsh
+        run: |
+          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath C:\ffmpeg
+          $ffmpegBin = Get-ChildItem -Path C:\ffmpeg -Recurse -Directory -Filter "bin" | Select-Object -First 1
+          echo "$($ffmpegBin.FullName)" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Generate test fixtures
         shell: bash
