@@ -4,7 +4,7 @@ mp3rgain is a complete rewrite of the original mp3gain in Rust, providing memory
 
 ## Security Vulnerabilities in the Original mp3gain
 
-The original mp3gain has **19 known CVEs** spanning two decades. The upstream project is **effectively abandoned** — the last source release was v1.6.2 (circa 2009–2010), and the SourceForge bug tracker shows no developer response to security reports. Distributions maintain their own patches to keep the tool usable.
+The original mp3gain has **19 known CVEs** spanning two decades. The last source release was v1.6.2 (circa 2009–2010). In November 2025, the maintainer applied Debian/openSUSE security patches to the upstream master branch, fixing the APE tag vulnerabilities. However, no new release has been created, the Windows binaries remain unpatched, and the mpglibDBL-related CVEs are only mitigated when building from source with system libmpg123.
 
 ### Root Causes
 
@@ -40,25 +40,32 @@ The vulnerabilities fall into two categories:
 
 #### APE Tag Vulnerabilities
 
-| CVE | Year | CVSS | Type | Affected Function |
-|-----|------|------|------|-------------------|
-| CVE-2017-12911 | 2017 | — | Stack memory corruption | `apetag.c` |
-| CVE-2018-10777 | 2018 | — | Buffer overflow | `apetag.c` (`WriteMP3GainAPETag`) |
-| CVE-2019-18359 | 2019 | 5.5 (Medium) | Buffer over-read | `apetag.c` (`ReadMP3APETag`) |
-| CVE-2023-49356 | 2023 | 7.5 (High) | Stack buffer overflow | `apetag.c` (`WriteMP3GainAPETag`) |
+These were fixed in upstream master on 2025-11-01 (commit `b0d6a5`) by applying Debian/openSUSE patches. However, no new release has been created, so pre-built binaries and source-based distributions that track releases (not git HEAD) remain affected.
+
+| CVE | Year | CVSS | Type | Affected Function | Upstream master |
+|-----|------|------|------|-------------------|-----------------|
+| CVE-2017-12911 | 2017 | — | Stack memory corruption | `apetag.c` | **Fixed** |
+| CVE-2018-10777 | 2018 | — | Buffer overflow | `apetag.c` (`WriteMP3GainAPETag`) | **Fixed** |
+| CVE-2019-18359 | 2019 | 5.5 (Medium) | Buffer over-read | `apetag.c` (`ReadMP3APETag`) | **Fixed** |
+| CVE-2023-49356 | 2023 | 7.5 (High) | Stack buffer overflow | `apetag.c` (`WriteMP3GainAPETag`) | **Fixed** |
+
+Additionally, SourceForge bugs #56–#60 (heap-buffer-overflow in `ReadMP3APETag`, reported July 2025) may also be addressed by the applied patches, but this has not been explicitly confirmed against the specific PoC files.
 
 ### Upstream Status
 
 - **Last release**: v1.6.2 (source only, circa 2009–2010)
+- **Latest commit**: 2025-11-01 — Debian/openSUSE APE tag security patches applied to master (`b0d6a5`)
 - **Website last updated**: September 2018 (translation update only)
-- **Bug tracker**: Multiple unresolved security reports (SourceForge bugs #36, #47, #50)
-- **Status**: Effectively abandoned — no developer response to CVE reports
+- **Bug tracker**: SourceForge bugs #56–#60 (July 2025, heap-buffer-overflow) remain open
+- **Status**: Minimally maintained — the developer (Glen Sawyer) responded to Bug #62 and applied patches in November 2025, but no new release has been created
 
-CVE-2020-15359 was discovered by VDA Labs using the ForAllSecure Mayhem fuzzer, which found ~1,600 crashes out of ~6,000 test cases, including pointer overwrites that could allow code execution hijacking. The developer was contacted but no fix was released.
+CVE-2020-15359 was discovered by VDA Labs using the ForAllSecure Mayhem fuzzer, which found ~1,600 crashes out of ~6,000 test cases, including pointer overwrites that could allow code execution hijacking.
+
+**Note**: The Windows binaries on the SourceForge Downloads page (v1.2.5 stable, v1.3.4 beta) predate all security fixes and remain vulnerable to all 19 CVEs.
 
 ## Distribution Patch Status
 
-Since upstream is abandoned, distributions maintain their own patches independently.
+As of November 2025, the upstream master branch includes APE tag security patches. However, no new release has been created, so distributions that track releases rather than git HEAD may still carry their own patches or remain unpatched.
 
 ### Debian / Ubuntu
 
@@ -100,7 +107,7 @@ Ubuntu inherits Debian's patches.
 | openSUSE | Partial | 2020 security updates for select CVEs |
 | Fedora | Partial | Some CVEs tracked in Bugzilla |
 | Arch Linux | No | AUR only, no official support |
-| Upstream | No | Abandoned, no fixes released |
+| Upstream master | Partial | APE tag CVEs fixed (2025-11), no new release, mpglibDBL still bundled |
 
 ## aacgain
 
@@ -169,7 +176,7 @@ In addition to the Linux distribution packages described above, mp3gain is avail
 | Debian/Ubuntu | 1.6.2-3 | **Yes** | Most comprehensive patches, links to system libmpg123 |
 | openSUSE | 1.6.2 | Partial | Security updates issued in 2020 |
 | Fedora | 1.6.2 | Partial | Some CVEs tracked |
-| Homebrew | 1.6.2 | **No** | Builds from source, links to libmpg123 but no APE tag patches |
+| Homebrew | 1.6.2 | **No** | Builds from release source, links to libmpg123 but no APE tag patches (upstream master has fixes but no new release) |
 | Arch Linux (AUR) | 1.6.2 | **No** | User-maintained, no official support |
 | Chocolatey | **1.5.2** | **No** | **Not updated since 2014 — includes mpglibDBL, extremely dangerous** |
 | SourceForge (Windows) | **1.2.5** (stable) | **No** | **2004-era binary — contains CVE-2003 through CVE-2006 vulnerabilities** |
@@ -178,7 +185,7 @@ In addition to the Linux distribution packages described above, mp3gain is avail
 
 - **Chocolatey mp3gain 1.5.2**: Ships the pre-1.6.x version that still bundles mpglibDBL. All 19 CVEs apply.
 - **SourceForge Windows binary**: The "stable" download (v1.2.5) dates from ~2004 and is vulnerable to every known CVE.
-- **Homebrew mp3gain 1.6.2**: Links to system libmpg123 (mitigating mpglibDBL CVEs), but does **not** apply Debian's APE tag security patches. CVE-2023-49356 and CVE-2019-18359 remain unpatched.
+- **Homebrew mp3gain 1.6.2**: Links to system libmpg123 (mitigating mpglibDBL CVEs), but does **not** apply APE tag security patches. These are fixed in upstream master but no new release exists for Homebrew to pick up.
 
 ## Why mp3rgain Is Safe
 
@@ -256,7 +263,8 @@ Please do not open public issues for security vulnerabilities.
 ### Vulnerability Reports
 - [CVE-2020-15359 - VDA Labs / Mayhem fuzzer discovery](https://www.mayhem.security/blog/cve-2020-15359-vdalabs-uses-mayhem-to-find-mp3gain-stack-overflow)
 - [CVE-2023-49356 - Stack buffer overflow report](https://github.com/linzc21/bug-reports/blob/main/reports/mp3gain/1.6.2/stack-buffer-overflow/CVE-2023-49356.md)
-- [SourceForge Bug #36 - Arbitrary code execution](https://sourceforge.net/p/mp3gain/bugs/36/)
+- [SourceForge Bug #36 - Arbitrary code execution](https://sourceforge.net/p/mp3gain/bugs/36/) (fixed via libmpg123 migration)
+- [SourceForge Bug #62 - Backport Debian/openSUSE patches](https://sourceforge.net/p/mp3gain/bugs/62/) (applied 2025-11-01)
 - [Gentoo - mp3gain buffer overflow discovery](https://blogs.gentoo.org/ago/2017/09/08/mp3gain-global-buffer-overflow-in-iii_dequantize_sample-mpglibdbllayer3-c/)
 - [oss-security mailing list - mp3gain](https://www.openwall.com/lists/oss-security/2017/09/14/3)
 
