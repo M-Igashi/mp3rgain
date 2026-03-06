@@ -27,7 +27,7 @@ symphonia = { version = "0.5", optional = true, default-features = false, featur
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 id3 = "1"
-indicatif = "0.17"
+indicatif = "0.18"
 
 [lib]
 name = "mp3rgain"
