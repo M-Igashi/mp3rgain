@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-cli:
@@ -27,7 +27,7 @@ jobs:
             os: windows-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
@@ -41,14 +41,14 @@ jobs:
 
       - name: Upload artifact (Unix)
         if: runner.os != 'Windows'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: mp3rgain-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/mp3rgain
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: mp3rgain-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/mp3rgain.exe
@@ -69,7 +69,7 @@ jobs:
             os: windows-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
@@ -89,14 +89,14 @@ jobs:
 
       - name: Upload artifact (Unix)
         if: runner.os != 'Windows'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: mp3rgui-${{ matrix.target }}
           path: mp3rgui/target/${{ matrix.target }}/release/mp3rgui
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: mp3rgui-${{ matrix.target }}
           path: mp3rgui/target/${{ matrix.target }}/release/mp3rgui.exe
@@ -105,20 +105,22 @@ jobs:
     name: Create Release
     needs: [build-cli, build-gui]
     runs-on: macos-latest
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       windows_x64_sha256: ${{ steps.checksums.outputs.windows_x64_sha256 }}
       windows_arm64_sha256: ${{ steps.checksums.outputs.windows_arm64_sha256 }}
       macos_sha256: ${{ steps.checksums.outputs.macos_sha256 }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Get version
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8
         with:
           path: artifacts
 
@@ -132,60 +134,76 @@ jobs:
           chmod +x dist/mp3rgain
 
       - name: Create macOS tarball
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           cd dist
-          tar -czvf mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz mp3rgain
-          shasum -a 256 mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz > mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz.sha256
+          tar -czvf "mp3rgain-${TAG}-macos-universal.tar.gz" mp3rgain
+          shasum -a 256 "mp3rgain-${TAG}-macos-universal.tar.gz" > "mp3rgain-${TAG}-macos-universal.tar.gz.sha256"
 
       - name: Create Linux tarball
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           cd artifacts/mp3rgain-x86_64-unknown-linux-gnu
           chmod +x mp3rgain
-          tar -czvf ../../dist/mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz mp3rgain
+          tar -czvf "../../dist/mp3rgain-${TAG}-linux-x86_64.tar.gz" mp3rgain
           cd ../../dist
-          shasum -a 256 mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz > mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
+          shasum -a 256 "mp3rgain-${TAG}-linux-x86_64.tar.gz" > "mp3rgain-${TAG}-linux-x86_64.tar.gz.sha256"
 
       - name: Create Windows x86_64 zip
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           cd artifacts/mp3rgain-x86_64-pc-windows-msvc
-          zip ../../dist/mp3rgain-${{ github.ref_name }}-windows-x86_64.zip mp3rgain.exe
+          zip "../../dist/mp3rgain-${TAG}-windows-x86_64.zip" mp3rgain.exe
           cd ../../dist
-          shasum -a 256 mp3rgain-${{ github.ref_name }}-windows-x86_64.zip > mp3rgain-${{ github.ref_name }}-windows-x86_64.zip.sha256
+          shasum -a 256 "mp3rgain-${TAG}-windows-x86_64.zip" > "mp3rgain-${TAG}-windows-x86_64.zip.sha256"
 
       - name: Create Windows ARM64 zip
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           cd artifacts/mp3rgain-aarch64-pc-windows-msvc
-          zip ../../dist/mp3rgain-${{ github.ref_name }}-windows-arm64.zip mp3rgain.exe
+          zip "../../dist/mp3rgain-${TAG}-windows-arm64.zip" mp3rgain.exe
           cd ../../dist
-          shasum -a 256 mp3rgain-${{ github.ref_name }}-windows-arm64.zip > mp3rgain-${{ github.ref_name }}-windows-arm64.zip.sha256
+          shasum -a 256 "mp3rgain-${TAG}-windows-arm64.zip" > "mp3rgain-${TAG}-windows-arm64.zip.sha256"
 
       - name: Create GUI universal macOS binary
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           lipo -create \
             artifacts/mp3rgui-x86_64-apple-darwin/mp3rgui \
             artifacts/mp3rgui-aarch64-apple-darwin/mp3rgui \
             -output dist/mp3rgui
           chmod +x dist/mp3rgui
-          tar -czvf dist/mp3rgui-${{ github.ref_name }}-macos-universal.tar.gz -C dist mp3rgui
+          tar -czvf "dist/mp3rgui-${TAG}-macos-universal.tar.gz" -C dist mp3rgui
           rm dist/mp3rgui
 
       - name: Create GUI Linux tarball
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           cd artifacts/mp3rgui-x86_64-unknown-linux-gnu
           chmod +x mp3rgui
-          tar -czvf ../../dist/mp3rgui-${{ github.ref_name }}-linux-x86_64.tar.gz mp3rgui
+          tar -czvf "../../dist/mp3rgui-${TAG}-linux-x86_64.tar.gz" mp3rgui
 
       - name: Create GUI Windows zip
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           cd artifacts/mp3rgui-x86_64-pc-windows-msvc
-          zip ../../dist/mp3rgui-${{ github.ref_name }}-windows-x86_64.zip mp3rgui.exe
+          zip "../../dist/mp3rgui-${TAG}-windows-x86_64.zip" mp3rgui.exe
 
       - name: Extract checksums
         id: checksums
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          echo "windows_x64_sha256=$(cat dist/mp3rgain-${{ github.ref_name }}-windows-x86_64.zip.sha256 | awk '{print $1}')" >> $GITHUB_OUTPUT
-          echo "windows_arm64_sha256=$(cat dist/mp3rgain-${{ github.ref_name }}-windows-arm64.zip.sha256 | awk '{print $1}')" >> $GITHUB_OUTPUT
-          echo "macos_sha256=$(cat dist/mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz.sha256 | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "windows_x64_sha256=$(cat "dist/mp3rgain-${TAG}-windows-x86_64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "windows_arm64_sha256=$(cat "dist/mp3rgain-${TAG}-windows-arm64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "macos_sha256=$(cat "dist/mp3rgain-${TAG}-macos-universal.tar.gz.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
@@ -213,26 +231,32 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout homebrew-tap
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           repository: M-Igashi/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
       - name: Update formula
+        env:
+          TAG: ${{ github.ref_name }}
+          MACOS_SHA256: ${{ needs.release.outputs.macos_sha256 }}
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
           cd homebrew-tap/Formula
-          sed -i 's|url "https://github.com/M-Igashi/mp3rgain/releases/download/v[^"]*|url "https://github.com/M-Igashi/mp3rgain/releases/download/${{ github.ref_name }}/mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz|' mp3rgain.rb
-          sed -i 's|sha256 "[^"]*"|sha256 "${{ needs.release.outputs.macos_sha256 }}"|' mp3rgain.rb
-          sed -i 's|version "[^"]*"|version "${{ needs.release.outputs.version }}"|' mp3rgain.rb
+          sed -i "s|url \"https://github.com/M-Igashi/mp3rgain/releases/download/v[^\"]*|url \"https://github.com/M-Igashi/mp3rgain/releases/download/${TAG}/mp3rgain-${TAG}-macos-universal.tar.gz|" mp3rgain.rb
+          sed -i "s|sha256 \"[^\"]*\"|sha256 \"${MACOS_SHA256}\"|" mp3rgain.rb
+          sed -i "s|version \"[^\"]*\"|version \"${VERSION}\"|" mp3rgain.rb
 
       - name: Commit and push
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
           cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/mp3rgain.rb
-          git commit -m "Update mp3rgain to ${{ needs.release.outputs.version }}" || exit 0
+          git commit -m "Update mp3rgain to $VERSION" || exit 0
           git push
 
   # Build Debian package
@@ -240,9 +264,11 @@ jobs:
     name: Build Debian Package
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install dependencies
         run: |
@@ -256,8 +282,9 @@ jobs:
         run: cp -r packages/debian/debian .
 
       - name: Update changelog version
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
-          VERSION=${{ needs.release.outputs.version }}
           DATE=$(date -R)
           printf 'mp3rgain (%s-1) unstable; urgency=medium\n\n  * Release %s\n\n -- Jesse Pinkman <M-Igashi@users.noreply.github.com>  %s\n' \
             "$VERSION" "$VERSION" "$DATE" > debian/changelog
@@ -272,9 +299,11 @@ jobs:
         run: ls -la ../mp3rgain*.deb
 
       - name: Generate checksum
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
           cd ..
-          sha256sum mp3rgain_${{ needs.release.outputs.version }}-1_amd64.deb > mp3rgain_${{ needs.release.outputs.version }}-1_amd64.deb.sha256
+          sha256sum "mp3rgain_${VERSION}-1_amd64.deb" > "mp3rgain_${VERSION}-1_amd64.deb.sha256"
 
       - name: Upload to release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
@@ -290,15 +319,15 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
 
       - name: Publish to crates.io
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --token "$CARGO_REGISTRY_TOKEN"
 
   # Update AUR package (mp3rgui)
   update-aur:
@@ -307,21 +336,24 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: master
 
       - name: Setup SSH for AUR
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.AUR_SSH_KEY }}" > ~/.ssh/aur
+          echo "$AUR_SSH_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
           ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
           printf 'Host aur.archlinux.org\n  User aur\n  IdentityFile ~/.ssh/aur\n  IdentitiesOnly yes\n' >> ~/.ssh/config
 
       - name: Update GUI PKGBUILD version
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
-          VERSION=${{ needs.release.outputs.version }}
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packages/aur-gui/PKGBUILD
           sed -i "s/^pkgrel=.*/pkgrel=1/" packages/aur-gui/PKGBUILD
           sed -i "s/pkgver = .*/pkgver = ${VERSION}/" packages/aur-gui/.SRCINFO
@@ -329,16 +361,19 @@ jobs:
           sed -i "s|source = https://github.com/M-Igashi/mp3rgain/archive/v.*.tar.gz|source = https://github.com/M-Igashi/mp3rgain/archive/v${VERSION}.tar.gz|" packages/aur-gui/.SRCINFO
 
       - name: Commit and push to GitHub
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add packages/aur-gui/
-          git commit -m "Update AUR mp3rgui to ${{ needs.release.outputs.version }}" || exit 0
+          git commit -m "Update AUR mp3rgui to $VERSION" || exit 0
           git push
 
       - name: Push to AUR (mp3rgui)
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
-          VERSION=${{ needs.release.outputs.version }}
           git clone ssh://aur@aur.archlinux.org/mp3rgui.git /tmp/aur-mp3rgui
           cp packages/aur-gui/PKGBUILD /tmp/aur-mp3rgui/
           cp packages/aur-gui/.SRCINFO /tmp/aur-mp3rgui/
