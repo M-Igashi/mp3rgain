@@ -67,6 +67,8 @@ jobs:
             os: ubuntu-latest
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -112,6 +114,8 @@ jobs:
       windows_x64_sha256: ${{ steps.checksums.outputs.windows_x64_sha256 }}
       windows_arm64_sha256: ${{ steps.checksums.outputs.windows_arm64_sha256 }}
       macos_sha256: ${{ steps.checksums.outputs.macos_sha256 }}
+      gui_windows_x64_sha256: ${{ steps.checksums.outputs.gui_windows_x64_sha256 }}
+      gui_windows_arm64_sha256: ${{ steps.checksums.outputs.gui_windows_arm64_sha256 }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -189,12 +193,23 @@ jobs:
           chmod +x mp3rgui
           tar -czvf "../../dist/mp3rgui-${TAG}-linux-x86_64.tar.gz" mp3rgui
 
-      - name: Create GUI Windows zip
+      - name: Create GUI Windows x86_64 zip
         env:
           TAG: ${{ github.ref_name }}
         run: |
           cd artifacts/mp3rgui-x86_64-pc-windows-msvc
           zip "../../dist/mp3rgui-${TAG}-windows-x86_64.zip" mp3rgui.exe
+          cd ../../dist
+          shasum -a 256 "mp3rgui-${TAG}-windows-x86_64.zip" > "mp3rgui-${TAG}-windows-x86_64.zip.sha256"
+
+      - name: Create GUI Windows ARM64 zip
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd artifacts/mp3rgui-aarch64-pc-windows-msvc
+          zip "../../dist/mp3rgui-${TAG}-windows-arm64.zip" mp3rgui.exe
+          cd ../../dist
+          shasum -a 256 "mp3rgui-${TAG}-windows-arm64.zip" > "mp3rgui-${TAG}-windows-arm64.zip.sha256"
 
       - name: Extract checksums
         id: checksums
@@ -204,6 +219,8 @@ jobs:
           echo "windows_x64_sha256=$(cat "dist/mp3rgain-${TAG}-windows-x86_64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "windows_arm64_sha256=$(cat "dist/mp3rgain-${TAG}-windows-arm64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "macos_sha256=$(cat "dist/mp3rgain-${TAG}-macos-universal.tar.gz.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "gui_windows_x64_sha256=$(cat "dist/mp3rgui-${TAG}-windows-x86_64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "gui_windows_arm64_sha256=$(cat "dist/mp3rgui-${TAG}-windows-arm64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
@@ -220,6 +237,9 @@ jobs:
             dist/mp3rgui-${{ github.ref_name }}-macos-universal.tar.gz
             dist/mp3rgui-${{ github.ref_name }}-linux-x86_64.tar.gz
             dist/mp3rgui-${{ github.ref_name }}-windows-x86_64.zip
+            dist/mp3rgui-${{ github.ref_name }}-windows-x86_64.zip.sha256
+            dist/mp3rgui-${{ github.ref_name }}-windows-arm64.zip
+            dist/mp3rgui-${{ github.ref_name }}-windows-arm64.zip.sha256
           draft: false
           generate_release_notes: true
 
