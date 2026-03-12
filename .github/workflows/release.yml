@@ -114,6 +114,7 @@ jobs:
       windows_x64_sha256: ${{ steps.checksums.outputs.windows_x64_sha256 }}
       windows_arm64_sha256: ${{ steps.checksums.outputs.windows_arm64_sha256 }}
       macos_sha256: ${{ steps.checksums.outputs.macos_sha256 }}
+      gui_macos_dmg_sha256: ${{ steps.checksums.outputs.gui_macos_dmg_sha256 }}
       gui_windows_x64_sha256: ${{ steps.checksums.outputs.gui_windows_x64_sha256 }}
       gui_windows_arm64_sha256: ${{ steps.checksums.outputs.gui_windows_arm64_sha256 }}
     steps:
@@ -173,17 +174,35 @@ jobs:
           cd ../../dist
           shasum -a 256 "mp3rgain-${TAG}-windows-arm64.zip" > "mp3rgain-${TAG}-windows-arm64.zip.sha256"
 
-      - name: Create GUI universal macOS binary
+      - name: Create GUI macOS .app bundle
         env:
           TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # Create universal binary
           lipo -create \
             artifacts/mp3rgui-x86_64-apple-darwin/mp3rgui \
             artifacts/mp3rgui-aarch64-apple-darwin/mp3rgui \
             -output dist/mp3rgui
           chmod +x dist/mp3rgui
-          tar -czvf "dist/mp3rgui-${TAG}-macos-universal.tar.gz" -C dist mp3rgui
-          rm dist/mp3rgui
+
+          # Create .app bundle structure
+          APP="dist/mp3rgui.app"
+          mkdir -p "${APP}/Contents/MacOS"
+          mkdir -p "${APP}/Contents/Resources"
+          mv dist/mp3rgui "${APP}/Contents/MacOS/mp3rgui"
+          cp mp3rgui/icons/mp3rgui.icns "${APP}/Contents/Resources/mp3rgui.icns"
+          sed "s/__VERSION__/${VERSION}/g" packages/macos/Info.plist > "${APP}/Contents/Info.plist"
+
+          # Create DMG
+          hdiutil create -volname "mp3rgui" -srcfolder "${APP}" -ov -format UDZO "dist/mp3rgui-${TAG}-macos-universal.dmg"
+          cd dist
+          shasum -a 256 "mp3rgui-${TAG}-macos-universal.dmg" > "mp3rgui-${TAG}-macos-universal.dmg.sha256"
+
+          # Also create tarball for backward compatibility
+          tar -czvf "mp3rgui-${TAG}-macos-universal.tar.gz" mp3rgui.app
+          shasum -a 256 "mp3rgui-${TAG}-macos-universal.tar.gz" > "mp3rgui-${TAG}-macos-universal.tar.gz.sha256"
+          rm -rf mp3rgui.app
 
       - name: Create GUI Linux tarball
         env:
@@ -219,6 +238,7 @@ jobs:
           echo "windows_x64_sha256=$(cat "dist/mp3rgain-${TAG}-windows-x86_64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "windows_arm64_sha256=$(cat "dist/mp3rgain-${TAG}-windows-arm64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "macos_sha256=$(cat "dist/mp3rgain-${TAG}-macos-universal.tar.gz.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "gui_macos_dmg_sha256=$(cat "dist/mp3rgui-${TAG}-macos-universal.dmg.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "gui_windows_x64_sha256=$(cat "dist/mp3rgui-${TAG}-windows-x86_64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "gui_windows_arm64_sha256=$(cat "dist/mp3rgui-${TAG}-windows-arm64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
 
@@ -234,7 +254,10 @@ jobs:
             dist/mp3rgain-${{ github.ref_name }}-windows-x86_64.zip.sha256
             dist/mp3rgain-${{ github.ref_name }}-windows-arm64.zip
             dist/mp3rgain-${{ github.ref_name }}-windows-arm64.zip.sha256
+            dist/mp3rgui-${{ github.ref_name }}-macos-universal.dmg
+            dist/mp3rgui-${{ github.ref_name }}-macos-universal.dmg.sha256
             dist/mp3rgui-${{ github.ref_name }}-macos-universal.tar.gz
+            dist/mp3rgui-${{ github.ref_name }}-macos-universal.tar.gz.sha256
             dist/mp3rgui-${{ github.ref_name }}-linux-x86_64.tar.gz
             dist/mp3rgui-${{ github.ref_name }}-windows-x86_64.zip
             dist/mp3rgui-${{ github.ref_name }}-windows-x86_64.zip.sha256
@@ -257,7 +280,7 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
-      - name: Update formula
+      - name: Update CLI formula
         env:
           TAG: ${{ github.ref_name }}
           MACOS_SHA256: ${{ needs.release.outputs.macos_sha256 }}
@@ -268,6 +291,15 @@ jobs:
           sed -i "s|sha256 \"[^\"]*\"|sha256 \"${MACOS_SHA256}\"|" mp3rgain.rb
           sed -i "s|version \"[^\"]*\"|version \"${VERSION}\"|" mp3rgain.rb
 
+      - name: Update GUI cask
+        env:
+          GUI_MACOS_DMG_SHA256: ${{ needs.release.outputs.gui_macos_dmg_sha256 }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          cd homebrew-tap/Casks
+          sed -i "s|version \"[^\"]*\"|version \"${VERSION}\"|" mp3rgui.rb
+          sed -i "s|sha256 \"[^\"]*\"|sha256 \"${GUI_MACOS_DMG_SHA256}\"|" mp3rgui.rb
+
       - name: Commit and push
         env:
           VERSION: ${{ needs.release.outputs.version }}
@@ -275,8 +307,8 @@ jobs:
           cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/mp3rgain.rb
-          git commit -m "Update mp3rgain to $VERSION" || exit 0
+          git add Formula/mp3rgain.rb Casks/mp3rgui.rb
+          git commit -m "Update mp3rgain and mp3rgui to $VERSION" || exit 0
           git push
 
   # Build Debian package
