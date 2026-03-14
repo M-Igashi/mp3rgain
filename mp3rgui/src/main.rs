@@ -5,7 +5,7 @@ mod ui;
 
 use app::Mp3rgainApp;
 
-fn main() -> eframe::Result<()> {
+fn main() {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([900.0, 650.0])
@@ -14,9 +14,9 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    eframe::run_native(
+    let _ = eframe::run_native(
         "mp3rgain",
         options,
         Box::new(|cc| Ok(Box::new(Mp3rgainApp::new(cc)))),
-    )
+    );
 }
