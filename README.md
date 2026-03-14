@@ -20,42 +20,26 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 
 ## Installation
 
-### macOS
+### CLI (`mp3rgain`)
 
-```bash
-brew install M-Igashi/tap/mp3rgain
-```
+| Platform | Command |
+|----------|---------|
+| macOS | `brew install M-Igashi/tap/mp3rgain` |
+| Windows | `winget install M-Igashi.mp3rgain` |
+| Arch Linux (AUR) | `yay -S mp3rgain-bin` |
+| Debian/Ubuntu | `sudo apt install ./mp3rgain_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) |
+| Nix/NixOS | `nix profile install github:M-Igashi/mp3rgain` |
+| Cargo | `cargo install mp3rgain` |
 
-### Windows
+### GUI (`mp3rgui`)
 
-```powershell
-winget install M-Igashi.mp3rgain
-```
+| Platform | Command |
+|----------|---------|
+| macOS | `brew install --cask M-Igashi/tap/mp3rgui` |
+| Windows | `winget install M-Igashi.mp3rgui` |
+| Arch Linux (AUR) | `yay -S mp3rgui` |
 
-### Linux
-
-```bash
-# Debian/Ubuntu (.deb package from GitHub Releases)
-# Download from: https://github.com/M-Igashi/mp3rgain/releases
-sudo apt install ./mp3rgain_*_amd64.deb
-
-# Arch Linux (AUR)
-yay -S mp3rgain-bin  # CLI (pre-built binary)
-yay -S mp3rgui       # GUI application
-
-# Nix/NixOS
-nix profile install github:M-Igashi/mp3rgain
-```
-
-### Cargo
-
-```bash
-cargo install mp3rgain
-```
-
-### Manual Download
-
-Download binaries from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases).
+Binaries for all platforms are also available from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases).
 
 ## Quick Start
 
@@ -82,15 +66,16 @@ A native GUI application (`mp3rgui`) is available for users who prefer a graphic
 
 **Features:** Drag-and-drop, track/album analysis, one-click gain application, clipping warnings, progress indicators.
 
-**Download:** [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases)
-- `mp3rgui-macos-universal.tar.gz` (macOS)
-- `mp3rgui-linux-x86_64.tar.gz` (Linux)
-- `mp3rgui-windows-x86_64.zip` (Windows)
+**Install:** See [Installation](#installation) above for Homebrew, Winget, and AUR options. Binaries are also available from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
+- `mp3rgui-*-macos-universal.dmg` (macOS)
+- `mp3rgui-*-linux-x86_64.tar.gz` (Linux)
+- `mp3rgui-*-windows-x86_64.zip` / `mp3rgui-*-windows-arm64.zip` (Windows)
 
-> **macOS users:** If you see "mp3rgui cannot be opened" warning, run:
+> **macOS manual download:** If you see "mp3rgui cannot be opened" warning, run:
 > ```bash
-> xattr -cr /path/to/mp3rgui
+> xattr -cr /path/to/mp3rgui.app
 > ```
+> This is not needed when installing via Homebrew.
 
 ## Command-Line Options
 
