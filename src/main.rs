@@ -810,17 +810,20 @@ fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
     Ok(())
 }
 
-/// Tag values for display in cmd_check_tags
-struct CheckTagValues<'a> {
+/// Tag values and labels for display in cmd_check_tags
+struct CheckTagInfo<'a> {
     undo: Option<&'a str>,
     minmax: Option<&'a str>,
     track_gain: Option<&'a str>,
     track_peak: Option<&'a str>,
     album_gain: Option<&'a str>,
     album_peak: Option<&'a str>,
+    undo_label: &'a str,
+    minmax_label: &'a str,
+    no_tag_msg: &'a str,
 }
 
-impl CheckTagValues<'_> {
+impl CheckTagInfo<'_> {
     fn has_any(&self) -> bool {
         self.undo.is_some()
             || self.minmax.is_some()
@@ -829,62 +832,59 @@ impl CheckTagValues<'_> {
             || self.album_gain.is_some()
             || self.album_peak.is_some()
     }
-}
 
-fn display_tag_info(
-    filename: &str,
-    file_path: &Path,
-    tags: &CheckTagValues,
-    undo_label: &str,
-    minmax_label: &str,
-    no_tag_msg: &str,
-    format: OutputFormat,
-    json_results: &mut Vec<JsonFileResult>,
-) {
-    match format {
-        OutputFormat::Text => {
-            println!("{}", filename.cyan().bold());
-            if let Some(v) = tags.undo {
-                println!("  {:<25}{}", format!("{}:", undo_label), v);
+    fn display(
+        &self,
+        filename: &str,
+        file_path: &Path,
+        format: OutputFormat,
+        json_results: &mut Vec<JsonFileResult>,
+    ) {
+        match format {
+            OutputFormat::Text => {
+                println!("{}", filename.cyan().bold());
+                if let Some(v) = self.undo {
+                    println!("  {:<25}{}", format!("{}:", self.undo_label), v);
+                }
+                if let Some(v) = self.minmax {
+                    println!("  {:<25}{}", format!("{}:", self.minmax_label), v);
+                }
+                if let Some(v) = self.track_gain {
+                    println!("  REPLAYGAIN_TRACK_GAIN: {}", v);
+                }
+                if let Some(v) = self.track_peak {
+                    println!("  REPLAYGAIN_TRACK_PEAK: {}", v);
+                }
+                if let Some(v) = self.album_gain {
+                    println!("  REPLAYGAIN_ALBUM_GAIN: {}", v);
+                }
+                if let Some(v) = self.album_peak {
+                    println!("  REPLAYGAIN_ALBUM_PEAK: {}", v);
+                }
+                if !self.has_any() {
+                    println!("  ({})", self.no_tag_msg);
+                }
+                println!();
             }
-            if let Some(v) = tags.minmax {
-                println!("  {:<25}{}", format!("{}:", minmax_label), v);
+            OutputFormat::Tsv => {
+                println!(
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    filename,
+                    self.undo.unwrap_or("-"),
+                    self.minmax.unwrap_or("-"),
+                    self.track_gain.unwrap_or("-"),
+                    self.track_peak.unwrap_or("-"),
+                    self.album_gain.unwrap_or("-"),
+                    self.album_peak.unwrap_or("-")
+                );
             }
-            if let Some(v) = tags.track_gain {
-                println!("  REPLAYGAIN_TRACK_GAIN: {}", v);
+            OutputFormat::Json => {
+                json_results.push(JsonFileResult {
+                    file: file_path.display().to_string(),
+                    status: Some(if self.has_any() { "success" } else { "no_tag" }.to_string()),
+                    ..Default::default()
+                });
             }
-            if let Some(v) = tags.track_peak {
-                println!("  REPLAYGAIN_TRACK_PEAK: {}", v);
-            }
-            if let Some(v) = tags.album_gain {
-                println!("  REPLAYGAIN_ALBUM_GAIN: {}", v);
-            }
-            if let Some(v) = tags.album_peak {
-                println!("  REPLAYGAIN_ALBUM_PEAK: {}", v);
-            }
-            if !tags.has_any() {
-                println!("  ({})", no_tag_msg);
-            }
-            println!();
-        }
-        OutputFormat::Tsv => {
-            println!(
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                filename,
-                tags.undo.unwrap_or("-"),
-                tags.minmax.unwrap_or("-"),
-                tags.track_gain.unwrap_or("-"),
-                tags.track_peak.unwrap_or("-"),
-                tags.album_gain.unwrap_or("-"),
-                tags.album_peak.unwrap_or("-")
-            );
-        }
-        OutputFormat::Json => {
-            json_results.push(JsonFileResult {
-                file: file_path.display().to_string(),
-                status: Some(if tags.has_any() { "success" } else { "no_tag" }.to_string()),
-                ..Default::default()
-            });
         }
     }
 }
@@ -920,23 +920,18 @@ fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
             let album_gain = rg_tags.album_gain();
             let album_peak = rg_tags.album_peak();
 
-            display_tag_info(
-                filename,
-                file,
-                &CheckTagValues {
-                    undo,
-                    minmax,
-                    track_gain,
-                    track_peak,
-                    album_gain,
-                    album_peak,
-                },
-                "MP3RGAIN_UNDO",
-                "MP3RGAIN_MINMAX",
-                "no tags found",
-                opts.output_format,
-                &mut json_results,
-            );
+            CheckTagInfo {
+                undo,
+                minmax,
+                track_gain,
+                track_peak,
+                album_gain,
+                album_peak,
+                undo_label: "MP3RGAIN_UNDO",
+                minmax_label: "MP3RGAIN_MINMAX",
+                no_tag_msg: "no tags found",
+            }
+            .display(filename, file, opts.output_format, &mut json_results);
         } else if opts.use_id3v2 {
             // MP3 with -s i: read ID3v2 TXXX frames
             match id3v2::read_id3v2_replaygain(file) {
@@ -948,20 +943,20 @@ fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
                     let album_gain = rg.album_gain.as_deref();
                     let album_peak = rg.album_peak.as_deref();
 
-                    display_tag_info(
+                    CheckTagInfo {
+                        undo,
+                        minmax,
+                        track_gain,
+                        track_peak,
+                        album_gain,
+                        album_peak,
+                        undo_label: "MP3GAIN_UNDO",
+                        minmax_label: "MP3GAIN_MINMAX",
+                        no_tag_msg: "no ID3v2 ReplayGain tags found",
+                    }
+                    .display(
                         filename,
                         file,
-                        &CheckTagValues {
-                            undo,
-                            minmax,
-                            track_gain,
-                            track_peak,
-                            album_gain,
-                            album_peak,
-                        },
-                        "MP3GAIN_UNDO",
-                        "MP3GAIN_MINMAX",
-                        "no ID3v2 ReplayGain tags found",
                         opts.output_format,
                         &mut json_results,
                     );
@@ -983,39 +978,39 @@ fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
             // MP3: read APEv2 tags
             match read_ape_tag_from_file(file) {
                 Ok(Some(tag)) => {
-                    display_tag_info(
+                    CheckTagInfo {
+                        undo: tag.get(TAG_MP3GAIN_UNDO),
+                        minmax: tag.get(TAG_MP3GAIN_MINMAX),
+                        track_gain: tag.get(TAG_REPLAYGAIN_TRACK_GAIN),
+                        track_peak: tag.get(TAG_REPLAYGAIN_TRACK_PEAK),
+                        album_gain: tag.get(TAG_REPLAYGAIN_ALBUM_GAIN),
+                        album_peak: tag.get(TAG_REPLAYGAIN_ALBUM_PEAK),
+                        undo_label: "MP3GAIN_UNDO",
+                        minmax_label: "MP3GAIN_MINMAX",
+                        no_tag_msg: "no mp3gain tags found",
+                    }
+                    .display(
                         filename,
                         file,
-                        &CheckTagValues {
-                            undo: tag.get(TAG_MP3GAIN_UNDO),
-                            minmax: tag.get(TAG_MP3GAIN_MINMAX),
-                            track_gain: tag.get(TAG_REPLAYGAIN_TRACK_GAIN),
-                            track_peak: tag.get(TAG_REPLAYGAIN_TRACK_PEAK),
-                            album_gain: tag.get(TAG_REPLAYGAIN_ALBUM_GAIN),
-                            album_peak: tag.get(TAG_REPLAYGAIN_ALBUM_PEAK),
-                        },
-                        "MP3GAIN_UNDO",
-                        "MP3GAIN_MINMAX",
-                        "no mp3gain tags found",
                         opts.output_format,
                         &mut json_results,
                     );
                 }
                 Ok(None) => {
-                    display_tag_info(
+                    CheckTagInfo {
+                        undo: None,
+                        minmax: None,
+                        track_gain: None,
+                        track_peak: None,
+                        album_gain: None,
+                        album_peak: None,
+                        undo_label: "MP3GAIN_UNDO",
+                        minmax_label: "MP3GAIN_MINMAX",
+                        no_tag_msg: "no APE tag found",
+                    }
+                    .display(
                         filename,
                         file,
-                        &CheckTagValues {
-                            undo: None,
-                            minmax: None,
-                            track_gain: None,
-                            track_peak: None,
-                            album_gain: None,
-                            album_peak: None,
-                        },
-                        "MP3GAIN_UNDO",
-                        "MP3GAIN_MINMAX",
-                        "no APE tag found",
                         opts.output_format,
                         &mut json_results,
                     );
