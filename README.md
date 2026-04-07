@@ -27,7 +27,7 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 | macOS | `brew install M-Igashi/tap/mp3rgain` |
 | Windows | `winget install M-Igashi.mp3rgain` |
 | Arch Linux (AUR) | `yay -S mp3rgain-bin` |
-| Debian/Ubuntu | `sudo apt install ./mp3rgain_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) |
+| Debian/Ubuntu | `sudo apt install ./mp3rgain_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) (ARM64 also available) |
 | Nix/NixOS | `nix profile install github:M-Igashi/mp3rgain` |
 | Cargo | `cargo install mp3rgain` |
 
@@ -38,6 +38,7 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 | macOS | `brew install --cask M-Igashi/tap/mp3rgui` |
 | Windows | `winget install M-Igashi.mp3rgui` |
 | Arch Linux (AUR) | `yay -S mp3rgui` |
+| Debian/Ubuntu | `sudo apt install ./mp3rgui_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) (ARM64 also available) |
 
 Binaries for all platforms are also available from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases).
 
@@ -68,8 +69,9 @@ A native GUI application (`mp3rgui`) is available for users who prefer a graphic
 
 **Install:** See [Installation](#installation) above for Homebrew, Winget, and AUR options. Binaries are also available from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
 - `mp3rgui-*-macos-universal.dmg` (macOS)
-- `mp3rgui-*-linux-x86_64.tar.gz` (Linux)
+- `mp3rgui-*-linux-x86_64.tar.gz` / `mp3rgui-*-linux-arm64.tar.gz` (Linux)
 - `mp3rgui-*-windows-x86_64.zip` / `mp3rgui-*-windows-arm64.zip` (Windows)
+- `mp3rgui_*_amd64.deb` / `mp3rgui_*_arm64.deb` (Debian/Ubuntu)
 
 > **macOS manual download:** If you see "mp3rgui cannot be opened" warning, run:
 > ```bash

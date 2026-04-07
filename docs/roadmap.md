@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current Status: v2.0.0 (Production Ready)
+## Current Status: v2.1.0 (Production Ready)
 
 All core functionality complete:
 - [x] MP3 frame parsing (MPEG 1/2/2.5 Layer III)
@@ -121,6 +121,13 @@ All core functionality complete:
 - [x] Private struct fields with accessor methods
 - [x] `GainOptions` builder pattern
 - [x] Submodule organization (`analysis`, `gain`, `ape`, `frame`)
+
+### v2.1.0 - Linux ARM64 & GUI Debian Package
+
+- [x] Linux ARM64 build targets (CLI and GUI) using `ubuntu-24.04-arm` runner
+- [x] mp3rgui .deb package (amd64 and arm64)
+- [x] mp3rgain .deb package ARM64 support
+- [x] .deb test workflow for mp3rgui
 
 ## Upcoming Goals
 

@@ -38,7 +38,10 @@ sudo apt-get install -y build-essential debhelper cargo rustc
 ### Installing the Package
 
 ```bash
-sudo dpkg -i ../mp3rgain_1.1.1-1_amd64.deb
+# x86_64
+sudo dpkg -i ../mp3rgain_*-1_amd64.deb
+# ARM64
+sudo dpkg -i ../mp3rgain_*-1_arm64.deb
 ```
 
 ### Using Docker (recommended for clean builds)
@@ -55,7 +58,9 @@ docker run --rm -v "$(pwd):/src" -w /src debian:bookworm bash -c '
 
 ## GitHub Actions Build
 
-The `.deb` package is automatically built on each release. Download the artifact from the GitHub Actions workflow or the release assets.
+The `.deb` package is automatically built on each release for both amd64 and arm64 architectures. Download the artifact from the GitHub Actions workflow or the release assets.
+
+A separate GUI package (`mp3rgui`) is also available — see `packages/debian-gui/`.
 
 ## Version Updates
 
