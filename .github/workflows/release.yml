@@ -21,6 +21,8 @@ jobs:
             os: macos-latest
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
           - target: x86_64-pc-windows-msvc
             os: windows-latest
           - target: aarch64-pc-windows-msvc
@@ -65,6 +67,8 @@ jobs:
             os: macos-latest
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
           - target: x86_64-pc-windows-msvc
             os: windows-latest
           - target: aarch64-pc-windows-msvc
@@ -146,7 +150,7 @@ jobs:
           tar -czvf "mp3rgain-${TAG}-macos-universal.tar.gz" mp3rgain
           shasum -a 256 "mp3rgain-${TAG}-macos-universal.tar.gz" > "mp3rgain-${TAG}-macos-universal.tar.gz.sha256"
 
-      - name: Create Linux tarball
+      - name: Create Linux x86_64 tarball
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -155,6 +159,16 @@ jobs:
           tar -czvf "../../dist/mp3rgain-${TAG}-linux-x86_64.tar.gz" mp3rgain
           cd ../../dist
           shasum -a 256 "mp3rgain-${TAG}-linux-x86_64.tar.gz" > "mp3rgain-${TAG}-linux-x86_64.tar.gz.sha256"
+
+      - name: Create Linux ARM64 tarball
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd artifacts/mp3rgain-aarch64-unknown-linux-gnu
+          chmod +x mp3rgain
+          tar -czvf "../../dist/mp3rgain-${TAG}-linux-arm64.tar.gz" mp3rgain
+          cd ../../dist
+          shasum -a 256 "mp3rgain-${TAG}-linux-arm64.tar.gz" > "mp3rgain-${TAG}-linux-arm64.tar.gz.sha256"
 
       - name: Create Windows x86_64 zip
         env:
@@ -204,13 +218,21 @@ jobs:
           shasum -a 256 "mp3rgui-${TAG}-macos-universal.tar.gz" > "mp3rgui-${TAG}-macos-universal.tar.gz.sha256"
           rm -rf mp3rgui.app
 
-      - name: Create GUI Linux tarball
+      - name: Create GUI Linux x86_64 tarball
         env:
           TAG: ${{ github.ref_name }}
         run: |
           cd artifacts/mp3rgui-x86_64-unknown-linux-gnu
           chmod +x mp3rgui
           tar -czvf "../../dist/mp3rgui-${TAG}-linux-x86_64.tar.gz" mp3rgui
+
+      - name: Create GUI Linux ARM64 tarball
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd artifacts/mp3rgui-aarch64-unknown-linux-gnu
+          chmod +x mp3rgui
+          tar -czvf "../../dist/mp3rgui-${TAG}-linux-arm64.tar.gz" mp3rgui
 
       - name: Create GUI Windows x86_64 zip
         env:
@@ -250,6 +272,8 @@ jobs:
             dist/mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz.sha256
             dist/mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz
             dist/mp3rgain-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
+            dist/mp3rgain-${{ github.ref_name }}-linux-arm64.tar.gz
+            dist/mp3rgain-${{ github.ref_name }}-linux-arm64.tar.gz.sha256
             dist/mp3rgain-${{ github.ref_name }}-windows-x86_64.zip
             dist/mp3rgain-${{ github.ref_name }}-windows-x86_64.zip.sha256
             dist/mp3rgain-${{ github.ref_name }}-windows-arm64.zip
@@ -259,6 +283,7 @@ jobs:
             dist/mp3rgui-${{ github.ref_name }}-macos-universal.tar.gz
             dist/mp3rgui-${{ github.ref_name }}-macos-universal.tar.gz.sha256
             dist/mp3rgui-${{ github.ref_name }}-linux-x86_64.tar.gz
+            dist/mp3rgui-${{ github.ref_name }}-linux-arm64.tar.gz
             dist/mp3rgui-${{ github.ref_name }}-windows-x86_64.zip
             dist/mp3rgui-${{ github.ref_name }}-windows-x86_64.zip.sha256
             dist/mp3rgui-${{ github.ref_name }}-windows-arm64.zip
@@ -313,12 +338,19 @@ jobs:
 
   # Build Debian package
   build-deb:
-    name: Build Debian Package
+    name: Build Debian Package (${{ matrix.arch }})
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
     continue-on-error: true
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            os: ubuntu-latest
+          - arch: arm64
+            os: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -353,16 +385,19 @@ jobs:
       - name: Generate checksum
         env:
           VERSION: ${{ needs.release.outputs.version }}
+          ARCH: ${{ matrix.arch }}
         run: |
           cd ..
-          sha256sum "mp3rgain_${VERSION}-1_amd64.deb" > "mp3rgain_${VERSION}-1_amd64.deb.sha256"
+          sha256sum "mp3rgain_${VERSION}-1_${ARCH}.deb" > "mp3rgain_${VERSION}-1_${ARCH}.deb.sha256"
 
       - name: Upload to release
+        env:
+          ARCH: ${{ matrix.arch }}
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
         with:
           files: |
-            ../mp3rgain_${{ needs.release.outputs.version }}-1_amd64.deb
-            ../mp3rgain_${{ needs.release.outputs.version }}-1_amd64.deb.sha256
+            ../mp3rgain_${{ needs.release.outputs.version }}-1_${{ matrix.arch }}.deb
+            ../mp3rgain_${{ needs.release.outputs.version }}-1_${{ matrix.arch }}.deb.sha256
 
   # Publish to crates.io
   publish-cargo:
