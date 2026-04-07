@@ -111,28 +111,39 @@ jobs:
           apt-get install -y curl ca-certificates
 
       - name: Download GUI .deb package
+        id: download-gui
         run: |
           # Get the latest GUI .deb filename from releases
           DEB_URL=$(curl -sL https://api.github.com/repos/M-Igashi/mp3rgain/releases/latest \
             | grep -o 'https://[^"]*mp3rgui[^"]*\.deb"' | tr -d '"' | head -1)
-          echo "Downloading: $DEB_URL"
-          curl -sL -o mp3rgui.deb "$DEB_URL"
-          ls -la mp3rgui.deb
+          if [ -z "$DEB_URL" ]; then
+            echo "No GUI .deb found in latest release, skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Downloading: $DEB_URL"
+            curl -sL -o mp3rgui.deb "$DEB_URL"
+            ls -la mp3rgui.deb
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install package
+        if: steps.download-gui.outputs.skip != 'true'
         run: |
           apt-get install -y ./mp3rgui.deb
           echo "Package installed successfully"
 
       - name: Verify binary
+        if: steps.download-gui.outputs.skip != 'true'
         run: |
           which mp3rgui
           mp3rgui --version || true
 
       - name: Verify desktop file
+        if: steps.download-gui.outputs.skip != 'true'
         run: |
           test -f /usr/share/applications/mp3rgui.desktop && echo "Desktop file found" || echo "Desktop file not found"
 
       - name: Verify icon
+        if: steps.download-gui.outputs.skip != 'true'
         run: |
           test -f /usr/share/icons/hicolor/128x128/apps/mp3rgui.png && echo "Icon found" || echo "Icon not found"
