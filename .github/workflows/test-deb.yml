@@ -92,12 +92,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - distro: debian:bookworm
-            name: Debian 12 (bookworm)
+          # GUI .deb requires glibc >= 2.39 (built on Ubuntu 24.04)
           - distro: debian:trixie
             name: Debian 13 (trixie)
-          - distro: ubuntu:22.04
-            name: Ubuntu 22.04 LTS
           - distro: ubuntu:24.04
             name: Ubuntu 24.04 LTS
 
