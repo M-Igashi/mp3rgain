@@ -121,13 +121,19 @@ For AAC/M4A files, both mp3rgain and aacgain store undo data in iTunes freeform 
 # macOS (Homebrew)
 brew install M-Igashi/tap/mp3rgain
 
+# Windows (winget)
+winget install M-Igashi.mp3rgain
+
+# Arch Linux (AUR)
+yay -S mp3rgain-bin
+
+# Debian/Ubuntu (amd64 and arm64 .deb available)
+sudo apt install ./mp3rgain_*_amd64.deb
+
 # Any platform (Cargo) - includes ReplayGain by default
 cargo install mp3rgain
 
-# Minimal installation (no audio decoding, gain adjustment only)
-cargo install mp3rgain --no-default-features
-
-# Binary download
+# Binary download (macOS, Linux x86_64/arm64, Windows x86_64/arm64)
 # https://github.com/M-Igashi/mp3rgain/releases
 ```
 
