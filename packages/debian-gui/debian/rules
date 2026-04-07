@@ -6,7 +6,7 @@ export CARGO_HOME = $(CURDIR)/debian/cargo-home
 	dh $@
 
 override_dh_auto_build:
-	cargo build --release --locked --manifest-path mp3rgui/Cargo.toml
+	cargo build --release --manifest-path mp3rgui/Cargo.toml
 
 override_dh_auto_install:
 	install -Dm755 mp3rgui/target/release/mp3rgui debian/mp3rgui/usr/bin/mp3rgui
@@ -21,6 +21,9 @@ override_dh_auto_install:
 override_dh_auto_test:
 	# Skip tests as GUI tests require display server
 	true
+
+override_dh_shlibdeps:
+	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
 
 override_dh_auto_clean:
 	cargo clean --manifest-path mp3rgui/Cargo.toml || true
