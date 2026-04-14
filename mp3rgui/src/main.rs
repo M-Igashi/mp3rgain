@@ -14,9 +14,17 @@ fn main() {
         ..Default::default()
     };
 
-    let _ = eframe::run_native(
+    if let Err(e) = eframe::run_native(
         "mp3rgain",
         options,
         Box::new(|cc| Ok(Box::new(Mp3rgainApp::new(cc)))),
-    );
+    ) {
+        let msg = format!("Failed to start mp3rgain GUI:\n\n{e}");
+        eprintln!("{msg}");
+        rfd::MessageDialog::new()
+            .set_title("mp3rgain Error")
+            .set_description(&msg)
+            .set_level(rfd::MessageLevel::Error)
+            .show();
+    }
 }
