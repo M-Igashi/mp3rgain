@@ -18,17 +18,17 @@ use std::path::Path;
 use crate::mp4meta;
 
 #[cfg(feature = "replaygain")]
-use symphonia::core::audio::{AudioBufferRef, Signal};
+use symphonia::core::audio::{Audio, GenericAudioBufferRef};
 #[cfg(feature = "replaygain")]
-use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::codecs::audio::{AudioDecoderOptions, CODEC_ID_NULL_AUDIO};
+#[cfg(feature = "replaygain")]
+use symphonia::core::formats::probe::Hint;
 #[cfg(feature = "replaygain")]
 use symphonia::core::formats::FormatOptions;
 #[cfg(feature = "replaygain")]
 use symphonia::core::io::MediaSourceStream;
 #[cfg(feature = "replaygain")]
 use symphonia::core::meta::MetadataOptions;
-#[cfg(feature = "replaygain")]
-use symphonia::core::probe::Hint;
 
 /// ReplayGain reference level in dB SPL
 /// Original mp3gain uses 89 dB (ReplayGain 1.0)
@@ -906,25 +906,28 @@ fn analyze_track_internal(
         hint.with_extension(ext);
     }
 
-    let probed = symphonia::default::get_probe()
-        .format(
+    let mut format = symphonia::default::get_probe()
+        .probe(
             &hint,
             mss,
-            &FormatOptions::default(),
-            &MetadataOptions::default(),
+            FormatOptions::default(),
+            MetadataOptions::default(),
         )
         .map_err(|e| Error::ProbeFailed {
             path: file_path.to_path_buf(),
             source: Box::new(e),
         })?;
 
-    let mut format = probed.format;
-
     // Find audio tracks
     let audio_tracks: Vec<_> = format
         .tracks()
         .iter()
-        .filter(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .filter(|t| {
+            t.codec_params
+                .as_ref()
+                .and_then(|p| p.audio())
+                .is_some_and(|a| a.codec != CODEC_ID_NULL_AUDIO)
+        })
         .collect();
 
     if audio_tracks.is_empty() {
@@ -947,15 +950,23 @@ fn analyze_track_internal(
     };
 
     let track_id = track.id;
-    let sample_rate = track
+    let audio_params = track
         .codec_params
+        .as_ref()
+        .and_then(|p| p.audio())
+        .ok_or(Error::NoAudioTrack)?;
+    let sample_rate = audio_params
         .sample_rate
         .ok_or(Error::UnsupportedSampleRate(0))?;
-    let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(2);
+    let channels = audio_params
+        .channels
+        .as_ref()
+        .map(|c| c.count())
+        .unwrap_or(2);
 
     // Create decoder
     let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
+        .make_audio_decoder(audio_params, &AudioDecoderOptions::default())
         .map_err(|e| Error::Decode(Box::new(e)))?;
 
     // Create filter for each channel
@@ -971,12 +982,8 @@ fn analyze_track_internal(
     // Process all packets
     loop {
         let packet = match format.next_packet() {
-            Ok(p) => p,
-            Err(symphonia::core::errors::Error::IoError(e))
-                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                break;
-            }
+            Ok(Some(p)) => p,
+            Ok(None) => break,
             Err(e) => return Err(Error::Decode(Box::new(e))),
         };
 
@@ -1036,25 +1043,25 @@ const SAMPLE_SCALE_16BIT: f64 = 32768.0;
 /// Process an audio buffer and feed filtered samples to the analyzer
 #[cfg(feature = "replaygain")]
 fn process_audio_buffer(
-    buffer: &AudioBufferRef,
+    buffer: &GenericAudioBufferRef,
     filters: &mut [EqualLoudnessFilter],
     analyzer: &mut ReplayGainAnalyzer,
     peak: &mut f64,
 ) {
     match buffer {
-        AudioBufferRef::F32(buf) => {
-            let channels = buf.spec().channels.count();
+        GenericAudioBufferRef::F32(buf) => {
+            let channels = buf.num_planes();
             let frames = buf.frames();
 
             for frame in 0..frames {
                 // Get normalized sample and track peak (in normalized range for peak reporting)
-                let left_norm = buf.chan(0)[frame] as f64;
+                let left_norm = buf.plane(0).unwrap()[frame] as f64;
                 *peak = peak.max(left_norm.abs());
                 // Scale to 16-bit range for ReplayGain algorithm compatibility
                 let left_filtered = filters[0].process(left_norm * SAMPLE_SCALE_16BIT);
 
                 if channels >= 2 {
-                    let right_norm = buf.chan(1)[frame] as f64;
+                    let right_norm = buf.plane(1).unwrap()[frame] as f64;
                     *peak = peak.max(right_norm.abs());
                     let right_filtered = filters[1].process(right_norm * SAMPLE_SCALE_16BIT);
                     analyzer.add_sample(left_filtered, right_filtered);
@@ -1063,20 +1070,20 @@ fn process_audio_buffer(
                 }
             }
         }
-        AudioBufferRef::S16(buf) => {
-            let channels = buf.spec().channels.count();
+        GenericAudioBufferRef::S16(buf) => {
+            let channels = buf.num_planes();
             let frames = buf.frames();
 
             for frame in 0..frames {
                 // S16 samples are already in the correct range for ReplayGain algorithm
                 // Convert to f64 directly without normalization for filter processing
-                let left = buf.chan(0)[frame] as f64;
+                let left = buf.plane(0).unwrap()[frame] as f64;
                 // Track peak in normalized range (0.0 to 1.0)
                 *peak = peak.max((left / SAMPLE_SCALE_16BIT).abs());
                 let left_filtered = filters[0].process(left);
 
                 if channels >= 2 {
-                    let right = buf.chan(1)[frame] as f64;
+                    let right = buf.plane(1).unwrap()[frame] as f64;
                     *peak = peak.max((right / SAMPLE_SCALE_16BIT).abs());
                     let right_filtered = filters[1].process(right);
                     analyzer.add_sample(left_filtered, right_filtered);
@@ -1085,20 +1092,20 @@ fn process_audio_buffer(
                 }
             }
         }
-        AudioBufferRef::S32(buf) => {
-            let channels = buf.spec().channels.count();
+        GenericAudioBufferRef::S32(buf) => {
+            let channels = buf.num_planes();
             let frames = buf.frames();
             // Scale S32 to 16-bit range: divide by 2^16 to go from 32-bit to 16-bit range
             let scale = SAMPLE_SCALE_16BIT / 2147483648.0;
 
             for frame in 0..frames {
-                let left = buf.chan(0)[frame] as f64 * scale;
+                let left = buf.plane(0).unwrap()[frame] as f64 * scale;
                 // Track peak in normalized range
                 *peak = peak.max((left / SAMPLE_SCALE_16BIT).abs());
                 let left_filtered = filters[0].process(left);
 
                 if channels >= 2 {
-                    let right = buf.chan(1)[frame] as f64 * scale;
+                    let right = buf.plane(1).unwrap()[frame] as f64 * scale;
                     *peak = peak.max((right / SAMPLE_SCALE_16BIT).abs());
                     let right_filtered = filters[1].process(right);
                     analyzer.add_sample(left_filtered, right_filtered);
@@ -1258,46 +1265,49 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
         hint.with_extension(ext);
     }
 
-    let probed = symphonia::default::get_probe()
-        .format(
+    let mut format = symphonia::default::get_probe()
+        .probe(
             &hint,
             mss,
-            &FormatOptions::default(),
-            &MetadataOptions::default(),
+            FormatOptions::default(),
+            MetadataOptions::default(),
         )
         .map_err(|e| Error::ProbeFailed {
             path: file_path.to_path_buf(),
             source: Box::new(e),
         })?;
 
-    let mut format = probed.format;
-
     let track = format
         .tracks()
         .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .find(|t| {
+            t.codec_params
+                .as_ref()
+                .and_then(|p| p.audio())
+                .is_some_and(|a| a.codec != CODEC_ID_NULL_AUDIO)
+        })
         .ok_or(Error::NoAudioTrack)?;
 
     let track_id = track.id;
-    let sample_rate = track
+    let audio_params = track
         .codec_params
+        .as_ref()
+        .and_then(|p| p.audio())
+        .ok_or(Error::NoAudioTrack)?;
+    let sample_rate = audio_params
         .sample_rate
         .ok_or(Error::UnsupportedSampleRate(0))?;
 
     let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
+        .make_audio_decoder(audio_params, &AudioDecoderOptions::default())
         .map_err(|e| Error::Decode(Box::new(e)))?;
 
     let mut max_peak: f64 = 0.0;
 
     loop {
         let packet = match format.next_packet() {
-            Ok(p) => p,
-            Err(symphonia::core::errors::Error::IoError(e))
-                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                break;
-            }
+            Ok(Some(p)) => p,
+            Ok(None) => break,
             Err(e) => return Err(Error::Decode(Box::new(e))),
         };
 
@@ -1321,31 +1331,32 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
         // To detect clipping, we check if the peak is exactly 1.0 (or very close),
         // which indicates the audio may have been clipped by the decoder.
         match &decoded {
-            AudioBufferRef::F32(buf) => {
-                let channels = buf.spec().channels.count();
+            GenericAudioBufferRef::F32(buf) => {
+                let channels = buf.num_planes();
                 for frame in 0..buf.frames() {
                     for ch in 0..channels {
-                        let sample = buf.chan(ch)[frame].abs() as f64;
+                        let sample = buf.plane(ch).unwrap()[frame].abs() as f64;
                         max_peak = max_peak.max(sample);
                     }
                 }
             }
-            AudioBufferRef::S16(buf) => {
-                let channels = buf.spec().channels.count();
+            GenericAudioBufferRef::S16(buf) => {
+                let channels = buf.num_planes();
                 for frame in 0..buf.frames() {
                     for ch in 0..channels {
                         // S16 samples: convert to normalized range
                         // This can exceed 1.0 if sample is at max (32767/32768 ≈ 0.99997)
-                        let sample = (buf.chan(ch)[frame] as f64).abs() / SAMPLE_SCALE_16BIT;
+                        let sample =
+                            (buf.plane(ch).unwrap()[frame] as f64).abs() / SAMPLE_SCALE_16BIT;
                         max_peak = max_peak.max(sample);
                     }
                 }
             }
-            AudioBufferRef::S32(buf) => {
-                let channels = buf.spec().channels.count();
+            GenericAudioBufferRef::S32(buf) => {
+                let channels = buf.num_planes();
                 for frame in 0..buf.frames() {
                     for ch in 0..channels {
-                        let sample = (buf.chan(ch)[frame] as f64).abs() / 2147483648.0;
+                        let sample = (buf.plane(ch).unwrap()[frame] as f64).abs() / 2147483648.0;
                         max_peak = max_peak.max(sample);
                     }
                 }

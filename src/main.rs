@@ -615,25 +615,11 @@ fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
                     f64::INFINITY
                 };
 
-                // Check if peak is at clipping threshold (Symphonia MP3 decoder limitation)
-                // Only applies to MP3 files - AAC/M4A decoder doesn't have this issue
-                let is_mp3 = file
-                    .extension()
-                    .map(|e| e.eq_ignore_ascii_case("mp3"))
-                    .unwrap_or(false);
-                let may_clip = is_mp3 && max_amp >= 0.9999;
-
                 match opts.output_format {
                     OutputFormat::Text => {
                         if !opts.quiet {
                             println!("{}", filename.cyan().bold());
                             println!("  Max PCM sample: {:.6}", max_pcm_sample);
-                            if may_clip {
-                                println!(
-                                    "  {}",
-                                    "  (may be clipped - actual peak could be higher)".yellow()
-                                );
-                            }
                             println!("  Headroom:       {:+.2} dB", headroom_db);
                             println!("  Max global_gain: {}", max_gain);
                             println!("  Min global_gain: {}", min_gain);
@@ -649,19 +635,14 @@ fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
                         );
                     }
                     OutputFormat::Json => {
-                        let mut result = JsonFileResult {
+                        json_results.push(JsonFileResult {
                             file: file.display().to_string(),
                             max_amplitude: Some(max_pcm_sample),
                             headroom_db: Some(headroom_db),
                             max_gain: Some(max_gain),
                             min_gain: Some(min_gain),
                             ..Default::default()
-                        };
-                        if may_clip {
-                            result.warning =
-                                Some("peak may be clipped - actual value could be higher".into());
-                        }
-                        json_results.push(result);
+                        });
                     }
                 }
             }
