@@ -1,0 +1,86 @@
+name: Download Stats
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Every Monday 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  collect-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: gh-pages
+
+      - name: Collect GitHub Releases stats
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${{ github.repository }}/releases --paginate \
+            --jq '[.[] | {
+              tag: .tag_name,
+              date: .published_at,
+              assets: [.assets[] | {name, download_count}]
+            }]' > /tmp/github_releases.json
+
+      - name: Collect crates.io stats
+        run: |
+          curl -sf -H 'User-Agent: mp3rgain-stats' \
+            'https://crates.io/api/v1/crates/mp3rgain' \
+            | jq '{
+              total_downloads: .crate.downloads,
+              recent_downloads: .crate.recent_downloads,
+              versions: [.versions[] | {num, downloads, created_at}]
+            }' > /tmp/crates_io.json
+
+      - name: Collect AUR stats
+        run: |
+          curl -sf 'https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=mp3rgain-bin&arg[]=mp3rgui' \
+            | jq '[.results[] | {
+              name: .Name,
+              version: .Version,
+              votes: .NumVotes,
+              popularity: .Popularity,
+              maintainer: .Maintainer
+            }]' > /tmp/aur.json
+
+      - name: Build stats snapshot
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          jq -n \
+            --arg date "$DATE" \
+            --slurpfile gh /tmp/github_releases.json \
+            --slurpfile crates /tmp/crates_io.json \
+            --slurpfile aur /tmp/aur.json \
+            '{
+              date: $date,
+              github_releases: $gh[0],
+              crates_io: $crates[0],
+              aur: $aur[0]
+            }' > /tmp/snapshot.json
+
+      - name: Append to history
+        run: |
+          mkdir -p data
+          if [ -f data/stats.json ]; then
+            # Remove existing entry for the same date, then append
+            DATE=$(date -u +%Y-%m-%d)
+            jq --arg date "$DATE" '[.[] | select(.date != $date)]' data/stats.json > /tmp/existing.json
+            jq -s '.[0] + [.[1]]' /tmp/existing.json /tmp/snapshot.json > data/stats.json
+          else
+            jq -s '.' /tmp/snapshot.json > data/stats.json
+          fi
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/stats.json
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Update download stats $(date -u +%Y-%m-%d)"
+          git push
