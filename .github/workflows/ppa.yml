@@ -79,11 +79,13 @@ jobs:
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
         run: |
           PKG=mp3rgain
+          ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.gz"
           for DISTRO in noble oracular plucky; do
             echo "=== Building ${PKG} for ${DISTRO} ==="
             WORK="build-ppa/build-${DISTRO}"
             mkdir -p "$WORK"
-            tar -xzf "build-ppa/${PKG}_${VERSION}.orig.tar.gz" -C "$WORK"
+            tar -xzf "$ORIG" -C "$WORK"
+            cp "$ORIG" "$WORK/"
             cp -r packages/ppa/debian "$WORK/${PKG}-${VERSION}/debian"
             PPA_VER="${VERSION}-0ppa1~${DISTRO}1"
             printf '%s (%s) %s; urgency=medium\n\n  * Release %s\n\n -- M-Igashi <M-Igashi@users.noreply.github.com>  %s\n' \
@@ -155,11 +157,13 @@ jobs:
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
         run: |
           PKG=mp3rgui
+          ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.gz"
           for DISTRO in noble oracular plucky; do
             echo "=== Building ${PKG} for ${DISTRO} ==="
             WORK="build-ppa/build-${DISTRO}"
             mkdir -p "$WORK"
-            tar -xzf "build-ppa/${PKG}_${VERSION}.orig.tar.gz" -C "$WORK"
+            tar -xzf "$ORIG" -C "$WORK"
+            cp "$ORIG" "$WORK/"
             cp -r packages/ppa-gui/debian "$WORK/${PKG}-${VERSION}/debian"
             PPA_VER="${VERSION}-0ppa1~${DISTRO}1"
             printf '%s (%s) %s; urgency=medium\n\n  * Release %s\n\n -- M-Igashi <M-Igashi@users.noreply.github.com>  %s\n' \
