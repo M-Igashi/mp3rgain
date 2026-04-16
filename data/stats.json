@@ -5,6 +5,124 @@
       {
         "assets": [
           {
+            "download_count": 0,
+            "name": "mp3rgain-v2.2.0-linux-arm64.tar.gz"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgain-v2.2.0-linux-arm64.tar.gz.sha256"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgain-v2.2.0-linux-x86_64.tar.gz"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgain-v2.2.0-linux-x86_64.tar.gz.sha256"
+          },
+          {
+            "download_count": 3,
+            "name": "mp3rgain-v2.2.0-macos-universal.tar.gz"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgain-v2.2.0-macos-universal.tar.gz.sha256"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgain-v2.2.0-windows-arm64.zip"
+          },
+          {
+            "download_count": 1,
+            "name": "mp3rgain-v2.2.0-windows-arm64.zip.sha256"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgain-v2.2.0-windows-x86_64.zip"
+          },
+          {
+            "download_count": 1,
+            "name": "mp3rgain-v2.2.0-windows-x86_64.zip.sha256"
+          },
+          {
+            "download_count": 4,
+            "name": "mp3rgain_2.2.0-1_amd64.deb"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgain_2.2.0-1_amd64.deb.sha256"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgain_2.2.0-1_arm64.deb"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgain_2.2.0-1_arm64.deb.sha256"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgui-v2.2.0-linux-arm64.tar.gz"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgui-v2.2.0-linux-x86_64.tar.gz"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgui-v2.2.0-macos-universal.dmg"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgui-v2.2.0-macos-universal.dmg.sha256"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgui-v2.2.0-macos-universal.tar.gz"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgui-v2.2.0-macos-universal.tar.gz.sha256"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgui-v2.2.0-windows-arm64.zip"
+          },
+          {
+            "download_count": 1,
+            "name": "mp3rgui-v2.2.0-windows-arm64.zip.sha256"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgui-v2.2.0-windows-x86_64.zip"
+          },
+          {
+            "download_count": 1,
+            "name": "mp3rgui-v2.2.0-windows-x86_64.zip.sha256"
+          },
+          {
+            "download_count": 2,
+            "name": "mp3rgui_2.2.0-1_amd64.deb"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgui_2.2.0-1_amd64.deb.sha256"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgui_2.2.0-1_arm64.deb"
+          },
+          {
+            "download_count": 0,
+            "name": "mp3rgui_2.2.0-1_arm64.deb.sha256"
+          }
+        ],
+        "date": "2026-04-16T17:28:05Z",
+        "tag": "v2.2.0"
+      },
+      {
+        "assets": [
+          {
             "download_count": 13,
             "name": "mp3rgain-v2.1.0-linux-arm64.tar.gz"
           },
@@ -29,7 +147,7 @@
             "name": "mp3rgain-v2.1.0-macos-universal.tar.gz.sha256"
           },
           {
-            "download_count": 54,
+            "download_count": 55,
             "name": "mp3rgain-v2.1.0-windows-arm64.zip"
           },
           {
@@ -41,7 +159,7 @@
             "name": "mp3rgain-v2.1.0-windows-x86_64.zip"
           },
           {
-            "download_count": 18,
+            "download_count": 19,
             "name": "mp3rgain-v2.1.0-windows-x86_64.zip.sha256"
           },
           {
@@ -93,7 +211,7 @@
             "name": "mp3rgui-v2.1.0-windows-arm64.zip.sha256"
           },
           {
-            "download_count": 84,
+            "download_count": 85,
             "name": "mp3rgui-v2.1.0-windows-x86_64.zip"
           },
           {
@@ -1494,12 +1612,17 @@
       }
     ],
     "crates_io": {
-      "total_downloads": 879,
-      "recent_downloads": 550,
+      "total_downloads": 881,
+      "recent_downloads": 552,
       "versions": [
         {
+          "num": "2.2.0",
+          "downloads": 1,
+          "created_at": "2026-04-16T17:32:43.761776Z"
+        },
+        {
           "num": "2.1.0",
-          "downloads": 39,
+          "downloads": 40,
           "created_at": "2026-04-07T09:34:58.346954Z"
         },
         {
@@ -1662,14 +1785,14 @@
     "aur": [
       {
         "name": "mp3rgain-bin",
-        "version": "2.1.0-1",
+        "version": "2.2.0-1",
         "votes": 3,
         "popularity": 1.508358,
         "maintainer": "Dominiquini"
       },
       {
         "name": "mp3rgui",
-        "version": "2.1.0-1",
+        "version": "2.2.0-1",
         "votes": 0,
         "popularity": 0,
         "maintainer": "m-igashi"
