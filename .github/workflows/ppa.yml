@@ -90,7 +90,7 @@ jobs:
               "$PKG" "$PPA_VER" "$DISTRO" "$VERSION" "$(date -R)" \
               > "$WORK/${PKG}-${VERSION}/debian/changelog"
             cd "$WORK/${PKG}-${VERSION}"
-            debuild -S -sa -k"$GPG_KEY_ID"
+            debuild -S -sa -d -k"$GPG_KEY_ID"
             cd "$GITHUB_WORKSPACE"
             echo "=== Uploading ${PKG} for ${DISTRO} ==="
             dput ppa:m-igashi/mp3rgain "$WORK/${PKG}_${PPA_VER}_source.changes"
@@ -166,7 +166,7 @@ jobs:
               "$PKG" "$PPA_VER" "$DISTRO" "$VERSION" "$(date -R)" \
               > "$WORK/${PKG}-${VERSION}/debian/changelog"
             cd "$WORK/${PKG}-${VERSION}"
-            debuild -S -sa -k"$GPG_KEY_ID"
+            debuild -S -sa -d -k"$GPG_KEY_ID"
             cd "$GITHUB_WORKSPACE"
             echo "=== Uploading ${PKG} for ${DISTRO} ==="
             dput ppa:m-igashi/mp3rgain "$WORK/${PKG}_${PPA_VER}_source.changes"
