@@ -27,6 +27,7 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 | macOS | `brew install M-Igashi/tap/mp3rgain` |
 | Windows | `winget install M-Igashi.mp3rgain` |
 | Arch Linux (AUR) | `yay -S mp3rgain-bin` |
+| Ubuntu (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgain` |
 | Debian/Ubuntu | `sudo apt install ./mp3rgain_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) (ARM64 also available) |
 | Nix/NixOS | `nix profile install github:M-Igashi/mp3rgain` |
 | Cargo | `cargo install mp3rgain` |
@@ -38,6 +39,7 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 | macOS | `brew install --cask M-Igashi/tap/mp3rgui` |
 | Windows | `winget install M-Igashi.mp3rgui` |
 | Arch Linux (AUR) | `yay -S mp3rgui` |
+| Ubuntu (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgui` |
 | Debian/Ubuntu | `sudo apt install ./mp3rgui_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) (ARM64 also available, requires Ubuntu 24.04+ / Debian trixie+) |
 
 Binaries for all platforms are also available from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases).

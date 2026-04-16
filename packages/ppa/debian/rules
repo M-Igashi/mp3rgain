@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+export DH_VERBOSE = 1
+export CARGO_HOME = $(CURDIR)/debian/cargo-home
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# Use vendored dependencies (no network access on Launchpad build farm)
+	cargo build --release --frozen --features replaygain
+
+override_dh_auto_install:
+	install -Dm755 target/release/mp3rgain debian/mp3rgain/usr/bin/mp3rgain
+	install -Dm644 docs/man/mp3rgain.1 debian/mp3rgain/usr/share/man/man1/mp3rgain.1
+
+override_dh_auto_test:
+	cargo test --release --frozen --features replaygain --lib
+
+override_dh_auto_clean:
+	cargo clean || true
+	rm -rf $(CARGO_HOME)

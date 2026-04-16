@@ -1,0 +1,31 @@
+#!/usr/bin/make -f
+export DH_VERBOSE = 1
+export CARGO_HOME = $(CURDIR)/debian/cargo-home
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# Use vendored dependencies (no network access on Launchpad build farm)
+	cargo build --release --frozen --manifest-path mp3rgui/Cargo.toml
+
+override_dh_auto_install:
+	install -Dm755 mp3rgui/target/release/mp3rgui debian/mp3rgui/usr/bin/mp3rgui
+	install -Dm644 packages/aur-gui/mp3rgui.desktop debian/mp3rgui/usr/share/applications/mp3rgui.desktop
+	install -Dm644 mp3rgui/icons/icon_128x128.png debian/mp3rgui/usr/share/icons/hicolor/128x128/apps/mp3rgui.png
+	install -Dm644 mp3rgui/icons/icon_256x256.png debian/mp3rgui/usr/share/icons/hicolor/256x256/apps/mp3rgui.png
+	install -Dm644 mp3rgui/icons/icon_64x64.png debian/mp3rgui/usr/share/icons/hicolor/64x64/apps/mp3rgui.png
+	install -Dm644 mp3rgui/icons/icon_48x48.png debian/mp3rgui/usr/share/icons/hicolor/48x48/apps/mp3rgui.png
+	install -Dm644 mp3rgui/icons/icon_32x32.png debian/mp3rgui/usr/share/icons/hicolor/32x32/apps/mp3rgui.png
+	install -Dm644 mp3rgui/icons/icon_16x16.png debian/mp3rgui/usr/share/icons/hicolor/16x16/apps/mp3rgui.png
+
+override_dh_auto_test:
+	# Skip tests as GUI tests require display server
+	true
+
+override_dh_shlibdeps:
+	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
+
+override_dh_auto_clean:
+	cargo clean --manifest-path mp3rgui/Cargo.toml || true
+	rm -rf $(CARGO_HOME)
