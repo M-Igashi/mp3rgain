@@ -5,6 +5,9 @@ name: PPA Upload
 #   GPG_PASSPHRASE   - passphrase for the GPG key
 
 on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       package:
@@ -26,7 +29,9 @@ permissions:
 jobs:
   upload-cli:
     name: Upload mp3rgain to PPA
-    if: inputs.package == 'all' || inputs.package == 'cli'
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.package == 'all' || inputs.package == 'cli'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -89,7 +94,7 @@ jobs:
         env:
           VERSION: ${{ steps.meta.outputs.version }}
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
-          PPA_REV: ${{ inputs.ppa_revision }}
+          PPA_REV: ${{ inputs.ppa_revision || '1' }}
         run: |
           PKG=mp3rgain
           ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
@@ -113,7 +118,9 @@ jobs:
 
   upload-gui:
     name: Upload mp3rgui to PPA
-    if: inputs.package == 'all' || inputs.package == 'gui'
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.package == 'all' || inputs.package == 'gui'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -200,7 +207,7 @@ jobs:
         env:
           VERSION: ${{ steps.meta.outputs.version }}
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
-          PPA_REV: ${{ inputs.ppa_revision }}
+          PPA_REV: ${{ inputs.ppa_revision || '1' }}
         run: |
           PKG=mp3rgui
           ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
