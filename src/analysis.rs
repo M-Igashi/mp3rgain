@@ -17,11 +17,9 @@ pub struct Mp3Analysis {
     max_gain: u8,
     avg_gain: f64,
     headroom_steps: i32,
-    headroom_db: f64,
 }
 
 impl Mp3Analysis {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         frame_count: usize,
         mpeg_version: MpegVersion,
@@ -30,7 +28,6 @@ impl Mp3Analysis {
         max_gain: u8,
         avg_gain: f64,
         headroom_steps: i32,
-        headroom_db: f64,
     ) -> Self {
         Self {
             frame_count,
@@ -40,7 +37,6 @@ impl Mp3Analysis {
             max_gain,
             avg_gain,
             headroom_steps,
-            headroom_db,
         }
     }
 
@@ -66,7 +62,7 @@ impl Mp3Analysis {
         self.headroom_steps
     }
     pub fn headroom_db(&self) -> f64 {
-        self.headroom_db
+        self.headroom_steps as f64 * GAIN_STEP_DB
     }
 }
 
@@ -75,7 +71,10 @@ impl std::fmt::Display for Mp3Analysis {
         write!(
             f,
             "{} {}, {} frames, headroom: {:+.1} dB",
-            self.mpeg_version, self.channel_mode, self.frame_count, self.headroom_db
+            self.mpeg_version,
+            self.channel_mode,
+            self.frame_count,
+            self.headroom_db()
         )
     }
 }
@@ -222,7 +221,6 @@ pub fn analyze(file_path: &Path) -> Result<Mp3Analysis> {
 
     let avg_gain = total_gain as f64 / gain_count as f64;
     let headroom_steps = (MAX_GAIN - max_gain) as i32;
-    let headroom_db = headroom_steps as f64 * GAIN_STEP_DB;
 
     Ok(Mp3Analysis::new(
         frame_count,
@@ -232,7 +230,6 @@ pub fn analyze(file_path: &Path) -> Result<Mp3Analysis> {
         max_gain,
         avg_gain,
         headroom_steps,
-        headroom_db,
     ))
 }
 

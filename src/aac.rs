@@ -1142,50 +1142,17 @@ fn parse_raw_data_block(reader: &mut BitReader, sample_rate: u32) -> Result<Vec<
 
 /// Read 8-bit value at bit-unaligned position in file data
 fn read_aac_gain_at(data: &[u8], loc: &AacGainLocation) -> u8 {
-    let idx = loc.file_offset as usize;
-    if idx >= data.len() {
-        return 0;
-    }
-    if loc.bit_offset == 0 {
-        data[idx]
-    } else if idx + 1 < data.len() {
-        let shift = loc.bit_offset;
-        let high = data[idx] << shift;
-        let low = data[idx + 1] >> (8 - shift);
-        high | low
-    } else {
-        data[idx] << loc.bit_offset
-    }
+    crate::frame::read_bits_u8(data, loc.file_offset as usize, loc.bit_offset)
 }
 
 /// Write 8-bit value at bit-unaligned position in file data
 fn write_aac_gain_at(data: &mut [u8], loc: &AacGainLocation, value: u8) {
-    let idx = loc.file_offset as usize;
-    if idx >= data.len() {
-        return;
-    }
-    if loc.bit_offset == 0 {
-        data[idx] = value;
-    } else if idx + 1 < data.len() {
-        let shift = loc.bit_offset;
-        let mask_high = 0xFFu8 << (8 - shift);
-        let mask_low = 0xFFu8 >> shift;
-        data[idx] = (data[idx] & mask_high) | (value >> shift);
-        data[idx + 1] = (data[idx + 1] & mask_low) | (value << (8 - shift));
-    } else {
-        let shift = loc.bit_offset;
-        let mask_high = 0xFFu8 << (8 - shift);
-        data[idx] = (data[idx] & mask_high) | (value >> shift);
-    }
+    crate::frame::write_bits_u8(data, loc.file_offset as usize, loc.bit_offset, value)
 }
 
 /// Adjust gain with saturating clamp to 0-255
 fn adjust_aac_gain_value(current: u8, steps: i32) -> u8 {
-    if steps > 0 {
-        current.saturating_add(steps.min(255) as u8)
-    } else {
-        current.saturating_sub((-steps).min(255) as u8)
-    }
+    crate::frame::adjust_gain_value(current, steps, crate::frame::GainMode::Saturating)
 }
 
 /// Apply gain adjustment to all gain locations in a file buffer.

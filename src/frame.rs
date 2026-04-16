@@ -188,46 +188,51 @@ pub(crate) fn calculate_gain_locations(
     locations
 }
 
-/// Read 8-bit value at bit-unaligned position
-pub(crate) fn read_gain_at(data: &[u8], loc: &GainLocation) -> u8 {
-    let idx = loc.byte_offset;
-    if idx >= data.len() {
+/// Read 8-bit value at bit-unaligned position (raw byte/bit offset)
+pub(crate) fn read_bits_u8(data: &[u8], byte_offset: usize, bit_offset: u8) -> u8 {
+    if byte_offset >= data.len() {
         return 0;
     }
 
-    if loc.bit_offset == 0 {
-        data[idx]
-    } else if idx + 1 < data.len() {
-        let shift = loc.bit_offset;
-        let high = data[idx] << shift;
-        let low = data[idx + 1] >> (8 - shift);
+    if bit_offset == 0 {
+        data[byte_offset]
+    } else if byte_offset + 1 < data.len() {
+        let high = data[byte_offset] << bit_offset;
+        let low = data[byte_offset + 1] >> (8 - bit_offset);
         high | low
     } else {
-        data[idx] << loc.bit_offset
+        data[byte_offset] << bit_offset
     }
+}
+
+/// Write 8-bit value at bit-unaligned position (raw byte/bit offset)
+pub(crate) fn write_bits_u8(data: &mut [u8], byte_offset: usize, bit_offset: u8, value: u8) {
+    if byte_offset >= data.len() {
+        return;
+    }
+
+    if bit_offset == 0 {
+        data[byte_offset] = value;
+    } else if byte_offset + 1 < data.len() {
+        let mask_high = 0xFFu8 << (8 - bit_offset);
+        let mask_low = 0xFFu8 >> bit_offset;
+
+        data[byte_offset] = (data[byte_offset] & mask_high) | (value >> bit_offset);
+        data[byte_offset + 1] = (data[byte_offset + 1] & mask_low) | (value << (8 - bit_offset));
+    } else {
+        let mask_high = 0xFFu8 << (8 - bit_offset);
+        data[byte_offset] = (data[byte_offset] & mask_high) | (value >> bit_offset);
+    }
+}
+
+/// Read 8-bit value at bit-unaligned position
+pub(crate) fn read_gain_at(data: &[u8], loc: &GainLocation) -> u8 {
+    read_bits_u8(data, loc.byte_offset, loc.bit_offset)
 }
 
 /// Write 8-bit value at bit-unaligned position
 pub(crate) fn write_gain_at(data: &mut [u8], loc: &GainLocation, value: u8) {
-    let idx = loc.byte_offset;
-    if idx >= data.len() {
-        return;
-    }
-
-    if loc.bit_offset == 0 {
-        data[idx] = value;
-    } else if idx + 1 < data.len() {
-        let shift = loc.bit_offset;
-        let mask_high = 0xFFu8 << (8 - shift);
-        let mask_low = 0xFFu8 >> shift;
-
-        data[idx] = (data[idx] & mask_high) | (value >> shift);
-        data[idx + 1] = (data[idx + 1] & mask_low) | (value << (8 - shift));
-    } else {
-        let shift = loc.bit_offset;
-        let mask_high = 0xFFu8 << (8 - shift);
-        data[idx] = (data[idx] & mask_high) | (value >> shift);
-    }
+    write_bits_u8(data, loc.byte_offset, loc.bit_offset, value)
 }
 
 /// Skip ID3v2 tag at beginning of data

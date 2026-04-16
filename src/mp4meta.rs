@@ -420,53 +420,47 @@ fn serialize_freeform_tag(tag: &FreeformTag) -> Vec<u8> {
     freeform
 }
 
-/// Read ReplayGain tags from MP4/M4A file
-pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
+/// Read all iTunes freeform tags from an MP4/M4A file.
+/// Navigates moov -> udta -> meta -> ilst and collects tags with the iTunes namespace.
+fn read_itunes_freeform_tags(file_path: &Path) -> Result<Vec<FreeformTag>> {
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
 
-    let mut tags = ReplayGainTags::default();
-
-    // Find moov box
     let (moov_pos, moov_header) = match find_box(&data, MOOV) {
         Some(x) => x,
-        None => return Ok(tags), // No moov, no metadata
+        None => return Ok(Vec::new()),
     };
 
     let moov_content_start = moov_pos + moov_header.header_size as usize;
     let moov_content_size = moov_header.content_size() as usize;
 
-    // Find udta in moov
     let (udta_pos, udta_header) =
         match find_box_in_container(&data, moov_content_start, moov_content_size, UDTA) {
             Some(x) => x,
-            None => return Ok(tags),
+            None => return Ok(Vec::new()),
         };
 
     let udta_content_start = udta_pos + udta_header.header_size as usize;
     let udta_content_size = udta_header.content_size() as usize;
 
-    // Find meta in udta
     let (meta_pos, meta_header) =
         match find_box_in_container(&data, udta_content_start, udta_content_size, META) {
             Some(x) => x,
-            None => return Ok(tags),
+            None => return Ok(Vec::new()),
         };
 
-    // meta box has 4-byte version/flags before content
     let meta_content_start = meta_pos + meta_header.header_size as usize + 4;
     let meta_content_size = meta_header.content_size() as usize - 4;
 
-    // Find ilst in meta
     let (ilst_pos, ilst_header) =
         match find_box_in_container(&data, meta_content_start, meta_content_size, ILST) {
             Some(x) => x,
-            None => return Ok(tags),
+            None => return Ok(Vec::new()),
         };
 
     let ilst_content_start = ilst_pos + ilst_header.header_size as usize;
     let ilst_content_size = ilst_header.content_size() as usize;
 
-    // Parse freeform tags in ilst
+    let mut tags = Vec::new();
     let mut pos = ilst_content_start;
     while pos + 8 <= ilst_content_start + ilst_content_size {
         let mut cursor = Cursor::new(&data[pos..]);
@@ -475,21 +469,7 @@ pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
                 let tag_data = &data[pos + header.header_size as usize..pos + header.size as usize];
                 if let Some(tag) = parse_freeform_tag(tag_data) {
                     if tag.namespace() == ITUNES_NAMESPACE {
-                        match tag.name() {
-                            x if x.eq_ignore_ascii_case(RG_TRACK_GAIN) => {
-                                tags.track_gain = Some(tag.value().to_string());
-                            }
-                            x if x.eq_ignore_ascii_case(RG_TRACK_PEAK) => {
-                                tags.track_peak = Some(tag.value().to_string());
-                            }
-                            x if x.eq_ignore_ascii_case(RG_ALBUM_GAIN) => {
-                                tags.album_gain = Some(tag.value().to_string());
-                            }
-                            x if x.eq_ignore_ascii_case(RG_ALBUM_PEAK) => {
-                                tags.album_peak = Some(tag.value().to_string());
-                            }
-                            _ => {}
-                        }
+                        tags.push(tag);
                     }
                 }
             }
@@ -506,74 +486,46 @@ pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
     Ok(tags)
 }
 
+/// Read ReplayGain tags from MP4/M4A file
+pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
+    let freeform_tags = read_itunes_freeform_tags(file_path)?;
+    let mut tags = ReplayGainTags::default();
+
+    for tag in &freeform_tags {
+        match tag.name() {
+            x if x.eq_ignore_ascii_case(RG_TRACK_GAIN) => {
+                tags.track_gain = Some(tag.value().to_string());
+            }
+            x if x.eq_ignore_ascii_case(RG_TRACK_PEAK) => {
+                tags.track_peak = Some(tag.value().to_string());
+            }
+            x if x.eq_ignore_ascii_case(RG_ALBUM_GAIN) => {
+                tags.album_gain = Some(tag.value().to_string());
+            }
+            x if x.eq_ignore_ascii_case(RG_ALBUM_PEAK) => {
+                tags.album_peak = Some(tag.value().to_string());
+            }
+            _ => {}
+        }
+    }
+
+    Ok(tags)
+}
+
 /// Read undo tags from MP4/M4A file
 pub fn read_undo_tags(file_path: &Path) -> Result<UndoTags> {
-    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-
+    let freeform_tags = read_itunes_freeform_tags(file_path)?;
     let mut tags = UndoTags::default();
 
-    let (moov_pos, moov_header) = match find_box(&data, MOOV) {
-        Some(x) => x,
-        None => return Ok(tags),
-    };
-
-    let moov_content_start = moov_pos + moov_header.header_size as usize;
-    let moov_content_size = moov_header.content_size() as usize;
-
-    let (udta_pos, udta_header) =
-        match find_box_in_container(&data, moov_content_start, moov_content_size, UDTA) {
-            Some(x) => x,
-            None => return Ok(tags),
-        };
-
-    let udta_content_start = udta_pos + udta_header.header_size as usize;
-    let udta_content_size = udta_header.content_size() as usize;
-
-    let (meta_pos, meta_header) =
-        match find_box_in_container(&data, udta_content_start, udta_content_size, META) {
-            Some(x) => x,
-            None => return Ok(tags),
-        };
-
-    let meta_content_start = meta_pos + meta_header.header_size as usize + 4;
-    let meta_content_size = meta_header.content_size() as usize - 4;
-
-    let (ilst_pos, ilst_header) =
-        match find_box_in_container(&data, meta_content_start, meta_content_size, ILST) {
-            Some(x) => x,
-            None => return Ok(tags),
-        };
-
-    let ilst_content_start = ilst_pos + ilst_header.header_size as usize;
-    let ilst_content_size = ilst_header.content_size() as usize;
-
-    let mut pos = ilst_content_start;
-    while pos + 8 <= ilst_content_start + ilst_content_size {
-        let mut cursor = Cursor::new(&data[pos..]);
-        if let Ok(Some(header)) = BoxHeader::read(&mut cursor) {
-            if header.box_type == FREEFORM {
-                let tag_data = &data[pos + header.header_size as usize..pos + header.size as usize];
-                if let Some(tag) = parse_freeform_tag(tag_data) {
-                    if tag.namespace() == ITUNES_NAMESPACE {
-                        match tag.name() {
-                            x if x.eq_ignore_ascii_case(UNDO_TAG) => {
-                                tags.undo = Some(tag.value().to_string());
-                            }
-                            x if x.eq_ignore_ascii_case(MINMAX_TAG) => {
-                                tags.minmax = Some(tag.value().to_string());
-                            }
-                            _ => {}
-                        }
-                    }
-                }
+    for tag in &freeform_tags {
+        match tag.name() {
+            x if x.eq_ignore_ascii_case(UNDO_TAG) => {
+                tags.undo = Some(tag.value().to_string());
             }
-
-            if header.size == 0 {
-                break;
+            x if x.eq_ignore_ascii_case(MINMAX_TAG) => {
+                tags.minmax = Some(tag.value().to_string());
             }
-            pos += header.size as usize;
-        } else {
-            break;
+            _ => {}
         }
     }
 
