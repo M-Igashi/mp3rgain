@@ -88,7 +88,7 @@ jobs:
         run: |
           PKG=mp3rgain
           ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
-          for DISTRO in noble oracular plucky; do
+          for DISTRO in noble plucky; do
             echo "=== Building ${PKG} for ${DISTRO} ==="
             WORK="build-ppa/build-${DISTRO}"
             mkdir -p "$WORK"
@@ -174,7 +174,7 @@ jobs:
         run: |
           PKG=mp3rgui
           ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
-          for DISTRO in noble oracular plucky; do
+          for DISTRO in noble plucky; do
             echo "=== Building ${PKG} for ${DISTRO} ==="
             WORK="build-ppa/build-${DISTRO}"
             mkdir -p "$WORK"

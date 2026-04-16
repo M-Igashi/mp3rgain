@@ -30,7 +30,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="${PROJECT_DIR}/build-ppa"
 
 # Supported Ubuntu releases
-ALL_DISTROS=("noble" "oracular" "plucky")
+ALL_DISTROS=("noble" "plucky")
 
 # Defaults
 UPLOAD=false
@@ -112,13 +112,23 @@ replace-with = "vendored-sources"
 directory = "vendor"
 CARGO_CONFIG
 
-    # Step 4: Remove files not needed in the source package
+    # Step 4: Clean up vendored deps to reduce tarball size
+    echo "==> Cleaning vendored dependencies..."
+    find "$src_dir/vendor" -name '*.a' -delete 2>/dev/null || true
+    find "$src_dir/vendor" -name '*.dll' -delete 2>/dev/null || true
+    find "$src_dir/vendor" -name '*.lib' -delete 2>/dev/null || true
+    find "$src_dir/vendor" -type d \( -name tests -o -name examples -o -name benches -o -name .github \) -exec rm -rf {} + 2>/dev/null || true
+    find "$src_dir/vendor" -name '*.md' ! -name 'README.md' -delete 2>/dev/null || true
+    # Clear cargo checksums (standard practice for Debian Rust packaging)
+    for f in "$src_dir"/vendor/*/.cargo-checksum.json; do echo '{"files":{}}' > "$f"; done
+
+    # Step 5: Remove files not needed in the source package
     rm -rf "$src_dir/.claude" "$src_dir/.github" "$src_dir/target" "$src_dir/CLAUDE.md"
 
-    # Step 5: Create orig tarball
+    # Step 6: Create orig tarball (xz for better compression)
     echo "==> Creating orig tarball..."
-    local orig_tarball="${pkg_build_dir}/${pkg_name}_${orig_version}.orig.tar.gz"
-    tar -czf "$orig_tarball" -C "$pkg_build_dir" "${pkg_name}-${orig_version}"
+    local orig_tarball="${pkg_build_dir}/${pkg_name}_${orig_version}.orig.tar.xz"
+    tar -cJf "$orig_tarball" -C "$pkg_build_dir" "${pkg_name}-${orig_version}"
 
     # Step 6: Build source package for each distro
     for distro in "${DISTROS[@]}"; do
@@ -128,8 +138,9 @@ CARGO_CONFIG
         local work_dir="$pkg_build_dir/build-${distro}"
         mkdir -p "$work_dir"
 
-        # Extract orig tarball
-        tar -xzf "$orig_tarball" -C "$work_dir"
+        # Extract orig tarball and copy it to parent dir (required by dpkg-source)
+        tar -xJf "$orig_tarball" -C "$work_dir"
+        cp "$orig_tarball" "$work_dir/"
         local build_src="$work_dir/${pkg_name}-${orig_version}"
 
         # Copy PPA-specific debian directory
