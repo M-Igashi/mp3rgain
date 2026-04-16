@@ -1,0 +1,173 @@
+name: PPA Upload
+
+# Required secrets:
+#   GPG_PRIVATE_KEY  - base64-encoded GPG private key (gpg --export-secret-keys KEY_ID | base64)
+#   GPG_PASSPHRASE   - passphrase for the GPG key
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package to build (cli, gui, or all)"
+        type: choice
+        options:
+          - all
+          - cli
+          - gui
+        default: "all"
+
+permissions:
+  contents: read
+
+jobs:
+  upload-cli:
+    name: Upload mp3rgain to PPA
+    if: inputs.package == 'all' || inputs.package == 'cli'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y devscripts debhelper dput
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
+          mkdir -p ~/.gnupg
+          echo "allow-preset-passphrase" > ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent
+          gpg-connect-agent /bye
+          for KG in $(gpg --with-keygrip --list-secret-keys --with-colons | grep '^grp' | cut -d: -f10); do
+            /usr/lib/gnupg/gpg-preset-passphrase --preset --passphrase "$GPG_PASSPHRASE" "$KG"
+          done
+
+      - name: Get version and GPG key ID
+        id: meta
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          GPG_KEY_ID=$(gpg --list-secret-keys --with-colons | grep '^sec' | head -1 | cut -d: -f5)
+          echo "gpg_key_id=$GPG_KEY_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Vendor dependencies and create orig tarball
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          PKG=mp3rgain
+          SRC_DIR="build-ppa/${PKG}-${VERSION}"
+          mkdir -p "$SRC_DIR"
+          git archive HEAD | tar -x -C "$SRC_DIR"
+          cd "$SRC_DIR"
+          cargo vendor vendor
+          mkdir -p .cargo
+          printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
+          rm -rf .claude .github target CLAUDE.md
+          cd ../..
+          tar -czf "build-ppa/${PKG}_${VERSION}.orig.tar.gz" -C build-ppa "${PKG}-${VERSION}"
+
+      - name: Build and upload source packages
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
+        run: |
+          PKG=mp3rgain
+          for DISTRO in noble oracular plucky; do
+            echo "=== Building ${PKG} for ${DISTRO} ==="
+            WORK="build-ppa/build-${DISTRO}"
+            mkdir -p "$WORK"
+            tar -xzf "build-ppa/${PKG}_${VERSION}.orig.tar.gz" -C "$WORK"
+            cp -r packages/ppa/debian "$WORK/${PKG}-${VERSION}/debian"
+            PPA_VER="${VERSION}-0ppa1~${DISTRO}1"
+            printf '%s (%s) %s; urgency=medium\n\n  * Release %s\n\n -- M-Igashi <M-Igashi@users.noreply.github.com>  %s\n' \
+              "$PKG" "$PPA_VER" "$DISTRO" "$VERSION" "$(date -R)" \
+              > "$WORK/${PKG}-${VERSION}/debian/changelog"
+            cd "$WORK/${PKG}-${VERSION}"
+            debuild -S -sa -k"$GPG_KEY_ID"
+            cd "$GITHUB_WORKSPACE"
+            echo "=== Uploading ${PKG} for ${DISTRO} ==="
+            dput ppa:m-igashi/mp3rgain "$WORK/${PKG}_${PPA_VER}_source.changes"
+          done
+
+  upload-gui:
+    name: Upload mp3rgui to PPA
+    if: inputs.package == 'all' || inputs.package == 'gui'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y devscripts debhelper dput
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
+          mkdir -p ~/.gnupg
+          echo "allow-preset-passphrase" > ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent
+          gpg-connect-agent /bye
+          for KG in $(gpg --with-keygrip --list-secret-keys --with-colons | grep '^grp' | cut -d: -f10); do
+            /usr/lib/gnupg/gpg-preset-passphrase --preset --passphrase "$GPG_PASSPHRASE" "$KG"
+          done
+
+      - name: Get version and GPG key ID
+        id: meta
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          GPG_KEY_ID=$(gpg --list-secret-keys --with-colons | grep '^sec' | head -1 | cut -d: -f5)
+          echo "gpg_key_id=$GPG_KEY_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Vendor dependencies and create orig tarball
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          PKG=mp3rgui
+          SRC_DIR="build-ppa/${PKG}-${VERSION}"
+          mkdir -p "$SRC_DIR"
+          git archive HEAD | tar -x -C "$SRC_DIR"
+          cd "$SRC_DIR"
+          cargo vendor --manifest-path mp3rgui/Cargo.toml vendor
+          mkdir -p .cargo
+          printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
+          rm -rf .claude .github target CLAUDE.md
+          cd ../..
+          tar -czf "build-ppa/${PKG}_${VERSION}.orig.tar.gz" -C build-ppa "${PKG}-${VERSION}"
+
+      - name: Build and upload source packages
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
+        run: |
+          PKG=mp3rgui
+          for DISTRO in noble oracular plucky; do
+            echo "=== Building ${PKG} for ${DISTRO} ==="
+            WORK="build-ppa/build-${DISTRO}"
+            mkdir -p "$WORK"
+            tar -xzf "build-ppa/${PKG}_${VERSION}.orig.tar.gz" -C "$WORK"
+            cp -r packages/ppa-gui/debian "$WORK/${PKG}-${VERSION}/debian"
+            PPA_VER="${VERSION}-0ppa1~${DISTRO}1"
+            printf '%s (%s) %s; urgency=medium\n\n  * Release %s\n\n -- M-Igashi <M-Igashi@users.noreply.github.com>  %s\n' \
+              "$PKG" "$PPA_VER" "$DISTRO" "$VERSION" "$(date -R)" \
+              > "$WORK/${PKG}-${VERSION}/debian/changelog"
+            cd "$WORK/${PKG}-${VERSION}"
+            debuild -S -sa -k"$GPG_KEY_ID"
+            cd "$GITHUB_WORKSPACE"
+            echo "=== Uploading ${PKG} for ${DISTRO} ==="
+            dput ppa:m-igashi/mp3rgain "$WORK/${PKG}_${PPA_VER}_source.changes"
+          done
