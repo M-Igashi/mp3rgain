@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use colored::*;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use mp3rgain::aac;
 use mp3rgain::id3v2;
 use mp3rgain::mp4meta;
@@ -576,6 +576,44 @@ fn progress_inc(pb: &Option<ProgressBar>) {
 }
 
 fn progress_finish(pb: Option<ProgressBar>) {
+    if let Some(pb) = pb {
+        pb.finish_and_clear();
+    }
+}
+
+/// Minimum file size (1 MB) to show per-file analysis progress bar
+const ANALYSIS_PROGRESS_MIN_SIZE: u64 = 1_000_000;
+
+fn create_analysis_progress_bar(
+    mp: &MultiProgress,
+    file: &Path,
+    opts: &Options,
+) -> Option<ProgressBar> {
+    if opts.quiet || opts.output_format != OutputFormat::Text {
+        return None;
+    }
+    let file_size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+    if file_size < ANALYSIS_PROGRESS_MIN_SIZE {
+        return None;
+    }
+    let pb = mp.add(ProgressBar::new(file_size));
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("      [{bar:30.cyan/blue}] {bytes}/{total_bytes}")
+            .unwrap()
+            .progress_chars("=>-"),
+    );
+    Some(pb)
+}
+
+fn update_analysis_progress(pb: &Option<ProgressBar>, bytes_read: u64, total_bytes: u64) {
+    if let Some(ref pb) = pb {
+        pb.set_length(total_bytes);
+        pb.set_position(bytes_read);
+    }
+}
+
+fn finish_analysis_progress(pb: Option<ProgressBar>) {
     if let Some(pb) = pb {
         pb.finish_and_clear();
     }
@@ -1241,20 +1279,44 @@ fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
         println!("File\tMP3 gain\tdB gain\tMax Amplitude\tMax global_gain\tMin global_gain");
     }
 
-    let pb = create_progress_bar(files.len(), opts);
+    let mp = MultiProgress::new();
+    let file_pb = if !opts.quiet
+        && opts.output_format == OutputFormat::Text
+        && files.len() >= PROGRESS_THRESHOLD
+    {
+        let pb = mp.add(ProgressBar::new(files.len() as u64));
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .unwrap()
+                .progress_chars("=>-"),
+        );
+        Some(pb)
+    } else {
+        None
+    };
+
     let mut json_results: Vec<JsonFileResult> = Vec::new();
 
     for file in files {
         let filename = get_filename(file);
-        progress_set_message(&pb, filename);
+        if let Some(ref pb) = file_pb {
+            pb.set_message(filename.to_string());
+        }
 
-        let result = process_info(file, opts)?;
+        let analysis_pb = create_analysis_progress_bar(&mp, file, opts);
+        let result = process_info(file, opts, analysis_pb.as_ref())?;
+        finish_analysis_progress(analysis_pb);
         json_results.push(result);
 
-        progress_inc(&pb);
+        if let Some(ref pb) = file_pb {
+            pb.inc(1);
+        }
     }
 
-    progress_finish(pb);
+    if let Some(pb) = file_pb {
+        pb.finish_and_clear();
+    }
 
     // Print album summary (mp3gain compatible)
     let show_album_summary = !files.is_empty()
@@ -1420,26 +1482,51 @@ fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         println!();
     }
 
-    let pb = create_progress_bar(files.len(), opts);
+    let mp = MultiProgress::new();
+    let file_pb = if !opts.quiet
+        && opts.output_format == OutputFormat::Text
+        && files.len() >= PROGRESS_THRESHOLD
+    {
+        let pb = mp.add(ProgressBar::new(files.len() as u64));
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .unwrap()
+                .progress_chars("=>-"),
+        );
+        Some(pb)
+    } else {
+        None
+    };
+
     let mut json_results: Vec<JsonFileResult> = Vec::new();
     let mut successful = 0;
     let mut failed = 0;
 
     for file in files {
         let filename = get_filename(file);
-        progress_set_message(&pb, filename);
+        if let Some(ref pb) = file_pb {
+            pb.set_message(filename.to_string());
+        }
 
-        let result = process_track_gain(file, opts)?;
+        let analysis_pb = create_analysis_progress_bar(&mp, file, opts);
+        let result = process_track_gain(file, opts, analysis_pb.as_ref())?;
+        finish_analysis_progress(analysis_pb);
+
         update_counters(&result, &mut successful, &mut failed);
 
         if opts.output_format == OutputFormat::Json {
             json_results.push(result);
         }
 
-        progress_inc(&pb);
+        if let Some(ref pb) = file_pb {
+            pb.inc(1);
+        }
     }
 
-    progress_finish(pb);
+    if let Some(pb) = file_pb {
+        pb.finish_and_clear();
+    }
 
     if opts.output_format == OutputFormat::Json {
         let output = JsonOutput {
@@ -1493,7 +1580,41 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
     let file_refs: Vec<&std::path::Path> = files.iter().map(|p| p.as_path()).collect();
 
-    match replaygain::analyze_album_with_index(&file_refs, opts.track_index) {
+    let show_progress = !opts.quiet && opts.output_format == OutputFormat::Text;
+    let mp = MultiProgress::new();
+
+    let album_analysis = if show_progress {
+        let analysis_pb = mp.add(ProgressBar::new(0));
+        analysis_pb.set_style(
+            ProgressStyle::default_bar()
+                .template("      [{bar:30.cyan/blue}] {bytes}/{total_bytes} {msg}")
+                .unwrap()
+                .progress_chars("=>-"),
+        );
+
+        let file_names: Vec<&str> = files.iter().map(|f| get_filename(f)).collect();
+        let result = replaygain::analyze_album_with_progress(
+            &file_refs,
+            opts.track_index,
+            &|file_idx, bytes, total| {
+                analysis_pb.set_length(total);
+                analysis_pb.set_position(bytes);
+                analysis_pb.set_message(format!(
+                    "({}/{}) {}",
+                    file_idx + 1,
+                    files.len(),
+                    file_names[file_idx]
+                ));
+            },
+        );
+
+        analysis_pb.finish_and_clear();
+        result
+    } else {
+        replaygain::analyze_album_with_index(&file_refs, opts.track_index)
+    };
+
+    match album_analysis {
         Ok(album_result) => {
             // Apply gain modifier
             let modified_gain_steps = album_result.album_gain_steps() + opts.gain_modifier;
@@ -1995,14 +2116,26 @@ fn process_apply_channel(
     }
 }
 
-fn process_info(file: &Path, opts: &Options) -> Result<JsonFileResult> {
+fn process_info(
+    file: &Path,
+    opts: &Options,
+    analysis_pb: Option<&ProgressBar>,
+) -> Result<JsonFileResult> {
     let filename = get_filename(file);
 
     // Perform ReplayGain analysis for TSV/Text output (mp3gain compatible)
     if matches!(opts.output_format, OutputFormat::Tsv | OutputFormat::Text)
         && replaygain::is_available()
     {
-        match replaygain::analyze_track_with_index(file, opts.track_index) {
+        let rg_result = if let Some(pb) = analysis_pb {
+            replaygain::analyze_track_with_progress(file, opts.track_index, &|bytes, total| {
+                update_analysis_progress(&Some(pb.clone()), bytes, total);
+            })
+        } else {
+            replaygain::analyze_track_with_index(file, opts.track_index)
+        };
+
+        match rg_result {
             Ok(rg_result) => {
                 // Get max amplitude info
                 let (max_amp, max_gain, min_gain) = find_max_amplitude(file)
@@ -2277,7 +2410,11 @@ fn process_undo(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> {
     }
 }
 
-fn process_track_gain(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> {
+fn process_track_gain(
+    file: &PathBuf,
+    opts: &Options,
+    analysis_pb: Option<&ProgressBar>,
+) -> Result<JsonFileResult> {
     let filename = get_filename(file);
     let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
 
@@ -2290,7 +2427,15 @@ fn process_track_gain(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> 
         );
     }
 
-    match replaygain::analyze_track_with_index(file, opts.track_index) {
+    let rg_result = if let Some(pb) = analysis_pb {
+        replaygain::analyze_track_with_progress(file, opts.track_index, &|bytes, total| {
+            update_analysis_progress(&Some(pb.clone()), bytes, total);
+        })
+    } else {
+        replaygain::analyze_track_with_index(file, opts.track_index)
+    };
+
+    match rg_result {
         Ok(result) => {
             // Apply gain modifier
             let base_steps = result.gain_steps();

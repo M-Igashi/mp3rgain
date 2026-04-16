@@ -16,6 +16,10 @@ use std::path::Path;
 
 #[cfg(feature = "replaygain")]
 use crate::mp4meta;
+#[cfg(feature = "replaygain")]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "replaygain")]
+use std::sync::Arc;
 
 #[cfg(feature = "replaygain")]
 use symphonia::core::audio::{Audio, GenericAudioBufferRef};
@@ -26,7 +30,7 @@ use symphonia::core::formats::probe::Hint;
 #[cfg(feature = "replaygain")]
 use symphonia::core::formats::FormatOptions;
 #[cfg(feature = "replaygain")]
-use symphonia::core::io::MediaSourceStream;
+use symphonia::core::io::{MediaSource, MediaSourceStream};
 #[cfg(feature = "replaygain")]
 use symphonia::core::meta::MetadataOptions;
 
@@ -879,6 +883,47 @@ fn detect_file_type(file_path: &Path) -> AudioFileType {
     }
 }
 
+// =============================================================================
+// Progress-tracking media source
+// =============================================================================
+
+/// Media source wrapper that tracks read position for progress reporting
+#[cfg(feature = "replaygain")]
+struct ProgressMediaSource {
+    inner: std::fs::File,
+    position: Arc<AtomicU64>,
+    total_size: u64,
+}
+
+#[cfg(feature = "replaygain")]
+impl std::io::Read for ProgressMediaSource {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.position.fetch_add(n as u64, Ordering::Relaxed);
+        Ok(n)
+    }
+}
+
+#[cfg(feature = "replaygain")]
+impl std::io::Seek for ProgressMediaSource {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        let new_pos = self.inner.seek(pos)?;
+        self.position.store(new_pos, Ordering::Relaxed);
+        Ok(new_pos)
+    }
+}
+
+#[cfg(feature = "replaygain")]
+impl MediaSource for ProgressMediaSource {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        Some(self.total_size)
+    }
+}
+
 /// Internal result containing both ReplayGainResult and histogram for album calculation
 #[cfg(feature = "replaygain")]
 struct TrackAnalysisInternal {
@@ -891,14 +936,28 @@ struct TrackAnalysisInternal {
 fn analyze_track_internal(
     file_path: &Path,
     track_index: Option<u32>,
+    progress: Option<&dyn Fn(u64, u64)>,
 ) -> Result<TrackAnalysisInternal> {
     // Detect file type
     let file_type = detect_file_type(file_path);
 
     // Open the media source
     let file = std::fs::File::open(file_path).map_err(|e| Error::io_open(file_path, e))?;
+    let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
 
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    // Create media source with optional position tracking
+    let position_tracker = progress.map(|_| Arc::new(AtomicU64::new(0)));
+
+    let mss = if let Some(ref tracker) = position_tracker {
+        let source = ProgressMediaSource {
+            inner: file,
+            position: Arc::clone(tracker),
+            total_size: file_size,
+        };
+        MediaSourceStream::new(Box::new(source), Default::default())
+    } else {
+        MediaSourceStream::new(Box::new(file), Default::default())
+    };
 
     // Probe the format
     let mut hint = Hint::new();
@@ -999,6 +1058,16 @@ fn analyze_track_internal(
 
         // Process audio buffer
         process_audio_buffer(&decoded, &mut filters, &mut analyzer, &mut peak);
+
+        // Report progress
+        if let (Some(cb), Some(ref tracker)) = (progress, &position_tracker) {
+            cb(tracker.load(Ordering::Relaxed), file_size);
+        }
+    }
+
+    // Report completion
+    if let Some(cb) = progress {
+        cb(file_size, file_size);
     }
 
     // Finish any remaining samples in the last window
@@ -1028,7 +1097,21 @@ pub fn analyze_track_with_index(
     file_path: &Path,
     track_index: Option<u32>,
 ) -> Result<ReplayGainResult> {
-    let internal = analyze_track_internal(file_path, track_index)?;
+    let internal = analyze_track_internal(file_path, track_index, None)?;
+    Ok(internal.result)
+}
+
+/// Analyze a single track with progress reporting
+///
+/// The callback receives `(bytes_read, total_bytes)` and is called after each
+/// decoded packet. Use this to drive a progress bar during analysis.
+#[cfg(feature = "replaygain")]
+pub fn analyze_track_with_progress(
+    file_path: &Path,
+    track_index: Option<u32>,
+    on_progress: &dyn Fn(u64, u64),
+) -> Result<ReplayGainResult> {
+    let internal = analyze_track_internal(file_path, track_index, Some(on_progress))?;
     Ok(internal.result)
 }
 
@@ -1137,14 +1220,41 @@ pub fn analyze_album_with_index(
     files: &[&Path],
     track_index: Option<u32>,
 ) -> Result<AlbumGainResult> {
+    analyze_album_internal(files, track_index, None)
+}
+
+/// Analyze multiple tracks for album gain with progress reporting
+///
+/// The callback receives `(file_index, bytes_read, total_bytes)` and is called
+/// after each decoded packet. `file_index` indicates which file is currently
+/// being analyzed (0-based).
+#[cfg(feature = "replaygain")]
+pub fn analyze_album_with_progress(
+    files: &[&Path],
+    track_index: Option<u32>,
+    on_progress: &dyn Fn(usize, u64, u64),
+) -> Result<AlbumGainResult> {
+    analyze_album_internal(files, track_index, Some(on_progress))
+}
+
+#[cfg(feature = "replaygain")]
+fn analyze_album_internal(
+    files: &[&Path],
+    track_index: Option<u32>,
+    on_progress: Option<&dyn Fn(usize, u64, u64)>,
+) -> Result<AlbumGainResult> {
     let mut track_results = Vec::with_capacity(files.len());
     let mut album_peak: f64 = 0.0;
     // Album histogram accumulates all track histograms (like B[] in original mp3gain)
     let mut album_histogram = LoudnessHistogram::new();
 
-    for file in files {
+    for (i, file) in files.iter().enumerate() {
+        // Create a per-file progress callback that includes the file index
+        let file_progress: Option<Box<dyn Fn(u64, u64) + '_>> =
+            on_progress.map(|cb| Box::new(move |bytes, total| cb(i, bytes, total)) as _);
+
         // Analyze each track and get histogram
-        let internal = analyze_track_internal(file, track_index)?;
+        let internal = analyze_track_internal(file, track_index, file_progress.as_deref())?;
         album_peak = album_peak.max(internal.result.peak);
 
         // Accumulate track histogram into album histogram
@@ -1189,6 +1299,18 @@ pub fn analyze_track_with_index(
 }
 
 #[cfg(not(feature = "replaygain"))]
+pub fn analyze_track_with_progress(
+    _file_path: &Path,
+    _track_index: Option<u32>,
+    _on_progress: &dyn Fn(u64, u64),
+) -> Result<ReplayGainResult> {
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
+}
+
+#[cfg(not(feature = "replaygain"))]
 pub fn analyze_album(_files: &[&Path]) -> Result<AlbumGainResult> {
     Err(Error::FeatureNotAvailable {
         feature: "ReplayGain analysis",
@@ -1200,6 +1322,18 @@ pub fn analyze_album(_files: &[&Path]) -> Result<AlbumGainResult> {
 pub fn analyze_album_with_index(
     _files: &[&Path],
     _track_index: Option<u32>,
+) -> Result<AlbumGainResult> {
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
+}
+
+#[cfg(not(feature = "replaygain"))]
+pub fn analyze_album_with_progress(
+    _files: &[&Path],
+    _track_index: Option<u32>,
+    _on_progress: &dyn Fn(usize, u64, u64),
 ) -> Result<AlbumGainResult> {
     Err(Error::FeatureNotAvailable {
         feature: "ReplayGain analysis",
