@@ -69,15 +69,17 @@ jobs:
           cargo vendor vendor
           mkdir -p .cargo
           printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
-          # Remove Windows binaries from vendored deps to reduce tarball size
+          # Remove unnecessary files from vendored deps to reduce tarball size
           find vendor -name '*.a' -delete 2>/dev/null || true
           find vendor -name '*.dll' -delete 2>/dev/null || true
           find vendor -name '*.lib' -delete 2>/dev/null || true
+          find vendor -type d \( -name tests -o -name examples -o -name benches -o -name .github \) -exec rm -rf {} + 2>/dev/null || true
+          find vendor -name '*.md' ! -name 'README.md' -delete 2>/dev/null || true
           # Clear cargo checksums (standard practice for Debian Rust packaging)
           for f in vendor/*/.cargo-checksum.json; do echo '{"files":{}}' > "$f"; done
           rm -rf .claude .github target CLAUDE.md
           cd ../..
-          tar -czf "build-ppa/${PKG}_${VERSION}.orig.tar.gz" -C build-ppa "${PKG}-${VERSION}"
+          tar -cJf "build-ppa/${PKG}_${VERSION}.orig.tar.xz" -C build-ppa "${PKG}-${VERSION}"
 
       - name: Build and upload source packages
         env:
@@ -85,12 +87,12 @@ jobs:
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
         run: |
           PKG=mp3rgain
-          ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.gz"
+          ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
           for DISTRO in noble oracular plucky; do
             echo "=== Building ${PKG} for ${DISTRO} ==="
             WORK="build-ppa/build-${DISTRO}"
             mkdir -p "$WORK"
-            tar -xzf "$ORIG" -C "$WORK"
+            tar -xJf "$ORIG" -C "$WORK"
             cp "$ORIG" "$WORK/"
             cp -r packages/ppa/debian "$WORK/${PKG}-${VERSION}/debian"
             PPA_VER="${VERSION}-0ppa1~${DISTRO}1"
@@ -153,15 +155,17 @@ jobs:
           cargo vendor --manifest-path mp3rgui/Cargo.toml vendor
           mkdir -p .cargo
           printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
-          # Remove Windows binaries from vendored deps to reduce tarball size
+          # Remove unnecessary files from vendored deps to reduce tarball size
           find vendor -name '*.a' -delete 2>/dev/null || true
           find vendor -name '*.dll' -delete 2>/dev/null || true
           find vendor -name '*.lib' -delete 2>/dev/null || true
+          find vendor -type d \( -name tests -o -name examples -o -name benches -o -name .github \) -exec rm -rf {} + 2>/dev/null || true
+          find vendor -name '*.md' ! -name 'README.md' -delete 2>/dev/null || true
           # Clear cargo checksums (standard practice for Debian Rust packaging)
           for f in vendor/*/.cargo-checksum.json; do echo '{"files":{}}' > "$f"; done
           rm -rf .claude .github target CLAUDE.md
           cd ../..
-          tar -czf "build-ppa/${PKG}_${VERSION}.orig.tar.gz" -C build-ppa "${PKG}-${VERSION}"
+          tar -cJf "build-ppa/${PKG}_${VERSION}.orig.tar.xz" -C build-ppa "${PKG}-${VERSION}"
 
       - name: Build and upload source packages
         env:
@@ -169,12 +173,12 @@ jobs:
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
         run: |
           PKG=mp3rgui
-          ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.gz"
+          ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
           for DISTRO in noble oracular plucky; do
             echo "=== Building ${PKG} for ${DISTRO} ==="
             WORK="build-ppa/build-${DISTRO}"
             mkdir -p "$WORK"
-            tar -xzf "$ORIG" -C "$WORK"
+            tar -xJf "$ORIG" -C "$WORK"
             cp "$ORIG" "$WORK/"
             cp -r packages/ppa-gui/debian "$WORK/${PKG}-${VERSION}/debian"
             PPA_VER="${VERSION}-0ppa1~${DISTRO}1"
