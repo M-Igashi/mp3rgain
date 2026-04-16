@@ -28,7 +28,7 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 | Windows | `winget install M-Igashi.mp3rgain` |
 | Arch Linux (AUR) | `yay -S mp3rgain-bin` |
 | Ubuntu (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgain` |
-| Debian/Ubuntu | `sudo apt install ./mp3rgain_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) (ARM64 also available) |
+| Debian | `sudo apt install ./mp3rgain_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) (ARM64 also available) |
 | Nix/NixOS | `nix profile install github:M-Igashi/mp3rgain` |
 | Cargo | `cargo install mp3rgain` |
 
