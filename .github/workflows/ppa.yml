@@ -75,6 +75,15 @@ jobs:
           mkdir -p "$SRC_DIR"
           git archive HEAD | tar -x -C "$SRC_DIR"
           cd "$SRC_DIR"
+          # Convert Cargo.lock v4 to v3 for compatibility with Ubuntu noble's cargo
+          python3 -c "
+          import re
+          for lockfile in ['Cargo.lock']:
+              with open(lockfile) as f: c = f.read()
+              c = c.replace('version = 4', 'version = 3', 1)
+              c = re.sub(r'source = \"([^\"#]+)#([^\"]+)\"', r'source = \"\1\"\nchecksum = \"\2\"', c)
+              with open(lockfile, 'w') as f: f.write(c)
+          "
           cargo vendor vendor
           mkdir -p .cargo
           printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
@@ -98,7 +107,7 @@ jobs:
         run: |
           PKG=mp3rgain
           ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
-          for DISTRO in noble plucky; do
+          for DISTRO in noble; do
             echo "=== Building ${PKG} for ${DISTRO} ==="
             WORK="build-ppa/build-${DISTRO}"
             mkdir -p "$WORK"
@@ -164,6 +173,15 @@ jobs:
           mkdir -p "$SRC_DIR"
           git archive HEAD | tar -x -C "$SRC_DIR"
           cd "$SRC_DIR"
+          # Convert Cargo.lock v4 to v3 for compatibility with Ubuntu noble's cargo
+          python3 -c "
+          import re
+          for lockfile in ['Cargo.lock', 'mp3rgui/Cargo.lock']:
+              with open(lockfile) as f: c = f.read()
+              c = c.replace('version = 4', 'version = 3', 1)
+              c = re.sub(r'source = \"([^\"#]+)#([^\"]+)\"', r'source = \"\1\"\nchecksum = \"\2\"', c)
+              with open(lockfile, 'w') as f: f.write(c)
+          "
           cargo vendor --manifest-path mp3rgui/Cargo.toml vendor
           mkdir -p .cargo
           printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
@@ -211,7 +229,7 @@ jobs:
         run: |
           PKG=mp3rgui
           ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
-          for DISTRO in noble plucky; do
+          for DISTRO in noble; do
             echo "=== Building ${PKG} for ${DISTRO} ==="
             WORK="build-ppa/build-${DISTRO}"
             mkdir -p "$WORK"

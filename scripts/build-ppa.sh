@@ -30,7 +30,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="${PROJECT_DIR}/build-ppa"
 
 # Supported Ubuntu releases
-ALL_DISTROS=("noble" "plucky")
+ALL_DISTROS=("noble")
 
 # Defaults
 UPLOAD=false
@@ -94,7 +94,20 @@ build_source_package() {
     # Export source from git (clean, no .git directory)
     git -C "$PROJECT_DIR" archive HEAD | tar -x -C "$src_dir"
 
-    # Step 2: Vendor Rust dependencies
+    # Step 2: Convert Cargo.lock v4 to v3 for Ubuntu noble compatibility
+    echo "==> Converting Cargo.lock to v3 format..."
+    python3 -c "
+import re, glob
+for lockfile in glob.glob('$src_dir/**/Cargo.lock', recursive=True):
+    with open(lockfile) as f: c = f.read()
+    if 'version = 4' not in c: continue
+    c = c.replace('version = 4', 'version = 3', 1)
+    c = re.sub(r'source = \"([^\"#]+)#([^\"]+)\"', r'source = \"\1\"\nchecksum = \"\2\"', c)
+    with open(lockfile, 'w') as f: f.write(c)
+    print(f'  Converted: {lockfile}')
+"
+
+    # Step 3: Vendor Rust dependencies
     echo "==> Vendoring Rust dependencies..."
     if [[ "$pkg_name" == "mp3rgui" ]]; then
         (cd "$src_dir" && cargo vendor --manifest-path mp3rgui/Cargo.toml vendor)

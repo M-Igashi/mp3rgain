@@ -124,7 +124,6 @@ From the project root:
 | Codename | Version | Status |
 |----------|---------|--------|
 | noble | 24.04 LTS | Supported |
-| plucky | 25.04 | Supported |
 
 ### What the Script Does
 
