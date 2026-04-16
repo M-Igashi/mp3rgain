@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mp3rgain Download Stats</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e;
+    --blue: #58a6ff; --green: #3fb950; --orange: #d29922; --purple: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 2rem 1rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); margin-bottom: 2rem; font-size: 0.875rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+  .card-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .card-value { font-size: 1.75rem; font-weight: 600; }
+  .section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; }
+  .section h2 { font-size: 1rem; margin-bottom: 1rem; }
+  canvas { max-height: 350px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .loading { text-align: center; padding: 4rem; color: var(--muted); }
+  .badge { display: inline-block; padding: 0.125rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 500; }
+  .badge-cli { background: #1f3a5f; color: var(--blue); }
+  .badge-gui { background: #2a1f3f; color: var(--purple); }
+  footer { text-align: center; color: var(--muted); font-size: 0.75rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+  footer a { color: var(--blue); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>mp3rgain Download Stats</h1>
+  <p class="subtitle">Updated weekly &mdash; <span id="last-updated">loading...</span></p>
+
+  <div class="grid" id="summary-cards">
+    <div class="card"><div class="card-label">GitHub Releases Total</div><div class="card-value" id="gh-total">-</div></div>
+    <div class="card"><div class="card-label">crates.io Total</div><div class="card-value" id="crates-total">-</div></div>
+    <div class="card"><div class="card-label">AUR Votes</div><div class="card-value" id="aur-votes">-</div></div>
+    <div class="card"><div class="card-label">Latest Version</div><div class="card-value" id="latest-version">-</div></div>
+  </div>
+
+  <div class="section">
+    <h2>Downloads by Version (GitHub Releases)</h2>
+    <canvas id="chart-versions"></canvas>
+  </div>
+
+  <div class="section">
+    <h2>Downloads by Platform (Latest Release)</h2>
+    <canvas id="chart-platform"></canvas>
+  </div>
+
+  <div class="section">
+    <h2>crates.io Downloads Over Versions</h2>
+    <canvas id="chart-crates"></canvas>
+  </div>
+
+  <div class="section">
+    <h2>Download Trend (GitHub Releases Total)</h2>
+    <canvas id="chart-trend"></canvas>
+  </div>
+
+  <div class="section">
+    <h2>Per-Release Breakdown</h2>
+    <div style="overflow-x:auto">
+      <table id="table-releases">
+        <thead><tr><th>Version</th><th>CLI</th><th>GUI</th><th class="num">CLI Downloads</th><th class="num">GUI Downloads</th><th class="num">Total</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>
+    <a href="https://github.com/M-Igashi/mp3rgain">mp3rgain</a> &mdash; Lossless MP3 volume adjustment
+  </footer>
+</div>
+
+<script>
+const COLORS = { blue: '#58a6ff', green: '#3fb950', orange: '#d29922', purple: '#bc8cff', red: '#f85149', gray: '#8b949e' };
+const CHART_DEFAULTS = {
+  responsive: true,
+  maintainAspectRatio: true,
+  plugins: { legend: { labels: { color: '#8b949e' } } },
+  scales: {
+    x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+    y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, beginAtZero: true }
+  }
+};
+
+function num(n) { return n.toLocaleString(); }
+
+function isReal(name) {
+  return !name.endsWith('.sha256') && !name.endsWith('.tar.gz.sha256');
+}
+
+function classifyAsset(name) {
+  if (name.startsWith('mp3rgui')) return 'gui';
+  if (name.startsWith('mp3rgain')) return 'cli';
+  return null;
+}
+
+function platformLabel(name) {
+  if (name.includes('macos')) return 'macOS';
+  if (name.includes('windows-x86_64')) return 'Windows x64';
+  if (name.includes('windows-arm64')) return 'Windows ARM64';
+  if (name.includes('linux-x86_64') || name.includes('amd64')) return 'Linux x64';
+  if (name.includes('linux-arm64') || name.includes('arm64')) return 'Linux ARM64';
+  return name;
+}
+
+async function main() {
+  let data;
+  try {
+    const resp = await fetch('data/stats.json');
+    data = await resp.json();
+  } catch {
+    document.querySelector('.loading')?.remove();
+    return;
+  }
+
+  const latest = data[data.length - 1];
+  document.getElementById('last-updated').textContent = latest.date;
+
+  // Summary cards
+  const ghReleases = latest.github_releases;
+  const ghTotal = ghReleases.reduce((sum, r) =>
+    sum + r.assets.filter(a => isReal(a.name)).reduce((s, a) => s + a.download_count, 0), 0);
+  document.getElementById('gh-total').textContent = num(ghTotal);
+  document.getElementById('crates-total').textContent = num(latest.crates_io.total_downloads);
+  const aurVotes = latest.aur.reduce((s, p) => s + p.votes, 0);
+  document.getElementById('aur-votes').textContent = num(aurVotes);
+  document.getElementById('latest-version').textContent = ghReleases[0]?.tag || '-';
+
+  // Downloads by version (bar chart, top 15)
+  const versionData = ghReleases.slice(0, 15).reverse().map(r => ({
+    tag: r.tag,
+    cli: r.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'cli').reduce((s, a) => s + a.download_count, 0),
+    gui: r.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'gui').reduce((s, a) => s + a.download_count, 0),
+  }));
+  new Chart(document.getElementById('chart-versions'), {
+    type: 'bar',
+    data: {
+      labels: versionData.map(v => v.tag),
+      datasets: [
+        { label: 'CLI', data: versionData.map(v => v.cli), backgroundColor: COLORS.blue },
+        { label: 'GUI', data: versionData.map(v => v.gui), backgroundColor: COLORS.purple },
+      ]
+    },
+    options: { ...CHART_DEFAULTS, plugins: { ...CHART_DEFAULTS.plugins, legend: { display: true, labels: { color: '#8b949e' } } }, scales: { ...CHART_DEFAULTS.scales, x: { ...CHART_DEFAULTS.scales.x, stacked: true }, y: { ...CHART_DEFAULTS.scales.y, stacked: true } } }
+  });
+
+  // Platform breakdown for latest release
+  const latestRelease = ghReleases[0];
+  if (latestRelease) {
+    const cliAssets = latestRelease.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'cli');
+    const guiAssets = latestRelease.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'gui');
+    const platforms = [...new Set([...cliAssets, ...guiAssets].map(a => platformLabel(a.name)))];
+    const cliByPlatform = platforms.map(p => cliAssets.find(a => platformLabel(a.name) === p)?.download_count || 0);
+    const guiByPlatform = platforms.map(p => guiAssets.find(a => platformLabel(a.name) === p)?.download_count || 0);
+    new Chart(document.getElementById('chart-platform'), {
+      type: 'bar',
+      data: {
+        labels: platforms,
+        datasets: [
+          { label: 'CLI', data: cliByPlatform, backgroundColor: COLORS.blue },
+          { label: 'GUI', data: guiByPlatform, backgroundColor: COLORS.purple },
+        ]
+      },
+      options: CHART_DEFAULTS
+    });
+  }
+
+  // crates.io versions chart
+  const cratesVersions = latest.crates_io.versions.slice(0, 15).reverse();
+  new Chart(document.getElementById('chart-crates'), {
+    type: 'bar',
+    data: {
+      labels: cratesVersions.map(v => v.num),
+      datasets: [{ label: 'Downloads', data: cratesVersions.map(v => v.downloads), backgroundColor: COLORS.orange }]
+    },
+    options: CHART_DEFAULTS
+  });
+
+  // Trend chart (only if we have history)
+  if (data.length > 1) {
+    const trendLabels = data.map(d => d.date);
+    const trendGH = data.map(d => d.github_releases.reduce((sum, r) =>
+      sum + r.assets.filter(a => isReal(a.name)).reduce((s, a) => s + a.download_count, 0), 0));
+    const trendCrates = data.map(d => d.crates_io.total_downloads);
+    new Chart(document.getElementById('chart-trend'), {
+      type: 'line',
+      data: {
+        labels: trendLabels,
+        datasets: [
+          { label: 'GitHub Releases', data: trendGH, borderColor: COLORS.blue, backgroundColor: 'transparent', tension: 0.3 },
+          { label: 'crates.io', data: trendCrates, borderColor: COLORS.orange, backgroundColor: 'transparent', tension: 0.3 },
+        ]
+      },
+      options: CHART_DEFAULTS
+    });
+  } else {
+    document.getElementById('chart-trend').parentElement.innerHTML =
+      '<h2>Download Trend (GitHub Releases Total)</h2><p style="color:var(--muted);text-align:center;padding:2rem">Trend data will appear after multiple weekly snapshots.</p>';
+  }
+
+  // Release table
+  const tbody = document.querySelector('#table-releases tbody');
+  ghReleases.forEach(r => {
+    const cliDL = r.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'cli').reduce((s, a) => s + a.download_count, 0);
+    const guiDL = r.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'gui').reduce((s, a) => s + a.download_count, 0);
+    const cliPlatforms = r.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'cli').map(a => platformLabel(a.name)).join(', ');
+    const guiPlatforms = r.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'gui').map(a => platformLabel(a.name)).join(', ');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.tag}</td><td>${cliPlatforms || '-'}</td><td>${guiPlatforms || '-'}</td><td class="num">${num(cliDL)}</td><td class="num">${num(guiDL)}</td><td class="num">${num(cliDL + guiDL)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+main();
+</script>
+</body>
+</html>
