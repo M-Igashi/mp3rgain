@@ -128,12 +128,14 @@ From the project root:
 ### What the Script Does
 
 1. Exports clean source from git
-2. Runs `cargo vendor` to bundle all Rust dependencies
-3. Creates `.cargo/config.toml` for offline builds
-4. Creates `.orig.tar.gz` (source + vendored deps)
-5. Generates `debian/changelog` for each Ubuntu release
-6. Builds signed source packages with `debuild -S`
-7. Optionally uploads with `dput`
+2. Converts `Cargo.lock` v4 to v3 (Ubuntu noble's cargo doesn't support v4)
+3. Runs `cargo vendor` to bundle all Rust dependencies
+4. Removes Windows/macOS-only binaries and stubs platform-specific crates
+5. Creates `.cargo/config.toml` for offline builds
+6. Creates `.orig.tar.xz` with maximum compression (source + vendored deps)
+7. Generates `debian/changelog` for each Ubuntu release
+8. Builds signed source packages with `debuild -S`
+9. Optionally uploads with `dput`
 
 ### Manual Upload
 
@@ -184,15 +186,14 @@ docker run --rm -it \
 
 ## Release Workflow
 
-When releasing a new version:
+PPA upload is **automatic**. When you push a release tag:
 
-1. Update version in `Cargo.toml` and `mp3rgui/Cargo.toml`
-2. Create git tag and push (triggers GitHub release workflow)
-3. Build and upload PPA packages:
-   ```bash
-   ./scripts/build-ppa.sh --upload
-   ```
-4. Verify builds on Launchpad
+1. Release workflow builds binaries and creates GitHub Release
+2. On success, PPA workflow triggers automatically
+3. Source packages are built, signed, and uploaded to Launchpad
+4. Launchpad builds .deb packages for amd64 and arm64
+
+To manually trigger: Actions → PPA Upload → Run workflow
 
 ## Troubleshooting
 
@@ -200,10 +201,17 @@ When releasing a new version:
 
 Your GPG key isn't registered on Launchpad, or the email doesn't match.
 
-### "Already uploaded"
+### "Already uploaded" / "different contents"
 
-Each version can only be uploaded once per distro. Bump the PPA revision:
-- Change `0ppa1` to `0ppa2` in the build script (or modify the changelog manually)
+Each version's orig tarball can only be uploaded once. Options:
+- Bump PPA revision via `ppa_revision` input (e.g., `2`)
+- If orig tarball contents changed, delete and recreate the PPA
+
+### "lock file version 4 requires -Znext-lockfile-bump"
+
+Ubuntu noble's cargo (Rust 1.75) doesn't support Cargo.lock v4.
+The workflow converts v4 to v3 automatically. If this error appears,
+the conversion step may have failed — check the workflow logs.
 
 ### "Build-Depends not satisfiable"
 
@@ -211,3 +219,8 @@ A build dependency isn't available in that Ubuntu release. Check package availab
 ```bash
 rmadison -u ubuntu <package-name>
 ```
+
+### "obsolete and will not accept new uploads"
+
+The Ubuntu release has reached EOL. Remove it from the distro list in
+`.github/workflows/ppa.yml`.
