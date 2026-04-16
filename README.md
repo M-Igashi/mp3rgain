@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
 [![crates.io](https://img.shields.io/crates/v/mp3rgain.svg)](https://crates.io/crates/mp3rgain)
+[![GitHub Downloads](https://img.shields.io/github/downloads/M-Igashi/mp3rgain/total?label=downloads&color=brightgreen)](https://m-igashi.github.io/mp3rgain/)
 [![mp3gain compatible](https://img.shields.io/badge/mp3gain-compatible-brightgreen.svg)](docs/compatibility-report.md)
 
 **Lossless MP3/AAC volume adjustment - a modern mp3gain replacement written in Rust**
@@ -104,6 +105,7 @@ Run `mp3rgain -h` for the full list of options.
 - [Compatibility Report](docs/compatibility-report.md) - Verification against original mp3gain
 - [Technical Comparison](docs/COMPARISON.md) - Comparison with similar tools
 - [Use Cases](docs/use-cases.md) - Integration examples (beets, headroom, etc.)
+- [Download Stats](https://m-igashi.github.io/mp3rgain/) - Weekly download trends across all platforms
 
 ## Why mp3rgain?
 
