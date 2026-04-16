@@ -161,11 +161,35 @@ jobs:
           find vendor -name '*.lib' -delete 2>/dev/null || true
           find vendor -type d \( -name tests -o -name examples -o -name benches -o -name .github \) -exec rm -rf {} + 2>/dev/null || true
           find vendor -name '*.md' ! -name 'README.md' -delete 2>/dev/null || true
+          # Stub out platform-specific crates not needed for Linux builds
+          # These crates are resolved by cargo but never compiled on Linux
+          for pattern in 'windows-sys-*' 'windows-core-*' 'windows-implement-*' 'windows-interface-*' \
+            'windows-targets-*' 'windows_x86_64_*' 'windows_i686_*' 'windows_aarch64_*' \
+            'winapi-x86_64-*' 'winapi-i686-*' \
+            'd3d12-*' 'winresource-*' 'widestring-*' \
+            'cocoa-*' 'cocoa-foundation-*' 'core-foundation-*' 'core-foundation-sys-*' \
+            'core-graphics-*' 'core-graphics-types-*' 'metal-*' \
+            'objc-*' 'objc2-*' 'objc-sys-*' 'block-*' 'block2-*' 'block-sys-*' \
+            'dispatch-*' 'icrate-*' \
+            'accesskit_macos-*' 'accesskit_windows-*'; do
+            for crate_dir in vendor/$pattern; do
+              [ -d "$crate_dir" ] || continue
+              tmp_toml=$(mktemp)
+              cp "$crate_dir/Cargo.toml" "$tmp_toml"
+              rm -rf "$crate_dir"/*
+              mv "$tmp_toml" "$crate_dir/Cargo.toml"
+              echo '{"files":{}}' > "$crate_dir/.cargo-checksum.json"
+              mkdir -p "$crate_dir/src"
+              echo '' > "$crate_dir/src/lib.rs"
+            done
+          done
           # Clear cargo checksums (standard practice for Debian Rust packaging)
           for f in vendor/*/.cargo-checksum.json; do echo '{"files":{}}' > "$f"; done
           rm -rf .claude .github target CLAUDE.md
           cd ../..
-          tar -cJf "build-ppa/${PKG}_${VERSION}.orig.tar.xz" -C build-ppa "${PKG}-${VERSION}"
+          du -sh "build-ppa/${PKG}-${VERSION}/vendor"
+          XZ_OPT='-9e' tar -cJf "build-ppa/${PKG}_${VERSION}.orig.tar.xz" -C build-ppa "${PKG}-${VERSION}"
+          ls -lh "build-ppa/${PKG}_${VERSION}.orig.tar.xz"
 
       - name: Build and upload source packages
         env:
