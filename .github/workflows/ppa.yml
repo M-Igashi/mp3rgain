@@ -69,6 +69,12 @@ jobs:
           cargo vendor vendor
           mkdir -p .cargo
           printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
+          # Remove Windows binaries from vendored deps to reduce tarball size
+          find vendor -name '*.a' -delete 2>/dev/null || true
+          find vendor -name '*.dll' -delete 2>/dev/null || true
+          find vendor -name '*.lib' -delete 2>/dev/null || true
+          # Clear cargo checksums (standard practice for Debian Rust packaging)
+          for f in vendor/*/.cargo-checksum.json; do echo '{"files":{}}' > "$f"; done
           rm -rf .claude .github target CLAUDE.md
           cd ../..
           tar -czf "build-ppa/${PKG}_${VERSION}.orig.tar.gz" -C build-ppa "${PKG}-${VERSION}"
@@ -147,6 +153,12 @@ jobs:
           cargo vendor --manifest-path mp3rgui/Cargo.toml vendor
           mkdir -p .cargo
           printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
+          # Remove Windows binaries from vendored deps to reduce tarball size
+          find vendor -name '*.a' -delete 2>/dev/null || true
+          find vendor -name '*.dll' -delete 2>/dev/null || true
+          find vendor -name '*.lib' -delete 2>/dev/null || true
+          # Clear cargo checksums (standard practice for Debian Rust packaging)
+          for f in vendor/*/.cargo-checksum.json; do echo '{"files":{}}' > "$f"; done
           rm -rf .claude .github target CLAUDE.md
           cd ../..
           tar -czf "build-ppa/${PKG}_${VERSION}.orig.tar.gz" -C build-ppa "${PKG}-${VERSION}"
