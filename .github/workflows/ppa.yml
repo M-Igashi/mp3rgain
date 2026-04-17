@@ -26,6 +26,10 @@ on:
         description: "Target PPA (e.g. ppa:m-igashi/mp3rgain or ppa:m-igashi/mp3rgain-test)"
         type: string
         default: "ppa:m-igashi/mp3rgain"
+      target_distro:
+        description: "Target Ubuntu distro (noble, plucky, questing, etc.)"
+        type: string
+        default: "noble"
 
 permissions:
   contents: read
@@ -113,10 +117,11 @@ jobs:
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
           PPA_REV: ${{ inputs.ppa_revision || '1' }}
           TARGET_PPA: ${{ inputs.target_ppa || 'ppa:m-igashi/mp3rgain' }}
+          TARGET_DISTRO: ${{ inputs.target_distro || 'noble' }}
         run: |
           PKG=mp3rgain
           ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
-          for DISTRO in noble; do
+          for DISTRO in ${TARGET_DISTRO}; do
             echo "=== Building ${PKG} for ${DISTRO} ==="
             WORK="build-ppa/build-${DISTRO}"
             mkdir -p "$WORK"
@@ -240,10 +245,11 @@ jobs:
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
           PPA_REV: ${{ inputs.ppa_revision || '1' }}
           TARGET_PPA: ${{ inputs.target_ppa || 'ppa:m-igashi/mp3rgain' }}
+          TARGET_DISTRO: ${{ inputs.target_distro || 'noble' }}
         run: |
           PKG=mp3rgui
           ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
-          for DISTRO in noble; do
+          for DISTRO in ${TARGET_DISTRO}; do
             echo "=== Building ${PKG} for ${DISTRO} ==="
             WORK="build-ppa/build-${DISTRO}"
             mkdir -p "$WORK"
