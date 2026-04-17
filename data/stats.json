@@ -3705,22 +3705,6 @@
         }
       ]
     },
-    "aur": [
-      {
-        "name": "mp3rgain-bin",
-        "version": "2.2.0-1",
-        "votes": 3,
-        "popularity": 1.508358,
-        "maintainer": "Dominiquini"
-      },
-      {
-        "name": "mp3rgui",
-        "version": "2.2.1-1",
-        "votes": 0,
-        "popularity": 0,
-        "maintainer": "m-igashi"
-      }
-    ],
     "pkgstats": [
       {
         "name": "mp3rgain-bin",
