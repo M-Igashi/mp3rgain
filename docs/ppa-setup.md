@@ -4,13 +4,24 @@ This guide covers the complete setup for distributing mp3rgain and mp3rgui via U
 
 ## Overview
 
-PPA allows Ubuntu users to install mp3rgain with:
+PPA allows Ubuntu users to install mp3rgain and mp3rgui. The CLI and GUI
+are distributed via **separate PPAs**:
 
 ```bash
+# CLI (mp3rgain)
 sudo add-apt-repository ppa:m-igashi/mp3rgain
 sudo apt update
-sudo apt install mp3rgain mp3rgui
+sudo apt install mp3rgain
+
+# GUI (mp3rgui)
+sudo add-apt-repository ppa:m-igashi/mp3rgui
+sudo apt update
+sudo apt install mp3rgui
 ```
+
+**Supported platform**: Ubuntu 25.10 (questing), amd64 and arm64.
+Older Ubuntu releases (including 24.04 LTS noble) ship Cargo 1.75 which
+cannot build `symphonia-core 0.6.0-alpha.2` (requires Rust >= 1.79).
 
 ## Prerequisites
 
@@ -59,21 +70,35 @@ gpg --keyserver keyserver.ubuntu.com --send-keys YOUR_KEY_ID
    gpg --decrypt confirmation.txt
    ```
 
-### 5. Create PPA
+### 5. Create PPAs
 
+Create two separate PPAs — one for CLI and one for GUI.
+
+**PPA 1 — mp3rgain (CLI):**
 1. Go to https://launchpad.net/~/+activate-ppa
 2. PPA name: `mp3rgain`
 3. Display name: `mp3rgain - Lossless MP3 volume adjustment`
-4. Description:
-   ```
-   Modern mp3gain replacement written in Rust.
-   Includes mp3rgain (CLI) and mp3rgui (GUI).
-   
-   Homepage: https://github.com/M-Igashi/mp3rgain
-   ```
-5. Click "Activate"
+4. Click "Activate"
 
-The PPA URL will be: `ppa:m-igashi/mp3rgain`
+**PPA 2 — mp3rgui (GUI):**
+1. Go to https://launchpad.net/~/+activate-ppa
+2. PPA name: `mp3rgui`
+3. Display name: `mp3rgui - GUI for mp3rgain`
+4. Click "Activate"
+
+The URLs will be: `ppa:m-igashi/mp3rgain` and `ppa:m-igashi/mp3rgui`.
+
+### 6. Enable arm64 Processors
+
+For each PPA, the default enabled processor is amd64 only. To build for
+arm64 as well, visit the admin edit page for each PPA and check `arm64`:
+
+- https://launchpad.net/~m-igashi/+archive/ubuntu/mp3rgain/+edit
+- https://launchpad.net/~m-igashi/+archive/ubuntu/mp3rgui/+edit
+
+Under **Processors**, enable at minimum:
+- `AMD x86-64 (amd64)`
+- `ARM ARMv8 (arm64)`
 
 ## Building and Uploading Packages
 
@@ -95,8 +120,8 @@ From the project root:
 # Build for all Ubuntu releases (both CLI and GUI)
 ./scripts/build-ppa.sh
 
-# Build only CLI for noble
-./scripts/build-ppa.sh --package=cli --distro=noble
+# Build only CLI for questing
+./scripts/build-ppa.sh --package=cli --distro=questing
 
 # Build and upload
 ./scripts/build-ppa.sh --upload
@@ -115,20 +140,21 @@ From the project root:
 | `--upload` | Upload to PPA after building |
 | `--package=PKG` | `cli`, `gui`, or `all` (default: `all`) |
 | `--distro=DISTRO` | Build for specific distro (default: all supported) |
-| `--ppa=PPA` | PPA target (default: `ppa:m-igashi/mp3rgain`) |
+| `--ppa=PPA` | PPA target (default: `ppa:m-igashi/mp3rgain` for CLI, `ppa:m-igashi/mp3rgui` for GUI in the GitHub Actions workflow) |
 | `--key=KEYID` | GPG key ID for signing |
 | `--dry-run` | Show commands without executing |
 
 ### Supported Ubuntu Releases
 
-| Codename | Version | Status |
-|----------|---------|--------|
-| noble | 24.04 LTS | Supported |
+| Codename | Version | Status | Notes |
+|----------|---------|--------|-------|
+| questing | 25.10 | Supported (default) | Rust 1.83+ — builds pass |
+| noble | 24.04 LTS | Not supported | Cargo 1.75 cannot build symphonia-core 0.6.0-alpha.2 (requires Rust >= 1.79) |
 
 ### What the Script Does
 
 1. Exports clean source from git
-2. Converts `Cargo.lock` v4 to v3 (Ubuntu noble's cargo doesn't support v4)
+2. Converts `Cargo.lock` v4 to v3, downgrades `edition = "2024"` to `"2021"`, strips `rust-version` declarations and `checksum` lines (compatibility shims for older distros; no-ops on questing)
 3. Runs `cargo vendor` to bundle all Rust dependencies
 4. Removes Windows/macOS-only binaries and stubs platform-specific crates
 5. Creates `.cargo/config.toml` for offline builds
@@ -142,8 +168,8 @@ From the project root:
 If you built without `--upload`:
 
 ```bash
-dput ppa:m-igashi/mp3rgain build-ppa/mp3rgain/build-noble/mp3rgain_*_source.changes
-dput ppa:m-igashi/mp3rgain build-ppa/mp3rgui/build-noble/mp3rgui_*_source.changes
+dput ppa:m-igashi/mp3rgain build-ppa/mp3rgain/build-questing/mp3rgain_*_source.changes
+dput ppa:m-igashi/mp3rgui  build-ppa/mp3rgui/build-questing/mp3rgui_*_source.changes
 ```
 
 ## After Upload
@@ -209,9 +235,9 @@ Each version's orig tarball can only be uploaded once. Options:
 
 ### "lock file version 4 requires -Znext-lockfile-bump"
 
-Ubuntu noble's cargo (Rust 1.75) doesn't support Cargo.lock v4.
-The workflow converts v4 to v3 automatically. If this error appears,
-the conversion step may have failed — check the workflow logs.
+Ubuntu noble's cargo (Rust 1.75) doesn't support Cargo.lock v4. This is
+one of several reasons we target questing (25.10) instead. The workflow
+still runs the v4→v3 conversion for compatibility.
 
 ### "Build-Depends not satisfiable"
 
