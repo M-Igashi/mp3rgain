@@ -2,7 +2,7 @@ name: Download Stats
 
 on:
   schedule:
-    - cron: "0 9 * * 1" # Every Monday 09:00 UTC
+    - cron: "0 9 * * *" # Every day 09:00 UTC
   workflow_dispatch:
 
 permissions:
