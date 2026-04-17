@@ -49,6 +49,54 @@ jobs:
               maintainer: .Maintainer
             }]' > /tmp/aur.json
 
+      - name: Collect pkgstats (Arch install counts)
+        run: |
+          for pkg in mp3rgain-bin mp3rgui; do
+            curl -sf "https://pkgstats.archlinux.de/api/packages/${pkg}" \
+              -o "/tmp/pkgstats_${pkg}.json" || echo '{}' > "/tmp/pkgstats_${pkg}.json"
+          done
+          jq -s '[.[0] + {name: "mp3rgain-bin"}, .[1] + {name: "mp3rgui"}]' \
+            /tmp/pkgstats_mp3rgain-bin.json /tmp/pkgstats_mp3rgui.json \
+            > /tmp/pkgstats.json
+
+      - name: Collect PPA download stats
+        run: |
+          collect_ppa() {
+            local ppa=$1
+            local out=$2
+            local entries='[]'
+            local next="https://api.launchpad.net/1.0/~m-igashi/+archive/ubuntu/${ppa}?ws.op=getPublishedBinaries"
+            while [ -n "$next" ] && [ "$next" != "null" ]; do
+              local page
+              page=$(curl -sf "$next") || break
+              entries=$(jq -s 'add' <(echo "$entries") <(echo "$page" | jq '.entries'))
+              next=$(echo "$page" | jq -r '.next_collection_link // empty')
+            done
+            local enriched='[]'
+            local count i
+            count=$(echo "$entries" | jq 'length')
+            i=0
+            while [ "$i" -lt "$count" ]; do
+              local self version arch series dl
+              self=$(echo "$entries" | jq -r ".[$i].self_link")
+              version=$(echo "$entries" | jq -r ".[$i].binary_package_version")
+              arch=$(echo "$entries" | jq -r ".[$i].distro_arch_series_link | split(\"/\") | .[-1]")
+              series=$(echo "$entries" | jq -r ".[$i].distro_arch_series_link | split(\"/\") | .[-2]")
+              dl=$(curl -sf "${self}?ws.op=getDownloadCount" || echo 0)
+              [ -z "$dl" ] && dl=0
+              enriched=$(jq -c \
+                --arg v "$version" --arg a "$arch" --arg s "$series" --argjson d "$dl" \
+                '. + [{version: $v, arch: $a, series: $s, downloads: $d}]' <(echo "$enriched"))
+              i=$((i + 1))
+            done
+            local total
+            total=$(echo "$enriched" | jq '[.[].downloads] | add // 0')
+            jq -n --arg ppa "$ppa" --argjson total "$total" --argjson items "$enriched" \
+              '{ppa: $ppa, total_downloads: $total, items: $items}' > "$out"
+          }
+          collect_ppa mp3rgain /tmp/ppa_cli.json
+          collect_ppa mp3rgui /tmp/ppa_gui.json
+
       - name: Build stats snapshot
         run: |
           DATE=$(date -u +%Y-%m-%d)
@@ -57,11 +105,17 @@ jobs:
             --slurpfile gh /tmp/github_releases.json \
             --slurpfile crates /tmp/crates_io.json \
             --slurpfile aur /tmp/aur.json \
+            --slurpfile pkgstats /tmp/pkgstats.json \
+            --slurpfile ppa_cli /tmp/ppa_cli.json \
+            --slurpfile ppa_gui /tmp/ppa_gui.json \
             '{
               date: $date,
               github_releases: $gh[0],
               crates_io: $crates[0],
-              aur: $aur[0]
+              aur: $aur[0],
+              pkgstats: $pkgstats[0],
+              ppa_cli: $ppa_cli[0],
+              ppa_gui: $ppa_gui[0]
             }' > /tmp/snapshot.json
 
       - name: Append to history
