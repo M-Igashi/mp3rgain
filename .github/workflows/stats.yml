@@ -54,7 +54,7 @@ jobs:
             local ppa=$1
             local out=$2
             local entries='[]'
-            local next="https://api.launchpad.net/1.0/~m-igashi/+archive/ubuntu/${ppa}?ws.op=getPublishedBinaries"
+            local next="https://api.launchpad.net/1.0/~m-igashi/+archive/ubuntu/${ppa}?ws.op=getPublishedBinaries&order_by_date=true"
             while [ -n "$next" ] && [ "$next" != "null" ]; do
               local page
               page=$(curl -sf "$next") || break
@@ -81,14 +81,14 @@ jobs:
             done
             # Collapse publications sharing the same build (e.g. amd64 and
             # amd64v3 variants of the same Launchpad build): sum downloads and
-            # join arch labels.
+            # display only the baseline arch (strip trailing vN suffix).
             local grouped
             grouped=$(echo "$enriched" | jq '
               group_by(.build)
               | map({
                   version: .[0].version,
                   series: .[0].series,
-                  arch: (map(.arch) | unique | join(" / ")),
+                  arch: (map(.arch | sub("v[0-9]+$"; "")) | unique | join(" / ")),
                   downloads: (map(.downloads) | add)
                 })
             ')
