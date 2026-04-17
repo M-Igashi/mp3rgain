@@ -3729,20 +3729,14 @@
       "items": [
         {
           "version": "2.2.1-0ppa1~questing1",
+          "series": "questing",
+          "arch": "amd64 / amd64v3",
+          "downloads": 0
+        },
+        {
+          "version": "2.2.1-0ppa1~questing1",
+          "series": "questing",
           "arch": "arm64",
-          "series": "questing",
-          "downloads": 0
-        },
-        {
-          "version": "2.2.1-0ppa1~questing1",
-          "arch": "amd64v3",
-          "series": "questing",
-          "downloads": 0
-        },
-        {
-          "version": "2.2.1-0ppa1~questing1",
-          "arch": "amd64",
-          "series": "questing",
           "downloads": 0
         }
       ]
