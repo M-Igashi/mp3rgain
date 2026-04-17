@@ -38,17 +38,6 @@ jobs:
               versions: [.versions[] | {num, downloads, created_at}]
             }' > /tmp/crates_io.json
 
-      - name: Collect AUR stats
-        run: |
-          curl -sf 'https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=mp3rgain-bin&arg[]=mp3rgui' \
-            | jq '[.results[] | {
-              name: .Name,
-              version: .Version,
-              votes: .NumVotes,
-              popularity: .Popularity,
-              maintainer: .Maintainer
-            }]' > /tmp/aur.json
-
       - name: Collect pkgstats (Arch install counts)
         run: |
           for pkg in mp3rgain-bin mp3rgui; do
@@ -104,7 +93,6 @@ jobs:
             --arg date "$DATE" \
             --slurpfile gh /tmp/github_releases.json \
             --slurpfile crates /tmp/crates_io.json \
-            --slurpfile aur /tmp/aur.json \
             --slurpfile pkgstats /tmp/pkgstats.json \
             --slurpfile ppa_cli /tmp/ppa_cli.json \
             --slurpfile ppa_gui /tmp/ppa_gui.json \
@@ -112,7 +100,6 @@ jobs:
               date: $date,
               github_releases: $gh[0],
               crates_io: $crates[0],
-              aur: $aur[0],
               pkgstats: $pkgstats[0],
               ppa_cli: $ppa_cli[0],
               ppa_gui: $ppa_gui[0]
