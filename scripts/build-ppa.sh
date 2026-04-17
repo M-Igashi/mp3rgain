@@ -133,7 +133,7 @@ CARGO_CONFIG
     find "$src_dir/vendor" -name '*.a' -delete 2>/dev/null || true
     find "$src_dir/vendor" -name '*.dll' -delete 2>/dev/null || true
     find "$src_dir/vendor" -name '*.lib' -delete 2>/dev/null || true
-    find "$src_dir/vendor" -type d \( -name tests -o -name examples -o -name benches -o -name .github \) -exec rm -rf {} + 2>/dev/null || true
+    find "$src_dir/vendor" -type d \( -name tests -o -name benches -o -name .github \) -exec rm -rf {} + 2>/dev/null || true
     find "$src_dir/vendor" -name '*.md' ! -name 'README.md' -delete 2>/dev/null || true
     # Downgrade edition2024 to edition2021 and strip rust-version for Ubuntu noble's Cargo 1.75.0
     find "$src_dir/vendor" -name Cargo.toml -exec sed -i -e 's/^edition = "2024"$/edition = "2021"/' -e 's/^resolver = "3"$/resolver = "2"/' -e '/^rust-version = /d' {} +
