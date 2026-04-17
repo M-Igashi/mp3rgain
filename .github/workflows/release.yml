@@ -43,14 +43,14 @@ jobs:
 
       - name: Upload artifact (Unix)
         if: runner.os != 'Windows'
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mp3rgain-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/mp3rgain
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mp3rgain-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/mp3rgain.exe
@@ -95,14 +95,14 @@ jobs:
 
       - name: Upload artifact (Unix)
         if: runner.os != 'Windows'
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mp3rgui-${{ matrix.target }}
           path: mp3rgui/target/${{ matrix.target }}/release/mp3rgui
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mp3rgui-${{ matrix.target }}
           path: mp3rgui/target/${{ matrix.target }}/release/mp3rgui.exe
@@ -265,7 +265,7 @@ jobs:
           echo "gui_windows_arm64_sha256=$(cat "dist/mp3rgui-${TAG}-windows-arm64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v2
         with:
           files: |
             dist/mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz
@@ -393,7 +393,7 @@ jobs:
       - name: Upload to release
         env:
           ARCH: ${{ matrix.arch }}
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v2
         with:
           files: |
             ../mp3rgain_${{ needs.release.outputs.version }}-1_${{ matrix.arch }}.deb
@@ -456,7 +456,7 @@ jobs:
       - name: Upload to release
         env:
           ARCH: ${{ matrix.arch }}
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v2
         with:
           files: |
             ../mp3rgui_${{ needs.release.outputs.version }}-1_${{ matrix.arch }}.deb
