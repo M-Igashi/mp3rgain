@@ -66,21 +66,35 @@ jobs:
             count=$(echo "$entries" | jq 'length')
             i=0
             while [ "$i" -lt "$count" ]; do
-              local self version arch series dl
+              local self version arch series build dl
               self=$(echo "$entries" | jq -r ".[$i].self_link")
               version=$(echo "$entries" | jq -r ".[$i].binary_package_version")
               arch=$(echo "$entries" | jq -r ".[$i].distro_arch_series_link | split(\"/\") | .[-1]")
               series=$(echo "$entries" | jq -r ".[$i].distro_arch_series_link | split(\"/\") | .[-2]")
+              build=$(echo "$entries" | jq -r ".[$i].build_link")
               dl=$(curl -sf "${self}?ws.op=getDownloadCount" || echo 0)
               [ -z "$dl" ] && dl=0
               enriched=$(jq -c \
-                --arg v "$version" --arg a "$arch" --arg s "$series" --argjson d "$dl" \
-                '. + [{version: $v, arch: $a, series: $s, downloads: $d}]' <(echo "$enriched"))
+                --arg v "$version" --arg a "$arch" --arg s "$series" --arg b "$build" --argjson d "$dl" \
+                '. + [{version: $v, arch: $a, series: $s, build: $b, downloads: $d}]' <(echo "$enriched"))
               i=$((i + 1))
             done
+            # Collapse publications sharing the same build (e.g. amd64 and
+            # amd64v3 variants of the same Launchpad build): sum downloads and
+            # join arch labels.
+            local grouped
+            grouped=$(echo "$enriched" | jq '
+              group_by(.build)
+              | map({
+                  version: .[0].version,
+                  series: .[0].series,
+                  arch: (map(.arch) | unique | join(" / ")),
+                  downloads: (map(.downloads) | add)
+                })
+            ')
             local total
-            total=$(echo "$enriched" | jq '[.[].downloads] | add // 0')
-            jq -n --arg ppa "$ppa" --argjson total "$total" --argjson items "$enriched" \
+            total=$(echo "$grouped" | jq '[.[].downloads] | add // 0')
+            jq -n --arg ppa "$ppa" --argjson total "$total" --argjson items "$grouped" \
               '{ppa: $ppa, total_downloads: $total, items: $items}' > "$out"
           }
           collect_ppa mp3rgain /tmp/ppa_cli.json
