@@ -38,7 +38,7 @@
 <body>
 <div class="container">
   <h1>mp3rgain Download Stats</h1>
-  <p class="subtitle">Updated weekly &mdash; <span id="last-updated">loading...</span></p>
+  <p class="subtitle">Updated daily &mdash; <span id="last-updated">loading...</span></p>
 
   <div class="grid" id="summary-cards">
     <div class="card"><div class="card-label">GitHub Releases Total</div><div class="card-value" id="gh-total">-</div></div>
@@ -240,7 +240,7 @@ async function main() {
     });
   } else {
     document.getElementById('chart-trend').parentElement.innerHTML =
-      '<h2>Download Trend</h2><p style="color:var(--muted);text-align:center;padding:2rem">Trend data will appear after multiple weekly snapshots.</p>';
+      '<h2>Download Trend</h2><p style="color:var(--muted);text-align:center;padding:2rem">Trend data will appear after multiple daily snapshots.</p>';
   }
 
   // PPA table
