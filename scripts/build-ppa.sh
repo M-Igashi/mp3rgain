@@ -111,8 +111,11 @@ for lockfile in glob.glob('$src_dir/**/Cargo.lock', recursive=True):
     echo "==> Vendoring Rust dependencies..."
     if [[ "$pkg_name" == "mp3rgui" ]]; then
         (cd "$src_dir" && cargo vendor --manifest-path mp3rgui/Cargo.toml vendor)
+        # Strip checksum lines from Cargo.lock after vendor (cleared cargo-checksum.json invalidates them)
+        (cd "$src_dir" && sed -i '/^checksum = /d' Cargo.lock mp3rgui/Cargo.lock)
     else
         (cd "$src_dir" && cargo vendor vendor)
+        (cd "$src_dir" && sed -i '/^checksum = /d' Cargo.lock)
     fi
 
     # Step 3: Create .cargo/config.toml for offline builds

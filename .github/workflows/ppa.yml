@@ -85,6 +85,8 @@ jobs:
               with open(lockfile, 'w') as f: f.write(c)
           "
           cargo vendor vendor
+          # Strip checksum lines from Cargo.lock after vendor (cleared cargo-checksum.json invalidates them)
+          sed -i '/^checksum = /d' Cargo.lock
           mkdir -p .cargo
           printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
           # Remove unnecessary files from vendored deps to reduce tarball size
@@ -185,6 +187,8 @@ jobs:
               with open(lockfile, 'w') as f: f.write(c)
           "
           cargo vendor --manifest-path mp3rgui/Cargo.toml vendor
+          # Strip checksum lines from Cargo.lock after vendor (cleared cargo-checksum.json invalidates them)
+          sed -i '/^checksum = /d' Cargo.lock mp3rgui/Cargo.lock
           mkdir -p .cargo
           printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
           # Remove unnecessary files from vendored deps to reduce tarball size
