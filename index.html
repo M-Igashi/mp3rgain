@@ -43,7 +43,9 @@
   <div class="grid" id="summary-cards">
     <div class="card"><div class="card-label">GitHub Releases Total</div><div class="card-value" id="gh-total">-</div></div>
     <div class="card"><div class="card-label">crates.io Total</div><div class="card-value" id="crates-total">-</div></div>
+    <div class="card"><div class="card-label">PPA Downloads</div><div class="card-value" id="ppa-total">-</div></div>
     <div class="card"><div class="card-label">AUR Votes</div><div class="card-value" id="aur-votes">-</div></div>
+    <div class="card"><div class="card-label">Arch Installs (pkgstats)</div><div class="card-value" id="pkgstats-total">-</div></div>
     <div class="card"><div class="card-label">Latest Version</div><div class="card-value" id="latest-version">-</div></div>
   </div>
 
@@ -63,12 +65,34 @@
   </div>
 
   <div class="section">
-    <h2>Download Trend (GitHub Releases Total)</h2>
+    <h2>Download Trend</h2>
     <canvas id="chart-trend"></canvas>
   </div>
 
   <div class="section">
-    <h2>Per-Release Breakdown</h2>
+    <h2>PPA Downloads (Launchpad)</h2>
+    <div style="overflow-x:auto">
+      <table id="table-ppa">
+        <thead><tr><th>PPA</th><th>Version</th><th>Series</th><th>Arch</th><th class="num">Downloads</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">Counts come from Launchpad and may lag actual downloads by ~24h.</p>
+  </div>
+
+  <div class="section">
+    <h2>Arch Linux pkgstats (opt-in install counts)</h2>
+    <div style="overflow-x:auto">
+      <table id="table-pkgstats">
+        <thead><tr><th>Package</th><th class="num">Installs</th><th class="num">Samples</th><th class="num">Popularity</th><th>Month</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">Installs / samples from voluntary <a href="https://pkgstats.archlinux.de/" style="color:var(--blue)">pkgstats</a> submissions.</p>
+  </div>
+
+  <div class="section">
+    <h2>Per-Release Breakdown (GitHub Releases)</h2>
     <div style="overflow-x:auto">
       <table id="table-releases">
         <thead><tr><th>Version</th><th>CLI</th><th>GUI</th><th class="num">CLI Downloads</th><th class="num">GUI Downloads</th><th class="num">Total</th></tr></thead>
@@ -134,8 +158,13 @@ async function main() {
     sum + r.assets.filter(a => isReal(a.name)).reduce((s, a) => s + a.download_count, 0), 0);
   document.getElementById('gh-total').textContent = num(ghTotal);
   document.getElementById('crates-total').textContent = num(latest.crates_io.total_downloads);
+  const ppaCliTotal = latest.ppa_cli?.total_downloads || 0;
+  const ppaGuiTotal = latest.ppa_gui?.total_downloads || 0;
+  document.getElementById('ppa-total').textContent = num(ppaCliTotal + ppaGuiTotal);
   const aurVotes = latest.aur.reduce((s, p) => s + p.votes, 0);
   document.getElementById('aur-votes').textContent = num(aurVotes);
+  const pkgstatsTotal = (latest.pkgstats || []).reduce((s, p) => s + (p.count || 0), 0);
+  document.getElementById('pkgstats-total').textContent = num(pkgstatsTotal);
   document.getElementById('latest-version').textContent = ghReleases[0]?.tag || '-';
 
   // Downloads by version (bar chart, top 15)
@@ -194,6 +223,8 @@ async function main() {
     const trendGH = data.map(d => d.github_releases.reduce((sum, r) =>
       sum + r.assets.filter(a => isReal(a.name)).reduce((s, a) => s + a.download_count, 0), 0));
     const trendCrates = data.map(d => d.crates_io.total_downloads);
+    const trendPPA = data.map(d => (d.ppa_cli?.total_downloads || 0) + (d.ppa_gui?.total_downloads || 0));
+    const trendPkgstats = data.map(d => (d.pkgstats || []).reduce((s, p) => s + (p.count || 0), 0));
     new Chart(document.getElementById('chart-trend'), {
       type: 'line',
       data: {
@@ -201,13 +232,45 @@ async function main() {
         datasets: [
           { label: 'GitHub Releases', data: trendGH, borderColor: COLORS.blue, backgroundColor: 'transparent', tension: 0.3 },
           { label: 'crates.io', data: trendCrates, borderColor: COLORS.orange, backgroundColor: 'transparent', tension: 0.3 },
+          { label: 'PPA', data: trendPPA, borderColor: COLORS.green, backgroundColor: 'transparent', tension: 0.3 },
+          { label: 'pkgstats', data: trendPkgstats, borderColor: COLORS.purple, backgroundColor: 'transparent', tension: 0.3 },
         ]
       },
       options: CHART_DEFAULTS
     });
   } else {
     document.getElementById('chart-trend').parentElement.innerHTML =
-      '<h2>Download Trend (GitHub Releases Total)</h2><p style="color:var(--muted);text-align:center;padding:2rem">Trend data will appear after multiple weekly snapshots.</p>';
+      '<h2>Download Trend</h2><p style="color:var(--muted);text-align:center;padding:2rem">Trend data will appear after multiple weekly snapshots.</p>';
+  }
+
+  // PPA table
+  const ppaTbody = document.querySelector('#table-ppa tbody');
+  const ppaRows = [
+    ...((latest.ppa_cli?.items) || []).map(it => ({ ppa: 'mp3rgain (CLI)', ...it })),
+    ...((latest.ppa_gui?.items) || []).map(it => ({ ppa: 'mp3rgui (GUI)', ...it })),
+  ];
+  if (ppaRows.length === 0) {
+    ppaTbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:1.5rem">No published binaries yet.</td></tr>';
+  } else {
+    ppaRows.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${r.ppa}</td><td>${r.version}</td><td>${r.series}</td><td>${r.arch}</td><td class="num">${num(r.downloads)}</td>`;
+      ppaTbody.appendChild(tr);
+    });
+  }
+
+  // pkgstats table
+  const pkgTbody = document.querySelector('#table-pkgstats tbody');
+  const pkgRows = (latest.pkgstats || []).filter(p => p.name);
+  if (pkgRows.length === 0) {
+    pkgTbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:1.5rem">No data available.</td></tr>';
+  } else {
+    pkgRows.forEach(p => {
+      const tr = document.createElement('tr');
+      const month = p.startMonth ? String(p.startMonth).replace(/^(\d{4})(\d{2})$/, '$1-$2') : '-';
+      tr.innerHTML = `<td>${p.name}</td><td class="num">${num(p.count || 0)}</td><td class="num">${num(p.samples || 0)}</td><td class="num">${(p.popularity ?? 0).toFixed(3)}%</td><td>${month}</td>`;
+      pkgTbody.appendChild(tr);
+    });
   }
 
   // Release table
