@@ -41,16 +41,19 @@
   <p class="subtitle">Updated daily &mdash; <span id="last-updated">loading...</span></p>
 
   <div class="grid" id="summary-cards">
-    <div class="card"><div class="card-label">GitHub Releases Total</div><div class="card-value" id="gh-total">-</div></div>
+    <div class="card">
+      <div class="card-label" title="Includes downloads from Homebrew and Winget installs, which fetch assets from GitHub Releases.">GitHub Releases <span style="color:var(--muted)">&#9432;</span></div>
+      <div class="card-value" id="gh-total">-</div>
+      <div style="font-size:0.7rem;color:var(--muted);margin-top:0.25rem">incl. Homebrew / Winget</div>
+    </div>
     <div class="card"><div class="card-label">crates.io Total</div><div class="card-value" id="crates-total">-</div></div>
     <div class="card"><div class="card-label">PPA Downloads</div><div class="card-value" id="ppa-total">-</div></div>
-    <div class="card"><div class="card-label">AUR Votes</div><div class="card-value" id="aur-votes">-</div></div>
     <div class="card"><div class="card-label">Arch Installs (pkgstats)</div><div class="card-value" id="pkgstats-total">-</div></div>
     <div class="card"><div class="card-label">Latest Version</div><div class="card-value" id="latest-version">-</div></div>
   </div>
 
   <div class="section">
-    <h2>Downloads by Version (GitHub Releases)</h2>
+    <h2>Downloads by Version (GitHub Releases, incl. Homebrew / Winget)</h2>
     <canvas id="chart-versions"></canvas>
   </div>
 
@@ -92,7 +95,7 @@
   </div>
 
   <div class="section">
-    <h2>Per-Release Breakdown (GitHub Releases)</h2>
+    <h2>Per-Release Breakdown (GitHub Releases, incl. Homebrew / Winget)</h2>
     <div style="overflow-x:auto">
       <table id="table-releases">
         <thead><tr><th>Version</th><th>CLI</th><th>GUI</th><th class="num">CLI Downloads</th><th class="num">GUI Downloads</th><th class="num">Total</th></tr></thead>
@@ -161,8 +164,6 @@ async function main() {
   const ppaCliTotal = latest.ppa_cli?.total_downloads || 0;
   const ppaGuiTotal = latest.ppa_gui?.total_downloads || 0;
   document.getElementById('ppa-total').textContent = num(ppaCliTotal + ppaGuiTotal);
-  const aurVotes = latest.aur.reduce((s, p) => s + p.votes, 0);
-  document.getElementById('aur-votes').textContent = num(aurVotes);
   const pkgstatsTotal = (latest.pkgstats || []).reduce((s, p) => s + (p.count || 0), 0);
   document.getElementById('pkgstats-total').textContent = num(pkgstatsTotal);
   document.getElementById('latest-version').textContent = ghReleases[0]?.tag || '-';
