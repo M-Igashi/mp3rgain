@@ -22,6 +22,10 @@ on:
         description: "PPA revision number (bump if re-uploading same version)"
         type: string
         default: "1"
+      target_ppa:
+        description: "Target PPA (e.g. ppa:m-igashi/mp3rgain or ppa:m-igashi/mp3rgain-test)"
+        type: string
+        default: "ppa:m-igashi/mp3rgain"
 
 permissions:
   contents: read
@@ -108,6 +112,7 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
           PPA_REV: ${{ inputs.ppa_revision || '1' }}
+          TARGET_PPA: ${{ inputs.target_ppa || 'ppa:m-igashi/mp3rgain' }}
         run: |
           PKG=mp3rgain
           ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
@@ -126,7 +131,7 @@ jobs:
             debuild -S -sa -d -k"$GPG_KEY_ID"
             cd "$GITHUB_WORKSPACE"
             echo "=== Uploading ${PKG} for ${DISTRO} ==="
-            dput ppa:m-igashi/mp3rgain "$WORK/${PKG}_${PPA_VER}_source.changes"
+            dput "${TARGET_PPA}" "$WORK/${PKG}_${PPA_VER}_source.changes"
           done
 
   upload-gui:
@@ -234,6 +239,7 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
           PPA_REV: ${{ inputs.ppa_revision || '1' }}
+          TARGET_PPA: ${{ inputs.target_ppa || 'ppa:m-igashi/mp3rgain' }}
         run: |
           PKG=mp3rgui
           ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
@@ -252,5 +258,5 @@ jobs:
             debuild -S -sa -d -k"$GPG_KEY_ID"
             cd "$GITHUB_WORKSPACE"
             echo "=== Uploading ${PKG} for ${DISTRO} ==="
-            dput ppa:m-igashi/mp3rgain "$WORK/${PKG}_${PPA_VER}_source.changes"
+            dput "${TARGET_PPA}" "$WORK/${PKG}_${PPA_VER}_source.changes"
           done
