@@ -219,7 +219,7 @@ jobs:
             'd3d12-*' 'winresource-*' 'widestring-*' \
             'cocoa-*' 'cocoa-foundation-*' 'core-foundation-*' 'core-foundation-sys-*' \
             'core-graphics-*' 'core-graphics-types-*' 'metal-*' \
-            'objc-*' 'objc2-*' 'objc-sys-*' 'block-*' 'block2-*' 'block-sys-*' \
+            'objc-*' 'objc2-*' 'objc-sys-*' 'block-0.*' 'block-1.*' 'block2-*' 'block-sys-*' \
             'dispatch-*' 'icrate-*' \
             'accesskit_macos-*' 'accesskit_windows-*'; do
             for crate_dir in vendor/$pattern; do
