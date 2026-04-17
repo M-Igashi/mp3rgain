@@ -22,10 +22,14 @@ on:
         description: "PPA revision number (bump if re-uploading same version)"
         type: string
         default: "1"
-      target_ppa:
-        description: "Target PPA (e.g. ppa:m-igashi/mp3rgain or ppa:m-igashi/mp3rgain-test)"
+      target_ppa_cli:
+        description: "Target PPA for mp3rgain (CLI)"
         type: string
         default: "ppa:m-igashi/mp3rgain"
+      target_ppa_gui:
+        description: "Target PPA for mp3rgui (GUI)"
+        type: string
+        default: "ppa:m-igashi/mp3rgui"
       target_distro:
         description: "Target Ubuntu distro (questing, noble, etc.)"
         type: string
@@ -116,7 +120,7 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
           PPA_REV: ${{ inputs.ppa_revision || '1' }}
-          TARGET_PPA: ${{ inputs.target_ppa || 'ppa:m-igashi/mp3rgain' }}
+          TARGET_PPA: ${{ inputs.target_ppa_cli || 'ppa:m-igashi/mp3rgain' }}
           TARGET_DISTRO: ${{ inputs.target_distro || 'questing' }}
         run: |
           PKG=mp3rgain
@@ -244,7 +248,7 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
           PPA_REV: ${{ inputs.ppa_revision || '1' }}
-          TARGET_PPA: ${{ inputs.target_ppa || 'ppa:m-igashi/mp3rgain' }}
+          TARGET_PPA: ${{ inputs.target_ppa_gui || 'ppa:m-igashi/mp3rgui' }}
           TARGET_DISTRO: ${{ inputs.target_distro || 'questing' }}
         run: |
           PKG=mp3rgui
