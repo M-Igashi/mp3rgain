@@ -10,6 +10,8 @@ use id3::TagLike;
 
 use std::path::Path;
 
+const TARGET_VERSION: id3::Version = id3::Version::Id3v24;
+
 /// All known mp3gain/ReplayGain TXXX descriptions
 const ALL_RG_DESCRIPTIONS: &[&str] = &[
     TAG_MP3GAIN_UNDO,
@@ -45,7 +47,16 @@ fn read_tag(path: &Path) -> Result<id3::Tag> {
 }
 
 fn write_tag(path: &Path, tag: &id3::Tag) -> Result<()> {
-    tag.write_to_path(path, id3::Version::Id3v24)
+    // Drop frames whose IDs can't be expressed in the target version. Files
+    // authored with an ID3v2.2 tag can contain 3-byte IDs (e.g. "GP1") that
+    // the id3 crate keeps as-is during read but refuses to encode into v2.4,
+    // which would otherwise fail the whole write and lose the ReplayGain tags.
+    let mut sanitized = tag.clone();
+    sanitized
+        .frames_vec_mut()
+        .retain(|f| f.id_for_version(TARGET_VERSION).is_some());
+    sanitized
+        .write_to_path(path, TARGET_VERSION)
         .map_err(|e| Error::Id3v2Error {
             message: e.to_string(),
         })
