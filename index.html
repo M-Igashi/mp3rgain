@@ -244,11 +244,36 @@ async function main() {
       '<h2>Download Trend</h2><p style="color:var(--muted);text-align:center;padding:2rem">Trend data will appear after multiple daily snapshots.</p>';
   }
 
-  // PPA table
+  // PPA table: show only the latest version per (series, arch), but sum
+  // downloads across every published version so historical installs don't
+  // disappear from the running total when we cut a new PPA release.
+  const compareUpstream = (a, b) => {
+    const parts = v => (v.split('-')[0] || '').split('.').map(n => parseInt(n, 10) || 0);
+    const pa = parts(a), pb = parts(b);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const d = (pa[i] || 0) - (pb[i] || 0);
+      if (d !== 0) return d;
+    }
+    return 0;
+  };
+  const aggregatePpa = items => {
+    const groups = new Map();
+    for (const it of items || []) {
+      const key = `${it.series}|${it.arch}`;
+      const g = groups.get(key);
+      if (!g) {
+        groups.set(key, { ...it, downloads: it.downloads || 0 });
+      } else {
+        g.downloads += it.downloads || 0;
+        if (compareUpstream(it.version, g.version) > 0) g.version = it.version;
+      }
+    }
+    return [...groups.values()];
+  };
   const ppaTbody = document.querySelector('#table-ppa tbody');
   const ppaRows = [
-    ...((latest.ppa_cli?.items) || []).map(it => ({ ppa: 'mp3rgain (CLI)', ...it })),
-    ...((latest.ppa_gui?.items) || []).map(it => ({ ppa: 'mp3rgui (GUI)', ...it })),
+    ...aggregatePpa(latest.ppa_cli?.items).map(it => ({ ppa: 'mp3rgain (CLI)', ...it })),
+    ...aggregatePpa(latest.ppa_gui?.items).map(it => ({ ppa: 'mp3rgui (GUI)', ...it })),
   ];
   if (ppaRows.length === 0) {
     ppaTbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:1.5rem">No published binaries yet.</td></tr>';
