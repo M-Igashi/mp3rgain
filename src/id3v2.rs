@@ -46,15 +46,37 @@ fn read_tag(path: &Path) -> Result<id3::Tag> {
     }
 }
 
+/// Drop any frame that the `id3` crate refuses to encode in `TARGET_VERSION`.
+///
+/// An existing v2.2/v2.3 tag can carry frames that cannot be round-tripped into
+/// v2.4 without failing the whole write and losing the ReplayGain TXXX frames.
+/// Seen in the wild so far:
+/// - `ID::Invalid` 3-byte IDs with no v2.3/v2.4 equivalent (e.g. `GP1`).
+/// - Frames whose content type mismatches the declared ID and trips
+///   `Frame::validate` (e.g. IPLS read as `InvolvedPeopleList` then targeted
+///   as a plain text frame via ID remap).
+/// - Frames whose content encoding fails in the underlying crate for other
+///   reasons.
+///
+/// Test-encoding each frame in isolation catches all three: if the single-frame
+/// tag round-trips, the frame is safe to keep; otherwise we drop it before
+/// attempting the full write.
+fn is_frame_encodable(frame: &id3::Frame) -> bool {
+    if frame.id_for_version(TARGET_VERSION).is_none() {
+        return false;
+    }
+    let mut probe = id3::Tag::new();
+    probe.add_frame(frame.clone());
+    let mut buf: Vec<u8> = Vec::new();
+    id3::Encoder::new()
+        .version(TARGET_VERSION)
+        .encode(&probe, &mut buf)
+        .is_ok()
+}
+
 fn write_tag(path: &Path, tag: &id3::Tag) -> Result<()> {
-    // Drop frames whose IDs can't be expressed in the target version. Files
-    // authored with an ID3v2.2 tag can contain 3-byte IDs (e.g. "GP1") that
-    // the id3 crate keeps as-is during read but refuses to encode into v2.4,
-    // which would otherwise fail the whole write and lose the ReplayGain tags.
     let mut sanitized = tag.clone();
-    sanitized
-        .frames_vec_mut()
-        .retain(|f| f.id_for_version(TARGET_VERSION).is_some());
+    sanitized.frames_vec_mut().retain(is_frame_encodable);
     sanitized
         .write_to_path(path, TARGET_VERSION)
         .map_err(|e| Error::Id3v2Error {
@@ -168,4 +190,38 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
     write_tag(path, &tag)?;
 
     Ok(frames)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use id3::frame::{Content, ExtendedText};
+    use id3::Frame;
+
+    #[test]
+    fn extended_text_frame_is_encodable() {
+        let frame: Frame = ExtendedText {
+            description: "REPLAYGAIN_TRACK_GAIN".to_string(),
+            value: "+1.50 dB".to_string(),
+        }
+        .into();
+        assert!(is_frame_encodable(&frame));
+    }
+
+    #[test]
+    fn invalid_three_byte_id_is_dropped() {
+        // "GP1" is an ID3v2.2-only ID that has no v2.3/v2.4 equivalent, so the
+        // id3 crate stores it as ID::Invalid and refuses to encode as v2.4.
+        let frame = Frame::with_content("GP1", Content::Text("grouping".to_string()));
+        assert!(!is_frame_encodable(&frame));
+    }
+
+    #[test]
+    fn text_content_in_tipl_frame_is_dropped() {
+        // TIPL must hold an InvolvedPeopleList; giving it Content::Text trips
+        // Frame::validate and blocks the whole tag encode. Our per-frame probe
+        // catches this so the RG TXXX frames still get written.
+        let frame = Frame::with_content("TIPL", Content::Text("producer".to_string()));
+        assert!(!is_frame_encodable(&frame));
+    }
 }
