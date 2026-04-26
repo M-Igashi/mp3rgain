@@ -40,13 +40,52 @@ jobs:
 
       - name: Collect pkgstats (Arch install counts)
         run: |
+          # The bare /api/packages/<pkg> endpoint returns only the most recent
+          # *closed* month, so the dashboard appears stuck until the next month
+          # closes. Use /series with an explicit window so the open month is
+          # included and we can also expose monthly history for trend charts.
+          END_MONTH=$(date -u +%Y%m)
+          START_MONTH=$(date -u -d '11 months ago' +%Y%m)
           for pkg in mp3rgain-bin mp3rgui; do
-            curl -sf "https://pkgstats.archlinux.de/api/packages/${pkg}" \
-              -o "/tmp/pkgstats_${pkg}.json" || echo '{}' > "/tmp/pkgstats_${pkg}.json"
+            curl -sf "https://pkgstats.archlinux.de/api/packages/${pkg}/series?startMonth=${START_MONTH}&endMonth=${END_MONTH}" \
+              -o "/tmp/pkgstats_${pkg}_series.json" \
+              || echo '{"packagePopularities":[]}' > "/tmp/pkgstats_${pkg}_series.json"
           done
-          jq -s '[.[0] + {name: "mp3rgain-bin"}, .[1] + {name: "mp3rgui"}]' \
-            /tmp/pkgstats_mp3rgain-bin.json /tmp/pkgstats_mp3rgui.json \
-            > /tmp/pkgstats.json
+          jq -n \
+            --slurpfile cli /tmp/pkgstats_mp3rgain-bin_series.json \
+            --slurpfile gui /tmp/pkgstats_mp3rgui_series.json \
+            '
+            def summarize($name):
+              ((.packagePopularities // []) | sort_by(.startMonth)) as $pops
+              | ($pops | last) as $latest
+              | {
+                  name: $name,
+                  count: ($latest.count // 0),
+                  samples: ($latest.samples // 0),
+                  popularity: ($latest.popularity // 0),
+                  startMonth: ($latest.startMonth // null),
+                  endMonth: ($latest.endMonth // null),
+                  series: [$pops[] | {month: .startMonth, count: (.count // 0), samples: (.samples // 0), popularity: (.popularity // 0)}]
+                };
+            [
+              ($cli[0] | summarize("mp3rgain-bin")),
+              ($gui[0] | summarize("mp3rgui"))
+            ]
+            ' > /tmp/pkgstats.json
+
+      - name: Collect AUR popularity
+        run: |
+          curl -sf 'https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=mp3rgain-bin&arg[]=mp3rgui' \
+            -o /tmp/aur_raw.json || echo '{"results":[]}' > /tmp/aur_raw.json
+          jq '{
+                packages: [.results[] | {
+                  name: .Name,
+                  votes: .NumVotes,
+                  popularity: .Popularity,
+                  maintainer: .Maintainer,
+                  last_modified: .LastModified
+                }]
+              }' /tmp/aur_raw.json > /tmp/aur.json
 
       - name: Collect PPA download stats
         run: |
@@ -108,6 +147,7 @@ jobs:
             --slurpfile gh /tmp/github_releases.json \
             --slurpfile crates /tmp/crates_io.json \
             --slurpfile pkgstats /tmp/pkgstats.json \
+            --slurpfile aur /tmp/aur.json \
             --slurpfile ppa_cli /tmp/ppa_cli.json \
             --slurpfile ppa_gui /tmp/ppa_gui.json \
             '{
@@ -115,6 +155,7 @@ jobs:
               github_releases: $gh[0],
               crates_io: $crates[0],
               pkgstats: $pkgstats[0],
+              aur: $aur[0],
               ppa_cli: $ppa_cli[0],
               ppa_gui: $ppa_gui[0]
             }' > /tmp/snapshot.json
