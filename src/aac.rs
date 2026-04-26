@@ -10,6 +10,7 @@
 
 use crate::error::{Error, Result};
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::aac_codebooks;
 use crate::mp4meta;
@@ -187,27 +188,62 @@ impl<'a> BitReader<'a> {
         self.data.len().saturating_sub(self.byte_pos) * 8 - self.bit_pos as usize
     }
 
-    /// Read 1-25 bits, MSB first
+    /// Read 1-32 bits, MSB first
     fn read_bits(&mut self, n: u8) -> Result<u32> {
-        let mut val = 0u32;
-        for _ in 0..n {
-            if self.byte_pos >= self.data.len() {
-                return Err(Error::AacParse {
-                    message: "unexpected end of bitstream".into(),
-                });
-            }
-            val = (val << 1) | ((self.data[self.byte_pos] >> (7 - self.bit_pos)) & 1) as u32;
-            self.bit_pos += 1;
-            if self.bit_pos == 8 {
-                self.bit_pos = 0;
-                self.byte_pos += 1;
-            }
+        if n == 0 {
+            return Ok(0);
         }
-        Ok(val)
+        let value = self.peek_bits(n)?;
+        self.advance_bits(n as usize);
+        Ok(value)
+    }
+
+    fn peek_bits(&self, n: u8) -> Result<u32> {
+        let bits_to_read = n as usize;
+        if bits_to_read == 0 {
+            return Ok(0);
+        }
+        if self.bits_remaining() < bits_to_read {
+            return Err(Error::AacParse {
+                message: "unexpected end of bitstream".into(),
+            });
+        }
+
+        let bytes_needed = (self.bit_pos as usize + bits_to_read).div_ceil(8);
+        let mut window = 0u64;
+        for byte in &self.data[self.byte_pos..self.byte_pos + bytes_needed] {
+            window = (window << 8) | u64::from(*byte);
+        }
+
+        let window_bits = bytes_needed * 8;
+        let shift = window_bits - self.bit_pos as usize - bits_to_read;
+        let mask = if n == 32 {
+            u64::from(u32::MAX)
+        } else {
+            (1u64 << bits_to_read) - 1
+        };
+        Ok(((window >> shift) & mask) as u32)
+    }
+
+    fn advance_bits(&mut self, bits_to_advance: usize) {
+        let next_bit = self.byte_pos * 8 + self.bit_pos as usize + bits_to_advance;
+        self.byte_pos = next_bit / 8;
+        self.bit_pos = (next_bit % 8) as u8;
     }
 
     fn read_bit(&mut self) -> Result<bool> {
-        Ok(self.read_bits(1)? != 0)
+        if self.byte_pos >= self.data.len() {
+            return Err(Error::AacParse {
+                message: "unexpected end of bitstream".into(),
+            });
+        }
+        let bit = ((self.data[self.byte_pos] >> (7 - self.bit_pos)) & 1) != 0;
+        self.bit_pos += 1;
+        if self.bit_pos == 8 {
+            self.bit_pos = 0;
+            self.byte_pos += 1;
+        }
+        Ok(bit)
     }
 
     fn skip_bits(&mut self, n: usize) -> Result<()> {
@@ -235,15 +271,95 @@ impl<'a> BitReader<'a> {
 // Huffman decoder
 // =============================================================================
 
+#[derive(Clone, Copy)]
+struct HuffmanEntry {
+    symbol: u16,
+    len: u8,
+}
+
+struct HuffmanTable {
+    lens: &'static [u8],
+    codes: &'static [u32],
+    max_len: u8,
+    entries: Vec<HuffmanEntry>,
+}
+
+impl HuffmanTable {
+    fn new(lens: &'static [u8], codes: &'static [u32], max_len: u8) -> Self {
+        let size = 1usize << max_len;
+        let mut entries = vec![HuffmanEntry { symbol: 0, len: 0 }; size];
+
+        for (symbol, (&len, &code)) in lens.iter().zip(codes.iter()).enumerate() {
+            if len == 0 {
+                continue;
+            }
+            let prefix = (code as usize) << (max_len - len);
+            let fill = 1usize << (max_len - len);
+            for slot in entries.iter_mut().skip(prefix).take(fill) {
+                *slot = HuffmanEntry {
+                    symbol: symbol as u16,
+                    len,
+                };
+            }
+        }
+
+        Self {
+            lens,
+            codes,
+            max_len,
+            entries,
+        }
+    }
+}
+
+static SCF_HUFFMAN_TABLE: OnceLock<HuffmanTable> = OnceLock::new();
+static SPECTRUM_HUFFMAN_TABLES: OnceLock<Vec<HuffmanTable>> = OnceLock::new();
+
+fn scf_huffman_table() -> &'static HuffmanTable {
+    SCF_HUFFMAN_TABLE.get_or_init(|| {
+        HuffmanTable::new(
+            &aac_codebooks::SCF_CB_LENS,
+            &aac_codebooks::SCF_CB_CODES,
+            aac_codebooks::SCF_CB_MAX_LEN,
+        )
+    })
+}
+
+fn spectrum_huffman_tables() -> &'static [HuffmanTable] {
+    SPECTRUM_HUFFMAN_TABLES.get_or_init(|| {
+        aac_codebooks::SPECTRUM_CODEBOOKS
+            .iter()
+            .map(|cb| HuffmanTable::new(cb.lens, cb.codes, cb.max_len))
+            .collect()
+    })
+}
+
 /// Decode one Huffman symbol from the bitstream.
-/// Returns the symbol index.
-fn decode_huffman(reader: &mut BitReader, lens: &[u8], codes: &[u32]) -> Result<usize> {
+/// Fast path: peek `max_len` bits, look up symbol in precomputed table, advance
+/// by the symbol's actual code length. Slow path falls back at end-of-stream.
+fn decode_huffman(reader: &mut BitReader, table: &HuffmanTable) -> Result<usize> {
+    if reader.bits_remaining() >= table.max_len as usize {
+        let bits = reader.peek_bits(table.max_len)? as usize;
+        let entry = table.entries[bits];
+        if entry.len != 0 {
+            reader.advance_bits(entry.len as usize);
+            return Ok(entry.symbol as usize);
+        }
+    }
+    decode_huffman_slow(reader, table.lens, table.codes, table.max_len)
+}
+
+fn decode_huffman_slow(
+    reader: &mut BitReader,
+    lens: &[u8],
+    codes: &[u32],
+    max_len: u8,
+) -> Result<usize> {
     let mut code: u32 = 0;
     let mut bits_read: u8 = 0;
-    let max_len = *lens.iter().max().unwrap_or(&0);
 
     for _ in 0..max_len {
-        code = (code << 1) | reader.read_bits(1)?;
+        code = (code << 1) | u32::from(reader.read_bit()?);
         bits_read += 1;
 
         for (i, (&len, &cw)) in lens.iter().zip(codes.iter()).enumerate() {
@@ -743,6 +859,7 @@ fn parse_scale_factor_data(
     section: &SectionData,
 ) -> Result<()> {
     let mut noise_pcm_flag = true;
+    let scf_table = scf_huffman_table();
 
     for g in 0..info.window_groups {
         for sfb in 0..info.max_sfb {
@@ -757,11 +874,7 @@ fn parse_scale_factor_data(
             }
             // INTENSITY, NOISE (after first), and regular scalefactors all
             // use the same Huffman codebook
-            decode_huffman(
-                reader,
-                &aac_codebooks::SCF_CB_LENS,
-                &aac_codebooks::SCF_CB_CODES,
-            )?;
+            decode_huffman(reader, scf_table)?;
         }
     }
     Ok(())
@@ -777,6 +890,8 @@ fn parse_spectral_data(
     section: &SectionData,
     bands: &[usize],
 ) -> Result<()> {
+    let huffman_tables = spectrum_huffman_tables();
+
     for g in 0..info.window_groups {
         // Short-window spectral data is ordered by scalefactor band, then by
         // each window in the group; reversing that order desynchronizes CPEs.
@@ -796,10 +911,11 @@ fn parse_spectral_data(
             let cb_info = &aac_codebooks::SPECTRUM_CODEBOOKS[cb_idx as usize - 1];
             let dim = cb_info.dimension as usize;
             let num_codewords = width / dim;
+            let huffman_table = &huffman_tables[cb_idx as usize - 1];
 
             for _w in 0..info.window_group_len[g] {
                 for _ in 0..num_codewords {
-                    let symbol = decode_huffman(reader, cb_info.lens, cb_info.codes)?;
+                    let symbol = decode_huffman(reader, huffman_table)?;
 
                     if cb_info.is_unsigned {
                         // For unsigned codebooks, read sign bits for nonzero values
@@ -1412,12 +1528,8 @@ mod tests {
         // CB1 index 40 has code 0x000 with length 1 (the shortest code)
         let data = [0b00000000]; // starts with 0
         let mut reader = BitReader::new(&data);
-        let symbol = decode_huffman(
-            &mut reader,
-            &aac_codebooks::SPECTRUM_CB1_LENS,
-            &aac_codebooks::SPECTRUM_CB1_CODES,
-        )
-        .unwrap();
+        let table = &spectrum_huffman_tables()[0];
+        let symbol = decode_huffman(&mut reader, table).unwrap();
         assert_eq!(symbol, 40);
     }
 
