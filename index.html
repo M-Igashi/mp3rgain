@@ -48,7 +48,12 @@
     </div>
     <div class="card"><div class="card-label">crates.io Total</div><div class="card-value" id="crates-total">-</div></div>
     <div class="card"><div class="card-label">PPA Downloads</div><div class="card-value" id="ppa-total">-</div></div>
-    <div class="card"><div class="card-label">Arch Installs (pkgstats)</div><div class="card-value" id="pkgstats-total">-</div></div>
+    <div class="card">
+      <div class="card-label" title="Sum of opt-in pkgstats reports for the current month. Resets monthly.">Arch pkgstats <span style="color:var(--muted)">&#9432;</span></div>
+      <div class="card-value" id="pkgstats-total">-</div>
+      <div style="font-size:0.7rem;color:var(--muted);margin-top:0.25rem" id="pkgstats-month">current month</div>
+    </div>
+    <div class="card"><div class="card-label">AUR Votes</div><div class="card-value" id="aur-votes-total">-</div></div>
     <div class="card"><div class="card-label">Latest Version</div><div class="card-value" id="latest-version">-</div></div>
   </div>
 
@@ -84,14 +89,25 @@
   </div>
 
   <div class="section">
-    <h2>Arch Linux pkgstats (opt-in install counts)</h2>
+    <h2>Arch Linux pkgstats (monthly opt-in counts)</h2>
     <div style="overflow-x:auto">
       <table id="table-pkgstats">
-        <thead><tr><th>Package</th><th class="num">Installs</th><th class="num">Samples</th><th class="num">Popularity</th><th>Month</th></tr></thead>
+        <thead><tr><th>Package</th><th>Month</th><th class="num">Installs</th><th class="num">Samples</th><th class="num">Popularity</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
-    <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">Installs / samples from voluntary <a href="https://pkgstats.archlinux.de/" style="color:var(--blue)">pkgstats</a> submissions.</p>
+    <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">Each row is a monthly snapshot of voluntary <a href="https://pkgstats.archlinux.de/" style="color:var(--blue)">pkgstats</a> submissions. The current month is partial and updates daily.</p>
+  </div>
+
+  <div class="section">
+    <h2>AUR (Arch User Repository)</h2>
+    <div style="overflow-x:auto">
+      <table id="table-aur">
+        <thead><tr><th>Package</th><th>Maintainer</th><th class="num">Votes</th><th class="num">Popularity</th><th>Last Modified</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">Source: <a href="https://aur.archlinux.org/rpc/" style="color:var(--blue)">AUR RPC</a>. AUR does not expose install counts &mdash; popularity is a rolling activity score.</p>
   </div>
 
   <div class="section">
@@ -166,6 +182,13 @@ async function main() {
   document.getElementById('ppa-total').textContent = num(ppaCliTotal + ppaGuiTotal);
   const pkgstatsTotal = (latest.pkgstats || []).reduce((s, p) => s + (p.count || 0), 0);
   document.getElementById('pkgstats-total').textContent = num(pkgstatsTotal);
+  const pkgstatsMonth = (latest.pkgstats || []).map(p => p.startMonth).find(m => m);
+  if (pkgstatsMonth) {
+    document.getElementById('pkgstats-month').textContent =
+      String(pkgstatsMonth).replace(/^(\d{4})(\d{2})$/, '$1-$2') + ' (in progress)';
+  }
+  const aurVotesTotal = (latest.aur?.packages || []).reduce((s, p) => s + (p.votes || 0), 0);
+  document.getElementById('aur-votes-total').textContent = num(aurVotesTotal);
   document.getElementById('latest-version').textContent = ghReleases[0]?.tag || '-';
 
   // Downloads by version (bar chart, top 15)
@@ -234,7 +257,7 @@ async function main() {
           { label: 'GitHub Releases', data: trendGH, borderColor: COLORS.blue, backgroundColor: 'transparent', tension: 0.3 },
           { label: 'crates.io', data: trendCrates, borderColor: COLORS.orange, backgroundColor: 'transparent', tension: 0.3 },
           { label: 'PPA', data: trendPPA, borderColor: COLORS.green, backgroundColor: 'transparent', tension: 0.3 },
-          { label: 'pkgstats', data: trendPkgstats, borderColor: COLORS.purple, backgroundColor: 'transparent', tension: 0.3 },
+          { label: 'pkgstats (current month)', data: trendPkgstats, borderColor: COLORS.purple, backgroundColor: 'transparent', tension: 0.3 },
         ]
       },
       options: CHART_DEFAULTS
@@ -285,17 +308,40 @@ async function main() {
     });
   }
 
-  // pkgstats table
+  // pkgstats table: one row per (package, month). Falls back to single-row
+  // legacy schema for older snapshots that lack a `series` field.
+  const fmtMonth = m => m ? String(m).replace(/^(\d{4})(\d{2})$/, '$1-$2') : '-';
   const pkgTbody = document.querySelector('#table-pkgstats tbody');
-  const pkgRows = (latest.pkgstats || []).filter(p => p.name);
+  const pkgPackages = (latest.pkgstats || []).filter(p => p.name);
+  const pkgRows = pkgPackages.flatMap(p => {
+    if (Array.isArray(p.series) && p.series.length > 0) {
+      return [...p.series].sort((a, b) => b.month - a.month).map(s => ({
+        name: p.name, month: s.month, count: s.count, samples: s.samples, popularity: s.popularity
+      }));
+    }
+    return [{ name: p.name, month: p.startMonth, count: p.count, samples: p.samples, popularity: p.popularity }];
+  });
   if (pkgRows.length === 0) {
     pkgTbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:1.5rem">No data available.</td></tr>';
   } else {
-    pkgRows.forEach(p => {
+    pkgRows.forEach(r => {
       const tr = document.createElement('tr');
-      const month = p.startMonth ? String(p.startMonth).replace(/^(\d{4})(\d{2})$/, '$1-$2') : '-';
-      tr.innerHTML = `<td>${p.name}</td><td class="num">${num(p.count || 0)}</td><td class="num">${num(p.samples || 0)}</td><td class="num">${(p.popularity ?? 0).toFixed(3)}%</td><td>${month}</td>`;
+      tr.innerHTML = `<td>${r.name}</td><td>${fmtMonth(r.month)}</td><td class="num">${num(r.count || 0)}</td><td class="num">${num(r.samples || 0)}</td><td class="num">${(r.popularity ?? 0).toFixed(3)}%</td>`;
       pkgTbody.appendChild(tr);
+    });
+  }
+
+  // AUR table
+  const aurTbody = document.querySelector('#table-aur tbody');
+  const aurPackages = (latest.aur?.packages || []).filter(p => p.name);
+  if (aurPackages.length === 0) {
+    aurTbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:1.5rem">No data available.</td></tr>';
+  } else {
+    aurPackages.forEach(p => {
+      const tr = document.createElement('tr');
+      const lastMod = p.last_modified ? new Date(p.last_modified * 1000).toISOString().slice(0, 10) : '-';
+      tr.innerHTML = `<td>${p.name}</td><td>${p.maintainer || '-'}</td><td class="num">${num(p.votes || 0)}</td><td class="num">${(p.popularity ?? 0).toFixed(3)}</td><td>${lastMod}</td>`;
+      aurTbody.appendChild(tr);
     });
   }
 
