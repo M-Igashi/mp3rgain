@@ -717,6 +717,12 @@ fn parse_section_data(reader: &mut BitReader, info: &IcsInfo) -> Result<SectionD
                 }
             }
 
+            if sect_len == 0 || k + sect_len > info.max_sfb {
+                return Err(Error::AacParse {
+                    message: "invalid AAC section length".into(),
+                });
+            }
+
             for slot in group_cb.iter_mut().skip(k).take(sect_len) {
                 *slot = cb;
             }
@@ -772,24 +778,26 @@ fn parse_spectral_data(
     bands: &[usize],
 ) -> Result<()> {
     for g in 0..info.window_groups {
-        for _w in 0..info.window_group_len[g] {
-            for sfb in 0..info.max_sfb {
-                let cb_idx = section.sfb_cb[g][sfb];
-                if matches!(
-                    cb_idx,
-                    ZERO_HCB | NOISE_HCB | INTENSITY_HCB | INTENSITY_HCB2
-                ) {
-                    continue;
-                }
+        // Short-window spectral data is ordered by scalefactor band, then by
+        // each window in the group; reversing that order desynchronizes CPEs.
+        for sfb in 0..info.max_sfb {
+            let cb_idx = section.sfb_cb[g][sfb];
+            if matches!(
+                cb_idx,
+                ZERO_HCB | NOISE_HCB | INTENSITY_HCB | INTENSITY_HCB2
+            ) {
+                continue;
+            }
 
-                let start = bands[sfb];
-                let end = bands[sfb + 1];
-                let width = end - start;
+            let start = bands[sfb];
+            let end = bands[sfb + 1];
+            let width = end - start;
 
-                let cb_info = &aac_codebooks::SPECTRUM_CODEBOOKS[cb_idx as usize - 1];
-                let dim = cb_info.dimension as usize;
-                let num_codewords = width / dim;
+            let cb_info = &aac_codebooks::SPECTRUM_CODEBOOKS[cb_idx as usize - 1];
+            let dim = cb_info.dimension as usize;
+            let num_codewords = width / dim;
 
+            for _w in 0..info.window_group_len[g] {
                 for _ in 0..num_codewords {
                     let symbol = decode_huffman(reader, cb_info.lens, cb_info.codes)?;
 
@@ -882,11 +890,18 @@ fn parse_tns_data(reader: &mut BitReader, info: &IcsInfo) -> Result<()> {
     let num_windows = if info.long_win { 1 } else { 8 };
 
     for _ in 0..num_windows {
+        let mut remaining_bands = info.max_sfb;
         let n_filt = reader.read_bits(n_filt_bits)? as usize;
         if n_filt > 0 {
             let coef_res = reader.read_bits(1)?; // coef_res flag
             for _ in 0..n_filt {
-                let _length = reader.read_bits(length_bits)?;
+                let length = reader.read_bits(length_bits)? as usize;
+                if length > remaining_bands {
+                    return Err(Error::AacParse {
+                        message: "invalid TNS filter length".into(),
+                    });
+                }
+                remaining_bands -= length;
                 let order = reader.read_bits(order_bits)? as usize;
                 if order > 0 {
                     let _direction = reader.read_bits(1)?;
