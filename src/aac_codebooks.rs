@@ -437,12 +437,15 @@ pub(crate) const AAC_QUADS: [(u8, u8, u8, u8); 81] = [
 // Codebook metadata
 // ---------------------------------------------------------------------------
 
+pub(crate) const SCF_CB_MAX_LEN: u8 = 19;
+
 pub(crate) struct CodebookInfo {
     pub lens: &'static [u8],
     pub codes: &'static [u32],
     pub dimension: u8,
     pub is_unsigned: bool,
     pub mod_value: u8,
+    pub max_len: u8,
 }
 
 pub(crate) const SPECTRUM_CODEBOOKS: [CodebookInfo; 11] = [
@@ -452,6 +455,7 @@ pub(crate) const SPECTRUM_CODEBOOKS: [CodebookInfo; 11] = [
         dimension: 4,
         is_unsigned: false,
         mod_value: 3,
+        max_len: 11,
     },
     CodebookInfo {
         lens: &SPECTRUM_CB2_LENS,
@@ -459,6 +463,7 @@ pub(crate) const SPECTRUM_CODEBOOKS: [CodebookInfo; 11] = [
         dimension: 4,
         is_unsigned: false,
         mod_value: 3,
+        max_len: 9,
     },
     CodebookInfo {
         lens: &SPECTRUM_CB3_LENS,
@@ -466,6 +471,7 @@ pub(crate) const SPECTRUM_CODEBOOKS: [CodebookInfo; 11] = [
         dimension: 4,
         is_unsigned: true,
         mod_value: 3,
+        max_len: 16,
     },
     CodebookInfo {
         lens: &SPECTRUM_CB4_LENS,
@@ -473,6 +479,7 @@ pub(crate) const SPECTRUM_CODEBOOKS: [CodebookInfo; 11] = [
         dimension: 4,
         is_unsigned: true,
         mod_value: 3,
+        max_len: 12,
     },
     CodebookInfo {
         lens: &SPECTRUM_CB5_LENS,
@@ -480,6 +487,7 @@ pub(crate) const SPECTRUM_CODEBOOKS: [CodebookInfo; 11] = [
         dimension: 2,
         is_unsigned: false,
         mod_value: 9,
+        max_len: 13,
     },
     CodebookInfo {
         lens: &SPECTRUM_CB6_LENS,
@@ -487,6 +495,7 @@ pub(crate) const SPECTRUM_CODEBOOKS: [CodebookInfo; 11] = [
         dimension: 2,
         is_unsigned: false,
         mod_value: 9,
+        max_len: 11,
     },
     CodebookInfo {
         lens: &SPECTRUM_CB7_LENS,
@@ -494,6 +503,7 @@ pub(crate) const SPECTRUM_CODEBOOKS: [CodebookInfo; 11] = [
         dimension: 2,
         is_unsigned: true,
         mod_value: 8,
+        max_len: 12,
     },
     CodebookInfo {
         lens: &SPECTRUM_CB8_LENS,
@@ -501,6 +511,7 @@ pub(crate) const SPECTRUM_CODEBOOKS: [CodebookInfo; 11] = [
         dimension: 2,
         is_unsigned: true,
         mod_value: 8,
+        max_len: 10,
     },
     CodebookInfo {
         lens: &SPECTRUM_CB9_LENS,
@@ -508,6 +519,7 @@ pub(crate) const SPECTRUM_CODEBOOKS: [CodebookInfo; 11] = [
         dimension: 2,
         is_unsigned: true,
         mod_value: 13,
+        max_len: 15,
     },
     CodebookInfo {
         lens: &SPECTRUM_CB10_LENS,
@@ -515,6 +527,7 @@ pub(crate) const SPECTRUM_CODEBOOKS: [CodebookInfo; 11] = [
         dimension: 2,
         is_unsigned: true,
         mod_value: 13,
+        max_len: 12,
     },
     CodebookInfo {
         lens: &SPECTRUM_CB11_LENS,
@@ -522,6 +535,7 @@ pub(crate) const SPECTRUM_CODEBOOKS: [CodebookInfo; 11] = [
         dimension: 2,
         is_unsigned: true,
         mod_value: 17,
+        max_len: 12,
     },
 ];
 
