@@ -23,29 +23,35 @@ mp3rgain --help
 sudo port uninstall mp3rgain
 ```
 
-## Submission Workflow
+## Submission / Update Workflow
+
+The `M-Igashi/macports-ports` fork only lives on GitHub. Every time we touch
+the Portfile, clone upstream into `/tmp`, push a branch to the fork, open or
+update the PR, then delete the temp clone.
 
 ```sh
-# Fork macports/macports-ports on GitHub first
-
-cd /tmp
-gh repo clone macports/macports-ports -- --depth 1
-cd macports-ports
+# Fresh /tmp clone (fork is M-Igashi/macports-ports, already on github.com)
+rm -rf /tmp/macports-ports
+gh repo clone macports/macports-ports /tmp/macports-ports -- --depth 1
+cd /tmp/macports-ports
 git checkout -b audio/mp3rgain-new-port
+git remote add fork https://github.com/M-Igashi/macports-ports.git
 
+# Copy canonical Portfile from this repo into the temp clone
 mkdir -p audio/mp3rgain
 cp ~/Projects/mp3rgain/packages/macports/audio/mp3rgain/Portfile audio/mp3rgain/
 
 git add audio/mp3rgain/Portfile
 git commit -m "audio/mp3rgain: new port"
-
-git remote add fork https://github.com/M-Igashi/macports-ports.git
-git push fork audio/mp3rgain-new-port
+git push -u fork audio/mp3rgain-new-port
 
 gh pr create --repo macports/macports-ports --base master \
   --head M-Igashi:audio/mp3rgain-new-port \
   --title "audio/mp3rgain: new port" \
   --body "Lossless MP3/AAC volume normalizer using ReplayGain. Modern Rust reimplementation of mp3gain. Provides the same lossless AAC/M4A global_gain rewrite functionality as the orphaned aacgain port."
+
+# Clean up temp clone after PR is opened/updated
+cd ~ && rm -rf /tmp/macports-ports /tmp/macports-ports-test /tmp/mp3rgain-*.tar.gz
 ```
 
 ## Updating the Portfile for a New Release
