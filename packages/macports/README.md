@@ -30,9 +30,10 @@ the Portfile, clone upstream into `/tmp`, push a branch to the fork, open or
 update the PR, then delete the temp clone.
 
 ```sh
-# Fresh /tmp clone (fork is M-Igashi/macports-ports, already on github.com)
+# Fresh /tmp clone (fork is M-Igashi/macports-ports, already on github.com).
+# Use a FULL clone (no --depth) so amend/rebase keeps a proper parent.
 rm -rf /tmp/macports-ports
-gh repo clone macports/macports-ports /tmp/macports-ports -- --depth 1
+gh repo clone macports/macports-ports /tmp/macports-ports
 cd /tmp/macports-ports
 git checkout -b audio/mp3rgain-new-port
 git remote add fork https://github.com/M-Igashi/macports-ports.git
