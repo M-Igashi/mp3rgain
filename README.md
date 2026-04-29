@@ -6,17 +6,21 @@
 [![GitHub Downloads](https://img.shields.io/github/downloads/M-Igashi/mp3rgain/total?label=downloads&color=brightgreen)](https://m-igashi.github.io/mp3rgain/)
 [![mp3gain compatible](https://img.shields.io/badge/mp3gain-compatible-brightgreen.svg)](docs/compatibility-report.md)
 
-**Lossless MP3/AAC volume adjustment - a modern mp3gain replacement written in Rust**
+**Lossless MP3/AAC volume adjustment - a modern mp3gain / aacgain replacement written in Rust**
 
 mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global_gain` field in each frame. This preserves audio quality while achieving permanent volume changes.
 
+> **The only actively maintained tool that performs lossless AAC/M4A bitstream gain adjustment.**
+> aacgain has been unmaintained since ~2009 and rarely builds on modern 64-bit systems. mp3rgain is the only practical option today for re-encode-free AAC volume normalization.
+
 ## Features
 
+- **Only tool with lossless AAC bitstream gain**: re-encode-free `global_gain` rewrite for AAC/M4A — a capability previously only available in the long-abandoned aacgain
 - **Lossless & Reversible**: No re-encoding, all changes can be undone (MP3 and AAC)
 - **ReplayGain**: Track and album gain analysis for MP3 and AAC/M4A
-- **Zero dependencies**: Single static binary (no ffmpeg, no mp3gain)
+- **Zero dependencies**: Single static binary (no ffmpeg, no mp3gain, no aacgain)
 - **Cross-platform**: macOS, Linux, Windows (x86_64 and ARM64)
-- **mp3gain compatible**: Drop-in replacement with identical CLI
+- **mp3gain / aacgain compatible**: Drop-in replacement with identical CLI
 - **GUI Application**: Native desktop app for drag-and-drop workflow
 
 ## Installation
@@ -109,9 +113,11 @@ Run `mp3rgain -h` for the full list of options.
 
 ## Why mp3rgain?
 
-The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained upstream since ~2015 (though distribution maintainers continue to apply security patches). mp3rgain is a modern, memory-safe replacement written in Rust.
+The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained upstream since ~2015 (though distribution maintainers continue to apply security patches). [aacgain](http://aacgain.altosdesign.com/), its AAC counterpart, has been unmaintained since ~2009 and is effectively unbuildable on modern 64-bit systems. mp3rgain is a modern, memory-safe replacement written in Rust that covers both.
 
-mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) for full compatibility with the original mp3gain. Loudness values will differ from EBU R128/LUFS-based tools (foobar2000, loudgain, ffmpeg loudnorm).
+**AAC/M4A is the differentiator.** No other actively maintained tool can rewrite AAC `global_gain` in place. Existing alternatives (rsgain, loudgain, FFmpeg) either only write ReplayGain tags (which non-compliant players ignore) or re-encode the audio (lossy). mp3rgain is the only option that gives you a lossless, reversible, player-agnostic AAC volume adjustment today.
+
+mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) for full compatibility with the original mp3gain / aacgain. Loudness values will differ from EBU R128/LUFS-based tools (foobar2000, loudgain, ffmpeg loudnorm).
 
 ## Library Usage
 

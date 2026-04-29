@@ -2,6 +2,8 @@
 
 This document provides a detailed comparison between mp3rgain and the original aacgain/mp3gain tools.
 
+> **Headline:** mp3rgain is the **only actively maintained tool** that performs lossless `global_gain` rewrite on AAC/M4A files. aacgain has been effectively abandoned since ~2009 and is unbuildable on most modern 64-bit systems; every other actively maintained alternative (rsgain, loudgain, FFmpeg) either tags-only or re-encodes. If you need re-encode-free AAC volume adjustment in 2026, mp3rgain is the only practical choice.
+
 ## Overview
 
 | | mp3rgain | aacgain | mp3gain |
@@ -248,6 +250,22 @@ If you apply `global_gain` adjustment with mp3rgain and later add ReplayGain tag
    rsgain easy *.mp3           # Then apply ReplayGain tags
    ```
 
+### AAC Volume Adjustment: Tool Landscape
+
+For AAC/M4A files specifically, the choice of tool matters more than for MP3, because almost no other modern tool can avoid re-encoding:
+
+| Tool | AAC approach | Lossless? | Player-agnostic? | Maintained? |
+|------|--------------|-----------|------------------|-------------|
+| **mp3rgain** | `global_gain` rewrite | **Yes** | **Yes** | **Yes (active)** |
+| aacgain | `global_gain` rewrite | Yes | Yes | No (~2009) |
+| rsgain | ReplayGain 2.0 tags | Yes (file untouched) | No (player must read tags) | Yes |
+| loudgain | ReplayGain 2.0 tags | Yes (file untouched) | No (player must read tags) | Yes |
+| FFmpeg `volume` | Re-encode | No (lossy) | Yes | Yes |
+| FFmpeg `loudnorm` | Re-encode | No (lossy) | Yes | Yes |
+| beets ReplayGain plugin | Tags via backend | Yes (file untouched) | No (player must read tags) | Yes |
+
+**The "lossless + player-agnostic + maintained" intersection contains exactly one tool: mp3rgain.** This matters for DJ equipment, car audio, smart speakers, and any environment where the playback device ignores ReplayGain tags.
+
 ### When to Use global_gain vs ReplayGain Tags
 
 | Use Case | Recommended Approach |
@@ -289,9 +307,10 @@ See [Security Documentation](security.md) for detailed CVE analysis.
 
 ## Why Choose mp3rgain?
 
-1. **Modern platform support**: Works on Windows 11, macOS (including Apple Silicon), and Linux
-2. **No dependencies**: Single static binary, no ffmpeg or other libraries required
-3. **Memory safety**: Written in Rust with strong safety guarantees
-4. **Active development**: Regularly updated and maintained
-5. **Extended features**: Recursive processing, dry-run mode, JSON output
-6. **Drop-in replacement**: 100% command-line compatible with original mp3gain
+1. **Only viable AAC bitstream gain tool today**: aacgain is unmaintained and unbuildable on modern 64-bit systems; rsgain/loudgain only write tags; FFmpeg only re-encodes. mp3rgain is the only path to lossless, reversible, player-agnostic AAC volume adjustment.
+2. **Modern platform support**: Works on Windows 11, macOS (including Apple Silicon), and Linux
+3. **No dependencies**: Single static binary, no ffmpeg or other libraries required
+4. **Memory safety**: Written in Rust with strong safety guarantees
+5. **Active development**: Regularly updated and maintained
+6. **Extended features**: Recursive processing, dry-run mode, JSON output
+7. **Drop-in replacement**: 100% command-line compatible with original mp3gain / aacgain

@@ -2,6 +2,19 @@
 
 This document describes real-world use cases for mp3rgain.
 
+## Standout Capability: Lossless AAC Volume Adjustment
+
+mp3rgain is the **only actively maintained tool** that performs lossless `global_gain` rewrite on AAC/M4A files. Use cases that specifically benefit from this:
+
+- **iTunes / Apple Music libraries**: Most personal music libraries on Apple platforms are AAC/M4A. Until now, normalizing them without re-encoding was impossible with any maintained tool.
+- **DJ workflows with AAC**: DJ hardware (CDJs, XDJs, controllers) ignores ReplayGain tags. AAC tracks bought from iTunes Store or other M4A sources previously had to be re-encoded to lose loudness, sacrificing quality.
+- **Smart speaker / car audio playback**: Same issue — these devices don't read ReplayGain tags, so the only way to adjust AAC volume in a way they respect is via bitstream rewrite.
+- **Audio archival**: For users who curate AAC libraries and want non-destructive, fully reversible volume normalization.
+
+For MP3, mp3rgain is one of several drop-in mp3gain replacements; for AAC, it currently has no equivalent.
+
+---
+
 ## Projects Using mp3rgain
 
 ### beets - Music Library Manager
@@ -18,17 +31,18 @@ This document describes real-world use cases for mp3rgain.
 
 **How it uses mp3rgain:**
 
-headroom includes mp3rgain as a built-in library dependency for lossless MP3 volume adjustment. This enables:
+headroom includes mp3rgain as a built-in library dependency for lossless MP3 **and AAC/M4A** volume adjustment. This enables:
 
-- **Native lossless gain**: For MP3 files with sufficient headroom (≥1.5 dB), headroom uses the mp3rgain library to directly modify the `global_gain` field in MP3 frames
-- **Zero external dependencies**: No need to install mp3gain separately
+- **Native lossless gain**: For MP3 and AAC/M4A files with sufficient headroom (≥1.5 dB), headroom uses the mp3rgain library to directly modify the `global_gain` field
+- **AAC bitstream gain unique to mp3rgain**: For AAC, no other library or CLI tool provides this — headroom previously had to re-encode AAC files
+- **Zero external dependencies for MP3/AAC**: No need to install mp3gain or aacgain separately
 - **Bitrate-aware processing**: Automatically selects appropriate True Peak ceiling based on bitrate
 
 ```
-# headroom's three-tier MP3 processing approach:
-1. Native Lossless (mp3rgain) - For files with ≥1.5 dB headroom
-2. Re-encode (ffmpeg) - For files needing precise gain <1.5 dB
-3. Skip - Files already at target ceiling
+# headroom's processing approach:
+1. Native Lossless (mp3rgain)   - MP3 / AAC with ≥1.5 dB headroom
+2. Re-encode (ffmpeg)            - FLAC / WAV / AIFF, or files needing <1.5 dB precision
+3. Skip                          - Files already at target ceiling
 ```
 
 **Installation:**
