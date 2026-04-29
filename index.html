@@ -78,6 +78,30 @@
   </div>
 
   <div class="section">
+    <h2>Linux Direct-Download Profile (CLI, GitHub Releases)</h2>
+    <p style="color:var(--muted);font-size:0.875rem;margin-bottom:1rem">
+      Estimates how much of the Linux GitHub-Releases traffic is automated (CI, Docker, scripts) vs. human end users.
+      Computed across CLI Linux assets (<code>linux-*.tar.gz</code> + <code>*_amd64/arm64.deb</code>) over all releases.
+    </p>
+    <div class="grid" style="margin-bottom:0">
+      <div class="card">
+        <div class="card-label" title="Sum of *.sha256 fetches divided by sum of binary fetches. Humans rarely fetch checksums; automation usually does.">SHA256 Fetch Ratio <span style="color:var(--muted)">&#9432;</span></div>
+        <div class="card-value" id="auto-sha256">-</div>
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:0.25rem" id="auto-sha256-hint">-</div>
+      </div>
+      <div class="card">
+        <div class="card-label" title="Linux ARM64 downloads divided by Linux total. Desktop Linux skews x86_64; high ARM64 share suggests CI matrix or container builds.">Linux ARM64 Share <span style="color:var(--muted)">&#9432;</span></div>
+        <div class="card-value" id="auto-arm">-</div>
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:0.25rem" id="auto-arm-hint">-</div>
+      </div>
+    </div>
+    <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">
+      Rule of thumb &mdash; SHA256 ratio &ge; 20% or ARM64 share &ge; 30% are strong automation signals.
+      Windows / macOS are excluded because their checksums are pulled by Winget / Homebrew validators and would skew the ratio.
+    </p>
+  </div>
+
+  <div class="section">
     <h2>PPA Downloads (Launchpad)</h2>
     <div style="overflow-x:auto">
       <table id="table-ppa">
@@ -266,6 +290,35 @@ async function main() {
     document.getElementById('chart-trend').parentElement.innerHTML =
       '<h2>Download Trend</h2><p style="color:var(--muted);text-align:center;padding:2rem">Trend data will appear after multiple daily snapshots.</p>';
   }
+
+  // Linux direct-download profile (CLI only): SHA256 fetch ratio + ARM64 share.
+  // We restrict to CLI Linux assets (tarballs + .deb, both archs) so that
+  // Winget / Homebrew validator traffic on Windows / macOS doesn't pollute
+  // the ratios.
+  const isCliLinuxAsset = name => {
+    if (!name.startsWith('mp3rgain') || name.startsWith('mp3rgui')) return false;
+    return /linux-(x86_64|arm64)\.tar\.gz(\.sha256)?$/.test(name)
+        || /_(amd64|arm64)\.deb(\.sha256)?$/.test(name);
+  };
+  const isArmName = name => name.includes('linux-arm64') || /_arm64\.deb(\.sha256)?$/.test(name);
+  let shaDL = 0, binDL = 0, armDL = 0, x86DL = 0;
+  for (const r of ghReleases) {
+    for (const a of r.assets) {
+      if (!isCliLinuxAsset(a.name)) continue;
+      if (a.name.endsWith('.sha256')) {
+        shaDL += a.download_count;
+      } else {
+        binDL += a.download_count;
+        if (isArmName(a.name)) armDL += a.download_count;
+        else x86DL += a.download_count;
+      }
+    }
+  }
+  const fmtPct = (n, d) => d > 0 ? (n / d * 100).toFixed(1) + '%' : '-';
+  document.getElementById('auto-sha256').textContent = fmtPct(shaDL, binDL);
+  document.getElementById('auto-sha256-hint').textContent = `${num(shaDL)} sha256 / ${num(binDL)} binary fetches`;
+  document.getElementById('auto-arm').textContent = fmtPct(armDL, armDL + x86DL);
+  document.getElementById('auto-arm-hint').textContent = `${num(armDL)} arm64 / ${num(x86DL)} x86_64`;
 
   // PPA table: show only the latest version per (series, arch), but sum
   // downloads across every published version so historical installs don't
