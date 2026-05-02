@@ -115,6 +115,17 @@ jobs:
           cd ../..
           tar -cJf "build-ppa/${PKG}_${VERSION}.orig.tar.xz" -C build-ppa "${PKG}-${VERSION}"
 
+      - name: Configure dput for HTTPS upload
+        run: |
+          cat > ~/.dput.cf <<'EOF'
+          [ppa]
+          fqdn = ppa.launchpad.net
+          method = https
+          incoming = ~%(ppa)s/ubuntu/
+          login = anonymous
+          allow_unsigned_uploads = 0
+          EOF
+
       - name: Build and upload source packages
         env:
           VERSION: ${{ steps.meta.outputs.version }}
@@ -242,6 +253,17 @@ jobs:
           du -sh "build-ppa/${PKG}-${VERSION}/vendor"
           XZ_OPT='-9e' tar -cJf "build-ppa/${PKG}_${VERSION}.orig.tar.xz" -C build-ppa "${PKG}-${VERSION}"
           ls -lh "build-ppa/${PKG}_${VERSION}.orig.tar.xz"
+
+      - name: Configure dput for HTTPS upload
+        run: |
+          cat > ~/.dput.cf <<'EOF'
+          [ppa]
+          fqdn = ppa.launchpad.net
+          method = https
+          incoming = ~%(ppa)s/ubuntu/
+          login = anonymous
+          allow_unsigned_uploads = 0
+          EOF
 
       - name: Build and upload source packages
         env:
