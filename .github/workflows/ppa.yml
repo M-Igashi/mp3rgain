@@ -125,6 +125,7 @@ jobs:
           login = anonymous
           allow_unsigned_uploads = 0
           EOF
+          echo 'precedence ::ffff:0:0/96  100' | sudo tee -a /etc/gai.conf
 
       - name: Build and upload source packages
         env:
@@ -264,6 +265,7 @@ jobs:
           login = anonymous
           allow_unsigned_uploads = 0
           EOF
+          echo 'precedence ::ffff:0:0/96  100' | sudo tee -a /etc/gai.conf
 
       - name: Build and upload source packages
         env:
