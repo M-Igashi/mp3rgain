@@ -23,3 +23,9 @@ updates:
       github-actions:
         patterns:
           - "*"
+    # dtolnay/rust-toolchain force-pushes its branches (stable/nightly/1.x)
+    # whenever Rust releases, so old SHAs become unreachable. Dependabot's
+    # find_container_branch fails with "no such commit" on every run.
+    # Bump the SHA manually when Rust stable changes.
+    ignore:
+      - dependency-name: "dtolnay/rust-toolchain"
