@@ -117,7 +117,8 @@ jobs:
             CONFIG_DIGEST=$(echo "$M" | jq -r '.config.digest // empty')
             CREATED=""
             if [ -n "$CONFIG_DIGEST" ]; then
-              CREATED=$(curl -sf -H "Authorization: Bearer $TOKEN" \
+              # -L is required: GHCR 307-redirects blob fetches to a CDN host.
+              CREATED=$(curl -sLf -H "Authorization: Bearer $TOKEN" \
                 "https://ghcr.io/v2/${OWNER}/${PKG}/blobs/${CONFIG_DIGEST}" \
                 | jq -r '.created // empty')
             fi
