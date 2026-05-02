@@ -69,6 +69,16 @@ mp3rgain -u song.mp3
 mp3rgain song.mp3
 ```
 
+## Migrating from mp3gain?
+
+Already running `mp3gain` (or `aacgain`) in a script, Dockerfile, or CI pipeline? mp3rgain is a drop-in replacement — the CLI flags, the TSV output format, and the APEv2 `mp3gain_undo` tag are all mp3gain-compatible, so existing parsers (e.g. [beets](https://beets.io/)) keep working unchanged. For most setups, migration is a one-line substitution:
+
+```bash
+sed -i 's/\bmp3gain\b/mp3rgain/g' your_script.sh
+```
+
+See **[docs/migrating-from-mp3gain.md](docs/migrating-from-mp3gain.md)** for the full flag equivalence table, Dockerfile/CI substitution patterns, tag interop notes, and the small set of intentional behaviour differences. Bit-level verification lives in [docs/compatibility-report.md](docs/compatibility-report.md).
+
 ## GUI Application
 
 A native GUI application (`mp3rgui`) is available for users who prefer a graphical interface.
@@ -105,6 +115,7 @@ Run `mp3rgain -h` for the full list of options.
 
 ## Documentation
 
+- [Migration Guide](docs/migrating-from-mp3gain.md) - Drop-in replacement for mp3gain: flag equivalence, sed/Dockerfile/CI substitution patterns, beets config
 - [Roadmap](docs/roadmap.md) - Development plans and upcoming features
 - [Security](docs/security.md) - Memory safety and CVE analysis
 - [Compatibility Report](docs/compatibility-report.md) - Verification against original mp3gain
