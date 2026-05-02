@@ -1,5 +1,5 @@
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Default, Clone, PartialEq)]
 pub enum FileStatus {
@@ -67,7 +67,7 @@ impl Mp3rgainApp {
         let mut skipped = 0;
 
         for path in paths {
-            if Self::is_supported_format(&path) && path.is_file() {
+            if mp3rgain::is_supported_audio_path(&path) && path.is_file() {
                 if self.is_duplicate(&path) {
                     skipped += 1;
                     continue;
@@ -93,22 +93,8 @@ impl Mp3rgainApp {
         }
     }
 
-    fn is_supported_format(path: &PathBuf) -> bool {
-        // Skip macOS resource fork files (._*)
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with("._") {
-                return false;
-            }
-        }
-        path.extension().map_or(false, |ext| {
-            ext.eq_ignore_ascii_case("mp3")
-                || ext.eq_ignore_ascii_case("m4a")
-                || ext.eq_ignore_ascii_case("aac")
-        })
-    }
-
-    fn is_duplicate(&self, path: &PathBuf) -> bool {
-        self.files.iter().any(|f| f.path == *path)
+    fn is_duplicate(&self, path: &Path) -> bool {
+        self.files.iter().any(|f| f.path == path)
     }
 
     pub fn add_folder(&mut self, folder: PathBuf, recursive: bool) {
@@ -117,13 +103,13 @@ impl Mp3rgainApp {
         self.add_files(paths_to_add);
     }
 
-    fn collect_files_from_folder(folder: &PathBuf, recursive: bool, paths: &mut Vec<PathBuf>) {
+    fn collect_files_from_folder(folder: &Path, recursive: bool, paths: &mut Vec<PathBuf>) {
         if let Ok(entries) = std::fs::read_dir(folder) {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.is_dir() && recursive {
                     Self::collect_files_from_folder(&path, true, paths);
-                } else if Self::is_supported_format(&path) {
+                } else if mp3rgain::is_supported_audio_path(&path) {
                     paths.push(path);
                 }
             }
@@ -284,8 +270,7 @@ impl Mp3rgainApp {
 
         self.total_progress = 1.0;
         self.is_processing = false;
-        self.status_message =
-            Self::format_result_message("Applied track gain to", applied, errors);
+        self.status_message = Self::format_result_message("Applied track gain to", applied, errors);
     }
 
     pub fn apply_album_gain(&mut self) {
@@ -320,8 +305,7 @@ impl Mp3rgainApp {
 
         self.total_progress = 1.0;
         self.is_processing = false;
-        self.status_message =
-            Self::format_result_message("Applied album gain to", applied, errors);
+        self.status_message = Self::format_result_message("Applied album gain to", applied, errors);
     }
 }
 

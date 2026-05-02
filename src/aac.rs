@@ -1348,7 +1348,7 @@ pub fn apply_aac_gain_with_undo(file_path: &Path, gain_steps: i32) -> Result<usi
     let existing_undo = mp4meta::read_undo_tags(file_path)?;
 
     // Parse existing undo value and accumulate
-    let existing_gain = parse_undo_gain(existing_undo.undo());
+    let existing_gain = crate::ape::parse_undo_values(existing_undo.undo()).0;
     let new_undo_gain = existing_gain + gain_steps;
 
     // Apply gain to bitstream (in-place, no container change)
@@ -1383,7 +1383,7 @@ pub fn undo_aac_gain(file_path: &Path) -> Result<usize> {
     let undo_tags = mp4meta::read_undo_tags(file_path)?;
     let undo_str = undo_tags.undo().ok_or(Error::NoUndoTag)?;
 
-    let undo_gain = parse_undo_gain(Some(undo_str));
+    let undo_gain = crate::ape::parse_undo_values(Some(undo_str)).0;
 
     if undo_gain == 0 {
         return Ok(0);
@@ -1401,18 +1401,6 @@ pub fn undo_aac_gain(file_path: &Path) -> Result<usize> {
     mp4meta::delete_undo_tags(file_path)?;
 
     Ok(modified)
-}
-
-/// Parse undo gain value from tag string (e.g., "+003,+003,N" -> 3)
-fn parse_undo_gain(undo_str: Option<&str>) -> i32 {
-    match undo_str {
-        Some(v) => v
-            .split(',')
-            .next()
-            .and_then(|s| s.trim().parse::<i32>().ok())
-            .unwrap_or(0),
-        None => 0,
-    }
 }
 
 /// Analyze AAC/M4A file and locate all global_gain fields (read-only)
@@ -1637,14 +1625,5 @@ mod tests {
         let modified = apply_aac_gain_to_data(&mut data, &analysis, 0);
         assert_eq!(modified, 0);
         assert_eq!(data[10], 80); // unchanged
-    }
-
-    #[test]
-    fn test_parse_undo_gain() {
-        assert_eq!(parse_undo_gain(None), 0);
-        assert_eq!(parse_undo_gain(Some("+003,+003,N")), 3);
-        assert_eq!(parse_undo_gain(Some("-005,-005,N")), -5);
-        assert_eq!(parse_undo_gain(Some("+000,+000,N")), 0);
-        assert_eq!(parse_undo_gain(Some("invalid")), 0);
     }
 }

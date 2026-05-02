@@ -72,7 +72,6 @@ pub mod id3v2;
 pub mod mp4meta;
 pub mod replaygain;
 
-// Re-export commonly used items at crate root for convenience
 pub use analysis::{
     analyze, find_max_amplitude, is_mono, ChannelMode, MaxAmplitudeResult, Mp3Analysis, MpegVersion,
 };
@@ -90,3 +89,27 @@ pub use id3v2::{
     delete_id3v2_replaygain, read_id3v2_replaygain, undo_gain_id3v2, write_id3v2_replaygain,
     write_id3v2_undo, Id3v2ReplayGain,
 };
+
+use std::path::Path;
+
+/// File extensions mp3rgain can process.
+pub const SUPPORTED_EXTENSIONS: &[&str] = &["mp3", "m4a", "aac", "mp4"];
+
+/// Returns true if `path` is a regular audio file mp3rgain can process.
+/// Filters out macOS resource fork files (`._*`) and unsupported extensions.
+pub fn is_supported_audio_path(path: &Path) -> bool {
+    if path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("._"))
+    {
+        return false;
+    }
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| {
+            SUPPORTED_EXTENSIONS
+                .iter()
+                .any(|s| ext.eq_ignore_ascii_case(s))
+        })
+}

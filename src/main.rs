@@ -95,6 +95,16 @@ struct Options {
     files: Vec<PathBuf>,
 }
 
+impl Options {
+    fn dry_run_prefix(&self) -> &'static str {
+        if self.dry_run {
+            "[DRY RUN] "
+        } else {
+            ""
+        }
+    }
+}
+
 // =============================================================================
 // JSON Output Structures
 // =============================================================================
@@ -452,22 +462,8 @@ fn collect_audio_files(dir: &Path, result: &mut Vec<PathBuf>) -> Result<()> {
 
         if path.is_dir() {
             collect_audio_files(&path, result)?;
-        } else if let Some(ext) = path.extension() {
-            // Skip macOS resource fork files (._*)
-            if path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("._"))
-            {
-                continue;
-            }
-            if ext.eq_ignore_ascii_case("mp3")
-                || ext.eq_ignore_ascii_case("m4a")
-                || ext.eq_ignore_ascii_case("aac")
-                || ext.eq_ignore_ascii_case("mp4")
-            {
-                result.push(path);
-            }
+        } else if mp3rgain::is_supported_audio_path(&path) {
+            result.push(path);
         }
     }
 
@@ -716,7 +712,7 @@ fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
 }
 
 fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
-    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+    let dry_run_prefix = opts.dry_run_prefix();
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         println!(
@@ -1111,7 +1107,7 @@ fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
     }
 
     let db_value = steps_to_db(steps);
-    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+    let dry_run_prefix = opts.dry_run_prefix();
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         println!(
@@ -1208,7 +1204,7 @@ fn cmd_apply_channel(
     }
 
     let db_value = steps_to_db(steps);
-    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+    let dry_run_prefix = opts.dry_run_prefix();
     let channel_name = match channel {
         Channel::Left => "left",
         Channel::Right => "right",
@@ -1394,7 +1390,7 @@ fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
 }
 
 fn cmd_undo(files: &[PathBuf], opts: &Options) -> Result<()> {
-    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+    let dry_run_prefix = opts.dry_run_prefix();
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         println!(
@@ -1461,7 +1457,7 @@ fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         std::process::exit(1);
     }
 
-    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+    let dry_run_prefix = opts.dry_run_prefix();
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         println!(
@@ -1557,7 +1553,7 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         std::process::exit(1);
     }
 
-    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+    let dry_run_prefix = opts.dry_run_prefix();
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         println!(
@@ -1756,7 +1752,7 @@ fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 // File processing
 // =============================================================================
 
-fn apply_with_temp_file<F>(file: &PathBuf, operation: F, opts: &Options) -> Result<usize>
+fn apply_with_temp_file<F>(file: &Path, operation: F, opts: &Options) -> Result<usize>
 where
     F: FnOnce(&Path) -> Result<usize>,
 {
@@ -1786,9 +1782,9 @@ where
     }
 }
 
-fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileResult> {
+fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFileResult> {
     let filename = get_filename(file);
-    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+    let dry_run_prefix = opts.dry_run_prefix();
 
     // Save original timestamp if needed
     let original_mtime = if opts.preserve_timestamp && !opts.dry_run {
@@ -1988,7 +1984,7 @@ fn process_apply(file: &PathBuf, steps: i32, opts: &Options) -> Result<JsonFileR
 }
 
 fn process_apply_channel(
-    file: &PathBuf,
+    file: &Path,
     channel: Channel,
     steps: i32,
     opts: &Options,
@@ -2320,9 +2316,9 @@ fn process_info(
     }
 }
 
-fn process_undo(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> {
+fn process_undo(file: &Path, opts: &Options) -> Result<JsonFileResult> {
     let filename = get_filename(file);
-    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+    let dry_run_prefix = opts.dry_run_prefix();
 
     // Save original timestamp if needed
     let original_mtime = if opts.preserve_timestamp && !opts.dry_run {
@@ -2411,12 +2407,12 @@ fn process_undo(file: &PathBuf, opts: &Options) -> Result<JsonFileResult> {
 }
 
 fn process_track_gain(
-    file: &PathBuf,
+    file: &Path,
     opts: &Options,
     analysis_pb: Option<&ProgressBar>,
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
-    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+    let dry_run_prefix = opts.dry_run_prefix();
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         println!(
@@ -2489,14 +2485,14 @@ fn process_track_gain(
 }
 
 fn process_apply_replaygain_with_album(
-    file: &PathBuf,
+    file: &Path,
     steps: i32,
     result: &ReplayGainResult,
     opts: &Options,
     album_info: Option<&AacAlbumInfo>,
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
-    let dry_run_prefix = if opts.dry_run { "[DRY RUN] " } else { "" };
+    let dry_run_prefix = opts.dry_run_prefix();
 
     // Save original timestamp if needed
     let original_mtime = if opts.preserve_timestamp && !opts.dry_run {

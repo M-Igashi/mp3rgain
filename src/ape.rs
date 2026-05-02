@@ -65,32 +65,30 @@ impl ApeTag {
 
     /// Get a tag value by key (case-insensitive)
     pub fn get(&self, key: &str) -> Option<&str> {
-        let key_upper = key.to_uppercase();
         self.items
             .iter()
-            .find(|item| item.key.to_uppercase() == key_upper)
+            .find(|item| item.key.eq_ignore_ascii_case(key))
             .map(|item| item.value.as_str())
     }
 
     /// Set a tag value (replaces existing if present)
     pub fn set(&mut self, key: &str, value: &str) {
-        let key_upper = key.to_uppercase();
         if let Some(item) = self
             .items
             .iter_mut()
-            .find(|item| item.key.to_uppercase() == key_upper)
+            .find(|item| item.key.eq_ignore_ascii_case(key))
         {
             item.value = value.to_string();
         } else {
-            self.items.push(ApeItem::new(key_upper, value.to_string()));
+            self.items
+                .push(ApeItem::new(key.to_uppercase(), value.to_string()));
         }
     }
 
     /// Remove a tag by key
     pub fn remove(&mut self, key: &str) {
-        let key_upper = key.to_uppercase();
         self.items
-            .retain(|item| item.key.to_uppercase() != key_upper);
+            .retain(|item| !item.key.eq_ignore_ascii_case(key));
     }
 
     /// Check if tag is empty
@@ -110,14 +108,8 @@ impl ApeTag {
 
     /// Get MP3GAIN_UNDO value as gain steps
     pub fn get_undo_gain(&self) -> Option<i32> {
-        self.get(TAG_MP3GAIN_UNDO).and_then(|v| {
-            let parts: Vec<&str> = v.split(',').collect();
-            if !parts.is_empty() {
-                parts[0].trim().parse::<i32>().ok()
-            } else {
-                None
-            }
-        })
+        self.get(TAG_MP3GAIN_UNDO)
+            .and_then(|v| v.split(',').next()?.trim().parse::<i32>().ok())
     }
 
     /// Set MP3GAIN_UNDO value
