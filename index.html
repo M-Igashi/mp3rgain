@@ -54,6 +54,11 @@
       <div style="font-size:0.7rem;color:var(--muted);margin-top:0.25rem" id="pkgstats-month">current month</div>
     </div>
     <div class="card"><div class="card-label">AUR Votes</div><div class="card-value" id="aur-votes-total">-</div></div>
+    <div class="card">
+      <div class="card-label" title="GHCR does not expose pull counts publicly. Shown: supported architectures + image size.">Docker (GHCR) <span style="color:var(--muted)">&#9432;</span></div>
+      <div class="card-value" id="ghcr-arches" style="font-size:1.25rem">-</div>
+      <div style="font-size:0.7rem;color:var(--muted);margin-top:0.25rem" id="ghcr-size">-</div>
+    </div>
     <div class="card"><div class="card-label">Latest Version</div><div class="card-value" id="latest-version">-</div></div>
   </div>
 
@@ -98,6 +103,7 @@
     <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">
       Rule of thumb &mdash; SHA256 ratio &ge; 20% or ARM64 share &ge; 30% are strong automation signals.
       Windows / macOS are excluded because their checksums are pulled by Winget / Homebrew validators and would skew the ratio.
+      Since v2.3.1 a multi-arch <a href="#" onclick="document.getElementById('table-ghcr').scrollIntoView({behavior:'smooth'});return false" style="color:var(--blue)">GHCR image</a> is also available; CI / container automation that previously fetched <code>linux-*.tar.gz</code> here may shift to <code>docker pull</code> over time, gradually lowering the signals shown above.
     </p>
   </div>
 
@@ -110,6 +116,27 @@
       </table>
     </div>
     <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">Counts come from Launchpad and may lag actual downloads by ~24h.</p>
+  </div>
+
+  <div class="section">
+    <h2>Docker / GHCR</h2>
+    <p style="color:var(--muted);font-size:0.875rem;margin-bottom:1rem">
+      Multi-arch image at <code id="ghcr-image">ghcr.io/m-igashi/mp3rgain</code>, available since v2.3.1.
+      Designed as a drop-in for the classic <code>mp3gain</code> Docker workflows used by Plex / Jellyfin / cron-driven media servers.
+    </p>
+    <pre style="background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:0.75rem;font-size:0.8rem;overflow-x:auto;margin-bottom:1rem"><code id="ghcr-pull-cmd">docker pull ghcr.io/m-igashi/mp3rgain:v2</code></pre>
+    <div style="overflow-x:auto">
+      <table id="table-ghcr">
+        <thead><tr><th>Architecture</th><th class="num">Image Size</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">
+      Tags: <span id="ghcr-tags">-</span> &middot; latest pushed <span id="ghcr-pushed">-</span>.
+      GHCR does not expose pull counts publicly &mdash; this section reports availability and size only.
+      Some Linux automation traffic that previously fetched <code>linux-*.tar.gz</code> from GitHub Releases
+      is expected to migrate here over time.
+    </p>
   </div>
 
   <div class="section">
@@ -359,6 +386,40 @@ async function main() {
       tr.innerHTML = `<td>${r.ppa}</td><td>${r.version}</td><td>${r.series}</td><td>${r.arch}</td><td class="num">${num(r.downloads)}</td>`;
       ppaTbody.appendChild(tr);
     });
+  }
+
+  // GHCR / Docker section: availability + per-arch image size + tags.
+  // GHCR does not expose public pull counts, so we report what we can read
+  // from the registry: supported architectures, layer-sum sizes, and tags.
+  const fmtBytes = b => {
+    if (!b || b <= 0) return '-';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+    return (b / 1024 / 1024).toFixed(2) + ' MB';
+  };
+  const ghcr = latest.ghcr;
+  const ghcrTbody = document.querySelector('#table-ghcr tbody');
+  if (ghcr && Array.isArray(ghcr.platforms) && ghcr.platforms.length > 0) {
+    document.getElementById('ghcr-image').textContent = ghcr.image || 'ghcr.io/m-igashi/mp3rgain';
+    const archList = ghcr.platforms.map(p => p.arch).join(' + ');
+    document.getElementById('ghcr-arches').textContent = archList || '-';
+    const totalSize = ghcr.platforms.reduce((s, p) => s + (p.size_bytes || 0), 0) / ghcr.platforms.length;
+    document.getElementById('ghcr-size').textContent = `${fmtBytes(totalSize)} / arch`;
+    ghcr.platforms.forEach(p => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${p.arch}</td><td class="num">${fmtBytes(p.size_bytes)}</td>`;
+      ghcrTbody.appendChild(tr);
+    });
+    const tags = (ghcr.tags || []).slice().sort();
+    document.getElementById('ghcr-tags').innerHTML = tags.length > 0
+      ? tags.map(t => `<code>${t.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'})[c])}</code>`).join(' ')
+      : '-';
+    document.getElementById('ghcr-pushed').textContent = ghcr.latest_pushed
+      ? ghcr.latest_pushed.slice(0, 10)
+      : '-';
+  } else {
+    document.getElementById('ghcr-arches').textContent = '-';
+    document.getElementById('ghcr-size').textContent = 'metadata unavailable';
+    ghcrTbody.innerHTML = '<tr><td colspan="2" style="color:var(--muted);text-align:center;padding:1.5rem">GHCR metadata not yet collected. Refresh after the next stats run.</td></tr>';
   }
 
   // pkgstats table: one row per (package, month). Falls back to single-row
