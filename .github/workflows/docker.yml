@@ -1,0 +1,166 @@
+name: Docker
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build only, do not push to GHCR (manifest job is skipped)"
+        type: boolean
+        default: true
+      version:
+        description: "Override version (e.g. 2.3.0). Default: derived from github.ref_name."
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Docker image (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            os: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      - name: Compute lowercase image name
+        id: image
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: echo "name=ghcr.io/${OWNER,,}/mp3rgain" >> $GITHUB_OUTPUT
+
+      # ---------- Dry run path: build, do not push ----------
+      - name: Build (dry run)
+        if: ${{ inputs.dry_run }}
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
+        with:
+          context: .
+          file: packages/docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: false
+          load: true
+          tags: mp3rgain:dryrun
+
+      - name: Smoke test (dry run)
+        if: ${{ inputs.dry_run }}
+        run: |
+          docker run --rm mp3rgain:dryrun --help
+          docker image inspect mp3rgain:dryrun --format 'Size: {{.Size}} bytes ({{.Architecture}})'
+
+      # ---------- Real publish path: push by digest ----------
+      - name: Log in to GHCR
+        if: ${{ !inputs.dry_run }}
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        if: ${{ !inputs.dry_run }}
+        id: build
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
+        with:
+          context: .
+          file: packages/docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          provenance: false
+          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        if: ${{ !inputs.dry_run }}
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        if: ${{ !inputs.dry_run }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: docker-digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    name: Publish Docker manifest
+    needs: build
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: /tmp/digests
+          pattern: docker-digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name and tags
+        id: meta
+        env:
+          OWNER: ${{ github.repository_owner }}
+          REF: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            version="$INPUT_VERSION"
+          else
+            version="${REF#v}"
+          fi
+          {
+            echo "image=ghcr.io/${OWNER,,}/mp3rgain"
+            echo "version=$version"
+            echo "major=${version%%.*}"
+          } >> $GITHUB_OUTPUT
+
+      - name: Create manifest list and push
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          MAJOR: ${{ steps.meta.outputs.major }}
+        run: |
+          cd /tmp/digests
+          docker buildx imagetools create \
+            -t "${IMAGE}:latest" \
+            -t "${IMAGE}:v${VERSION}" \
+            -t "${IMAGE}:v${MAJOR}" \
+            $(printf "${IMAGE}@sha256:%s " *)
+
+      - name: Inspect image
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: docker buildx imagetools inspect "${IMAGE}:v${VERSION}"

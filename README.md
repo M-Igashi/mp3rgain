@@ -35,6 +35,7 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 | Ubuntu 25.10 (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgain` (amd64/arm64) |
 | Debian | `sudo apt install ./mp3rgain_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) (ARM64 also available) |
 | Nix/NixOS | `nix profile install github:M-Igashi/mp3rgain` |
+| Docker | `docker pull ghcr.io/m-igashi/mp3rgain:latest` |
 | Cargo | `cargo install mp3rgain` |
 
 ### GUI (`mp3rgui`)
@@ -118,6 +119,36 @@ The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained up
 **AAC/M4A is the differentiator.** No other actively maintained tool can rewrite AAC `global_gain` in place. Existing alternatives (rsgain, loudgain, FFmpeg) either only write ReplayGain tags (which non-compliant players ignore) or re-encode the audio (lossy). mp3rgain is the only option that gives you a lossless, reversible, player-agnostic AAC volume adjustment today.
 
 mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) for full compatibility with the original mp3gain / aacgain. Loudness values will differ from EBU R128/LUFS-based tools (foobar2000, loudgain, ffmpeg loudnorm).
+
+## Use mp3rgain in Docker / CI
+
+Official multi-arch images (`linux/amd64`, `linux/arm64`) are published to GHCR:
+
+```
+ghcr.io/m-igashi/mp3rgain:latest
+ghcr.io/m-igashi/mp3rgain:v2          # latest 2.x
+ghcr.io/m-igashi/mp3rgain:v2.3.0      # exact version
+```
+
+The image is built `FROM scratch` with a fully static binary — no shell, no
+runtime deps, ~6 MB. Drop-in replacement for `mp3gain` in containerized
+batch / cron pipelines (e.g. Plex maintenance windows):
+
+```bash
+# Normalize a music library by mounting it into the container
+docker run --rm \
+  -v /path/to/music:/music \
+  ghcr.io/m-igashi/mp3rgain:latest -r -R /music
+
+# Run as your own user so written files keep correct ownership
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -v /path/to/music:/music \
+  ghcr.io/m-igashi/mp3rgain:latest -r -R /music
+```
+
+Because the entrypoint is the binary itself, all `mp3rgain` flags work
+exactly the same as the host CLI (`-r`, `-a`, `-R`, `-k`, `-u`, …).
 
 ## Library Usage
 

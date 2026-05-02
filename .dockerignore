@@ -1,0 +1,6 @@
+# Only Cargo.toml, Cargo.lock and src/ are needed for the Docker build.
+# Everything else is excluded to keep the build context small.
+*
+!Cargo.toml
+!Cargo.lock
+!src/
