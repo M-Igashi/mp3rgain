@@ -87,6 +87,63 @@ jobs:
                 }]
               }' /tmp/aur_raw.json > /tmp/aur.json
 
+      - name: Collect GHCR (Docker) metadata
+        run: |
+          OWNER=m-igashi
+          PKG=mp3rgain
+          IMAGE="ghcr.io/${OWNER}/${PKG}"
+          # Anonymous pull token for the public image
+          TOKEN=$(curl -sf "https://ghcr.io/token?scope=repository:${OWNER}/${PKG}:pull&service=ghcr.io" \
+            | jq -r .token)
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo '{}' > /tmp/ghcr.json
+            exit 0
+          fi
+          ACCEPT="application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json"
+          MLIST=$(curl -sf -H "Authorization: Bearer $TOKEN" -H "Accept: $ACCEPT" \
+            "https://ghcr.io/v2/${OWNER}/${PKG}/manifests/latest") || MLIST=""
+          if [ -z "$MLIST" ]; then
+            echo '{}' > /tmp/ghcr.json
+            exit 0
+          fi
+          M_ACCEPT="application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json"
+          PLATFORMS='[]'
+          LATEST_PUSHED=""
+          while IFS=$'\t' read -r ARCH DIGEST; do
+            [ -z "$ARCH" ] && continue
+            M=$(curl -sf -H "Authorization: Bearer $TOKEN" -H "Accept: $M_ACCEPT" \
+              "https://ghcr.io/v2/${OWNER}/${PKG}/manifests/${DIGEST}") || continue
+            SIZE=$(echo "$M" | jq '[.layers[].size] | add // 0')
+            CONFIG_DIGEST=$(echo "$M" | jq -r '.config.digest // empty')
+            CREATED=""
+            if [ -n "$CONFIG_DIGEST" ]; then
+              CREATED=$(curl -sf -H "Authorization: Bearer $TOKEN" \
+                "https://ghcr.io/v2/${OWNER}/${PKG}/blobs/${CONFIG_DIGEST}" \
+                | jq -r '.created // empty')
+            fi
+            PLATFORMS=$(echo "$PLATFORMS" | jq \
+              --arg arch "$ARCH" --argjson size "$SIZE" \
+              '. + [{arch: $arch, size_bytes: $size}]')
+            if [ -n "$CREATED" ] && { [ -z "$LATEST_PUSHED" ] || [ "$CREATED" \> "$LATEST_PUSHED" ]; }; then
+              LATEST_PUSHED="$CREATED"
+            fi
+          done < <(echo "$MLIST" | jq -r '.manifests[] | [.platform.architecture, .digest] | @tsv')
+          TAGS=$(curl -sf -H "Authorization: Bearer $TOKEN" \
+            "https://ghcr.io/v2/${OWNER}/${PKG}/tags/list" \
+            | jq '.tags // []') || TAGS='[]'
+          jq -n \
+            --arg image "$IMAGE" \
+            --arg pushed "$LATEST_PUSHED" \
+            --argjson platforms "$PLATFORMS" \
+            --argjson tags "$TAGS" \
+            '{
+              image: $image,
+              platforms: $platforms,
+              tags: $tags,
+              latest_pushed: (if $pushed == "" then null else $pushed end)
+            }' > /tmp/ghcr.json
+          cat /tmp/ghcr.json
+
       - name: Collect PPA download stats
         run: |
           collect_ppa() {
@@ -150,6 +207,7 @@ jobs:
             --slurpfile aur /tmp/aur.json \
             --slurpfile ppa_cli /tmp/ppa_cli.json \
             --slurpfile ppa_gui /tmp/ppa_gui.json \
+            --slurpfile ghcr /tmp/ghcr.json \
             '{
               date: $date,
               github_releases: $gh[0],
@@ -157,7 +215,8 @@ jobs:
               pkgstats: $pkgstats[0],
               aur: $aur[0],
               ppa_cli: $ppa_cli[0],
-              ppa_gui: $ppa_gui[0]
+              ppa_gui: $ppa_gui[0],
+              ghcr: $ghcr[0]
             }' > /tmp/snapshot.json
 
       - name: Append to history
