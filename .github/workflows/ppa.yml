@@ -115,7 +115,7 @@ jobs:
           cd ../..
           tar -cJf "build-ppa/${PKG}_${VERSION}.orig.tar.xz" -C build-ppa "${PKG}-${VERSION}"
 
-      - name: Configure dput for HTTPS upload
+      - name: Configure dput for HTTPS upload (IPv4 pinned)
         run: |
           cat > ~/.dput.cf <<'EOF'
           [ppa]
@@ -125,7 +125,15 @@ jobs:
           login = anonymous
           allow_unsigned_uploads = 0
           EOF
-          echo 'precedence ::ffff:0:0/96  100' | sudo tee -a /etc/gai.conf
+          IPV4=$(getent ahostsv4 ppa.launchpad.net | awk 'NR==1 {print $1}')
+          echo "Resolved ppa.launchpad.net IPv4: $IPV4"
+          echo "$IPV4 ppa.launchpad.net" | sudo tee -a /etc/hosts
+          echo "--- /etc/hosts tail ---"
+          tail -3 /etc/hosts
+          echo "--- Connectivity probe ---"
+          curl -sS -o /dev/null -w "HTTP %{http_code} in %{time_total}s\n" \
+            --max-time 30 https://ppa.launchpad.net/ || \
+            echo "curl probe failed"
 
       - name: Build and upload source packages
         env:
@@ -255,7 +263,7 @@ jobs:
           XZ_OPT='-9e' tar -cJf "build-ppa/${PKG}_${VERSION}.orig.tar.xz" -C build-ppa "${PKG}-${VERSION}"
           ls -lh "build-ppa/${PKG}_${VERSION}.orig.tar.xz"
 
-      - name: Configure dput for HTTPS upload
+      - name: Configure dput for HTTPS upload (IPv4 pinned)
         run: |
           cat > ~/.dput.cf <<'EOF'
           [ppa]
@@ -265,7 +273,15 @@ jobs:
           login = anonymous
           allow_unsigned_uploads = 0
           EOF
-          echo 'precedence ::ffff:0:0/96  100' | sudo tee -a /etc/gai.conf
+          IPV4=$(getent ahostsv4 ppa.launchpad.net | awk 'NR==1 {print $1}')
+          echo "Resolved ppa.launchpad.net IPv4: $IPV4"
+          echo "$IPV4 ppa.launchpad.net" | sudo tee -a /etc/hosts
+          echo "--- /etc/hosts tail ---"
+          tail -3 /etc/hosts
+          echo "--- Connectivity probe ---"
+          curl -sS -o /dev/null -w "HTTP %{http_code} in %{time_total}s\n" \
+            --max-time 30 https://ppa.launchpad.net/ || \
+            echo "curl probe failed"
 
       - name: Build and upload source packages
         env:
