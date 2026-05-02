@@ -131,6 +131,14 @@ All core functionality complete:
 - [x] mp3rgain .deb package ARM64 support
 - [x] .deb test workflow for mp3rgui
 
+### Distribution: Container Images
+
+- [x] Official multi-arch Docker image on GHCR (Issue #123)
+  - `ghcr.io/m-igashi/mp3rgain:{latest, vX.Y.Z, vX}`
+  - `linux/amd64` + `linux/arm64`, native build per arch
+  - `FROM scratch` + musl static binary, ~2 MB
+  - Drop-in replacement for `mp3gain` containers in cron / Plex pipelines
+
 ## Upcoming Goals
 
 ### Future Enhancements

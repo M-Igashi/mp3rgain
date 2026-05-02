@@ -256,6 +256,39 @@ For game development or podcast production pipelines:
     mp3rgain -n -o json ./assets/audio/ > audio_report.json
 ```
 
+### Containerized batch normalization (Plex / cron)
+
+A common existing workflow for `mp3gain` is a Docker container triggered
+by cron during a media-server maintenance window — adjusting newly added
+tracks automatically so the player doesn't have to guess loudness levels.
+
+mp3rgain ships an official multi-arch image (`linux/amd64`, `linux/arm64`)
+on GHCR that drops into the same workflow. Image size is ~2 MB (`FROM
+scratch`, fully static musl binary, no shell, no runtime deps):
+
+```bash
+docker pull ghcr.io/m-igashi/mp3rgain:latest
+```
+
+Cron entry (host crontab) — runs at 03:00 daily during Plex maintenance:
+
+```
+0 3 * * *  docker run --rm \
+    --user 1000:1000 \
+    -v /srv/plex/music:/music \
+    ghcr.io/m-igashi/mp3rgain:v2 \
+    -r -R /music
+```
+
+Pin to a major tag (`:v2`) for stability — patch / minor releases land
+automatically, breaking changes do not. Pin to an exact version
+(`:v2.3.0`) for fully reproducible runs. `--user $(id -u):$(id -g)`
+keeps written files under your own UID instead of root.
+
+Because the image is `ENTRYPOINT`-only, every `mp3rgain` flag works
+identically to the host CLI — `-r`, `-a`, `-R`, `-k`, `-u`, `-o json`,
+etc.
+
 ### Rust Projects
 
 ```rust

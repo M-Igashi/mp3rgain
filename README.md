@@ -130,9 +130,9 @@ ghcr.io/m-igashi/mp3rgain:v2          # latest 2.x
 ghcr.io/m-igashi/mp3rgain:v2.3.0      # exact version
 ```
 
-The image is built `FROM scratch` with a fully static binary — no shell, no
-runtime deps, ~6 MB. Drop-in replacement for `mp3gain` in containerized
-batch / cron pipelines (e.g. Plex maintenance windows):
+The image is built `FROM scratch` with a fully static (musl) binary — no
+shell, no runtime deps, ~2 MB. Drop-in replacement for `mp3gain` in
+containerized batch / cron pipelines (e.g. Plex maintenance windows):
 
 ```bash
 # Normalize a music library by mounting it into the container
