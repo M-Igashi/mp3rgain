@@ -39,7 +39,7 @@ relying on this in scripts.
 
 ## Command and flag equivalence
 
-The flag list comes from `mp3rgain --help` (v2.3.1). All classic mp3gain
+The flag list comes from `mp3rgain --help` (v2.4.0). All classic mp3gain
 flags are accepted with the same semantics; mp3rgain adds a few extensions.
 
 ### Identical behaviour
