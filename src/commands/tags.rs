@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::utils::create_json_summary;
-use crate::get_filename;
 use crate::json_output::{JsonFileResult, JsonOutput};
 use crate::processors::utils::restore_timestamp;
 use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
+use crate::util::get_filename;
 
 /// Tag values and labels for display in cmd_check_tags
 struct CheckTagInfo<'a> {

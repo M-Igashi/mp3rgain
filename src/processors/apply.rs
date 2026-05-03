@@ -4,8 +4,8 @@ use mp3rgain::{aac, analyze, id3v2, mp4meta, steps_to_db, Channel, GainOptions};
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat, StoredTagMode};
-use crate::get_filename;
 use crate::json_output::JsonFileResult;
+use crate::util::get_filename;
 
 use super::utils::{apply_with_temp_file, restore_timestamp};
 

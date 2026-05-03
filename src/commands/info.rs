@@ -5,10 +5,10 @@ use mp3rgain::{db_to_steps, mp4meta};
 use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::get_filename;
 use crate::json_output::{JsonFileResult, JsonOutput};
 use crate::processors::info::process_info;
 use crate::progress::{create_analysis_progress_bar, finish_analysis_progress, PROGRESS_THRESHOLD};
+use crate::util::get_filename;
 
 pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
     // Print mp3gain-compatible TSV header

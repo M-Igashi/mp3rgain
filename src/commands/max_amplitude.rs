@@ -4,9 +4,9 @@ use mp3rgain::find_max_amplitude;
 use std::path::PathBuf;
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::get_filename;
 use crate::json_output::{JsonFileResult, JsonOutput};
 use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
+use crate::util::get_filename;
 
 pub fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
     if opts.output_format == OutputFormat::Text && !opts.quiet {
