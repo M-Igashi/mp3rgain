@@ -6,13 +6,13 @@ use std::path::PathBuf;
 
 use crate::cli::options::{AacAlbumInfo, Options, OutputFormat};
 use crate::commands::utils::{create_json_summary, print_dry_run_notice, update_counters};
-use crate::get_filename;
 use crate::json_output::{JsonAlbumResult, JsonFileResult, JsonOutput};
 use crate::processors::replaygain::{process_apply_replaygain_with_album, process_track_gain};
 use crate::progress::{
     create_analysis_progress_bar, create_progress_bar, finish_analysis_progress, progress_finish,
     progress_inc, progress_set_message, PROGRESS_THRESHOLD,
 };
+use crate::util::get_filename;
 
 pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     if !replaygain::is_available() {

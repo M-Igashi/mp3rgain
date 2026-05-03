@@ -6,9 +6,9 @@ use mp3rgain::{analyze, db_to_steps, find_max_amplitude, mp4meta};
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::get_filename;
 use crate::json_output::JsonFileResult;
 use crate::progress::update_analysis_progress;
+use crate::util::get_filename;
 
 pub fn process_info(
     file: &Path,

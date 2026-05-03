@@ -6,9 +6,9 @@ use mp3rgain::{aac, analyze, db_to_steps, id3v2, mp4meta, steps_to_db, GainOptio
 use std::path::Path;
 
 use crate::cli::options::{AacAlbumInfo, Options, OutputFormat};
-use crate::get_filename;
 use crate::json_output::JsonFileResult;
 use crate::progress::update_analysis_progress;
+use crate::util::get_filename;
 
 use super::utils::{apply_with_temp_file, restore_timestamp};
 
