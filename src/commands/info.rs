@@ -119,7 +119,12 @@ pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
             &aac_files
         };
 
-        if let Ok(album_rg) = replaygain::analyze_album(album_paths) {
+        let album_rg = if parallel {
+            replaygain::analyze_album_parallel(album_paths, opts.track_index, threads)
+        } else {
+            replaygain::analyze_album(album_paths)
+        };
+        if let Ok(album_rg) = album_rg {
             let album_gain_db = album_rg.album_gain_db() + opts.gain_modifier_db;
             let album_gain_steps = db_to_steps(album_gain_db);
             let album_max_amp = album_rg.album_peak() * 32768.0;

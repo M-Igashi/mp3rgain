@@ -109,13 +109,21 @@ A native GUI application (`mp3rgui`) is available for users who prefer a graphic
 | `-k` | Prevent clipping |
 | `-R` | Process directories recursively |
 | `-n` | Dry-run mode |
+| `-j <n>` / `--threads <n>` | Worker threads for analysis (default: auto, 0=auto, 1=serial) |
 | `-o [fmt]` | Output format: `text`, `json`, `tsv` (default: tsv if no argument) |
 
 Run `mp3rgain -h` for the full list of options.
 
+ReplayGain analysis runs in parallel by default
+(`std::thread::available_parallelism()` worker threads). Use `-j 1` or
+`MP3RGAIN_THREADS=1` for the legacy serial path. See
+[docs/perf-parallel.md](docs/perf-parallel.md) for the design and
+real-corpus benchmark numbers.
+
 ## Documentation
 
 - [Migration Guide](docs/migrating-from-mp3gain.md) - Drop-in replacement for mp3gain: flag equivalence, sed/Dockerfile/CI substitution patterns, beets config
+- [Parallel Performance](docs/perf-parallel.md) - `-j` / `--threads` design and real-corpus benchmark numbers
 - [Roadmap](docs/roadmap.md) - Development plans and upcoming features
 - [Security](docs/security.md) - Memory safety and CVE analysis
 - [Compatibility Report](docs/compatibility-report.md) - Verification against original mp3gain
