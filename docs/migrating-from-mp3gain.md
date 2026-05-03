@@ -77,6 +77,7 @@ are worth knowing:
 | `-n`, `--dry-run` | Preview changes without writing |
 | `-o text` / `-o json` / `-o tsv` | Explicit output format selection |
 | `-s i` | Use ID3v2 ReplayGain tags instead of APEv2 (partial) |
+| `-j <n>` / `--threads <n>` | Worker threads for ReplayGain analysis (default: auto). `MP3RGAIN_THREADS` env var also honored. `-j 1` reproduces mp3gain's serial behavior. See [docs/perf-parallel.md](perf-parallel.md). |
 
 For the full list run `mp3rgain --help`.
 

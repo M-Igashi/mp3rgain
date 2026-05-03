@@ -3,6 +3,7 @@ pub mod info;
 pub mod max_amplitude;
 pub mod replaygain;
 pub mod tags;
+pub mod threading;
 pub mod undo;
 pub mod utils;
 
@@ -35,6 +36,10 @@ pub fn run(mut opts: Options) -> Result<()> {
             std::process::exit(1);
         }
     }
+
+    // Configure the global rayon pool from -j / --threads / MP3RGAIN_THREADS.
+    // Default is std::thread::available_parallelism(); -j 1 forces serial.
+    threading::install_global_pool(threading::effective_threads(&opts));
 
     // -f option warning (assume MPEG2)
     if opts.assume_mpeg2 && !opts.quiet && opts.output_format == OutputFormat::Text {

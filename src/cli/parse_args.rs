@@ -29,6 +29,30 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
             std::process::exit(0);
         }
 
+        if arg == "--threads" {
+            i += 1;
+            if i >= args.len() {
+                eprintln!("{}: --threads requires an argument", "error".red().bold());
+                std::process::exit(1);
+            }
+            opts.threads = Some(
+                args[i]
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("invalid --threads value: {}", args[i]))?,
+            );
+            i += 1;
+            continue;
+        }
+
+        if let Some(rest) = arg.strip_prefix("--threads=") {
+            opts.threads = Some(
+                rest.parse()
+                    .map_err(|_| anyhow::anyhow!("invalid --threads value: {}", rest))?,
+            );
+            i += 1;
+            continue;
+        }
+
         if arg.starts_with('-') && arg.len() > 1 && !arg.starts_with("--") {
             let flag = &arg[1..];
 
@@ -170,6 +194,18 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                             .map_err(|_| anyhow::anyhow!("invalid track index: {}", args[i]))?,
                     );
                 }
+                "j" => {
+                    i += 1;
+                    if i >= args.len() {
+                        eprintln!("{}: -j requires an argument", "error".red().bold());
+                        std::process::exit(1);
+                    }
+                    opts.threads = Some(
+                        args[i]
+                            .parse()
+                            .map_err(|_| anyhow::anyhow!("invalid -j value: {}", args[i]))?,
+                    );
+                }
                 "u" => opts.undo = true,
                 "p" => opts.preserve_timestamp = true,
                 "c" => opts.ignore_clipping = true,
@@ -238,6 +274,14 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                     opts.track_index = Some(
                         val.parse()
                             .map_err(|_| anyhow::anyhow!("invalid track index: {}", val))?,
+                    );
+                }
+                // Handle -j with attached value (e.g., -j4)
+                _ if flag.starts_with('j') => {
+                    let val = &flag[1..];
+                    opts.threads = Some(
+                        val.parse()
+                            .map_err(|_| anyhow::anyhow!("invalid -j value: {}", val))?,
                     );
                 }
                 _ => {
@@ -517,6 +561,50 @@ mod tests {
     fn assume_mpeg2_flag() {
         let opts = parse_args(&args(&["-f", "song.mp3"])).unwrap();
         assert!(opts.assume_mpeg2);
+    }
+
+    #[test]
+    fn j_flag_separate_value() {
+        let opts = parse_args(&args(&["-j", "4", "song.mp3"])).unwrap();
+        assert_eq!(opts.threads, Some(4));
+    }
+
+    #[test]
+    fn j_flag_attached_value() {
+        let opts = parse_args(&args(&["-j8", "song.mp3"])).unwrap();
+        assert_eq!(opts.threads, Some(8));
+    }
+
+    #[test]
+    fn j_flag_zero_means_auto() {
+        let opts = parse_args(&args(&["-j", "0", "song.mp3"])).unwrap();
+        assert_eq!(opts.threads, Some(0));
+    }
+
+    #[test]
+    fn j_flag_one_serial() {
+        let opts = parse_args(&args(&["-j", "1", "song.mp3"])).unwrap();
+        assert_eq!(opts.threads, Some(1));
+    }
+
+    #[test]
+    fn threads_long_flag() {
+        let opts = parse_args(&args(&["--threads", "2", "song.mp3"])).unwrap();
+        assert_eq!(opts.threads, Some(2));
+    }
+
+    #[test]
+    fn threads_long_flag_equals() {
+        let opts = parse_args(&args(&["--threads=6", "song.mp3"])).unwrap();
+        assert_eq!(opts.threads, Some(6));
+    }
+
+    #[test]
+    fn invalid_j_returns_error() {
+        let result = parse_args(&args(&["-j", "abc"]));
+        assert!(result.is_err());
+        let result = parse_args(&args(&["-jabc"]));
+        assert!(result.is_err());
     }
 
     #[test]

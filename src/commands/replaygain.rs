@@ -2,9 +2,12 @@ use anyhow::Result;
 use colored::*;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use mp3rgain::replaygain::{self, REPLAYGAIN_REFERENCE_DB};
+use rayon::prelude::*;
+use std::io::{self, Write};
 use std::path::PathBuf;
 
 use crate::cli::options::{AacAlbumInfo, Options, OutputFormat};
+use crate::commands::threading::effective_threads;
 use crate::commands::utils::{create_json_summary, print_dry_run_notice, update_counters};
 use crate::json_output::{JsonAlbumResult, JsonFileResult, JsonOutput};
 use crate::processors::replaygain::{process_apply_replaygain_with_album, process_track_gain};
@@ -45,6 +48,9 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         println!();
     }
 
+    let threads = effective_threads(opts);
+    let parallel = threads > 1 && files.len() > 1;
+
     let mp = MultiProgress::new();
     let file_pb = if !opts.quiet
         && opts.output_format == OutputFormat::Text
@@ -66,24 +72,59 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     let mut successful = 0;
     let mut failed = 0;
 
-    for file in files {
-        let filename = get_filename(file);
-        if let Some(ref pb) = file_pb {
-            pb.set_message(filename.to_string());
+    if parallel {
+        let file_pb_ref = file_pb.as_ref();
+        let collected: Vec<(JsonFileResult, String)> = files
+            .par_iter()
+            .map(|file| -> Result<(JsonFileResult, String)> {
+                let r = process_track_gain(file, opts, None)?;
+                if let Some(pb) = file_pb_ref {
+                    pb.set_message(get_filename(file).to_string());
+                    pb.inc(1);
+                }
+                Ok(r)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        for (_, text) in &collected {
+            if !text.is_empty() {
+                handle.write_all(text.as_bytes())?;
+            }
         }
+        drop(handle);
 
-        let analysis_pb = create_analysis_progress_bar(&mp, file, opts);
-        let result = process_track_gain(file, opts, analysis_pb.as_ref())?;
-        finish_analysis_progress(analysis_pb);
-
-        update_counters(&result, &mut successful, &mut failed);
-
-        if opts.output_format == OutputFormat::Json {
-            json_results.push(result);
+        for (result, _) in collected {
+            update_counters(&result, &mut successful, &mut failed);
+            if opts.output_format == OutputFormat::Json {
+                json_results.push(result);
+            }
         }
+    } else {
+        for file in files {
+            let filename = get_filename(file);
+            if let Some(ref pb) = file_pb {
+                pb.set_message(filename.to_string());
+            }
 
-        if let Some(ref pb) = file_pb {
-            pb.inc(1);
+            let analysis_pb = create_analysis_progress_bar(&mp, file, opts);
+            let (result, text) = process_track_gain(file, opts, analysis_pb.as_ref())?;
+            finish_analysis_progress(analysis_pb);
+
+            if !text.is_empty() {
+                print!("{}", text);
+            }
+
+            update_counters(&result, &mut successful, &mut failed);
+
+            if opts.output_format == OutputFormat::Json {
+                json_results.push(result);
+            }
+
+            if let Some(ref pb) = file_pb {
+                pb.inc(1);
+            }
         }
     }
 
@@ -143,10 +184,14 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
     let file_refs: Vec<&std::path::Path> = files.iter().map(|p| p.as_path()).collect();
 
+    let threads = effective_threads(opts);
+    let parallel = threads > 1 && files.len() > 1;
+
     let show_progress = !opts.quiet && opts.output_format == OutputFormat::Text;
     let mp = MultiProgress::new();
 
-    let album_analysis = if show_progress {
+    let album_analysis = if show_progress && !parallel {
+        // Serial mode keeps the existing per-file byte progress bar.
         let analysis_pb = mp.add(ProgressBar::new(0));
         analysis_pb.set_style(
             ProgressStyle::default_bar()
@@ -173,6 +218,31 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
         analysis_pb.finish_and_clear();
         result
+    } else if show_progress && parallel {
+        // Parallel mode: per-file byte progress would overlap; show a
+        // file-count bar driven by completion notifications instead.
+        let analysis_pb = mp.add(ProgressBar::new(files.len() as u64));
+        analysis_pb.set_style(
+            ProgressStyle::default_bar()
+                .template("      [{bar:30.cyan/blue}] {pos}/{len} {msg}")
+                .unwrap()
+                .progress_chars("=>-"),
+        );
+
+        let pb_ref = &analysis_pb;
+        let result = replaygain::analyze_album_parallel_with_completion(
+            &file_refs,
+            opts.track_index,
+            threads,
+            &|completed_idx, _path| {
+                pb_ref.set_position((completed_idx + 1) as u64);
+            },
+        );
+
+        analysis_pb.finish_and_clear();
+        result
+    } else if parallel {
+        replaygain::analyze_album_parallel(&file_refs, opts.track_index, threads)
     } else {
         replaygain::analyze_album_with_index(&file_refs, opts.track_index)
     };
@@ -253,25 +323,67 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             let mut successful = 0;
             let mut failed = 0;
 
-            for (i, file) in files.iter().enumerate() {
-                let filename = get_filename(file);
-                progress_set_message(&pb, filename);
+            if parallel {
+                let pb_ref = pb.as_ref();
+                let collected: Vec<(JsonFileResult, String)> = files
+                    .par_iter()
+                    .enumerate()
+                    .map(|(i, file)| -> Result<(JsonFileResult, String)> {
+                        let track_result = &album_result.tracks()[i];
+                        let r = process_apply_replaygain_with_album(
+                            file,
+                            steps,
+                            track_result,
+                            opts,
+                            Some(&album_info),
+                        )?;
+                        if let Some(pb) = pb_ref {
+                            pb.set_message(get_filename(file).to_string());
+                            pb.inc(1);
+                        }
+                        Ok(r)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
 
-                let track_result = &album_result.tracks()[i];
-                let result = process_apply_replaygain_with_album(
-                    file,
-                    steps,
-                    track_result,
-                    opts,
-                    Some(&album_info),
-                )?;
-                update_counters(&result, &mut successful, &mut failed);
-
-                if opts.output_format == OutputFormat::Json {
-                    json_results.push(result);
+                let stdout = io::stdout();
+                let mut handle = stdout.lock();
+                for (_, text) in &collected {
+                    if !text.is_empty() {
+                        handle.write_all(text.as_bytes())?;
+                    }
                 }
+                drop(handle);
 
-                progress_inc(&pb);
+                for (result, _) in collected {
+                    update_counters(&result, &mut successful, &mut failed);
+                    if opts.output_format == OutputFormat::Json {
+                        json_results.push(result);
+                    }
+                }
+            } else {
+                for (i, file) in files.iter().enumerate() {
+                    let filename = get_filename(file);
+                    progress_set_message(&pb, filename);
+
+                    let track_result = &album_result.tracks()[i];
+                    let (result, text) = process_apply_replaygain_with_album(
+                        file,
+                        steps,
+                        track_result,
+                        opts,
+                        Some(&album_info),
+                    )?;
+                    if !text.is_empty() {
+                        print!("{}", text);
+                    }
+                    update_counters(&result, &mut successful, &mut failed);
+
+                    if opts.output_format == OutputFormat::Json {
+                        json_results.push(result);
+                    }
+
+                    progress_inc(&pb);
+                }
             }
 
             progress_finish(pb);

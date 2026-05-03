@@ -1275,6 +1275,99 @@ fn analyze_album_internal(
     ))
 }
 
+/// Analyze multiple tracks for album gain in parallel.
+///
+/// Tracks are decoded and filtered concurrently using a rayon thread pool
+/// (or the global pool when `threads <= 1`, in which case this falls back
+/// to the serial implementation). The album histogram fold is associative,
+/// and `track_results` is preserved in input order — the parallel result is
+/// numerically identical to the serial one.
+#[cfg(feature = "replaygain")]
+pub fn analyze_album_parallel(
+    files: &[&Path],
+    track_index: Option<u32>,
+    threads: usize,
+) -> Result<AlbumGainResult> {
+    if threads <= 1 || files.len() <= 1 {
+        return analyze_album_internal(files, track_index, None);
+    }
+    analyze_album_parallel_internal::<fn(usize, &Path)>(files, track_index, None)
+}
+
+/// Analyze multiple tracks for album gain in parallel, with a per-file
+/// completion callback.
+///
+/// `on_complete(idx, path)` is invoked from the rayon worker thread that
+/// finished decoding `files[idx]`. The callback may be called concurrently
+/// from multiple threads, so it must be `Sync`.
+#[cfg(feature = "replaygain")]
+pub fn analyze_album_parallel_with_completion<F>(
+    files: &[&Path],
+    track_index: Option<u32>,
+    threads: usize,
+    on_complete: &F,
+) -> Result<AlbumGainResult>
+where
+    F: Fn(usize, &Path) + Sync,
+{
+    if threads <= 1 || files.len() <= 1 {
+        // Serial fallback still drives the completion callback in input order.
+        let result = analyze_album_internal(files, track_index, None)?;
+        for (i, f) in files.iter().enumerate() {
+            on_complete(i, f);
+        }
+        return Ok(result);
+    }
+    analyze_album_parallel_internal(files, track_index, Some(on_complete))
+}
+
+#[cfg(feature = "replaygain")]
+fn analyze_album_parallel_internal<F>(
+    files: &[&Path],
+    track_index: Option<u32>,
+    on_complete: Option<&F>,
+) -> Result<AlbumGainResult>
+where
+    F: Fn(usize, &Path) + Sync,
+{
+    use rayon::prelude::*;
+
+    // par_iter().collect() preserves input order, which keeps album_peak
+    // / album_histogram folding deterministic and matches the serial path
+    // bit-for-bit.
+    let internals: Vec<TrackAnalysisInternal> = files
+        .par_iter()
+        .enumerate()
+        .map(|(i, file)| {
+            let r = analyze_track_internal(file, track_index, None);
+            if let Some(cb) = on_complete {
+                cb(i, file);
+            }
+            r
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut track_results = Vec::with_capacity(internals.len());
+    let mut album_peak: f64 = 0.0;
+    let mut album_histogram = LoudnessHistogram::new();
+
+    for internal in internals {
+        album_peak = album_peak.max(internal.result.peak);
+        album_histogram.accumulate(&internal.histogram);
+        track_results.push(internal.result);
+    }
+
+    let album_loudness_db = album_histogram.get_loudness();
+    let album_gain_db = PINK_REF - album_loudness_db;
+
+    Ok(AlbumGainResult::new(
+        track_results,
+        album_loudness_db,
+        album_gain_db,
+        album_peak,
+    ))
+}
+
 // =============================================================================
 // Stub implementations when feature is disabled
 // =============================================================================
@@ -1335,6 +1428,34 @@ pub fn analyze_album_with_progress(
     _track_index: Option<u32>,
     _on_progress: &dyn Fn(usize, u64, u64),
 ) -> Result<AlbumGainResult> {
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
+}
+
+#[cfg(not(feature = "replaygain"))]
+pub fn analyze_album_parallel(
+    _files: &[&Path],
+    _track_index: Option<u32>,
+    _threads: usize,
+) -> Result<AlbumGainResult> {
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
+}
+
+#[cfg(not(feature = "replaygain"))]
+pub fn analyze_album_parallel_with_completion<F>(
+    _files: &[&Path],
+    _track_index: Option<u32>,
+    _threads: usize,
+    _on_complete: &F,
+) -> Result<AlbumGainResult>
+where
+    F: Fn(usize, &Path) + Sync,
+{
     Err(Error::FeatureNotAvailable {
         feature: "ReplayGain analysis",
         feature_flag: "replaygain",

@@ -3,6 +3,7 @@ use colored::*;
 use indicatif::ProgressBar;
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult};
 use mp3rgain::{aac, analyze, db_to_steps, id3v2, mp4meta, steps_to_db, GainOptions};
+use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::cli::options::{AacAlbumInfo, Options, OutputFormat};
@@ -16,17 +17,29 @@ pub fn process_track_gain(
     file: &Path,
     opts: &Options,
     analysis_pb: Option<&ProgressBar>,
+) -> Result<(JsonFileResult, String)> {
+    let mut out = String::new();
+    let result = process_track_gain_into(file, opts, analysis_pb, &mut out)?;
+    Ok((result, out))
+}
+
+fn process_track_gain_into(
+    file: &Path,
+    opts: &Options,
+    analysis_pb: Option<&ProgressBar>,
+    out: &mut String,
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
     let dry_run_prefix = opts.dry_run_prefix();
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
-        println!(
+        writeln!(
+            out,
             "  {} {}Analyzing {}...",
             "->".cyan(),
             dry_run_prefix,
             filename
-        );
+        )?;
     }
 
     let rg_result = if let Some(pb) = analysis_pb {
@@ -44,7 +57,8 @@ pub fn process_track_gain(
             let modified_steps = base_steps + opts.gain_modifier;
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
-                println!(
+                writeln!(
+                    out,
                     "      Loudness: {:.1} dB, Gain: {:+.1} dB ({} steps{}), Peak: {:.4}",
                     result.loudness_db(),
                     result.gain_db(),
@@ -55,12 +69,12 @@ pub fn process_track_gain(
                         String::new()
                     },
                     result.peak()
-                );
+                )?;
             }
 
             if modified_steps == 0 {
                 if opts.output_format == OutputFormat::Text && !opts.quiet {
-                    println!("  {} {} (no adjustment needed)", ".".cyan(), filename);
+                    writeln!(out, "  {} {} (no adjustment needed)", ".".cyan(), filename)?;
                 }
                 return Ok(JsonFileResult {
                     file: file.display().to_string(),
@@ -73,7 +87,7 @@ pub fn process_track_gain(
                 });
             }
 
-            process_apply_replaygain_with_album(file, modified_steps, &result, opts, None)
+            apply_replaygain_with_album_into(file, modified_steps, &result, opts, None, out)
         }
         Err(e) => {
             if opts.output_format == OutputFormat::Text && !opts.quiet {
@@ -96,6 +110,19 @@ pub fn process_apply_replaygain_with_album(
     result: &ReplayGainResult,
     opts: &Options,
     album_info: Option<&AacAlbumInfo>,
+) -> Result<(JsonFileResult, String)> {
+    let mut out = String::new();
+    let r = apply_replaygain_with_album_into(file, steps, result, opts, album_info, &mut out)?;
+    Ok((r, out))
+}
+
+fn apply_replaygain_with_album_into(
+    file: &Path,
+    steps: i32,
+    result: &ReplayGainResult,
+    opts: &Options,
+    album_info: Option<&AacAlbumInfo>,
+    out: &mut String,
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
     let dry_run_prefix = opts.dry_run_prefix();
@@ -162,13 +189,14 @@ pub fn process_apply_replaygain_with_album(
     // Dry run: don't actually modify
     if opts.dry_run {
         if opts.output_format == OutputFormat::Text && !opts.quiet {
-            println!(
+            writeln!(
+                out,
                 "  {} [DRY RUN] {} (would apply {:+.1} dB, {} steps)",
                 "~".cyan(),
                 filename,
                 steps_to_db(actual_steps),
                 actual_steps,
-            );
+            )?;
         }
         return Ok(JsonFileResult {
             file: file.display().to_string(),
@@ -185,7 +213,7 @@ pub fn process_apply_replaygain_with_album(
 
     // Handle AAC/M4A files differently - only write ReplayGain tags
     if result.file_type() == AudioFileType::Aac {
-        return process_apply_replaygain_aac_with_album(
+        return apply_replaygain_aac_with_album_into(
             file,
             actual_steps,
             result,
@@ -193,6 +221,7 @@ pub fn process_apply_replaygain_with_album(
             warning_msg,
             original_mtime,
             album_info,
+            out,
         );
     }
 
@@ -246,13 +275,14 @@ pub fn process_apply_replaygain_with_album(
             }
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
-                println!(
+                writeln!(
+                    out,
                     "  {} {} ({} frames, {:+.1} dB)",
                     "v".green(),
                     filename,
                     frames,
                     steps_to_db(actual_steps)
-                );
+                )?;
             }
 
             Ok(JsonFileResult {
@@ -283,7 +313,8 @@ pub fn process_apply_replaygain_with_album(
 }
 
 /// Apply ReplayGain to AAC/M4A files with optional album info
-fn process_apply_replaygain_aac_with_album(
+#[allow(clippy::too_many_arguments)]
+fn apply_replaygain_aac_with_album_into(
     file: &Path,
     actual_steps: i32,
     result: &ReplayGainResult,
@@ -291,6 +322,7 @@ fn process_apply_replaygain_aac_with_album(
     warning_msg: Option<String>,
     original_mtime: Option<std::time::SystemTime>,
     album_info: Option<&AacAlbumInfo>,
+    out: &mut String,
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
 
@@ -352,22 +384,24 @@ fn process_apply_replaygain_aac_with_album(
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 if gain_modified > 0 {
-                    println!(
+                    writeln!(
+                        out,
                         "  {} {} ({} gains modified + {} written, {:+.1} dB)",
                         "v".green(),
                         filename,
                         gain_modified,
                         tag_type,
                         result.gain_db()
-                    );
+                    )?;
                 } else {
-                    println!(
+                    writeln!(
+                        out,
                         "  {} {} ({} written, {:+.1} dB)",
                         "v".green(),
                         filename,
                         tag_type,
                         result.gain_db()
-                    );
+                    )?;
                 }
             }
 

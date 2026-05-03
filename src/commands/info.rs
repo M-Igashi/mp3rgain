@@ -2,9 +2,12 @@ use anyhow::Result;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use mp3rgain::replaygain;
 use mp3rgain::{db_to_steps, mp4meta};
+use rayon::prelude::*;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
+use crate::commands::threading::effective_threads;
 use crate::json_output::{JsonFileResult, JsonOutput};
 use crate::processors::info::process_info;
 use crate::progress::{create_analysis_progress_bar, finish_analysis_progress, PROGRESS_THRESHOLD};
@@ -15,6 +18,9 @@ pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
     if opts.output_format == OutputFormat::Tsv {
         println!("File\tMP3 gain\tdB gain\tMax Amplitude\tMax global_gain\tMin global_gain");
     }
+
+    let threads = effective_threads(opts);
+    let parallel = threads > 1 && files.len() > 1;
 
     let mp = MultiProgress::new();
     let file_pb = if !opts.quiet
@@ -33,23 +39,63 @@ pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
         None
     };
 
-    let mut json_results: Vec<JsonFileResult> = Vec::new();
+    let json_results: Vec<JsonFileResult> = if parallel {
+        // Parallel: run process_info per file in rayon's pool. Per-file
+        // analysis progress bars would interleave confusingly when N files
+        // run concurrently, so we skip them in parallel mode and only show
+        // the file-count progress bar.
+        let file_pb_ref = file_pb.as_ref();
+        let collected: Vec<(JsonFileResult, String)> = files
+            .par_iter()
+            .map(|file| -> Result<(JsonFileResult, String)> {
+                let r = process_info(file, opts, None)?;
+                if let Some(pb) = file_pb_ref {
+                    pb.set_message(get_filename(file).to_string());
+                    pb.inc(1);
+                }
+                Ok(r)
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-    for file in files {
-        let filename = get_filename(file);
-        if let Some(ref pb) = file_pb {
-            pb.set_message(filename.to_string());
+        // Emit captured stdout in input order so TSV/Text output stays
+        // deterministic regardless of completion order.
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        for (_, text) in &collected {
+            if !text.is_empty() {
+                handle.write_all(text.as_bytes())?;
+            }
         }
+        drop(handle);
 
-        let analysis_pb = create_analysis_progress_bar(&mp, file, opts);
-        let result = process_info(file, opts, analysis_pb.as_ref())?;
-        finish_analysis_progress(analysis_pb);
-        json_results.push(result);
+        collected.into_iter().map(|(r, _)| r).collect()
+    } else {
+        // Serial path preserves the original behavior, including the
+        // per-file analysis progress bar that the issue's `-j 1` clause
+        // promises to keep working.
+        let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
+        for file in files {
+            let filename = get_filename(file);
+            if let Some(ref pb) = file_pb {
+                pb.set_message(filename.to_string());
+            }
 
-        if let Some(ref pb) = file_pb {
-            pb.inc(1);
+            let analysis_pb = create_analysis_progress_bar(&mp, file, opts);
+            let (result, text) = process_info(file, opts, analysis_pb.as_ref())?;
+            finish_analysis_progress(analysis_pb);
+
+            if !text.is_empty() {
+                print!("{}", text);
+            }
+
+            json_results.push(result);
+
+            if let Some(ref pb) = file_pb {
+                pb.inc(1);
+            }
         }
-    }
+        json_results
+    };
 
     if let Some(pb) = file_pb {
         pb.finish_and_clear();
@@ -73,7 +119,12 @@ pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
             &aac_files
         };
 
-        if let Ok(album_rg) = replaygain::analyze_album(album_paths) {
+        let album_rg = if parallel {
+            replaygain::analyze_album_parallel(album_paths, opts.track_index, threads)
+        } else {
+            replaygain::analyze_album(album_paths)
+        };
+        if let Ok(album_rg) = album_rg {
             let album_gain_db = album_rg.album_gain_db() + opts.gain_modifier_db;
             let album_gain_steps = db_to_steps(album_gain_db);
             let album_max_amp = album_rg.album_peak() * 32768.0;

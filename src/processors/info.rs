@@ -3,6 +3,7 @@ use colored::*;
 use indicatif::ProgressBar;
 use mp3rgain::replaygain;
 use mp3rgain::{analyze, db_to_steps, find_max_amplitude, mp4meta};
+use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat};
@@ -14,6 +15,17 @@ pub fn process_info(
     file: &Path,
     opts: &Options,
     analysis_pb: Option<&ProgressBar>,
+) -> Result<(JsonFileResult, String)> {
+    let mut out = String::new();
+    let result = process_info_into(file, opts, analysis_pb, &mut out)?;
+    Ok((result, out))
+}
+
+fn process_info_into(
+    file: &Path,
+    opts: &Options,
+    analysis_pb: Option<&ProgressBar>,
+    out: &mut String,
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
 
@@ -46,23 +58,29 @@ pub fn process_info(
 
                 match opts.output_format {
                     OutputFormat::Tsv => {
-                        println!(
+                        writeln!(
+                            out,
                             "{}\t{}\t{:.6}\t{:.6}\t{}\t{}",
                             filename, gain_steps, gain_db, max_amplitude_scaled, max_gain, min_gain
-                        );
+                        )?;
                     }
                     OutputFormat::Text => {
                         if !opts.quiet {
-                            println!("{}", filename.cyan().bold());
-                            println!("  Recommended \"Track\" dB change: {:.6}", gain_db);
-                            println!("  Recommended \"Track\" mp3 gain change: {}", gain_steps);
-                            println!(
+                            writeln!(out, "{}", filename.cyan().bold())?;
+                            writeln!(out, "  Recommended \"Track\" dB change: {:.6}", gain_db)?;
+                            writeln!(
+                                out,
+                                "  Recommended \"Track\" mp3 gain change: {}",
+                                gain_steps
+                            )?;
+                            writeln!(
+                                out,
                                 "  Max PCM sample at current gain: {:.6}",
                                 max_amplitude_scaled
-                            );
-                            println!("  Max mp3 global gain field: {}", max_gain);
-                            println!("  Min mp3 global gain field: {}", min_gain);
-                            println!();
+                            )?;
+                            writeln!(out, "  Max mp3 global gain field: {}", max_gain)?;
+                            writeln!(out, "  Min mp3 global gain field: {}", min_gain)?;
+                            writeln!(out)?;
                         }
                     }
                     OutputFormat::Json => {}
@@ -101,26 +119,28 @@ pub fn process_info(
         match opts.output_format {
             OutputFormat::Text => {
                 if opts.quiet {
-                    println!("{}\t{}\t-\t-\t-\t-\t-", filename, format_str);
+                    writeln!(out, "{}\t{}\t-\t-\t-\t-\t-", filename, format_str)?;
                 } else {
-                    println!("{}", filename.cyan().bold());
-                    println!("  Format:      {}", format_str);
+                    writeln!(out, "{}", filename.cyan().bold())?;
+                    writeln!(out, "  Format:      {}", format_str)?;
                     if is_alac {
-                        println!(
+                        writeln!(
+                            out,
                             "  {}",
                             "ALAC files are not supported for gain adjustment".yellow()
-                        );
+                        )?;
                     } else {
-                        println!(
+                        writeln!(
+                            out,
                             "  {}",
                             "Note: Use -r or -a for ReplayGain analysis".yellow()
-                        );
+                        )?;
                     }
-                    println!();
+                    writeln!(out)?;
                 }
             }
             OutputFormat::Tsv => {
-                println!("{}\t-\t-\t-\t-\t-", filename);
+                writeln!(out, "{}\t-\t-\t-\t-\t-", filename)?;
             }
             OutputFormat::Json => {}
         }
@@ -139,7 +159,8 @@ pub fn process_info(
                 OutputFormat::Text => {
                     if opts.quiet {
                         // Quiet mode: tab-separated output
-                        println!(
+                        writeln!(
+                            out,
                             "{}\t{}\t{}\t{}\t{:.1}\t{}\t{:.1}",
                             filename,
                             info.frame_count(),
@@ -148,32 +169,36 @@ pub fn process_info(
                             info.avg_gain(),
                             info.headroom_steps(),
                             info.headroom_db()
-                        );
+                        )?;
                     } else {
-                        println!("{}", filename.cyan().bold());
-                        println!(
+                        writeln!(out, "{}", filename.cyan().bold())?;
+                        writeln!(
+                            out,
                             "  Format:      {} Layer III, {}",
                             info.mpeg_version(),
                             info.channel_mode()
-                        );
-                        println!("  Frames:      {}", info.frame_count());
-                        println!(
+                        )?;
+                        writeln!(out, "  Frames:      {}", info.frame_count())?;
+                        writeln!(
+                            out,
                             "  Gain range:  {} - {} (avg: {:.1})",
                             info.min_gain(),
                             info.max_gain(),
                             info.avg_gain()
-                        );
-                        println!(
+                        )?;
+                        writeln!(
+                            out,
                             "  Headroom:    {} steps ({:+.1} dB)",
                             info.headroom_steps().to_string().green(),
                             info.headroom_db()
-                        );
-                        println!();
+                        )?;
+                        writeln!(out)?;
                     }
                 }
                 OutputFormat::Tsv => {
                     // Fallback TSV (ReplayGain not available): basic info
-                    println!(
+                    writeln!(
+                        out,
                         "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
                         filename,
                         info.headroom_steps(),
@@ -181,7 +206,7 @@ pub fn process_info(
                         1.0,
                         info.max_gain(),
                         info.min_gain()
-                    );
+                    )?;
                 }
                 OutputFormat::Json => {}
             }
