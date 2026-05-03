@@ -56,6 +56,10 @@ pub struct Options {
     pub use_temp_file: bool,         // -t: use temp file for writing
     pub assume_mpeg2: bool,          // -f: assume MPEG 2 Layer III
 
+    // Parallelism
+    // -j N / --threads N. None = auto (available_parallelism). Some(0) = auto. Some(1) = serial.
+    pub threads: Option<usize>,
+
     // Files
     pub files: Vec<PathBuf>,
 }

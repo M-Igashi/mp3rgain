@@ -49,6 +49,8 @@ pub fn print_usage() {
     println!("    -R          Process directories recursively");
     println!("    -n          Dry-run mode (show what would be done)");
     println!("    --dry-run   Same as -n");
+    println!("    -j <n>      Worker threads for analysis (default: auto, 0=auto, 1=serial)");
+    println!("    --threads <n>  Same as -j (also honors MP3RGAIN_THREADS env var)");
     println!("    -o <fmt>    Output format: 'text' (default), 'json', or 'tsv'");
     println!("    -v          Show version");
     println!("    -h          Show this help");
