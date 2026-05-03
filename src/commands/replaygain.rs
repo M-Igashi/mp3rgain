@@ -68,7 +68,7 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         None
     };
 
-    let mut json_results: Vec<JsonFileResult> = Vec::new();
+    let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
     let mut successful = 0;
     let mut failed = 0;
 
@@ -191,7 +191,6 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     let mp = MultiProgress::new();
 
     let album_analysis = if show_progress && !parallel {
-        // Serial mode keeps the existing per-file byte progress bar.
         let analysis_pb = mp.add(ProgressBar::new(0));
         analysis_pb.set_style(
             ProgressStyle::default_bar()
@@ -219,7 +218,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         analysis_pb.finish_and_clear();
         result
     } else if show_progress && parallel {
-        // Parallel mode: per-file byte progress would overlap; show a
+        // Per-file byte bars would interleave in parallel mode, so show a
         // file-count bar driven by completion notifications instead.
         let analysis_pb = mp.add(ProgressBar::new(files.len() as u64));
         analysis_pb.set_style(
@@ -319,7 +318,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             }
 
             let pb = create_progress_bar(files.len(), opts);
-            let mut json_results: Vec<JsonFileResult> = Vec::new();
+            let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
             let mut successful = 0;
             let mut failed = 0;
 

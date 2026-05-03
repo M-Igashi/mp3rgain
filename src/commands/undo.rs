@@ -28,7 +28,7 @@ pub fn cmd_undo(files: &[PathBuf], opts: &Options) -> Result<()> {
     }
 
     let pb = create_progress_bar(files.len(), opts);
-    let mut json_results: Vec<JsonFileResult> = Vec::new();
+    let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
     let mut successful = 0;
     let mut failed = 0;
 

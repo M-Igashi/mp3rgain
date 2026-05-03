@@ -7,22 +7,15 @@ use crate::cli::options::{Options, OutputFormat};
 use crate::json_output::JsonFileResult;
 use crate::util::get_filename;
 
-use super::utils::restore_timestamp;
+use super::utils::{restore_timestamp, save_original_mtime};
 
 pub fn process_undo(file: &Path, opts: &Options) -> Result<JsonFileResult> {
     let filename = get_filename(file);
     let dry_run_prefix = opts.dry_run_prefix();
 
-    // Save original timestamp if needed
-    let original_mtime = if opts.preserve_timestamp && !opts.dry_run {
-        std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
-    } else {
-        None
-    };
+    let original_mtime = save_original_mtime(file, opts);
 
-    // Dry run: just analyze what would be done
     if opts.dry_run {
-        // Try to read the undo tag to see what would happen
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             println!("  {} [DRY RUN] {} (would undo)", "~".cyan(), filename);
         }

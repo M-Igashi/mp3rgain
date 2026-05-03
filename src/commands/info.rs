@@ -40,10 +40,8 @@ pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
     };
 
     let json_results: Vec<JsonFileResult> = if parallel {
-        // Parallel: run process_info per file in rayon's pool. Per-file
-        // analysis progress bars would interleave confusingly when N files
-        // run concurrently, so we skip them in parallel mode and only show
-        // the file-count progress bar.
+        // Skip per-file byte progress bars in parallel mode: they would
+        // interleave across concurrent files. The file-count bar still runs.
         let file_pb_ref = file_pb.as_ref();
         let collected: Vec<(JsonFileResult, String)> = files
             .par_iter()
@@ -70,9 +68,6 @@ pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
 
         collected.into_iter().map(|(r, _)| r).collect()
     } else {
-        // Serial path preserves the original behavior, including the
-        // per-file analysis progress bar that the issue's `-j 1` clause
-        // promises to keep working.
         let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
         for file in files {
             let filename = get_filename(file);

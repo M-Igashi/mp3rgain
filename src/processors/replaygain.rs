@@ -11,7 +11,9 @@ use crate::json_output::JsonFileResult;
 use crate::progress::update_analysis_progress;
 use crate::util::get_filename;
 
-use super::utils::{apply_with_temp_file, restore_timestamp};
+use super::utils::{
+    apply_with_temp_file, restore_timestamp, save_original_mtime, warn_aac_multi_track,
+};
 
 pub fn process_track_gain(
     file: &Path,
@@ -127,14 +129,8 @@ fn apply_replaygain_with_album_into(
     let filename = get_filename(file);
     let dry_run_prefix = opts.dry_run_prefix();
 
-    // Save original timestamp if needed
-    let original_mtime = if opts.preserve_timestamp && !opts.dry_run {
-        std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
-    } else {
-        None
-    };
+    let original_mtime = save_original_mtime(file, opts);
 
-    // Check for clipping if not ignored
     let mut actual_steps = steps;
     let mut warning_msg: Option<String> = None;
 
@@ -326,20 +322,8 @@ fn apply_replaygain_aac_with_album_into(
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
 
-    // Multi-track warning
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
-        let track_count = mp4meta::count_audio_tracks(file);
-        if track_count > 1 {
-            eprintln!(
-                "  {} {} - {} audio tracks detected, processing first track only",
-                "!".yellow(),
-                filename,
-                track_count
-            );
-        }
-    }
+    warn_aac_multi_track(file, filename, opts, "");
 
-    // Apply bitstream gain modification with undo support
     let gain_modified = if actual_steps != 0 {
         match aac::apply_aac_gain_with_undo(file, actual_steps) {
             Ok(n) => n,

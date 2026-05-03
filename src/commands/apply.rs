@@ -49,7 +49,7 @@ pub fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
     }
 
     let pb = create_progress_bar(files.len(), opts);
-    let mut json_results: Vec<JsonFileResult> = Vec::new();
+    let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
     let mut successful = 0;
     let mut failed = 0;
 
@@ -149,7 +149,7 @@ pub fn cmd_apply_channel(
     }
 
     let pb = create_progress_bar(files.len(), opts);
-    let mut json_results: Vec<JsonFileResult> = Vec::new();
+    let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
     let mut successful = 0;
     let mut failed = 0;
 

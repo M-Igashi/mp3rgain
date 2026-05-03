@@ -7,33 +7,20 @@ use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::json_output::JsonFileResult;
 use crate::util::get_filename;
 
-use super::utils::{apply_with_temp_file, restore_timestamp};
+use super::utils::{
+    apply_with_temp_file, restore_timestamp, save_original_mtime, warn_aac_multi_track,
+};
 
 pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFileResult> {
     let filename = get_filename(file);
     let dry_run_prefix = opts.dry_run_prefix();
 
-    // Save original timestamp if needed
-    let original_mtime = if opts.preserve_timestamp && !opts.dry_run {
-        std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
-    } else {
-        None
-    };
+    let original_mtime = save_original_mtime(file, opts);
 
     let is_aac = mp4meta::is_aac_file(file);
 
-    // Multi-track warning for AAC files
-    if is_aac && opts.output_format == OutputFormat::Text && !opts.quiet {
-        let track_count = mp4meta::count_audio_tracks(file);
-        if track_count > 1 {
-            eprintln!(
-                "  {} {}{} - {} audio tracks detected, processing first track only",
-                "!".yellow(),
-                dry_run_prefix,
-                filename,
-                track_count
-            );
-        }
+    if is_aac {
+        warn_aac_multi_track(file, filename, opts, dry_run_prefix);
     }
 
     // Check for clipping and possibly prevent it
@@ -237,14 +224,8 @@ pub fn process_apply_channel(
         }
     }
 
-    // Save original timestamp if needed
-    let original_mtime = if opts.preserve_timestamp && !opts.dry_run {
-        std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
-    } else {
-        None
-    };
+    let original_mtime = save_original_mtime(file, opts);
 
-    // Dry run: don't actually modify
     if opts.dry_run {
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             println!(
