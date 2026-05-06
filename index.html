@@ -140,14 +140,14 @@
   </div>
 
   <div class="section">
-    <h2>Arch Linux pkgstats (monthly opt-in counts)</h2>
+    <h2>Arch Linux pkgstats (opt-in install counts)</h2>
     <div style="overflow-x:auto">
       <table id="table-pkgstats">
-        <thead><tr><th>Package</th><th>Month</th><th class="num">Installs</th><th class="num">Samples</th><th class="num">Popularity</th></tr></thead>
+        <thead><tr><th>Package</th><th>Months</th><th class="num">Total Installs</th><th class="num">Total Samples</th><th class="num">Popularity</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
-    <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">Each row is a monthly snapshot of voluntary <a href="https://pkgstats.archlinux.de/" style="color:var(--blue)">pkgstats</a> submissions. The current month is partial and updates daily.</p>
+    <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">Totals aggregate monthly <a href="https://pkgstats.archlinux.de/" style="color:var(--blue)">pkgstats</a> submissions across the collected window. Popularity is computed as total installs / total samples.</p>
   </div>
 
   <div class="section">
@@ -422,25 +422,30 @@ async function main() {
     ghcrTbody.innerHTML = '<tr><td colspan="2" style="color:var(--muted);text-align:center;padding:1.5rem">GHCR metadata not yet collected. Refresh after the next stats run.</td></tr>';
   }
 
-  // pkgstats table: one row per (package, month). Falls back to single-row
-  // legacy schema for older snapshots that lack a `series` field.
+  // pkgstats table: one row per package, totalling installs/samples across
+  // every collected month. Falls back to single-row legacy schema for older
+  // snapshots that lack a `series` field.
   const fmtMonth = m => m ? String(m).replace(/^(\d{4})(\d{2})$/, '$1-$2') : '-';
   const pkgTbody = document.querySelector('#table-pkgstats tbody');
   const pkgPackages = (latest.pkgstats || []).filter(p => p.name);
-  const pkgRows = pkgPackages.flatMap(p => {
-    if (Array.isArray(p.series) && p.series.length > 0) {
-      return [...p.series].sort((a, b) => b.month - a.month).map(s => ({
-        name: p.name, month: s.month, count: s.count, samples: s.samples, popularity: s.popularity
-      }));
-    }
-    return [{ name: p.name, month: p.startMonth, count: p.count, samples: p.samples, popularity: p.popularity }];
+  const pkgRows = pkgPackages.map(p => {
+    const months = Array.isArray(p.series) && p.series.length > 0
+      ? [...p.series].sort((a, b) => a.month - b.month)
+      : [{ month: p.startMonth, count: p.count, samples: p.samples, popularity: p.popularity }];
+    const totalCount = months.reduce((s, m) => s + (m.count || 0), 0);
+    const totalSamples = months.reduce((s, m) => s + (m.samples || 0), 0);
+    const popularity = totalSamples > 0 ? (totalCount / totalSamples * 100) : 0;
+    const range = months.length > 1
+      ? `${fmtMonth(months[0].month)} – ${fmtMonth(months[months.length - 1].month)}`
+      : fmtMonth(months[0]?.month);
+    return { name: p.name, range, totalCount, totalSamples, popularity };
   });
   if (pkgRows.length === 0) {
     pkgTbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:1.5rem">No data available.</td></tr>';
   } else {
     pkgRows.forEach(r => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${r.name}</td><td>${fmtMonth(r.month)}</td><td class="num">${num(r.count || 0)}</td><td class="num">${num(r.samples || 0)}</td><td class="num">${(r.popularity ?? 0).toFixed(3)}%</td>`;
+      tr.innerHTML = `<td>${r.name}</td><td>${r.range}</td><td class="num">${num(r.totalCount)}</td><td class="num">${num(r.totalSamples)}</td><td class="num">${r.popularity.toFixed(3)}%</td>`;
       pkgTbody.appendChild(tr);
     });
   }
