@@ -10,12 +10,12 @@
 
 mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global_gain` field in each frame. This preserves audio quality while achieving permanent volume changes.
 
-> **The only actively maintained tool that performs lossless AAC/M4A bitstream gain adjustment.**
-> aacgain has been unmaintained since ~2009 and rarely builds on modern 64-bit systems. mp3rgain is the only practical option today for re-encode-free AAC volume normalization.
+> **The only actively maintained CLI for lossless AAC/M4A bitstream gain adjustment.**
+> aacgain (the historic CLI) has been unmaintained since ~2009 and rarely builds on modern 64-bit systems. foobar2000 also offers re-encode-free AAC gain on MP4/MKA via its "Apply ReplayGain to file content" feature (Windows GUI only, no undo). mp3rgain is the actively maintained, cross-platform, scriptable, undoable option for headless / batch / CI use.
 
 ## Features
 
-- **Only tool with lossless AAC bitstream gain**: re-encode-free `global_gain` rewrite for AAC/M4A — a capability previously only available in the long-abandoned aacgain
+- **CLI lossless AAC bitstream gain**: re-encode-free `global_gain` rewrite for AAC/M4A — replacing the long-abandoned aacgain, with `-u` undo (foobar2000's GUI equivalent has no undo path)
 - **Lossless & Reversible**: No re-encoding, all changes can be undone (MP3 and AAC)
 - **ReplayGain**: Track and album gain analysis for MP3 and AAC/M4A
 - **Zero dependencies**: Single static binary (no ffmpeg, no mp3gain, no aacgain)
@@ -135,7 +135,7 @@ real-corpus benchmark numbers.
 
 The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained upstream since ~2015 (though distribution maintainers continue to apply security patches). [aacgain](http://aacgain.altosdesign.com/), its AAC counterpart, has been unmaintained since ~2009 and is effectively unbuildable on modern 64-bit systems. mp3rgain is a modern, memory-safe replacement written in Rust that covers both.
 
-**AAC/M4A is the differentiator.** No other actively maintained tool can rewrite AAC `global_gain` in place. Existing alternatives (rsgain, loudgain, FFmpeg) either only write ReplayGain tags (which non-compliant players ignore) or re-encode the audio (lossy). mp3rgain is the only option that gives you a lossless, reversible, player-agnostic AAC volume adjustment today.
+**AAC/M4A on the CLI is the differentiator.** Among CLIs, rsgain / loudgain / FFmpeg either only write ReplayGain tags (which non-compliant players ignore) or re-encode the audio. foobar2000 has a comparable "Apply ReplayGain to file content" feature for AAC in MP4/MKA, but it is Windows GUI only, has no undo, and is unsuited for batch, headless, or container workflows. mp3rgain fills the cross-platform, scriptable, reversible niche.
 
 mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) for full compatibility with the original mp3gain / aacgain. Loudness values will differ from EBU R128/LUFS-based tools (foobar2000, loudgain, ffmpeg loudnorm).
 

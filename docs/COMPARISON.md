@@ -2,7 +2,7 @@
 
 This document provides a detailed comparison between mp3rgain and the original aacgain/mp3gain tools.
 
-> **Headline:** mp3rgain is the **only actively maintained tool** that performs lossless `global_gain` rewrite on AAC/M4A files. aacgain has been effectively abandoned since ~2009 and is unbuildable on most modern 64-bit systems; every other actively maintained alternative (rsgain, loudgain, FFmpeg) either tags-only or re-encodes. If you need re-encode-free AAC volume adjustment in 2026, mp3rgain is the only practical choice.
+> **Headline:** mp3rgain is the **only actively maintained CLI** that performs lossless `global_gain` rewrite on AAC/M4A files. aacgain has been effectively abandoned since ~2009 and is unbuildable on most modern 64-bit systems; among other CLIs, rsgain / loudgain / FFmpeg either tags-only or re-encodes. foobar2000 has a comparable "Apply ReplayGain to file content" feature for AAC in MP4/MKA, but it is Windows GUI only with no undo and is unsuited for batch / headless / CI use. If you need re-encode-free AAC volume adjustment from a script, container, or non-Windows host in 2026, mp3rgain is the only practical choice.
 
 ## Overview
 
@@ -254,17 +254,18 @@ If you apply `global_gain` adjustment with mp3rgain and later add ReplayGain tag
 
 For AAC/M4A files specifically, the choice of tool matters more than for MP3, because almost no other modern tool can avoid re-encoding:
 
-| Tool | AAC approach | Lossless? | Player-agnostic? | Maintained? |
-|------|--------------|-----------|------------------|-------------|
-| **mp3rgain** | `global_gain` rewrite | **Yes** | **Yes** | **Yes (active)** |
-| aacgain | `global_gain` rewrite | Yes | Yes | No (~2009) |
-| rsgain | ReplayGain 2.0 tags | Yes (file untouched) | No (player must read tags) | Yes |
-| loudgain | ReplayGain 2.0 tags | Yes (file untouched) | No (player must read tags) | Yes |
-| FFmpeg `volume` | Re-encode | No (lossy) | Yes | Yes |
-| FFmpeg `loudnorm` | Re-encode | No (lossy) | Yes | Yes |
-| beets ReplayGain plugin | Tags via backend | Yes (file untouched) | No (player must read tags) | Yes |
+| Tool | AAC approach | Lossless? | Player-agnostic? | Maintained? | CLI / scriptable? |
+|------|--------------|-----------|------------------|-------------|-------------------|
+| **mp3rgain** | `global_gain` rewrite | **Yes** | **Yes** | **Yes (active)** | **Yes** |
+| aacgain | `global_gain` rewrite | Yes | Yes | No (~2009) | Yes |
+| foobar2000 "Apply ReplayGain to file content" | scalefactor rewrite (MP4/MKA AAC) | Yes (one-shot, no undo) | Yes | Yes | No (Windows GUI only) |
+| rsgain | ReplayGain 2.0 tags | Yes (file untouched) | No (player must read tags) | Yes | Yes |
+| loudgain | ReplayGain 2.0 tags | Yes (file untouched) | No (player must read tags) | Yes | Yes |
+| FFmpeg `volume` | Re-encode | No (lossy) | Yes | Yes | Yes |
+| FFmpeg `loudnorm` | Re-encode | No (lossy) | Yes | Yes | Yes |
+| beets ReplayGain plugin | Tags via backend | Yes (file untouched) | No (player must read tags) | Yes | Yes |
 
-**The "lossless + player-agnostic + maintained" intersection contains exactly one tool: mp3rgain.** This matters for DJ equipment, car audio, smart speakers, and any environment where the playback device ignores ReplayGain tags.
+**The "lossless + player-agnostic + maintained + CLI/scriptable + reversible" intersection contains exactly one tool: mp3rgain.** foobar2000 covers the lossless / player-agnostic / maintained cells but is GUI-only on Windows and irreversible. This matters for DJ equipment, car audio, smart speakers, batch / Docker / CI pipelines, and any environment where the playback device ignores ReplayGain tags or where a desktop GUI is not an option.
 
 ### When to Use global_gain vs ReplayGain Tags
 
@@ -307,7 +308,7 @@ See [Security Documentation](security.md) for detailed CVE analysis.
 
 ## Why Choose mp3rgain?
 
-1. **Only viable AAC bitstream gain tool today**: aacgain is unmaintained and unbuildable on modern 64-bit systems; rsgain/loudgain only write tags; FFmpeg only re-encodes. mp3rgain is the only path to lossless, reversible, player-agnostic AAC volume adjustment.
+1. **Only viable AAC bitstream gain CLI today**: aacgain is unmaintained and unbuildable on modern 64-bit systems; rsgain/loudgain only write tags; FFmpeg only re-encodes; foobar2000 is Windows GUI only with no undo. mp3rgain is the only path to lossless, reversible, player-agnostic AAC volume adjustment from a script, container, or non-Windows host.
 2. **Modern platform support**: Works on Windows 11, macOS (including Apple Silicon), and Linux
 3. **No dependencies**: Single static binary, no ffmpeg or other libraries required
 4. **Memory safety**: Written in Rust with strong safety guarantees

@@ -2,16 +2,17 @@
 
 This document describes real-world use cases for mp3rgain.
 
-## Standout Capability: Lossless AAC Volume Adjustment
+## Standout Capability: Lossless AAC Volume Adjustment on the CLI
 
-mp3rgain is the **only actively maintained tool** that performs lossless `global_gain` rewrite on AAC/M4A files. Use cases that specifically benefit from this:
+mp3rgain is the **only actively maintained CLI** that performs lossless `global_gain` rewrite on AAC/M4A files. (foobar2000's "Apply ReplayGain to file content" can do a comparable scalefactor-based AAC adjustment in MP4/MKA, but it is Windows GUI only with no undo path.) Use cases that specifically benefit from a scriptable, cross-platform option:
 
-- **iTunes / Apple Music libraries**: Most personal music libraries on Apple platforms are AAC/M4A. Until now, normalizing them without re-encoding was impossible with any maintained tool.
+- **iTunes / Apple Music libraries on macOS / Linux**: Most personal music libraries on Apple platforms are AAC/M4A. Normalizing them without re-encoding from a non-Windows host previously had no maintained option.
 - **DJ workflows with AAC**: DJ hardware (CDJs, XDJs, controllers) ignores ReplayGain tags. AAC tracks bought from iTunes Store or other M4A sources previously had to be re-encoded to lose loudness, sacrificing quality.
 - **Smart speaker / car audio playback**: Same issue — these devices don't read ReplayGain tags, so the only way to adjust AAC volume in a way they respect is via bitstream rewrite.
-- **Audio archival**: For users who curate AAC libraries and want non-destructive, fully reversible volume normalization.
+- **Audio archival**: For users who curate AAC libraries and want non-destructive, reversible (`-u`) volume normalization.
+- **Headless / batch / CI / Docker pipelines**: foobar2000 is not a fit; mp3rgain is the only practical option.
 
-For MP3, mp3rgain is one of several drop-in mp3gain replacements; for AAC, it currently has no equivalent.
+For MP3, mp3rgain is one of several drop-in mp3gain replacements; for AAC on the command line, it currently has no equivalent.
 
 ---
 
@@ -34,7 +35,7 @@ For MP3, mp3rgain is one of several drop-in mp3gain replacements; for AAC, it cu
 headroom includes mp3rgain as a built-in library dependency for lossless MP3 **and AAC/M4A** volume adjustment. This enables:
 
 - **Native lossless gain**: For MP3 and AAC/M4A files with sufficient headroom (≥1.5 dB), headroom uses the mp3rgain library to directly modify the `global_gain` field
-- **AAC bitstream gain unique to mp3rgain**: For AAC, no other library or CLI tool provides this — headroom previously had to re-encode AAC files
+- **AAC bitstream gain via embedded library**: For AAC, no other Rust library or maintained CLI exposes this — headroom previously had to re-encode AAC files (foobar2000's GUI-only equivalent could not be embedded)
 - **Zero external dependencies for MP3/AAC**: No need to install mp3gain or aacgain separately
 - **Bitrate-aware processing**: Automatically selects appropriate True Peak ceiling based on bitrate
 

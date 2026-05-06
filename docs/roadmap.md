@@ -2,7 +2,7 @@
 
 ## Current Status: v2.3.0 (Production Ready)
 
-**Positioning:** mp3rgain is the only actively maintained tool that performs lossless `global_gain` rewrite on AAC/M4A files (aacgain has been abandoned since ~2009). For MP3 it's a modern drop-in replacement for mp3gain; for AAC it has no equivalent.
+**Positioning:** mp3rgain is the only actively maintained CLI that performs lossless `global_gain` rewrite on AAC/M4A files (aacgain has been abandoned since ~2009; foobar2000's "Apply ReplayGain to file content" offers a comparable scalefactor-based AAC rewrite but is Windows GUI only with no undo). For MP3 it's a modern drop-in replacement for mp3gain; for AAC on the command line it has no equivalent.
 
 All core functionality complete:
 - [x] MP3 frame parsing (MPEG 1/2/2.5 Layer III)
