@@ -688,14 +688,15 @@ impl EqualLoudnessFilter {
         self.yule_y.copy_within(0..10, 1);
         self.yule_x[0] = sample;
 
-        // Apply Yule-Walker filter with denormal prevention
+        // Apply Yule-Walker filter with denormal prevention.
         // The 1e-10 constant prevents denormal float slowdowns on silent audio
-        // Reference: gain_analysis.c filterYule()
-        let yule_out = DENORMAL_PREVENTION
-            + self.yule_b[0] * self.yule_x[0]
-            + (1..11)
-                .map(|i| self.yule_b[i] * self.yule_x[i] - self.yule_a[i] * self.yule_y[i])
-                .sum::<f64>();
+        // (see gain_analysis.c filterYule()). The explicit loop with a fixed
+        // upper bound gives the optimizer a better shot at unrolling /
+        // vectorizing this hot path than the iterator chain.
+        let mut yule_out = DENORMAL_PREVENTION + self.yule_b[0] * self.yule_x[0];
+        for i in 1..11 {
+            yule_out += self.yule_b[i] * self.yule_x[i] - self.yule_a[i] * self.yule_y[i];
+        }
         self.yule_y[0] = yule_out;
 
         // Shift Butterworth filter history and insert Yule output
@@ -704,11 +705,10 @@ impl EqualLoudnessFilter {
         self.butter_x[0] = yule_out;
 
         // Apply Butterworth high-pass filter with denormal prevention
-        let butter_out = DENORMAL_PREVENTION
-            + self.butter_b[0] * self.butter_x[0]
-            + (1..3)
-                .map(|i| self.butter_b[i] * self.butter_x[i] - self.butter_a[i] * self.butter_y[i])
-                .sum::<f64>();
+        let mut butter_out = DENORMAL_PREVENTION + self.butter_b[0] * self.butter_x[0];
+        for i in 1..3 {
+            butter_out += self.butter_b[i] * self.butter_x[i] - self.butter_a[i] * self.butter_y[i];
+        }
         self.butter_y[0] = butter_out;
 
         butter_out
