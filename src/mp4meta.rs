@@ -16,6 +16,9 @@
 //!               └── ---- (freeform tags for ReplayGain)
 //! mdat (media data)
 //! ```
+//!
+//! Related: #118 (m4a write-path round-trip — ffmpeg decode errors and
+//! atom-rewriter pitfalls noted in the discussion thread).
 
 use crate::error::{Error, Result};
 use std::fs;

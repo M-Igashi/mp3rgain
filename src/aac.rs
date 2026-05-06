@@ -7,6 +7,10 @@
 //! The parser supports AAC-LC single channel elements (SCE), channel pair
 //! elements (CPE), and LFE elements. Unsupported element types (CCE, PCE)
 //! cause the individual sample to be skipped with a warning count increment.
+//!
+//! Initial AAC support was driven by the investigation in #118 (slow path
+//! and ffmpeg-decode errors on rewritten m4a), which seeded #120 / #121
+//! before being superseded by the present parser implementation.
 
 use crate::error::{Error, Result};
 use std::path::Path;
