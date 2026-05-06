@@ -1,9 +1,12 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::{analyze, steps_to_db, Channel};
+use rayon::prelude::*;
+use std::io::{self, Write};
 use std::path::PathBuf;
 
 use crate::cli::options::{Options, OutputFormat};
+use crate::commands::threading::effective_threads;
 use crate::commands::utils::{create_json_summary, print_dry_run_notice, update_counters};
 use crate::json_output::{JsonFileResult, JsonOutput};
 use crate::processors::apply::{process_apply, process_apply_channel};
@@ -53,32 +56,86 @@ pub fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
     let mut successful = 0;
     let mut failed = 0;
 
-    for file in files {
-        let filename = get_filename(file);
-        progress_set_message(&pb, filename);
+    let parallel = effective_threads(opts) > 1 && files.len() > 1;
 
-        let result = process_apply(file, steps, opts)?;
-        update_counters(&result, &mut successful, &mut failed);
+    if parallel {
+        let pb_ref = pb.as_ref();
+        let collected: Vec<(JsonFileResult, String, Option<String>)> = files
+            .par_iter()
+            .map(|file| -> Result<(JsonFileResult, String, Option<String>)> {
+                let (result, text) = process_apply(file, steps, opts)?;
+                let tsv_line = if opts.output_format == OutputFormat::Tsv {
+                    analyze(file).ok().map(|info| {
+                        format!(
+                            "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
+                            get_filename(file),
+                            steps,
+                            db_value,
+                            1.0,
+                            info.max_gain(),
+                            info.min_gain()
+                        )
+                    })
+                } else {
+                    None
+                };
+                if let Some(pb) = pb_ref {
+                    pb.set_message(get_filename(file).to_string());
+                    pb.inc(1);
+                }
+                Ok((result, text, tsv_line))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-        if opts.output_format == OutputFormat::Tsv {
-            if let Ok(info) = analyze(file) {
-                println!(
-                    "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
-                    filename,
-                    steps,
-                    db_value,
-                    1.0,
-                    info.max_gain(),
-                    info.min_gain()
-                );
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        for (_, text, tsv) in &collected {
+            if !text.is_empty() {
+                handle.write_all(text.as_bytes())?;
+            }
+            if let Some(line) = tsv {
+                writeln!(handle, "{}", line)?;
             }
         }
+        drop(handle);
 
-        if opts.output_format == OutputFormat::Json {
-            json_results.push(result);
+        for (result, _, _) in collected {
+            update_counters(&result, &mut successful, &mut failed);
+            if opts.output_format == OutputFormat::Json {
+                json_results.push(result);
+            }
         }
+    } else {
+        for file in files {
+            let filename = get_filename(file);
+            progress_set_message(&pb, filename);
 
-        progress_inc(&pb);
+            let (result, text) = process_apply(file, steps, opts)?;
+            if !text.is_empty() {
+                print!("{}", text);
+            }
+            update_counters(&result, &mut successful, &mut failed);
+
+            if opts.output_format == OutputFormat::Tsv {
+                if let Ok(info) = analyze(file) {
+                    println!(
+                        "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
+                        filename,
+                        steps,
+                        db_value,
+                        1.0,
+                        info.max_gain(),
+                        info.min_gain()
+                    );
+                }
+            }
+
+            if opts.output_format == OutputFormat::Json {
+                json_results.push(result);
+            }
+
+            progress_inc(&pb);
+        }
     }
 
     progress_finish(pb);
@@ -153,18 +210,54 @@ pub fn cmd_apply_channel(
     let mut successful = 0;
     let mut failed = 0;
 
-    for file in files {
-        let filename = get_filename(file);
-        progress_set_message(&pb, filename);
+    let parallel = effective_threads(opts) > 1 && files.len() > 1;
 
-        let result = process_apply_channel(file, channel, steps, opts)?;
-        update_counters(&result, &mut successful, &mut failed);
+    if parallel {
+        let pb_ref = pb.as_ref();
+        let collected: Vec<(JsonFileResult, String)> = files
+            .par_iter()
+            .map(|file| -> Result<(JsonFileResult, String)> {
+                let r = process_apply_channel(file, channel, steps, opts)?;
+                if let Some(pb) = pb_ref {
+                    pb.set_message(get_filename(file).to_string());
+                    pb.inc(1);
+                }
+                Ok(r)
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-        if opts.output_format == OutputFormat::Json {
-            json_results.push(result);
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        for (_, text) in &collected {
+            if !text.is_empty() {
+                handle.write_all(text.as_bytes())?;
+            }
         }
+        drop(handle);
 
-        progress_inc(&pb);
+        for (result, _) in collected {
+            update_counters(&result, &mut successful, &mut failed);
+            if opts.output_format == OutputFormat::Json {
+                json_results.push(result);
+            }
+        }
+    } else {
+        for file in files {
+            let filename = get_filename(file);
+            progress_set_message(&pb, filename);
+
+            let (result, text) = process_apply_channel(file, channel, steps, opts)?;
+            if !text.is_empty() {
+                print!("{}", text);
+            }
+            update_counters(&result, &mut successful, &mut failed);
+
+            if opts.output_format == OutputFormat::Json {
+                json_results.push(result);
+            }
+
+            progress_inc(&pb);
+        }
     }
 
     progress_finish(pb);

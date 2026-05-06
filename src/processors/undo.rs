@@ -1,6 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::{aac, id3v2, mp4meta, undo_gain};
+use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat};
@@ -9,7 +10,13 @@ use crate::util::get_filename;
 
 use super::utils::{restore_timestamp, save_original_mtime};
 
-pub fn process_undo(file: &Path, opts: &Options) -> Result<JsonFileResult> {
+pub fn process_undo(file: &Path, opts: &Options) -> Result<(JsonFileResult, String)> {
+    let mut out = String::new();
+    let result = process_undo_into(file, opts, &mut out)?;
+    Ok((result, out))
+}
+
+fn process_undo_into(file: &Path, opts: &Options, out: &mut String) -> Result<JsonFileResult> {
     let filename = get_filename(file);
     let dry_run_prefix = opts.dry_run_prefix();
 
@@ -17,7 +24,7 @@ pub fn process_undo(file: &Path, opts: &Options) -> Result<JsonFileResult> {
 
     if opts.dry_run {
         if opts.output_format == OutputFormat::Text && !opts.quiet {
-            println!("  {} [DRY RUN] {} (would undo)", "~".cyan(), filename);
+            writeln!(out, "  {} [DRY RUN] {} (would undo)", "~".cyan(), filename)?;
         }
         return Ok(JsonFileResult {
             file: file.display().to_string(),
@@ -40,12 +47,13 @@ pub fn process_undo(file: &Path, opts: &Options) -> Result<JsonFileResult> {
         Ok(frames) => {
             if frames == 0 {
                 if opts.output_format == OutputFormat::Text && !opts.quiet {
-                    println!(
+                    writeln!(
+                        out,
                         "  {} {}{} (no changes to undo)",
                         ".".cyan(),
                         dry_run_prefix,
                         filename
-                    );
+                    )?;
                 }
 
                 Ok(JsonFileResult {
@@ -61,12 +69,13 @@ pub fn process_undo(file: &Path, opts: &Options) -> Result<JsonFileResult> {
                 }
 
                 if opts.output_format == OutputFormat::Text && !opts.quiet {
-                    println!(
+                    writeln!(
+                        out,
                         "  {} {} ({} frames restored)",
                         "v".green(),
                         filename,
                         frames
-                    );
+                    )?;
                 }
 
                 Ok(JsonFileResult {

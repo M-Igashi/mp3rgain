@@ -5,9 +5,13 @@ use mp3rgain::{
     TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN,
     TAG_REPLAYGAIN_TRACK_PEAK,
 };
+use rayon::prelude::*;
+use std::fmt::Write as _;
+use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
+use crate::commands::threading::effective_threads;
 use crate::commands::utils::{create_json_summary, print_dry_run_notice};
 use crate::json_output::{FileStatus, JsonFileResult, JsonOutput};
 use crate::processors::utils::{restore_timestamp, save_original_mtime};
@@ -37,41 +41,43 @@ impl CheckTagInfo<'_> {
             || self.album_peak.is_some()
     }
 
-    fn display(
+    fn render(
         &self,
         filename: &str,
         file_path: &Path,
         format: OutputFormat,
-        json_results: &mut Vec<JsonFileResult>,
-    ) {
+        out: &mut String,
+    ) -> Option<JsonFileResult> {
         match format {
             OutputFormat::Text => {
-                println!("{}", filename.cyan().bold());
+                writeln!(out, "{}", filename.cyan().bold()).ok();
                 if let Some(v) = self.undo {
-                    println!("  {:<25}{}", format!("{}:", self.undo_label), v);
+                    writeln!(out, "  {:<25}{}", format!("{}:", self.undo_label), v).ok();
                 }
                 if let Some(v) = self.minmax {
-                    println!("  {:<25}{}", format!("{}:", self.minmax_label), v);
+                    writeln!(out, "  {:<25}{}", format!("{}:", self.minmax_label), v).ok();
                 }
                 if let Some(v) = self.track_gain {
-                    println!("  REPLAYGAIN_TRACK_GAIN: {}", v);
+                    writeln!(out, "  REPLAYGAIN_TRACK_GAIN: {}", v).ok();
                 }
                 if let Some(v) = self.track_peak {
-                    println!("  REPLAYGAIN_TRACK_PEAK: {}", v);
+                    writeln!(out, "  REPLAYGAIN_TRACK_PEAK: {}", v).ok();
                 }
                 if let Some(v) = self.album_gain {
-                    println!("  REPLAYGAIN_ALBUM_GAIN: {}", v);
+                    writeln!(out, "  REPLAYGAIN_ALBUM_GAIN: {}", v).ok();
                 }
                 if let Some(v) = self.album_peak {
-                    println!("  REPLAYGAIN_ALBUM_PEAK: {}", v);
+                    writeln!(out, "  REPLAYGAIN_ALBUM_PEAK: {}", v).ok();
                 }
                 if !self.has_any() {
-                    println!("  ({})", self.no_tag_msg);
+                    writeln!(out, "  ({})", self.no_tag_msg).ok();
                 }
-                println!();
+                writeln!(out).ok();
+                None
             }
             OutputFormat::Tsv => {
-                println!(
+                writeln!(
+                    out,
                     "{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     filename,
                     self.undo.unwrap_or("-"),
@@ -80,19 +86,19 @@ impl CheckTagInfo<'_> {
                     self.track_peak.unwrap_or("-"),
                     self.album_gain.unwrap_or("-"),
                     self.album_peak.unwrap_or("-")
-                );
+                )
+                .ok();
+                None
             }
-            OutputFormat::Json => {
-                json_results.push(JsonFileResult {
-                    file: file_path.display().to_string(),
-                    status: Some(if self.has_any() {
-                        FileStatus::Success
-                    } else {
-                        FileStatus::NoTag
-                    }),
-                    ..Default::default()
-                });
-            }
+            OutputFormat::Json => Some(JsonFileResult {
+                file: file_path.display().to_string(),
+                status: Some(if self.has_any() {
+                    FileStatus::Success
+                } else {
+                    FileStatus::NoTag
+                }),
+                ..Default::default()
+            }),
         }
     }
 }
@@ -116,72 +122,61 @@ pub fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
     }
 
     let pb = create_progress_bar(files.len(), opts);
-    let mut json_results: Vec<JsonFileResult> = Vec::new();
+    let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
     let mut successful = 0;
     let mut failed = 0;
 
-    for file in files {
-        let filename = get_filename(file);
-        progress_set_message(&pb, filename);
+    let parallel = effective_threads(opts) > 1 && files.len() > 1;
 
-        if opts.dry_run {
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
-                println!(
-                    "  {} [DRY RUN] {} (would delete tags)",
-                    "~".cyan(),
-                    filename
-                );
-            }
-            json_results.push(JsonFileResult {
-                file: file.display().to_string(),
-                status: Some(FileStatus::DryRun),
-                dry_run: Some(true),
-                ..Default::default()
-            });
-        } else {
-            let original_mtime = save_original_mtime(file, opts);
-
-            let delete_result = if mp4meta::is_aac_file(file) {
-                // AAC: delete both ReplayGain and undo freeform tags
-                mp4meta::delete_replaygain_tags(file).and_then(|()| mp4meta::delete_undo_tags(file))
-            } else if opts.use_id3v2 {
-                id3v2::delete_id3v2_replaygain(file)
-            } else {
-                delete_ape_tag(file)
-            };
-
-            match delete_result {
-                Ok(()) => {
-                    if let Some(mtime) = original_mtime {
-                        restore_timestamp(file, mtime);
-                    }
-
-                    if opts.output_format == OutputFormat::Text && !opts.quiet {
-                        println!("  {} {} (tags deleted)", "v".green(), filename);
-                    }
-                    successful += 1;
-                    json_results.push(JsonFileResult {
-                        file: file.display().to_string(),
-                        status: Some(FileStatus::Success),
-                        ..Default::default()
-                    });
+    if parallel {
+        let pb_ref = pb.as_ref();
+        let collected: Vec<(JsonFileResult, String)> = files
+            .par_iter()
+            .map(|file| -> Result<(JsonFileResult, String)> {
+                let r = process_delete_tags(file, opts)?;
+                if let Some(pb) = pb_ref {
+                    pb.set_message(get_filename(file).to_string());
+                    pb.inc(1);
                 }
-                Err(e) => {
-                    if opts.output_format == OutputFormat::Text && !opts.quiet {
-                        eprintln!("  {} {} - {}", "x".red(), filename, e);
-                    }
-                    failed += 1;
-                    json_results.push(JsonFileResult {
-                        file: file.display().to_string(),
-                        status: Some(FileStatus::Error),
-                        error: Some(e.to_string()),
-                        ..Default::default()
-                    });
-                }
+                Ok(r)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        for (_, text) in &collected {
+            if !text.is_empty() {
+                handle.write_all(text.as_bytes())?;
             }
         }
+        drop(handle);
 
-        progress_inc(&pb);
+        for (result, _) in collected {
+            match result.status {
+                Some(FileStatus::Success) => successful += 1,
+                Some(FileStatus::Error) => failed += 1,
+                _ => {}
+            }
+            json_results.push(result);
+        }
+    } else {
+        for file in files {
+            let filename = get_filename(file);
+            progress_set_message(&pb, filename);
+
+            let (result, text) = process_delete_tags(file, opts)?;
+            if !text.is_empty() {
+                print!("{}", text);
+            }
+            match result.status {
+                Some(FileStatus::Success) => successful += 1,
+                Some(FileStatus::Error) => failed += 1,
+                _ => {}
+            }
+            json_results.push(result);
+
+            progress_inc(&pb);
+        }
     }
 
     progress_finish(pb);
@@ -205,6 +200,76 @@ pub fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
     Ok(())
 }
 
+fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, String)> {
+    let filename = get_filename(file);
+    let mut out = String::new();
+
+    if opts.dry_run {
+        if opts.output_format == OutputFormat::Text && !opts.quiet {
+            writeln!(
+                out,
+                "  {} [DRY RUN] {} (would delete tags)",
+                "~".cyan(),
+                filename
+            )?;
+        }
+        return Ok((
+            JsonFileResult {
+                file: file.display().to_string(),
+                status: Some(FileStatus::DryRun),
+                dry_run: Some(true),
+                ..Default::default()
+            },
+            out,
+        ));
+    }
+
+    let original_mtime = save_original_mtime(file, opts);
+
+    let delete_result = if mp4meta::is_aac_file(file) {
+        // AAC: delete both ReplayGain and undo freeform tags
+        mp4meta::delete_replaygain_tags(file).and_then(|()| mp4meta::delete_undo_tags(file))
+    } else if opts.use_id3v2 {
+        id3v2::delete_id3v2_replaygain(file)
+    } else {
+        delete_ape_tag(file)
+    };
+
+    match delete_result {
+        Ok(()) => {
+            if let Some(mtime) = original_mtime {
+                restore_timestamp(file, mtime);
+            }
+
+            if opts.output_format == OutputFormat::Text && !opts.quiet {
+                writeln!(out, "  {} {} (tags deleted)", "v".green(), filename)?;
+            }
+            Ok((
+                JsonFileResult {
+                    file: file.display().to_string(),
+                    status: Some(FileStatus::Success),
+                    ..Default::default()
+                },
+                out,
+            ))
+        }
+        Err(e) => {
+            if opts.output_format == OutputFormat::Text && !opts.quiet {
+                eprintln!("  {} {} - {}", "x".red(), filename, e);
+            }
+            Ok((
+                JsonFileResult {
+                    file: file.display().to_string(),
+                    status: Some(FileStatus::Error),
+                    error: Some(e.to_string()),
+                    ..Default::default()
+                },
+                out,
+            ))
+        }
+    }
+}
+
 pub fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         println!(
@@ -218,135 +283,51 @@ pub fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
     let pb = create_progress_bar(files.len(), opts);
     let mut json_results: Vec<JsonFileResult> = Vec::new();
 
-    for file in files {
-        let filename = get_filename(file);
-        progress_set_message(&pb, filename);
+    let parallel = effective_threads(opts) > 1 && files.len() > 1;
 
-        let is_aac = mp4meta::is_aac_file(file);
+    if parallel {
+        let pb_ref = pb.as_ref();
+        let collected: Vec<(Option<JsonFileResult>, String)> = files
+            .par_iter()
+            .map(|file| -> Result<(Option<JsonFileResult>, String)> {
+                let r = process_check_tags(file, opts);
+                if let Some(pb) = pb_ref {
+                    pb.set_message(get_filename(file).to_string());
+                    pb.inc(1);
+                }
+                Ok(r)
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-        if is_aac {
-            // AAC: read iTunes freeform tags
-            let undo_tags = mp4meta::read_undo_tags(file).unwrap_or_default();
-            let rg_tags = mp4meta::read_replaygain_tags(file).unwrap_or_default();
-
-            let undo = undo_tags.undo();
-            let minmax = undo_tags.minmax();
-            let track_gain = rg_tags.track_gain();
-            let track_peak = rg_tags.track_peak();
-            let album_gain = rg_tags.album_gain();
-            let album_peak = rg_tags.album_peak();
-
-            CheckTagInfo {
-                undo,
-                minmax,
-                track_gain,
-                track_peak,
-                album_gain,
-                album_peak,
-                undo_label: "MP3RGAIN_UNDO",
-                minmax_label: "MP3RGAIN_MINMAX",
-                no_tag_msg: "no tags found",
-            }
-            .display(filename, file, opts.output_format, &mut json_results);
-        } else if opts.use_id3v2 {
-            // MP3 with -s i: read ID3v2 TXXX frames
-            match id3v2::read_id3v2_replaygain(file) {
-                Ok(rg) => {
-                    let undo = rg.undo.as_deref();
-                    let minmax = rg.minmax.as_deref();
-                    let track_gain = rg.track_gain.as_deref();
-                    let track_peak = rg.track_peak.as_deref();
-                    let album_gain = rg.album_gain.as_deref();
-                    let album_peak = rg.album_peak.as_deref();
-
-                    CheckTagInfo {
-                        undo,
-                        minmax,
-                        track_gain,
-                        track_peak,
-                        album_gain,
-                        album_peak,
-                        undo_label: "MP3GAIN_UNDO",
-                        minmax_label: "MP3GAIN_MINMAX",
-                        no_tag_msg: "no ID3v2 ReplayGain tags found",
-                    }
-                    .display(
-                        filename,
-                        file,
-                        opts.output_format,
-                        &mut json_results,
-                    );
-                }
-                Err(e) => {
-                    if opts.output_format != OutputFormat::Json {
-                        eprintln!("{} - {}", filename.red(), e);
-                    } else {
-                        json_results.push(JsonFileResult {
-                            file: file.display().to_string(),
-                            status: Some(FileStatus::Error),
-                            error: Some(e.to_string()),
-                            ..Default::default()
-                        });
-                    }
-                }
-            }
-        } else {
-            // MP3: read APEv2 tags
-            match read_ape_tag_from_file(file) {
-                Ok(Some(tag)) => {
-                    CheckTagInfo {
-                        undo: tag.get(TAG_MP3GAIN_UNDO),
-                        minmax: tag.get(TAG_MP3GAIN_MINMAX),
-                        track_gain: tag.get(TAG_REPLAYGAIN_TRACK_GAIN),
-                        track_peak: tag.get(TAG_REPLAYGAIN_TRACK_PEAK),
-                        album_gain: tag.get(TAG_REPLAYGAIN_ALBUM_GAIN),
-                        album_peak: tag.get(TAG_REPLAYGAIN_ALBUM_PEAK),
-                        undo_label: "MP3GAIN_UNDO",
-                        minmax_label: "MP3GAIN_MINMAX",
-                        no_tag_msg: "no mp3gain tags found",
-                    }
-                    .display(
-                        filename,
-                        file,
-                        opts.output_format,
-                        &mut json_results,
-                    );
-                }
-                Ok(None) => {
-                    CheckTagInfo {
-                        undo: None,
-                        minmax: None,
-                        track_gain: None,
-                        track_peak: None,
-                        album_gain: None,
-                        album_peak: None,
-                        undo_label: "MP3GAIN_UNDO",
-                        minmax_label: "MP3GAIN_MINMAX",
-                        no_tag_msg: "no APE tag found",
-                    }
-                    .display(
-                        filename,
-                        file,
-                        opts.output_format,
-                        &mut json_results,
-                    );
-                }
-                Err(e) => {
-                    if opts.output_format != OutputFormat::Json {
-                        eprintln!("{} - {}", filename.red(), e);
-                    } else {
-                        json_results.push(JsonFileResult {
-                            file: file.display().to_string(),
-                            status: Some(FileStatus::Error),
-                            error: Some(e.to_string()),
-                            ..Default::default()
-                        });
-                    }
-                }
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        for (_, text) in &collected {
+            if !text.is_empty() {
+                handle.write_all(text.as_bytes())?;
             }
         }
+        drop(handle);
 
-        progress_inc(&pb);
+        for (result, _) in collected {
+            if let Some(r) = result {
+                json_results.push(r);
+            }
+        }
+    } else {
+        for file in files {
+            let filename = get_filename(file);
+            progress_set_message(&pb, filename);
+
+            let (result, text) = process_check_tags(file, opts);
+            if !text.is_empty() {
+                print!("{}", text);
+            }
+            if let Some(r) = result {
+                json_results.push(r);
+            }
+
+            progress_inc(&pb);
+        }
     }
 
     progress_finish(pb);
@@ -361,4 +342,113 @@ pub fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, String) {
+    let filename = get_filename(file);
+    let mut out = String::new();
+
+    let is_aac = mp4meta::is_aac_file(file);
+
+    if is_aac {
+        let undo_tags = mp4meta::read_undo_tags(file).unwrap_or_default();
+        let rg_tags = mp4meta::read_replaygain_tags(file).unwrap_or_default();
+
+        let info = CheckTagInfo {
+            undo: undo_tags.undo(),
+            minmax: undo_tags.minmax(),
+            track_gain: rg_tags.track_gain(),
+            track_peak: rg_tags.track_peak(),
+            album_gain: rg_tags.album_gain(),
+            album_peak: rg_tags.album_peak(),
+            undo_label: "MP3RGAIN_UNDO",
+            minmax_label: "MP3RGAIN_MINMAX",
+            no_tag_msg: "no tags found",
+        };
+        let json = info.render(filename, file, opts.output_format, &mut out);
+        (json, out)
+    } else if opts.use_id3v2 {
+        match id3v2::read_id3v2_replaygain(file) {
+            Ok(rg) => {
+                let info = CheckTagInfo {
+                    undo: rg.undo.as_deref(),
+                    minmax: rg.minmax.as_deref(),
+                    track_gain: rg.track_gain.as_deref(),
+                    track_peak: rg.track_peak.as_deref(),
+                    album_gain: rg.album_gain.as_deref(),
+                    album_peak: rg.album_peak.as_deref(),
+                    undo_label: "MP3GAIN_UNDO",
+                    minmax_label: "MP3GAIN_MINMAX",
+                    no_tag_msg: "no ID3v2 ReplayGain tags found",
+                };
+                let json = info.render(filename, file, opts.output_format, &mut out);
+                (json, out)
+            }
+            Err(e) => {
+                if opts.output_format != OutputFormat::Json {
+                    eprintln!("{} - {}", filename.red(), e);
+                    (None, out)
+                } else {
+                    (
+                        Some(JsonFileResult {
+                            file: file.display().to_string(),
+                            status: Some(FileStatus::Error),
+                            error: Some(e.to_string()),
+                            ..Default::default()
+                        }),
+                        out,
+                    )
+                }
+            }
+        }
+    } else {
+        match read_ape_tag_from_file(file) {
+            Ok(Some(tag)) => {
+                let info = CheckTagInfo {
+                    undo: tag.get(TAG_MP3GAIN_UNDO),
+                    minmax: tag.get(TAG_MP3GAIN_MINMAX),
+                    track_gain: tag.get(TAG_REPLAYGAIN_TRACK_GAIN),
+                    track_peak: tag.get(TAG_REPLAYGAIN_TRACK_PEAK),
+                    album_gain: tag.get(TAG_REPLAYGAIN_ALBUM_GAIN),
+                    album_peak: tag.get(TAG_REPLAYGAIN_ALBUM_PEAK),
+                    undo_label: "MP3GAIN_UNDO",
+                    minmax_label: "MP3GAIN_MINMAX",
+                    no_tag_msg: "no mp3gain tags found",
+                };
+                let json = info.render(filename, file, opts.output_format, &mut out);
+                (json, out)
+            }
+            Ok(None) => {
+                let info = CheckTagInfo {
+                    undo: None,
+                    minmax: None,
+                    track_gain: None,
+                    track_peak: None,
+                    album_gain: None,
+                    album_peak: None,
+                    undo_label: "MP3GAIN_UNDO",
+                    minmax_label: "MP3GAIN_MINMAX",
+                    no_tag_msg: "no APE tag found",
+                };
+                let json = info.render(filename, file, opts.output_format, &mut out);
+                (json, out)
+            }
+            Err(e) => {
+                if opts.output_format != OutputFormat::Json {
+                    eprintln!("{} - {}", filename.red(), e);
+                    (None, out)
+                } else {
+                    (
+                        Some(JsonFileResult {
+                            file: file.display().to_string(),
+                            status: Some(FileStatus::Error),
+                            error: Some(e.to_string()),
+                            ..Default::default()
+                        }),
+                        out,
+                    )
+                }
+            }
+        }
+    }
 }

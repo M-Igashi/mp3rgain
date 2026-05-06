@@ -1,6 +1,7 @@
 use anyhow::Result;
 use colored::*;
-use mp3rgain::{aac, analyze, mp4meta, steps_to_db, Channel, GainOptions};
+use mp3rgain::{aac, analyze, mp4meta, steps_to_db, Channel, GainOptions, Mp3Analysis};
+use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat, StoredTagMode};
@@ -12,7 +13,18 @@ use super::utils::{
     write_id3v2_undo_after_apply,
 };
 
-pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFileResult> {
+pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<(JsonFileResult, String)> {
+    let mut out = String::new();
+    let result = process_apply_into(file, steps, opts, &mut out)?;
+    Ok((result, out))
+}
+
+fn process_apply_into(
+    file: &Path,
+    steps: i32,
+    opts: &Options,
+    out: &mut String,
+) -> Result<JsonFileResult> {
     let filename = get_filename(file);
     let dry_run_prefix = opts.dry_run_prefix();
 
@@ -28,13 +40,21 @@ pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFile
     let mut actual_steps = steps;
     let mut warning_msg: Option<String> = None;
 
+    // For MP3, hold onto the pre-apply analysis so the ID3v2 undo write below
+    // can reuse it instead of triggering a second `analyze(file)` on the same
+    // bytes (issue #135).
+    let mut mp3_analysis: Option<Mp3Analysis> = None;
+
     if steps > 0 && !opts.wrap_gain {
         let headroom = if is_aac {
             aac::analyze_aac_gains(file)
                 .ok()
                 .map(|a| (255u8.saturating_sub(a.max_gain())) as i32)
         } else {
-            analyze(file).ok().map(|info| info.headroom_steps())
+            let info = analyze(file).ok();
+            let headroom = info.as_ref().map(|i| i.headroom_steps());
+            mp3_analysis = info;
+            headroom
         };
 
         if let Some(headroom_steps) = headroom {
@@ -82,12 +102,13 @@ pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFile
     // Dry run: don't actually modify
     if opts.dry_run {
         if opts.output_format == OutputFormat::Text && !opts.quiet {
-            println!(
+            writeln!(
+                out,
                 "  {} [DRY RUN] {} (would apply {} steps)",
                 "~".cyan(),
                 filename,
                 actual_steps
-            );
+            )?;
         }
         return Ok(JsonFileResult {
             file: file.display().to_string(),
@@ -114,6 +135,10 @@ pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFile
     } else if opts.use_id3v2 {
         // MP3 with -s i: apply gain without APE undo, write undo to ID3v2
         let skip_undo = opts.stored_tag_mode == StoredTagMode::Skip;
+        // Materialize analysis lazily so unwrap-mode skip path stays free.
+        if !skip_undo && mp3_analysis.is_none() {
+            mp3_analysis = analyze(file).ok();
+        }
         let result = apply_with_temp_file(
             file,
             |f| {
@@ -125,7 +150,13 @@ pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFile
             opts,
         );
         if !skip_undo && result.is_ok() {
-            write_id3v2_undo_after_apply(file, actual_steps, actual_steps, opts.wrap_gain)?;
+            write_id3v2_undo_after_apply(
+                file,
+                actual_steps,
+                actual_steps,
+                opts.wrap_gain,
+                mp3_analysis.as_ref(),
+            )?;
         }
         result
     } else {
@@ -151,14 +182,15 @@ pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFile
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 if is_aac {
-                    println!(
+                    writeln!(
+                        out,
                         "  {} {} ({} gains modified)",
                         "v".green(),
                         filename,
                         modified
-                    );
+                    )?;
                 } else {
-                    println!("  {} {} ({} frames)", "v".green(), filename, modified);
+                    writeln!(out, "  {} {} ({} frames)", "v".green(), filename, modified)?;
                 }
             }
 
@@ -192,6 +224,18 @@ pub fn process_apply_channel(
     channel: Channel,
     steps: i32,
     opts: &Options,
+) -> Result<(JsonFileResult, String)> {
+    let mut out = String::new();
+    let result = process_apply_channel_into(file, channel, steps, opts, &mut out)?;
+    Ok((result, out))
+}
+
+fn process_apply_channel_into(
+    file: &Path,
+    channel: Channel,
+    steps: i32,
+    opts: &Options,
+    out: &mut String,
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
     let channel_name = match channel {
@@ -218,13 +262,14 @@ pub fn process_apply_channel(
 
     if opts.dry_run {
         if opts.output_format == OutputFormat::Text && !opts.quiet {
-            println!(
+            writeln!(
+                out,
                 "  {} [DRY RUN] {} (would apply {} steps to {} channel)",
                 "~".cyan(),
                 filename,
                 steps,
                 channel_name
-            );
+            )?;
         }
         return Ok(JsonFileResult {
             file: file.display().to_string(),
@@ -237,7 +282,10 @@ pub fn process_apply_channel(
     }
 
     let apply_result = if opts.use_id3v2 {
-        // Apply gain without APE undo, then write undo to ID3v2
+        // Apply gain without APE undo, then write undo to ID3v2.
+        // Capture the pre-apply analysis so the undo write can reuse min/max
+        // without a second file scan (issue #135).
+        let pre_analysis = analyze(file).ok();
         let result = GainOptions::new(steps)
             .channel(channel)
             .undo(false)
@@ -248,7 +296,13 @@ pub fn process_apply_channel(
                 Channel::Right => (0, steps),
                 _ => unreachable!(),
             };
-            write_id3v2_undo_after_apply(file, delta_left, delta_right, false)?;
+            write_id3v2_undo_after_apply(
+                file,
+                delta_left,
+                delta_right,
+                false,
+                pre_analysis.as_ref(),
+            )?;
         }
         result
     } else {
@@ -266,13 +320,14 @@ pub fn process_apply_channel(
             }
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
-                println!(
+                writeln!(
+                    out,
                     "  {} {} ({} frames, {} channel)",
                     "v".green(),
                     filename,
                     frames,
                     channel_name
-                );
+                )?;
             }
 
             Ok(JsonFileResult {

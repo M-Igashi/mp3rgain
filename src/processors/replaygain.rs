@@ -224,6 +224,13 @@ fn apply_replaygain_with_album_into(
 
     // MP3: Apply gain to audio frames
     let use_id3v2_undo = opts.use_id3v2;
+    // Pre-apply analysis is reused for the ID3v2 undo write below so we don't
+    // re-read the file just to fetch min/max (issue #135).
+    let pre_analysis = if use_id3v2_undo {
+        mp3rgain::analyze(file).ok()
+    } else {
+        None
+    };
     let apply_result = apply_with_temp_file(
         file,
         |f| {
@@ -239,7 +246,13 @@ fn apply_replaygain_with_album_into(
         Ok(frames) => {
             // Write ID3v2 tags if -s i mode
             if opts.use_id3v2 {
-                write_id3v2_undo_after_apply(file, actual_steps, actual_steps, opts.wrap_gain)?;
+                write_id3v2_undo_after_apply(
+                    file,
+                    actual_steps,
+                    actual_steps,
+                    opts.wrap_gain,
+                    pre_analysis.as_ref(),
+                )?;
 
                 // Write ReplayGain metadata tags
                 let rg = mp3rgain::Id3v2ReplayGain {
