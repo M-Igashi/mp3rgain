@@ -1,8 +1,10 @@
 name: PPA Upload
 
 # Required secrets:
-#   GPG_PRIVATE_KEY  - base64-encoded GPG private key (gpg --export-secret-keys KEY_ID | base64)
-#   GPG_PASSPHRASE   - passphrase for the GPG key
+#   GPG_PRIVATE_KEY            - base64-encoded GPG private key (gpg --export-secret-keys KEY_ID | base64)
+#   GPG_PASSPHRASE             - passphrase for the GPG key
+#   LAUNCHPAD_SSH_PRIVATE_KEY  - OpenSSH-format private key (ed25519 or rsa) whose
+#                                public half is registered at https://launchpad.net/~m-igashi/+editsshkeys
 
 on:
   workflow_run:
@@ -115,25 +117,37 @@ jobs:
           cd ../..
           tar -cJf "build-ppa/${PKG}_${VERSION}.orig.tar.xz" -C build-ppa "${PKG}-${VERSION}"
 
-      - name: Configure dput for HTTPS upload (IPv4 pinned)
+      - name: Configure SSH and dput for SFTP upload
+        env:
+          LAUNCHPAD_SSH_PRIVATE_KEY: ${{ secrets.LAUNCHPAD_SSH_PRIVATE_KEY }}
         run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          KEY_TMP=$(mktemp)
+          printf '%s\n' "$LAUNCHPAD_SSH_PRIVATE_KEY" > "$KEY_TMP"
+          chmod 600 "$KEY_TMP"
+          KEY_TYPE=$(ssh-keygen -y -f "$KEY_TMP" 2>/dev/null | awk '{print $1}')
+          case "$KEY_TYPE" in
+            ssh-ed25519) DEST=~/.ssh/id_ed25519 ;;
+            ssh-rsa)     DEST=~/.ssh/id_rsa ;;
+            ecdsa-*)     DEST=~/.ssh/id_ecdsa ;;
+            *) echo "Unsupported or invalid SSH key type: $KEY_TYPE" >&2; exit 1 ;;
+          esac
+          mv "$KEY_TMP" "$DEST"
+          # Pinned RSA host key — fingerprint SHA256:MGq+4hxD7RduVTcfwlwwboZnsgJC6SL/NltM8ye+gNg
+          # matches https://documentation.ubuntu.com/launchpad/user/reference/ssh-fingerprints/
+          cat > ~/.ssh/known_hosts <<'EOF'
+          ppa.launchpad.net ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEA0aKz5UTUndYgIGG7dQBV+HaeuEZJ2xPHo2DS2iSKvUL4xNMSAY4UguNW+pX56nAQmZKIZZ8MaEvSj6zMEDiq6HFfn5JcTlM80UwlnyKe8B8p7Nk06PPQLrnmQt5fh0HmEcZx+JU9TZsfCHPnX7MNz4ELfZE6cFsclClrKim3BHUIGq//t93DllB+h4O9LHjEUsQ1Sr63irDLSutkLJD6RXchjROXkNirlcNVHH/jwLWR5RcYilNX7S5bIkK8NlWPjsn/8Ua5O7I9/YoE97PpO6i73DTGLh5H9JN/SITwCKBkgSDWUt61uPK3Y11Gty7o2lWsBjhBUm2Y38CBsoGmBw==
+          EOF
+          chmod 600 ~/.ssh/known_hosts
           cat > ~/.dput.cf <<'EOF'
           [ppa]
           fqdn = ppa.launchpad.net
-          method = https
+          method = sftp
           incoming = ~%(ppa)s/ubuntu/
-          login = anonymous
+          login = m-igashi
           allow_unsigned_uploads = 0
           EOF
-          IPV4=$(getent ahostsv4 ppa.launchpad.net | awk 'NR==1 {print $1}')
-          echo "Resolved ppa.launchpad.net IPv4: $IPV4"
-          echo "$IPV4 ppa.launchpad.net" | sudo tee -a /etc/hosts
-          echo "--- /etc/hosts tail ---"
-          tail -3 /etc/hosts
-          echo "--- Connectivity probe ---"
-          curl -sS -o /dev/null -w "HTTP %{http_code} in %{time_total}s\n" \
-            --max-time 30 https://ppa.launchpad.net/ || \
-            echo "curl probe failed"
 
       - name: Build and upload source packages
         env:
@@ -263,25 +277,37 @@ jobs:
           XZ_OPT='-9e' tar -cJf "build-ppa/${PKG}_${VERSION}.orig.tar.xz" -C build-ppa "${PKG}-${VERSION}"
           ls -lh "build-ppa/${PKG}_${VERSION}.orig.tar.xz"
 
-      - name: Configure dput for HTTPS upload (IPv4 pinned)
+      - name: Configure SSH and dput for SFTP upload
+        env:
+          LAUNCHPAD_SSH_PRIVATE_KEY: ${{ secrets.LAUNCHPAD_SSH_PRIVATE_KEY }}
         run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          KEY_TMP=$(mktemp)
+          printf '%s\n' "$LAUNCHPAD_SSH_PRIVATE_KEY" > "$KEY_TMP"
+          chmod 600 "$KEY_TMP"
+          KEY_TYPE=$(ssh-keygen -y -f "$KEY_TMP" 2>/dev/null | awk '{print $1}')
+          case "$KEY_TYPE" in
+            ssh-ed25519) DEST=~/.ssh/id_ed25519 ;;
+            ssh-rsa)     DEST=~/.ssh/id_rsa ;;
+            ecdsa-*)     DEST=~/.ssh/id_ecdsa ;;
+            *) echo "Unsupported or invalid SSH key type: $KEY_TYPE" >&2; exit 1 ;;
+          esac
+          mv "$KEY_TMP" "$DEST"
+          # Pinned RSA host key — fingerprint SHA256:MGq+4hxD7RduVTcfwlwwboZnsgJC6SL/NltM8ye+gNg
+          # matches https://documentation.ubuntu.com/launchpad/user/reference/ssh-fingerprints/
+          cat > ~/.ssh/known_hosts <<'EOF'
+          ppa.launchpad.net ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEA0aKz5UTUndYgIGG7dQBV+HaeuEZJ2xPHo2DS2iSKvUL4xNMSAY4UguNW+pX56nAQmZKIZZ8MaEvSj6zMEDiq6HFfn5JcTlM80UwlnyKe8B8p7Nk06PPQLrnmQt5fh0HmEcZx+JU9TZsfCHPnX7MNz4ELfZE6cFsclClrKim3BHUIGq//t93DllB+h4O9LHjEUsQ1Sr63irDLSutkLJD6RXchjROXkNirlcNVHH/jwLWR5RcYilNX7S5bIkK8NlWPjsn/8Ua5O7I9/YoE97PpO6i73DTGLh5H9JN/SITwCKBkgSDWUt61uPK3Y11Gty7o2lWsBjhBUm2Y38CBsoGmBw==
+          EOF
+          chmod 600 ~/.ssh/known_hosts
           cat > ~/.dput.cf <<'EOF'
           [ppa]
           fqdn = ppa.launchpad.net
-          method = https
+          method = sftp
           incoming = ~%(ppa)s/ubuntu/
-          login = anonymous
+          login = m-igashi
           allow_unsigned_uploads = 0
           EOF
-          IPV4=$(getent ahostsv4 ppa.launchpad.net | awk 'NR==1 {print $1}')
-          echo "Resolved ppa.launchpad.net IPv4: $IPV4"
-          echo "$IPV4 ppa.launchpad.net" | sudo tee -a /etc/hosts
-          echo "--- /etc/hosts tail ---"
-          tail -3 /etc/hosts
-          echo "--- Connectivity probe ---"
-          curl -sS -o /dev/null -w "HTTP %{http_code} in %{time_total}s\n" \
-            --max-time 30 https://ppa.launchpad.net/ || \
-            echo "curl probe failed"
 
       - name: Build and upload source packages
         env:
