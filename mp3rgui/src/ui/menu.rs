@@ -6,8 +6,6 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             file_menu(app, ui, ctx);
             analysis_menu(app, ui);
             modify_menu(app, ui);
-            options_menu(ui);
-            help_menu(ui);
         });
     });
 }
@@ -73,34 +71,6 @@ fn modify_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                 app.apply_album_gain();
                 ui.close_menu();
             }
-            ui.separator();
-            if ui.button("Apply Constant Gain...").clicked() {
-                // TODO: Implement constant gain dialog
-                ui.close_menu();
-            }
-            ui.separator();
-            if ui.button("Undo Gain Changes").clicked() {
-                // TODO: Implement undo
-                ui.close_menu();
-            }
         });
-    });
-}
-
-fn options_menu(ui: &mut egui::Ui) {
-    ui.menu_button("Options", |ui| {
-        if ui.button("Settings...").clicked() {
-            // TODO: Implement settings dialog
-            ui.close_menu();
-        }
-    });
-}
-
-fn help_menu(ui: &mut egui::Ui) {
-    ui.menu_button("Help", |ui| {
-        if ui.button("About mp3rgain").clicked() {
-            // TODO: Implement about dialog
-            ui.close_menu();
-        }
     });
 }

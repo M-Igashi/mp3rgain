@@ -8,7 +8,7 @@ use mp3rgain::{
 use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::commands::utils::create_json_summary;
+use crate::commands::utils::{create_json_summary, print_dry_run_notice};
 use crate::json_output::{JsonFileResult, JsonOutput};
 use crate::processors::utils::restore_timestamp;
 use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
@@ -199,9 +199,8 @@ pub fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
             )),
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
-    } else if opts.dry_run && !opts.quiet {
-        println!();
-        println!("{}", "No files were modified.".yellow());
+    } else {
+        print_dry_run_notice(opts);
     }
 
     Ok(())

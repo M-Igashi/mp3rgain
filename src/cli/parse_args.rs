@@ -317,9 +317,10 @@ pub fn expand_files_recursive(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
 fn collect_audio_files(dir: &Path, result: &mut Vec<PathBuf>) -> Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
+        let file_type = entry.file_type()?;
         let path = entry.path();
 
-        if path.is_dir() {
+        if file_type.is_dir() {
             collect_audio_files(&path, result)?;
         } else if mp3rgain::is_supported_audio_path(&path) {
             result.push(path);
