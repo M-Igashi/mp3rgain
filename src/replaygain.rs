@@ -1105,6 +1105,8 @@ pub fn analyze_track_with_index(
 ///
 /// The callback receives `(bytes_read, total_bytes)` and is called after each
 /// decoded packet. Use this to drive a progress bar during analysis.
+///
+/// Originally requested by @Sappharad in #106 (mp3gain-style byte progress).
 #[cfg(feature = "replaygain")]
 pub fn analyze_track_with_progress(
     file_path: &Path,
@@ -1228,6 +1230,9 @@ pub fn analyze_album_with_index(
 /// The callback receives `(file_index, bytes_read, total_bytes)` and is called
 /// after each decoded packet. `file_index` indicates which file is currently
 /// being analyzed (0-based).
+///
+/// Companion to [`analyze_track_with_progress`]; both stem from the
+/// progress-indication request in #106 (@Sappharad).
 #[cfg(feature = "replaygain")]
 pub fn analyze_album_with_progress(
     files: &[&Path],

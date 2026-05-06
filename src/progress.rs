@@ -1,3 +1,10 @@
+//! Progress reporting helpers used during ReplayGain analysis.
+//!
+//! Per-file analysis progress was originally requested by @Sappharad in
+//! #106 to mirror the byte-level progress output of the legacy mp3gain CLI
+//! ("`54% of 119337493 bytes analyzed`"). The feature shipped in v2.2.0
+//! once the Symphonia v0.6 decoder migration landed.
+
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::path::Path;
 
