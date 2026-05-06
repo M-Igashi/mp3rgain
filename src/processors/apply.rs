@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::*;
-use mp3rgain::{aac, analyze, id3v2, mp4meta, steps_to_db, Channel, GainOptions};
+use mp3rgain::{aac, analyze, mp4meta, steps_to_db, Channel, GainOptions};
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat, StoredTagMode};
@@ -9,6 +9,7 @@ use crate::util::get_filename;
 
 use super::utils::{
     apply_with_temp_file, restore_timestamp, save_original_mtime, warn_aac_multi_track,
+    write_id3v2_undo_after_apply,
 };
 
 pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFileResult> {
@@ -124,18 +125,7 @@ pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFile
             opts,
         );
         if !skip_undo && result.is_ok() {
-            let analysis = analyze(file)?;
-            let existing_rg = id3v2::read_id3v2_replaygain(file).unwrap_or_default();
-            let (existing_left, _) = mp3rgain::ape::parse_undo_values(existing_rg.undo.as_deref());
-            let new_undo = existing_left + actual_steps;
-            id3v2::write_id3v2_undo(
-                file,
-                new_undo,
-                new_undo,
-                opts.wrap_gain,
-                analysis.min_gain(),
-                analysis.max_gain(),
-            )?;
+            write_id3v2_undo_after_apply(file, actual_steps, actual_steps, opts.wrap_gain)?;
         }
         result
     } else {
@@ -253,23 +243,12 @@ pub fn process_apply_channel(
             .undo(false)
             .apply(file);
         if result.is_ok() {
-            let analysis = analyze(file)?;
-            let existing_rg = id3v2::read_id3v2_replaygain(file).unwrap_or_default();
-            let (existing_left, existing_right) =
-                mp3rgain::ape::parse_undo_values(existing_rg.undo.as_deref());
-            let (new_left, new_right) = match channel {
-                Channel::Left => (existing_left + steps, existing_right),
-                Channel::Right => (existing_left, existing_right + steps),
+            let (delta_left, delta_right) = match channel {
+                Channel::Left => (steps, 0),
+                Channel::Right => (0, steps),
                 _ => unreachable!(),
             };
-            id3v2::write_id3v2_undo(
-                file,
-                new_left,
-                new_right,
-                false,
-                analysis.min_gain(),
-                analysis.max_gain(),
-            )?;
+            write_id3v2_undo_after_apply(file, delta_left, delta_right, false)?;
         }
         result
     } else {

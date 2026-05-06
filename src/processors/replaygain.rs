@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::*;
 use indicatif::ProgressBar;
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult};
-use mp3rgain::{aac, analyze, db_to_steps, id3v2, mp4meta, steps_to_db, GainOptions};
+use mp3rgain::{aac, db_to_steps, id3v2, mp4meta, steps_to_db, GainOptions};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -13,6 +13,7 @@ use crate::util::get_filename;
 
 use super::utils::{
     apply_with_temp_file, restore_timestamp, save_original_mtime, warn_aac_multi_track,
+    write_id3v2_undo_after_apply,
 };
 
 pub fn process_track_gain(
@@ -238,21 +239,7 @@ fn apply_replaygain_with_album_into(
         Ok(frames) => {
             // Write ID3v2 tags if -s i mode
             if opts.use_id3v2 {
-                let analysis = analyze(file)?;
-                let existing_rg = id3v2::read_id3v2_replaygain(file).unwrap_or_default();
-                let (existing_left, _) =
-                    mp3rgain::ape::parse_undo_values(existing_rg.undo.as_deref());
-                let new_undo = existing_left + actual_steps;
-
-                // Write undo data
-                id3v2::write_id3v2_undo(
-                    file,
-                    new_undo,
-                    new_undo,
-                    opts.wrap_gain,
-                    analysis.min_gain(),
-                    analysis.max_gain(),
-                )?;
+                write_id3v2_undo_after_apply(file, actual_steps, actual_steps, opts.wrap_gain)?;
 
                 // Write ReplayGain metadata tags
                 let rg = mp3rgain::Id3v2ReplayGain {
