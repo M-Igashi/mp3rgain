@@ -1,5 +1,16 @@
 use serde::Serialize;
 
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum FileStatus {
+    Success,
+    Error,
+    Skipped,
+    DryRun,
+    Info,
+    NoTag,
+}
+
 #[derive(Serialize)]
 pub struct JsonOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -14,7 +25,7 @@ pub struct JsonOutput {
 pub struct JsonFileResult {
     pub file: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
+    pub status: Option<FileStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frames: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]

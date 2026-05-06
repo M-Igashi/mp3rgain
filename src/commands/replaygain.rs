@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use crate::cli::options::{AacAlbumInfo, Options, OutputFormat};
 use crate::commands::threading::effective_threads;
 use crate::commands::utils::{create_json_summary, print_dry_run_notice, update_counters};
-use crate::json_output::{JsonAlbumResult, JsonFileResult, JsonOutput};
+use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
 use crate::processors::replaygain::{process_apply_replaygain_with_album, process_track_gain};
 use crate::progress::{
     create_analysis_progress_bar, create_progress_bar, finish_analysis_progress, progress_finish,
@@ -292,7 +292,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                             let track = &album_result.tracks()[i];
                             JsonFileResult {
                                 file: file.display().to_string(),
-                                status: Some("skipped".to_string()),
+                                status: Some(FileStatus::Skipped),
                                 loudness_db: Some(track.loudness_db()),
                                 peak: Some(track.peak()),
                                 gain_applied_steps: Some(0),

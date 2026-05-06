@@ -1,13 +1,17 @@
 use colored::*;
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::json_output::{JsonFileResult, JsonSummary};
+use crate::json_output::{FileStatus, JsonFileResult, JsonSummary};
 
 pub fn update_counters(result: &JsonFileResult, successful: &mut usize, failed: &mut usize) {
-    match result.status.as_deref() {
-        Some("success") => *successful += 1,
-        Some("error") => *failed += 1,
-        _ => {}
+    match result.status {
+        Some(FileStatus::Success) => *successful += 1,
+        Some(FileStatus::Error) => *failed += 1,
+        Some(FileStatus::Skipped)
+        | Some(FileStatus::DryRun)
+        | Some(FileStatus::Info)
+        | Some(FileStatus::NoTag)
+        | None => {}
     }
 }
 

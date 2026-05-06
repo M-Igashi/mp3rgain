@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::cli::options::{AacAlbumInfo, Options, OutputFormat};
-use crate::json_output::JsonFileResult;
+use crate::json_output::{FileStatus, JsonFileResult};
 use crate::progress::update_analysis_progress;
 use crate::util::get_filename;
 
@@ -80,7 +80,7 @@ fn process_track_gain_into(
                 }
                 return Ok(JsonFileResult {
                     file: file.display().to_string(),
-                    status: Some("skipped".to_string()),
+                    status: Some(FileStatus::Skipped),
                     loudness_db: Some(result.loudness_db()),
                     peak: Some(result.peak()),
                     gain_applied_steps: Some(0),
@@ -98,7 +98,7 @@ fn process_track_gain_into(
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
-                status: Some("error".to_string()),
+                status: Some(FileStatus::Error),
                 error: Some(e.to_string()),
                 ..Default::default()
             })
@@ -196,7 +196,7 @@ fn apply_replaygain_with_album_into(
         }
         return Ok(JsonFileResult {
             file: file.display().to_string(),
-            status: Some("dry_run".to_string()),
+            status: Some(FileStatus::DryRun),
             loudness_db: Some(result.loudness_db()),
             peak: Some(result.peak()),
             gain_applied_steps: Some(actual_steps),
@@ -283,7 +283,7 @@ fn apply_replaygain_with_album_into(
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
-                status: Some("success".to_string()),
+                status: Some(FileStatus::Success),
                 frames: Some(frames),
                 loudness_db: Some(result.loudness_db()),
                 peak: Some(result.peak()),
@@ -300,7 +300,7 @@ fn apply_replaygain_with_album_into(
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
-                status: Some("error".to_string()),
+                status: Some(FileStatus::Error),
                 error: Some(e.to_string()),
                 ..Default::default()
             })
@@ -391,7 +391,7 @@ fn apply_replaygain_aac_with_album_into(
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
-                status: Some("success".to_string()),
+                status: Some(FileStatus::Success),
                 loudness_db: Some(result.loudness_db()),
                 peak: Some(result.peak()),
                 gain_applied_steps: Some(actual_steps),
@@ -407,7 +407,7 @@ fn apply_replaygain_aac_with_album_into(
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
-                status: Some("error".to_string()),
+                status: Some(FileStatus::Error),
                 error: Some(e.to_string()),
                 ..Default::default()
             })

@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::utils::{create_json_summary, print_dry_run_notice};
-use crate::json_output::{JsonFileResult, JsonOutput};
-use crate::processors::utils::restore_timestamp;
+use crate::json_output::{FileStatus, JsonFileResult, JsonOutput};
+use crate::processors::utils::{restore_timestamp, save_original_mtime};
 use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
 use crate::util::get_filename;
 
@@ -85,7 +85,11 @@ impl CheckTagInfo<'_> {
             OutputFormat::Json => {
                 json_results.push(JsonFileResult {
                     file: file_path.display().to_string(),
-                    status: Some(if self.has_any() { "success" } else { "no_tag" }.to_string()),
+                    status: Some(if self.has_any() {
+                        FileStatus::Success
+                    } else {
+                        FileStatus::NoTag
+                    }),
                     ..Default::default()
                 });
             }
@@ -130,17 +134,12 @@ pub fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
             }
             json_results.push(JsonFileResult {
                 file: file.display().to_string(),
-                status: Some("dry_run".to_string()),
+                status: Some(FileStatus::DryRun),
                 dry_run: Some(true),
                 ..Default::default()
             });
         } else {
-            // Save original timestamp if needed
-            let original_mtime = if opts.preserve_timestamp {
-                std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
-            } else {
-                None
-            };
+            let original_mtime = save_original_mtime(file, opts);
 
             let delete_result = if mp4meta::is_aac_file(file) {
                 // AAC: delete both ReplayGain and undo freeform tags
@@ -163,7 +162,7 @@ pub fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
                     successful += 1;
                     json_results.push(JsonFileResult {
                         file: file.display().to_string(),
-                        status: Some("success".to_string()),
+                        status: Some(FileStatus::Success),
                         ..Default::default()
                     });
                 }
@@ -174,7 +173,7 @@ pub fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
                     failed += 1;
                     json_results.push(JsonFileResult {
                         file: file.display().to_string(),
-                        status: Some("error".to_string()),
+                        status: Some(FileStatus::Error),
                         error: Some(e.to_string()),
                         ..Default::default()
                     });
@@ -284,7 +283,7 @@ pub fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
                     } else {
                         json_results.push(JsonFileResult {
                             file: file.display().to_string(),
-                            status: Some("error".to_string()),
+                            status: Some(FileStatus::Error),
                             error: Some(e.to_string()),
                             ..Default::default()
                         });
@@ -338,7 +337,7 @@ pub fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
                     } else {
                         json_results.push(JsonFileResult {
                             file: file.display().to_string(),
-                            status: Some("error".to_string()),
+                            status: Some(FileStatus::Error),
                             error: Some(e.to_string()),
                             ..Default::default()
                         });

@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::json_output::JsonFileResult;
+use crate::json_output::{FileStatus, JsonFileResult};
 use crate::progress::update_analysis_progress;
 use crate::util::get_filename;
 
@@ -102,7 +102,7 @@ fn process_info_into(
                 eprintln!("{} - {}", filename.red(), e);
                 return Ok(JsonFileResult {
                     file: file.display().to_string(),
-                    status: Some("error".to_string()),
+                    status: Some(FileStatus::Error),
                     error: Some(e.to_string()),
                     ..Default::default()
                 });
@@ -147,7 +147,7 @@ fn process_info_into(
 
         return Ok(JsonFileResult {
             file: file.display().to_string(),
-            status: Some("info".to_string()),
+            status: Some(FileStatus::Info),
             ..Default::default()
         });
     }
@@ -231,7 +231,7 @@ fn process_info_into(
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
-                status: Some("error".to_string()),
+                status: Some(FileStatus::Error),
                 error: Some(e.to_string()),
                 ..Default::default()
             })

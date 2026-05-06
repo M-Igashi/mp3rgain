@@ -4,7 +4,7 @@ use mp3rgain::{aac, id3v2, mp4meta, undo_gain};
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::json_output::JsonFileResult;
+use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
 
 use super::utils::{restore_timestamp, save_original_mtime};
@@ -21,7 +21,7 @@ pub fn process_undo(file: &Path, opts: &Options) -> Result<JsonFileResult> {
         }
         return Ok(JsonFileResult {
             file: file.display().to_string(),
-            status: Some("dry_run".to_string()),
+            status: Some(FileStatus::DryRun),
             dry_run: Some(true),
             ..Default::default()
         });
@@ -50,7 +50,7 @@ pub fn process_undo(file: &Path, opts: &Options) -> Result<JsonFileResult> {
 
                 Ok(JsonFileResult {
                     file: file.display().to_string(),
-                    status: Some("skipped".to_string()),
+                    status: Some(FileStatus::Skipped),
                     frames: Some(0),
                     ..Default::default()
                 })
@@ -71,7 +71,7 @@ pub fn process_undo(file: &Path, opts: &Options) -> Result<JsonFileResult> {
 
                 Ok(JsonFileResult {
                     file: file.display().to_string(),
-                    status: Some("success".to_string()),
+                    status: Some(FileStatus::Success),
                     frames: Some(frames),
                     ..Default::default()
                 })
@@ -84,7 +84,7 @@ pub fn process_undo(file: &Path, opts: &Options) -> Result<JsonFileResult> {
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
-                status: Some("error".to_string()),
+                status: Some(FileStatus::Error),
                 error: Some(e.to_string()),
                 ..Default::default()
             })

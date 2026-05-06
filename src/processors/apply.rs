@@ -4,7 +4,7 @@ use mp3rgain::{aac, analyze, id3v2, mp4meta, steps_to_db, Channel, GainOptions};
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat, StoredTagMode};
-use crate::json_output::JsonFileResult;
+use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
 
 use super::utils::{
@@ -90,7 +90,7 @@ pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFile
         }
         return Ok(JsonFileResult {
             file: file.display().to_string(),
-            status: Some("dry_run".to_string()),
+            status: Some(FileStatus::DryRun),
             gain_applied_steps: Some(actual_steps),
             gain_applied_db: Some(steps_to_db(actual_steps)),
             warning: warning_msg,
@@ -174,7 +174,7 @@ pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFile
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
-                status: Some("success".to_string()),
+                status: Some(FileStatus::Success),
                 frames: Some(modified),
                 gain_applied_steps: Some(actual_steps),
                 gain_applied_db: Some(steps_to_db(actual_steps)),
@@ -189,7 +189,7 @@ pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<JsonFile
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
-                status: Some("error".to_string()),
+                status: Some(FileStatus::Error),
                 error: Some(e.to_string()),
                 ..Default::default()
             })
@@ -238,7 +238,7 @@ pub fn process_apply_channel(
         }
         return Ok(JsonFileResult {
             file: file.display().to_string(),
-            status: Some("dry_run".to_string()),
+            status: Some(FileStatus::DryRun),
             gain_applied_steps: Some(steps),
             gain_applied_db: Some(steps_to_db(steps)),
             dry_run: Some(true),
@@ -298,7 +298,7 @@ pub fn process_apply_channel(
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
-                status: Some("success".to_string()),
+                status: Some(FileStatus::Success),
                 frames: Some(frames),
                 gain_applied_steps: Some(steps),
                 gain_applied_db: Some(steps_to_db(steps)),
@@ -312,7 +312,7 @@ pub fn process_apply_channel(
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
-                status: Some("error".to_string()),
+                status: Some(FileStatus::Error),
                 error: Some(e.to_string()),
                 ..Default::default()
             })
