@@ -96,22 +96,8 @@ impl Mp3rgainApp {
     }
 
     pub fn add_folder(&mut self, folder: PathBuf, recursive: bool) {
-        let mut paths_to_add = Vec::new();
-        Self::collect_files_from_folder(&folder, recursive, &mut paths_to_add);
+        let paths_to_add = mp3rgain::collect_audio_files(&folder, recursive).unwrap_or_default();
         self.add_files(paths_to_add);
-    }
-
-    fn collect_files_from_folder(folder: &Path, recursive: bool, paths: &mut Vec<PathBuf>) {
-        if let Ok(entries) = std::fs::read_dir(folder) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                let path = entry.path();
-                if path.is_dir() && recursive {
-                    Self::collect_files_from_folder(&path, true, paths);
-                } else if mp3rgain::is_supported_audio_path(&path) {
-                    paths.push(path);
-                }
-            }
-        }
     }
 
     pub fn remove_selected(&mut self) {

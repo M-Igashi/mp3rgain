@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::Channel;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::options::{Options, OutputFormat, StoredTagMode};
 use super::usage::{print_usage, print_version};
@@ -304,7 +304,7 @@ pub fn expand_files_recursive(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
 
     for path in paths {
         if path.is_dir() {
-            collect_audio_files(path, &mut result)?;
+            result.extend(mp3rgain::collect_audio_files(path, true)?);
         } else {
             result.push(path.clone());
         }
@@ -312,22 +312,6 @@ pub fn expand_files_recursive(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
 
     result.sort();
     Ok(result)
-}
-
-fn collect_audio_files(dir: &Path, result: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let path = entry.path();
-
-        if file_type.is_dir() {
-            collect_audio_files(&path, result)?;
-        } else if mp3rgain::is_supported_audio_path(&path) {
-            result.push(path);
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

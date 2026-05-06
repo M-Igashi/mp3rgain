@@ -90,7 +90,7 @@ pub use id3v2::{
     write_id3v2_undo, Id3v2ReplayGain,
 };
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// File extensions mp3rgain can process.
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["mp3", "m4a", "aac", "mp4"];
@@ -112,4 +112,31 @@ pub fn is_supported_audio_path(path: &Path) -> bool {
                 .iter()
                 .any(|s| ext.eq_ignore_ascii_case(s))
         })
+}
+
+/// Collect supported audio file paths from a directory.
+///
+/// When `recursive` is true, descends into subdirectories. Files are filtered
+/// by [`is_supported_audio_path`]. The returned paths are not sorted.
+pub fn collect_audio_files(dir: &Path, recursive: bool) -> Result<Vec<PathBuf>> {
+    let mut result = Vec::new();
+    collect_audio_files_into(dir, recursive, &mut result)?;
+    Ok(result)
+}
+
+fn collect_audio_files_into(dir: &Path, recursive: bool, result: &mut Vec<PathBuf>) -> Result<()> {
+    let entries = std::fs::read_dir(dir).map_err(|e| Error::io_read(dir, e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| Error::io_read(dir, e))?;
+        let file_type = entry.file_type().map_err(|e| Error::io_read(dir, e))?;
+        let path = entry.path();
+        if file_type.is_dir() {
+            if recursive {
+                collect_audio_files_into(&path, recursive, result)?;
+            }
+        } else if is_supported_audio_path(&path) {
+            result.push(path);
+        }
+    }
+    Ok(())
 }
