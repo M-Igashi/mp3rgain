@@ -32,10 +32,14 @@ pub fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
                 let min_gain = amp_result.min_global_gain();
                 // Convert to PCM scale (like mp3gain: 0-32768+)
                 let max_pcm_sample = max_amp * 32768.0;
-                let headroom_db = if max_amp > 0.0 {
-                    -20.0 * max_amp.log10()
+                let headroom_db: Option<f64> = if max_amp > 0.0 {
+                    Some(-20.0 * max_amp.log10())
                 } else {
-                    f64::INFINITY
+                    None
+                };
+                let headroom_text = match headroom_db {
+                    Some(d) => format!("{:+.2}", d),
+                    None => "(silent)".to_string(),
                 };
 
                 match opts.output_format {
@@ -43,25 +47,25 @@ pub fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
                         if !opts.quiet {
                             println!("{}", filename.cyan().bold());
                             println!("  Max PCM sample: {:.6}", max_pcm_sample);
-                            println!("  Headroom:       {:+.2} dB", headroom_db);
+                            println!("  Headroom:       {} dB", headroom_text);
                             println!("  Max global_gain: {}", max_gain);
                             println!("  Min global_gain: {}", min_gain);
                             println!();
                         } else {
-                            println!("{}\t{:.6}\t{:.2}", filename, max_pcm_sample, headroom_db);
+                            println!("{}\t{:.6}\t{}", filename, max_pcm_sample, headroom_text);
                         }
                     }
                     OutputFormat::Tsv => {
                         println!(
-                            "{}\t{:.6}\t{:.2}\t{}\t{}",
-                            filename, max_pcm_sample, headroom_db, max_gain, min_gain
+                            "{}\t{:.6}\t{}\t{}\t{}",
+                            filename, max_pcm_sample, headroom_text, max_gain, min_gain
                         );
                     }
                     OutputFormat::Json => {
                         json_results.push(JsonFileResult {
                             file: file.display().to_string(),
                             max_amplitude: Some(max_pcm_sample),
-                            headroom_db: Some(headroom_db),
+                            headroom_db,
                             max_gain: Some(max_gain),
                             min_gain: Some(min_gain),
                             ..Default::default()

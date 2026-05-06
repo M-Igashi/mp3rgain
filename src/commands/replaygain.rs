@@ -17,7 +17,7 @@ use crate::progress::{
 };
 use crate::util::get_filename;
 
-pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
+fn require_replaygain_feature() {
     if !replaygain::is_available() {
         eprintln!(
             "{}: ReplayGain analysis requires the 'replaygain' feature",
@@ -26,6 +26,10 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         eprintln!("  Install with: cargo install mp3rgain --features replaygain");
         std::process::exit(1);
     }
+}
+
+pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
+    require_replaygain_feature();
 
     let dry_run_prefix = opts.dry_run_prefix();
 
@@ -152,14 +156,7 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 }
 
 pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
-    if !replaygain::is_available() {
-        eprintln!(
-            "{}: ReplayGain analysis requires the 'replaygain' feature",
-            "error".red().bold()
-        );
-        eprintln!("  Install with: cargo install mp3rgain --features replaygain");
-        std::process::exit(1);
-    }
+    require_replaygain_feature();
 
     let dry_run_prefix = opts.dry_run_prefix();
 

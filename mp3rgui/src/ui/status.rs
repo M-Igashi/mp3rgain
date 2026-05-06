@@ -2,16 +2,8 @@ use crate::app::Mp3rgainApp;
 
 pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
-        // Progress bars
         ui.horizontal(|ui| {
-            ui.label("File:");
-            ui.add(
-                egui::ProgressBar::new(app.file_progress)
-                    .desired_width(200.0)
-                    .show_percentage(),
-            );
-            ui.add_space(20.0);
-            ui.label("Total:");
+            ui.label("Progress:");
             ui.add(
                 egui::ProgressBar::new(app.total_progress)
                     .desired_width(200.0)
@@ -22,11 +14,6 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
                 if ui.button("Exit").clicked() {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
-                ui.add_enabled_ui(app.is_processing, |ui| {
-                    if ui.button("Cancel").clicked() {
-                        // TODO: Implement cancel
-                    }
-                });
             });
         });
 

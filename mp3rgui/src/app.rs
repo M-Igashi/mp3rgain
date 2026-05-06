@@ -43,7 +43,6 @@ pub struct Mp3rgainApp {
     pub files: Vec<FileEntry>,
     pub target_volume: f64,
     pub selected_indices: Vec<usize>,
-    pub file_progress: f32,
     pub total_progress: f32,
     pub is_processing: bool,
     pub status_message: String,
@@ -55,7 +54,6 @@ impl Mp3rgainApp {
             files: Vec::new(),
             target_volume: 89.0,
             selected_indices: Vec::new(),
-            file_progress: 0.0,
             total_progress: 0.0,
             is_processing: false,
             status_message: String::new(),
@@ -141,7 +139,6 @@ impl Mp3rgainApp {
         }
 
         self.is_processing = true;
-        self.file_progress = 0.0;
         self.total_progress = 0.0;
 
         let total = self.files.len();
