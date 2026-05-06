@@ -1,4 +1,8 @@
 //! ID3v2 TXXX frame storage for ReplayGain and undo tags.
+//!
+//! Original write-path issue (#115) reported a case where mp3gain values
+//! were not persisted to the file; the fix landed in #116 and was later
+//! subsumed by a broader rewrite of this module.
 
 use crate::ape::{
     parse_undo_values, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN,
