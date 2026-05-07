@@ -3,9 +3,15 @@ use colored::*;
 use mp3rgain::{analyze, ape, id3v2, mp4meta, Mp3Analysis};
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use crate::cli::options::{Options, OutputFormat};
+
+// Per-process counter so that parallel apply tasks operating on files in the
+// same parent directory don't collide on a shared temp filename. The previous
+// `.mp3rgain_temp_{pid}.mp3` template was racy under rayon parallelism.
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Run a gain operation, optionally going through a sibling temp file.
 ///
@@ -22,7 +28,12 @@ where
 {
     if opts.use_temp_file {
         let parent = file.parent().unwrap_or(Path::new("."));
-        let temp_path = parent.join(format!(".mp3rgain_temp_{}.mp3", std::process::id()));
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let temp_path = parent.join(format!(
+            ".mp3rgain_temp_{}_{}.mp3",
+            std::process::id(),
+            counter
+        ));
 
         match operation(file, &temp_path) {
             Ok(frames) => {

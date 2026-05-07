@@ -24,6 +24,12 @@ use crate::error::{Error, Result};
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// Per-process counter for atomic_write temp filenames. Without this, parallel
+// callers writing to MP4 files in the same parent directory would collide on
+// `.mp3rgain_temp_{pid}.m4a`.
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// ReplayGain tag keys (iTunes freeform format)
 pub const RG_TRACK_GAIN: &str = "replaygain_track_gain";
@@ -573,7 +579,12 @@ pub fn write_replaygain_tags(file_path: &Path, tags: &ReplayGainTags) -> Result<
 /// Falls back to direct write if rename fails (e.g., cross-filesystem).
 pub(crate) fn atomic_write(file_path: &Path, data: &[u8]) -> Result<()> {
     let parent = file_path.parent().unwrap_or(Path::new("."));
-    let temp_path = parent.join(format!(".mp3rgain_temp_{}.m4a", std::process::id()));
+    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_path = parent.join(format!(
+        ".mp3rgain_temp_{}_{}.m4a",
+        std::process::id(),
+        counter
+    ));
 
     if let Err(e) = fs::write(&temp_path, data) {
         let _ = fs::remove_file(&temp_path);
