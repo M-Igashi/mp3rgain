@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::*;
 use indicatif::ProgressBar;
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult};
-use mp3rgain::{aac, db_to_steps, id3v2, mp4meta, steps_to_db, GainOptions};
+use mp3rgain::{aac, db_to_steps, id3v2, mp4meta, peak_to_headroom_db, steps_to_db, GainOptions};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -141,8 +141,9 @@ fn apply_replaygain_with_album_into(
         let new_peak = result.peak() * gain_linear;
         if new_peak > 1.0 {
             if opts.prevent_clipping {
-                // Calculate the maximum safe gain
-                let max_safe_db = -20.0 * result.peak().log10();
+                // Calculate the maximum safe gain. The outer `new_peak > 1.0`
+                // guard implies peak > 0, so headroom is always defined here.
+                let max_safe_db = peak_to_headroom_db(result.peak()).unwrap_or(0.0);
                 let max_safe_steps = db_to_steps(max_safe_db);
                 actual_steps = max_safe_steps.max(0);
 
@@ -210,16 +211,12 @@ fn apply_replaygain_with_album_into(
 
     // Handle AAC/M4A files differently - only write ReplayGain tags
     if result.file_type() == AudioFileType::Aac {
-        return apply_replaygain_aac_with_album_into(
-            file,
-            actual_steps,
-            result,
-            opts,
+        let ctx = AacApplyContext {
             warning_msg,
             original_mtime,
             album_info,
-            out,
-        );
+        };
+        return apply_replaygain_aac_with_album_into(file, actual_steps, result, opts, ctx, out);
     }
 
     // MP3: Apply gain to audio frames
@@ -308,18 +305,26 @@ fn apply_replaygain_with_album_into(
     }
 }
 
+struct AacApplyContext<'a> {
+    warning_msg: Option<String>,
+    original_mtime: Option<std::time::SystemTime>,
+    album_info: Option<&'a AacAlbumInfo>,
+}
+
 /// Apply ReplayGain to AAC/M4A files with optional album info
-#[allow(clippy::too_many_arguments)]
 fn apply_replaygain_aac_with_album_into(
     file: &Path,
     actual_steps: i32,
     result: &ReplayGainResult,
     opts: &Options,
-    warning_msg: Option<String>,
-    original_mtime: Option<std::time::SystemTime>,
-    album_info: Option<&AacAlbumInfo>,
+    ctx: AacApplyContext<'_>,
     out: &mut String,
 ) -> Result<JsonFileResult> {
+    let AacApplyContext {
+        warning_msg,
+        original_mtime,
+        album_info,
+    } = ctx;
     let filename = get_filename(file);
 
     warn_aac_multi_track(file, filename, opts, "");

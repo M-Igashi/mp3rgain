@@ -54,6 +54,14 @@ impl Channel {
             Channel::Right => Channel::Left,
         }
     }
+
+    /// Lowercase short name (`"left"` / `"right"`) for log/CLI output.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Channel::Left => "left",
+            Channel::Right => "right",
+        }
+    }
 }
 
 impl std::fmt::Display for Channel {
@@ -242,6 +250,22 @@ pub fn db_to_steps(db: f64) -> i32 {
 /// Convert MP3 gain steps to dB
 pub fn steps_to_db(steps: i32) -> f64 {
     steps as f64 * GAIN_STEP_DB
+}
+
+/// Scale a normalized peak (0.0..=1.0+) to the 16-bit PCM sample range mp3gain
+/// uses in its TSV/info output. `peak * 32768.0`.
+pub fn peak_to_pcm_sample(peak: f64) -> f64 {
+    peak * 32768.0
+}
+
+/// Headroom in dB before clipping for a normalized peak. Returns `None` for
+/// silent input (peak <= 0) where the dB value would be undefined.
+pub fn peak_to_headroom_db(peak: f64) -> Option<f64> {
+    if peak > 0.0 {
+        Some(-20.0 * peak.log10())
+    } else {
+        None
+    }
 }
 
 // =============================================================================

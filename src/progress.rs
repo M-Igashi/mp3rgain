@@ -15,19 +15,64 @@ pub const PROGRESS_THRESHOLD: usize = 5;
 /// Minimum file size (1 MB) to show per-file analysis progress bar
 pub const ANALYSIS_PROGRESS_MIN_SIZE: u64 = 1_000_000;
 
+/// Standard file-count progress bar template used across commands.
+const FILE_COUNT_TEMPLATE: &str = "{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}";
+
+fn file_count_style() -> ProgressStyle {
+    ProgressStyle::default_bar()
+        .template(FILE_COUNT_TEMPLATE)
+        .unwrap()
+        .progress_chars("=>-")
+}
+
 pub fn create_progress_bar(total: usize, opts: &Options) -> Option<ProgressBar> {
     if opts.quiet || opts.output_format != OutputFormat::Text || total < PROGRESS_THRESHOLD {
         return None;
     }
 
     let pb = ProgressBar::new(total as u64);
+    pb.set_style(file_count_style());
+    Some(pb)
+}
+
+/// Same as [`create_progress_bar`], but attaches the bar to an existing
+/// `MultiProgress` so it can compose with byte-level analysis bars.
+pub fn create_file_count_pb_in(
+    mp: &MultiProgress,
+    total: usize,
+    opts: &Options,
+) -> Option<ProgressBar> {
+    if opts.quiet || opts.output_format != OutputFormat::Text || total < PROGRESS_THRESHOLD {
+        return None;
+    }
+    let pb = mp.add(ProgressBar::new(total as u64));
+    pb.set_style(file_count_style());
+    Some(pb)
+}
+
+/// Album analysis progress bar attached to a `MultiProgress`.
+///
+/// In `parallel` mode the bar is file-count driven (`{pos}/{len}`); in
+/// sequential mode it tracks bytes within a single file (`{bytes}/{total_bytes}`).
+pub fn create_album_progress_pb_in(
+    mp: &MultiProgress,
+    total: usize,
+    parallel: bool,
+) -> ProgressBar {
+    let initial_len = if parallel { total as u64 } else { 0 };
+    let template = if parallel {
+        "      [{bar:30.cyan/blue}] {pos}/{len} {msg}"
+    } else {
+        "      [{bar:30.cyan/blue}] {bytes}/{total_bytes} {msg}"
+    };
+    let pb = mp.add(ProgressBar::new(initial_len));
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .template(template)
             .unwrap()
             .progress_chars("=>-"),
     );
-    Some(pb)
+    pb
 }
 
 pub fn progress_set_message(pb: &Option<ProgressBar>, msg: &str) {

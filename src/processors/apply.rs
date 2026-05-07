@@ -242,11 +242,7 @@ fn process_apply_channel_into(
     out: &mut String,
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
-    let channel_name = match channel {
-        Channel::Left => "left",
-        Channel::Right => "right",
-        _ => unreachable!(),
-    };
+    let channel_name = channel.name();
 
     // Warn if file is Joint Stereo (mp3gain only supports Stereo for -l)
     if let Ok(info) = analyze(file) {

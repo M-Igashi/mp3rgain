@@ -181,11 +181,7 @@ pub fn cmd_apply_channel(
 
     let db_value = steps_to_db(steps);
     let dry_run_prefix = opts.dry_run_prefix();
-    let channel_name = match channel {
-        Channel::Left => "left",
-        Channel::Right => "right",
-        _ => unreachable!(),
-    };
+    let channel_name = channel.name();
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         println!(

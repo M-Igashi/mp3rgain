@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::*;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::MultiProgress;
 use mp3rgain::replaygain::{self, REPLAYGAIN_REFERENCE_DB};
 use rayon::prelude::*;
 use std::io::{self, Write};
@@ -12,8 +12,9 @@ use crate::commands::utils::{create_json_summary, print_dry_run_notice, update_c
 use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
 use crate::processors::replaygain::{process_apply_replaygain_with_album, process_track_gain};
 use crate::progress::{
-    create_analysis_progress_bar, create_progress_bar, finish_analysis_progress, progress_finish,
-    progress_inc, progress_set_message, PROGRESS_THRESHOLD,
+    create_album_progress_pb_in, create_analysis_progress_bar, create_file_count_pb_in,
+    create_progress_bar, finish_analysis_progress, progress_finish, progress_inc,
+    progress_set_message,
 };
 use crate::util::get_filename;
 
@@ -56,21 +57,7 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     let parallel = threads > 1 && files.len() > 1;
 
     let mp = MultiProgress::new();
-    let file_pb = if !opts.quiet
-        && opts.output_format == OutputFormat::Text
-        && files.len() >= PROGRESS_THRESHOLD
-    {
-        let pb = mp.add(ProgressBar::new(files.len() as u64));
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-                .unwrap()
-                .progress_chars("=>-"),
-        );
-        Some(pb)
-    } else {
-        None
-    };
+    let file_pb = create_file_count_pb_in(&mp, files.len(), opts);
 
     let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
     let mut successful = 0;
@@ -188,13 +175,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     let mp = MultiProgress::new();
 
     let album_analysis = if show_progress && !parallel {
-        let analysis_pb = mp.add(ProgressBar::new(0));
-        analysis_pb.set_style(
-            ProgressStyle::default_bar()
-                .template("      [{bar:30.cyan/blue}] {bytes}/{total_bytes} {msg}")
-                .unwrap()
-                .progress_chars("=>-"),
-        );
+        let analysis_pb = create_album_progress_pb_in(&mp, files.len(), false);
 
         let file_names: Vec<&str> = files.iter().map(|f| get_filename(f)).collect();
         let result = replaygain::analyze_album_with_progress(
@@ -217,13 +198,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     } else if show_progress && parallel {
         // Per-file byte bars would interleave in parallel mode, so show a
         // file-count bar driven by completion notifications instead.
-        let analysis_pb = mp.add(ProgressBar::new(files.len() as u64));
-        analysis_pb.set_style(
-            ProgressStyle::default_bar()
-                .template("      [{bar:30.cyan/blue}] {pos}/{len} {msg}")
-                .unwrap()
-                .progress_chars("=>-"),
-        );
+        let analysis_pb = create_album_progress_pb_in(&mp, files.len(), true);
 
         let pb_ref = &analysis_pb;
         let result = replaygain::analyze_album_parallel_with_completion(

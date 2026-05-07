@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::*;
 use indicatif::ProgressBar;
 use mp3rgain::replaygain;
-use mp3rgain::{analyze, db_to_steps, find_max_amplitude, mp4meta};
+use mp3rgain::{analyze, db_to_steps, find_max_amplitude, mp4meta, peak_to_pcm_sample};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -54,7 +54,7 @@ fn process_info_into(
 
                 // Max Amplitude scaled to 32768 (mp3gain format for beets)
                 // beets divides by 32768, so we output peak * 32768
-                let max_amplitude_scaled = rg_result.peak() * 32768.0;
+                let max_amplitude_scaled = peak_to_pcm_sample(rg_result.peak());
 
                 match opts.output_format {
                     OutputFormat::Tsv => {

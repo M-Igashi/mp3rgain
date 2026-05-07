@@ -1,7 +1,7 @@
 use anyhow::Result;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::MultiProgress;
 use mp3rgain::replaygain;
-use mp3rgain::{db_to_steps, mp4meta};
+use mp3rgain::{db_to_steps, mp4meta, peak_to_pcm_sample};
 use rayon::prelude::*;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -10,7 +10,9 @@ use crate::cli::options::{Options, OutputFormat};
 use crate::commands::threading::effective_threads;
 use crate::json_output::{JsonFileResult, JsonOutput};
 use crate::processors::info::process_info;
-use crate::progress::{create_analysis_progress_bar, finish_analysis_progress, PROGRESS_THRESHOLD};
+use crate::progress::{
+    create_analysis_progress_bar, create_file_count_pb_in, finish_analysis_progress,
+};
 use crate::util::get_filename;
 
 pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
@@ -23,21 +25,7 @@ pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
     let parallel = threads > 1 && files.len() > 1;
 
     let mp = MultiProgress::new();
-    let file_pb = if !opts.quiet
-        && opts.output_format == OutputFormat::Text
-        && files.len() >= PROGRESS_THRESHOLD
-    {
-        let pb = mp.add(ProgressBar::new(files.len() as u64));
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-                .unwrap()
-                .progress_chars("=>-"),
-        );
-        Some(pb)
-    } else {
-        None
-    };
+    let file_pb = create_file_count_pb_in(&mp, files.len(), opts);
 
     let json_results: Vec<JsonFileResult> = if parallel {
         // Skip per-file byte progress bars in parallel mode: they would
@@ -122,7 +110,7 @@ pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
         if let Ok(album_rg) = album_rg {
             let album_gain_db = album_rg.album_gain_db() + opts.gain_modifier_db;
             let album_gain_steps = db_to_steps(album_gain_db);
-            let album_max_amp = album_rg.album_peak() * 32768.0;
+            let album_max_amp = peak_to_pcm_sample(album_rg.album_peak());
 
             let album_max_gain = json_results
                 .iter()

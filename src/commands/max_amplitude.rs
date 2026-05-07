@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::*;
-use mp3rgain::find_max_amplitude;
+use mp3rgain::{find_max_amplitude, peak_to_headroom_db, peak_to_pcm_sample};
 use rayon::prelude::*;
 use std::fmt::Write as _;
 use std::io::{self, Write as IoWrite};
@@ -96,12 +96,8 @@ fn process_max_amplitude(file: &Path, opts: &Options) -> (Option<JsonFileResult>
             let max_gain = amp_result.max_global_gain();
             let min_gain = amp_result.min_global_gain();
             // Convert to PCM scale (like mp3gain: 0-32768+)
-            let max_pcm_sample = max_amp * 32768.0;
-            let headroom_db: Option<f64> = if max_amp > 0.0 {
-                Some(-20.0 * max_amp.log10())
-            } else {
-                None
-            };
+            let max_pcm_sample = peak_to_pcm_sample(max_amp);
+            let headroom_db: Option<f64> = peak_to_headroom_db(max_amp);
             let headroom_text = match headroom_db {
                 Some(d) => format!("{:+.2}", d),
                 None => "(silent)".to_string(),
