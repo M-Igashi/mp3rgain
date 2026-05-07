@@ -7,17 +7,24 @@ use std::time::SystemTime;
 
 use crate::cli::options::{Options, OutputFormat};
 
+/// Run a gain operation, optionally going through a sibling temp file.
+///
+/// The closure receives `(read_from, write_to)`. When `-t` is in effect they
+/// differ (read original, write temp file, rename) — when it isn't, both are
+/// the original path and the operation works in place.
+///
+/// Compared with the old "copy original to temp, then operate on temp" flow,
+/// the split-path variant saves one full-file pass on the `-t` apply path
+/// (issue #135).
 pub fn apply_with_temp_file<F>(file: &Path, operation: F, opts: &Options) -> Result<usize>
 where
-    F: FnOnce(&Path) -> Result<usize>,
+    F: FnOnce(&Path, &Path) -> Result<usize>,
 {
     if opts.use_temp_file {
         let parent = file.parent().unwrap_or(Path::new("."));
         let temp_path = parent.join(format!(".mp3rgain_temp_{}.mp3", std::process::id()));
 
-        fs::copy(file, &temp_path)?;
-
-        match operation(&temp_path) {
+        match operation(file, &temp_path) {
             Ok(frames) => {
                 fs::rename(&temp_path, file)?;
                 Ok(frames)
@@ -28,7 +35,7 @@ where
             }
         }
     } else {
-        operation(file)
+        operation(file, file)
     }
 }
 

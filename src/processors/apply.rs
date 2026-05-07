@@ -124,11 +124,15 @@ fn process_apply_into(
     // Apply gain
     let apply_result = if is_aac {
         if opts.stored_tag_mode == StoredTagMode::Skip {
-            apply_with_temp_file(file, |f| Ok(aac::apply_aac_gain(f, actual_steps)?), opts)
+            apply_with_temp_file(
+                file,
+                |r, w| Ok(aac::apply_aac_gain_to_path(r, w, actual_steps)?),
+                opts,
+            )
         } else {
             apply_with_temp_file(
                 file,
-                |f| Ok(aac::apply_aac_gain_with_undo(f, actual_steps)?),
+                |r, w| Ok(aac::apply_aac_gain_with_undo_to_path(r, w, actual_steps)?),
                 opts,
             )
         }
@@ -141,11 +145,11 @@ fn process_apply_into(
         }
         let result = apply_with_temp_file(
             file,
-            |f| {
+            |r, w| {
                 Ok(GainOptions::new(actual_steps)
                     .wrap(opts.wrap_gain)
                     .undo(false)
-                    .apply(f)?)
+                    .apply_to_path(r, w)?)
             },
             opts,
         );
@@ -163,11 +167,11 @@ fn process_apply_into(
         let use_undo = opts.stored_tag_mode != StoredTagMode::Skip;
         apply_with_temp_file(
             file,
-            |f| {
+            |r, w| {
                 Ok(GainOptions::new(actual_steps)
                     .wrap(opts.wrap_gain)
                     .undo(use_undo)
-                    .apply(f)?)
+                    .apply_to_path(r, w)?)
             },
             opts,
         )

@@ -1320,17 +1320,30 @@ fn apply_aac_gain_to_data(data: &mut [u8], analysis: &AacAnalysis, gain_steps: i
 ///
 /// Returns the number of modified gain locations.
 pub fn apply_aac_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
+    apply_aac_gain_to_path(file_path, file_path, gain_steps)
+}
+
+/// Apply gain reading from `read_from` and writing to `write_to`.
+///
+/// When `read_from == write_to`, behaves identically to [`apply_aac_gain`].
+/// When the paths differ, reads `read_from` once and writes the modified bytes
+/// directly to `write_to` — the caller (e.g. `apply_with_temp_file`) is
+/// responsible for the rename to atomically swap the file (issue #135).
+pub fn apply_aac_gain_to_path(read_from: &Path, write_to: &Path, gain_steps: i32) -> Result<usize> {
     if gain_steps == 0 {
+        if read_from != write_to {
+            std::fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
+        }
         return Ok(0);
     }
 
-    let analysis = analyze_aac_gains(file_path)?;
+    let mut data = std::fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
 
-    let mut data = std::fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    let analysis = analyze_aac_gains_from_data(&data)?;
 
     let modified = apply_aac_gain_to_data(&mut data, &analysis, gain_steps);
 
-    std::fs::write(file_path, &data).map_err(|e| Error::io_write(file_path, e))?;
+    std::fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
 
     Ok(modified)
 }
@@ -1341,28 +1354,42 @@ pub fn apply_aac_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
 /// undo value, so multiple gain changes can be fully reversed with a single undo.
 ///
 /// Returns the number of modified gain locations.
+//
+// Performs exactly one read and one atomic write: analysis, undo-tag parsing,
+// gain application, and metadata rewrite all run against an in-memory buffer
+// (issue #135).
 pub fn apply_aac_gain_with_undo(file_path: &Path, gain_steps: i32) -> Result<usize> {
+    apply_aac_gain_with_undo_to_path(file_path, file_path, gain_steps)
+}
+
+/// Read-from-A / write-to-B variant of [`apply_aac_gain_with_undo`].
+///
+/// The atomic-write step targets `write_to`, so when this is called from
+/// `apply_with_temp_file` with `write_to == temp_path`, the temp file ends up
+/// containing the fully-rewritten MP4 ready to be renamed over the original
+/// (issue #135).
+pub fn apply_aac_gain_with_undo_to_path(
+    read_from: &Path,
+    write_to: &Path,
+    gain_steps: i32,
+) -> Result<usize> {
     if gain_steps == 0 {
+        if read_from != write_to {
+            std::fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
+        }
         return Ok(0);
     }
 
-    let analysis = analyze_aac_gains(file_path)?;
+    let mut data = std::fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
 
-    // Read existing undo tags
-    let existing_undo = mp4meta::read_undo_tags(file_path)?;
+    let analysis = analyze_aac_gains_from_data(&data)?;
 
-    // Parse existing undo value and accumulate
+    let existing_undo = mp4meta::read_undo_tags_from_data(&data);
     let existing_gain = crate::ape::parse_undo_values(existing_undo.undo()).0;
     let new_undo_gain = existing_gain + gain_steps;
 
-    // Apply gain to bitstream (in-place, no container change)
-    let mut data = std::fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-
     let modified = apply_aac_gain_to_data(&mut data, &analysis, gain_steps);
 
-    std::fs::write(file_path, &data).map_err(|e| Error::io_write(file_path, e))?;
-
-    // Write undo tags (may change container structure)
     let minmax = existing_undo
         .minmax()
         .map(|s| s.to_string())
@@ -1371,7 +1398,9 @@ pub fn apply_aac_gain_with_undo(file_path: &Path, gain_steps: i32) -> Result<usi
         Some(format!("{:+04},{:+04},N", new_undo_gain, new_undo_gain)),
         minmax,
     );
-    mp4meta::write_undo_tags(file_path, &undo_tags)?;
+
+    let final_data = mp4meta::update_mp4_undo_metadata(&data, &undo_tags)?;
+    mp4meta::atomic_write(write_to, &final_data)?;
 
     Ok(modified)
 }
@@ -1409,16 +1438,23 @@ pub fn undo_aac_gain(file_path: &Path) -> Result<usize> {
 
 /// Analyze AAC/M4A file and locate all global_gain fields (read-only)
 pub fn analyze_aac_gains(file_path: &Path) -> Result<AacAnalysis> {
-    let data = std::fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-
     if !mp4meta::is_mp4_file(file_path) {
         return Err(Error::NotMp4File {
             path: file_path.to_path_buf(),
         });
     }
 
-    let (sample_table, stsd_pos) = build_sample_table(&data)?;
-    let sample_rate = parse_audio_config(&data, stsd_pos)?;
+    let data = std::fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    analyze_aac_gains_from_data(&data)
+}
+
+/// Slice-based variant of `analyze_aac_gains`. The caller is responsible for
+/// validating MP4 brand (e.g. via `mp4meta::is_mp4_file`) when working from a
+/// path; this function assumes `data` already represents an MP4 container and
+/// returns parser-level errors only.
+pub(crate) fn analyze_aac_gains_from_data(data: &[u8]) -> Result<AacAnalysis> {
+    let (sample_table, stsd_pos) = build_sample_table(data)?;
+    let sample_rate = parse_audio_config(data, stsd_pos)?;
 
     let sample_count = sample_table.len() as u32;
     let mut all_locations = Vec::new();

@@ -233,11 +233,11 @@ fn apply_replaygain_with_album_into(
     };
     let apply_result = apply_with_temp_file(
         file,
-        |f| {
+        |r, w| {
             Ok(GainOptions::new(actual_steps)
                 .wrap(opts.wrap_gain)
                 .undo(!use_id3v2_undo) // APE undo only when not using ID3v2
-                .apply(f)?)
+                .apply_to_path(r, w)?)
         },
         opts,
     );

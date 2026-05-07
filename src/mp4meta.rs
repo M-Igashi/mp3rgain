@@ -427,37 +427,42 @@ fn serialize_freeform_tag(tag: &FreeformTag) -> Vec<u8> {
 /// Navigates moov -> udta -> meta -> ilst and collects tags with the iTunes namespace.
 fn read_itunes_freeform_tags(file_path: &Path) -> Result<Vec<FreeformTag>> {
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    Ok(read_itunes_freeform_tags_from_data(&data))
+}
 
-    let (moov_pos, moov_header) = match find_box(&data, MOOV) {
+/// Slice-based variant of `read_itunes_freeform_tags`.
+/// Returns an empty vec for any non-fatal parse failure (missing moov / udta / meta / ilst).
+pub(crate) fn read_itunes_freeform_tags_from_data(data: &[u8]) -> Vec<FreeformTag> {
+    let (moov_pos, moov_header) = match find_box(data, MOOV) {
         Some(x) => x,
-        None => return Ok(Vec::new()),
+        None => return Vec::new(),
     };
 
     let moov_content_start = moov_pos + moov_header.header_size as usize;
     let moov_content_size = moov_header.content_size() as usize;
 
     let (udta_pos, udta_header) =
-        match find_box_in_container(&data, moov_content_start, moov_content_size, UDTA) {
+        match find_box_in_container(data, moov_content_start, moov_content_size, UDTA) {
             Some(x) => x,
-            None => return Ok(Vec::new()),
+            None => return Vec::new(),
         };
 
     let udta_content_start = udta_pos + udta_header.header_size as usize;
     let udta_content_size = udta_header.content_size() as usize;
 
     let (meta_pos, meta_header) =
-        match find_box_in_container(&data, udta_content_start, udta_content_size, META) {
+        match find_box_in_container(data, udta_content_start, udta_content_size, META) {
             Some(x) => x,
-            None => return Ok(Vec::new()),
+            None => return Vec::new(),
         };
 
     let meta_content_start = meta_pos + meta_header.header_size as usize + 4;
     let meta_content_size = meta_header.content_size() as usize - 4;
 
     let (ilst_pos, ilst_header) =
-        match find_box_in_container(&data, meta_content_start, meta_content_size, ILST) {
+        match find_box_in_container(data, meta_content_start, meta_content_size, ILST) {
             Some(x) => x,
-            None => return Ok(Vec::new()),
+            None => return Vec::new(),
         };
 
     let ilst_content_start = ilst_pos + ilst_header.header_size as usize;
@@ -486,7 +491,7 @@ fn read_itunes_freeform_tags(file_path: &Path) -> Result<Vec<FreeformTag>> {
         }
     }
 
-    Ok(tags)
+    tags
 }
 
 /// Read ReplayGain tags from MP4/M4A file
@@ -518,9 +523,18 @@ pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
 /// Read undo tags from MP4/M4A file
 pub fn read_undo_tags(file_path: &Path) -> Result<UndoTags> {
     let freeform_tags = read_itunes_freeform_tags(file_path)?;
-    let mut tags = UndoTags::default();
+    Ok(undo_tags_from_freeform(&freeform_tags))
+}
 
-    for tag in &freeform_tags {
+/// Slice-based variant of `read_undo_tags`.
+pub(crate) fn read_undo_tags_from_data(data: &[u8]) -> UndoTags {
+    let freeform_tags = read_itunes_freeform_tags_from_data(data);
+    undo_tags_from_freeform(&freeform_tags)
+}
+
+fn undo_tags_from_freeform(freeform_tags: &[FreeformTag]) -> UndoTags {
+    let mut tags = UndoTags::default();
+    for tag in freeform_tags {
         match tag.name() {
             x if x.eq_ignore_ascii_case(UNDO_TAG) => {
                 tags.undo = Some(tag.value().to_string());
@@ -531,8 +545,7 @@ pub fn read_undo_tags(file_path: &Path) -> Result<UndoTags> {
             _ => {}
         }
     }
-
-    Ok(tags)
+    tags
 }
 
 /// Write undo tags to MP4/M4A file.
@@ -558,7 +571,7 @@ pub fn write_replaygain_tags(file_path: &Path, tags: &ReplayGainTags) -> Result<
 
 /// Atomic write: write to a temp file then rename over the original.
 /// Falls back to direct write if rename fails (e.g., cross-filesystem).
-fn atomic_write(file_path: &Path, data: &[u8]) -> Result<()> {
+pub(crate) fn atomic_write(file_path: &Path, data: &[u8]) -> Result<()> {
     let parent = file_path.parent().unwrap_or(Path::new("."));
     let temp_path = parent.join(format!(".mp3rgain_temp_{}.m4a", std::process::id()));
 
@@ -582,7 +595,7 @@ fn update_mp4_metadata(data: &[u8], tags: &ReplayGainTags) -> Result<Vec<u8>> {
 }
 
 /// Update MP4 metadata with new undo tags
-fn update_mp4_undo_metadata(data: &[u8], tags: &UndoTags) -> Result<Vec<u8>> {
+pub(crate) fn update_mp4_undo_metadata(data: &[u8], tags: &UndoTags) -> Result<Vec<u8>> {
     let make_ilst = |existing: &[u8]| create_ilst_box_undo(tags, existing);
     rebuild_mp4_with_ilst(data, make_ilst)
 }

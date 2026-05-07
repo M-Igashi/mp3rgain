@@ -139,15 +139,34 @@ impl GainOptions {
     ///
     /// Returns the number of frames modified.
     pub fn apply(&self, file_path: &Path) -> Result<usize> {
+        self.apply_to_path(file_path, file_path)
+    }
+
+    /// Apply the configured gain adjustment, reading from `read_from` and writing
+    /// to `write_to`. When the two paths are the same, this is equivalent to
+    /// [`apply`].
+    ///
+    /// Used by the `--temp-file` (`-t`) path so that the modified audio is written
+    /// directly to the temp file without an intermediate full-file copy of the
+    /// original (issue #135).
+    pub fn apply_to_path(&self, read_from: &Path, write_to: &Path) -> Result<usize> {
+        let same_path = read_from == write_to;
+
         if self.steps == 0 {
+            if !same_path {
+                fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
+            }
             return Ok(0);
         }
 
         if let Some(channel) = self.channel {
+            if !same_path {
+                fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
+            }
             if self.undo {
-                apply_gain_channel_with_undo(file_path, channel, self.steps)
+                apply_gain_channel_with_undo(write_to, channel, self.steps)
             } else {
-                apply_gain_channel_impl(file_path, channel, self.steps)
+                apply_gain_channel_impl(write_to, channel, self.steps)
             }
         } else if self.undo {
             let mode = if self.wrap {
@@ -155,14 +174,14 @@ impl GainOptions {
             } else {
                 GainMode::Saturating
             };
-            apply_gain_with_undo_impl(file_path, self.steps, mode)
+            apply_gain_with_undo_impl_to_path(read_from, write_to, self.steps, mode)
         } else {
             let mode = if self.wrap {
                 GainMode::Wrapping
             } else {
                 GainMode::Saturating
             };
-            apply_gain_simple(file_path, self.steps, mode)
+            apply_gain_simple_to_path(read_from, write_to, self.steps, mode)
         }
     }
 }
@@ -229,22 +248,33 @@ pub fn steps_to_db(steps: i32) -> f64 {
 // Internal implementation functions
 // =============================================================================
 
-/// Simple gain application (no undo tag)
-fn apply_gain_simple(file_path: &Path, gain_steps: i32, mode: GainMode) -> Result<usize> {
-    let mut data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+/// Simple gain application (no undo tag).
+/// Reads from `read_from` and writes the modified bytes to `write_to`.
+fn apply_gain_simple_to_path(
+    read_from: &Path,
+    write_to: &Path,
+    gain_steps: i32,
+    mode: GainMode,
+) -> Result<usize> {
+    let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
 
     let modified_frames = apply_gain_to_data(&mut data, gain_steps, mode);
 
-    fs::write(file_path, &data).map_err(|e| Error::io_write(file_path, e))?;
+    fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
 
     Ok(modified_frames)
 }
 
-/// Apply gain with undo tag support (unified for both saturating and wrapping)
-fn apply_gain_with_undo_impl(file_path: &Path, gain_steps: i32, mode: GainMode) -> Result<usize> {
-    let analysis = analyze(file_path)?;
+/// Apply gain with APEv2 undo tag support (unified for both saturating and wrapping).
+fn apply_gain_with_undo_impl_to_path(
+    read_from: &Path,
+    write_to: &Path,
+    gain_steps: i32,
+    mode: GainMode,
+) -> Result<usize> {
+    let analysis = analyze(read_from)?;
 
-    let mut tag = read_ape_tag_from_file(file_path)?.unwrap_or_else(ApeTag::new);
+    let mut tag = read_ape_tag_from_file(read_from)?.unwrap_or_else(ApeTag::new);
 
     let existing_undo = tag.get_undo_gain().unwrap_or(0);
     let new_undo = existing_undo + gain_steps;
@@ -255,9 +285,9 @@ fn apply_gain_with_undo_impl(file_path: &Path, gain_steps: i32, mode: GainMode) 
         tag.set_minmax(analysis.min_gain(), analysis.max_gain());
     }
 
-    let frames = apply_gain_simple(file_path, gain_steps, mode)?;
+    let frames = apply_gain_simple_to_path(read_from, write_to, gain_steps, mode)?;
 
-    write_ape_tag(file_path, &tag)?;
+    write_ape_tag(write_to, &tag)?;
 
     Ok(frames)
 }
