@@ -1,0 +1,76 @@
+name: PPA FTP Probe (diagnostic)
+
+# One-off diagnostic to verify whether FTP upload to ppa.launchpad.net
+# actually works from a GitHub Actions runner.
+#
+# Background: a Launchpad team member said FTP uploads are not deprecated
+# (Reddit r/Ubuntu, 2026-05). Locally (from a residential network) FTP
+# STOR succeeds. This probe re-tests from a GHA runner so we can decide
+# whether to revert the SFTP migration or keep it.
+#
+# Safe to run: uses only anonymous FTP, uploads a 50-byte text file to
+# ~m-igashi/ubuntu/ (orphan files without a matching .changes are
+# automatically discarded by Launchpad's upload daemon).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Show runner egress IP
+        run: |
+          echo "Runner public IP:"
+          curl -sS https://api.ipify.org || true
+          echo
+
+      - name: Resolve ppa.launchpad.net
+        run: |
+          echo "=== A records ==="
+          getent ahostsv4 ppa.launchpad.net | awk '{print $1}' | sort -u
+          echo "=== AAAA records ==="
+          getent ahostsv6 ppa.launchpad.net | awk '{print $1}' | sort -u
+
+      - name: TCP reachability check (port 21)
+        run: |
+          set +e
+          timeout 10 bash -c '</dev/tcp/ppa.launchpad.net/21'
+          rc=$?
+          if [ $rc -eq 0 ]; then
+            echo "TCP/21 OK"
+          else
+            echo "TCP/21 FAIL (exit=$rc)"
+          fi
+
+      - name: FTP login + PWD (control channel only)
+        run: |
+          set +e
+          curl -v --connect-timeout 30 --max-time 60 \
+            ftp://ppa.launchpad.net/ 2>&1 | sed -n '1,40p'
+          echo "curl exit: $?"
+
+      - name: FTP STOR (upload a 50-byte probe file)
+        run: |
+          set +e
+          STAMP="ftp-probe-$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_RUN_ID}.txt"
+          echo "probe from gha runner $(date -u)" > "/tmp/${STAMP}"
+          ls -la "/tmp/${STAMP}"
+          echo
+          echo "Uploading as: ${STAMP}"
+          curl -v --connect-timeout 30 --max-time 120 \
+            --ftp-pasv \
+            -T "/tmp/${STAMP}" \
+            "ftp://ppa.launchpad.net/~m-igashi/ubuntu/" 2>&1 | tail -50
+          echo "curl exit: $?"
+
+      - name: HTTPS sanity check (expected to fail with cert mismatch)
+        run: |
+          set +e
+          curl -v --connect-timeout 30 --max-time 30 \
+            https://ppa.launchpad.net/ 2>&1 | sed -n '1,30p'
+          echo "curl exit: $?"
