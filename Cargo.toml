@@ -37,6 +37,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "mp3rgain"
 path = "src/main.rs"
+required-features = ["replaygain", "aac"]
 
 [profile.release]
 lto = "thin"
