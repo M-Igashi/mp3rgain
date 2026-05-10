@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::*;
 use indicatif::ProgressBar;
 use mp3rgain::replaygain;
-use mp3rgain::{analyze, db_to_steps, find_max_amplitude, mp4meta, peak_to_pcm_sample};
+use mp3rgain::{analyze, db_to_steps, mp4meta, peak_to_pcm_sample};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -43,10 +43,12 @@ fn process_info_into(
 
         match rg_result {
             Ok(rg_result) => {
-                // Get max amplitude info
-                let (max_amp, max_gain, min_gain) = find_max_amplitude(file)
-                    .map(|r| (r.max_amplitude(), r.max_global_gain(), r.min_global_gain()))
-                    .unwrap_or((1.0, 255, 0));
+                // Reuse the ReplayGain peak instead of re-decoding the audio
+                // via find_max_amplitude (issue #135).
+                let max_amp = rg_result.peak();
+                let (max_gain, min_gain) = analyze(file)
+                    .map(|info| (info.max_gain(), info.min_gain()))
+                    .unwrap_or((255, 0));
 
                 // Calculate gain with modifier (mp3gain compatible: -d modifies suggested gain)
                 let gain_db = rg_result.gain_db() + opts.gain_modifier_db;

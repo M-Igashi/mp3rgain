@@ -768,8 +768,8 @@ impl LoudnessHistogram {
 
     /// Accumulate another histogram into this one (for album gain calculation)
     fn accumulate(&mut self, other: &LoudnessHistogram) {
-        for (i, &count) in other.data.iter().enumerate() {
-            self.data[i] += count;
+        for (a, &b) in self.data.iter_mut().zip(other.data.iter()) {
+            *a += b;
         }
     }
 
@@ -823,9 +823,9 @@ impl ReplayGainAnalyzer {
         }
     }
 
-    /// Get a reference to the histogram for accumulation
-    fn get_histogram(&self) -> &LoudnessHistogram {
-        &self.histogram
+    /// Take ownership of the histogram, consuming the analyzer.
+    fn into_histogram(self) -> LoudnessHistogram {
+        self.histogram
     }
 
     /// Add a stereo sample pair (already filtered)
@@ -1094,7 +1094,7 @@ fn analyze_track_internal(
 
     Ok(TrackAnalysisInternal {
         result,
-        histogram: analyzer.get_histogram().clone(),
+        histogram: analyzer.into_histogram(),
     })
 }
 
