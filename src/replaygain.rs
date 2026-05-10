@@ -1423,42 +1423,58 @@ where
 {
     use rayon::prelude::*;
 
-    // par_iter().collect() preserves input order, which keeps album_peak
-    // / album_histogram folding deterministic and matches the serial path
-    // bit-for-bit.
-    let internals: Vec<Result<TrackAnalysisInternal>> = files
-        .par_iter()
-        .enumerate()
-        .map(|(i, file)| {
-            let r = analyze_track_internal(file, track_index, None);
-            if let Some(cb) = on_complete {
-                cb(i, file);
-            }
-            r
-        })
-        .collect();
-
-    let mut track_results = Vec::with_capacity(internals.len());
+    let mut track_results = Vec::with_capacity(files.len());
     let mut album_peak: f64 = 0.0;
     let mut album_histogram = LoudnessHistogram::new();
     let mut failures: Vec<(usize, String)> = Vec::new();
-    let mut successful_indices: Vec<usize> = Vec::with_capacity(internals.len());
+    let mut successful_indices: Vec<usize> = Vec::with_capacity(files.len());
 
-    for (i, internal) in internals.into_iter().enumerate() {
-        match internal {
-            Ok(internal) => {
-                album_peak = album_peak.max(internal.result.peak);
-                album_histogram.accumulate(&internal.histogram);
-                track_results.push(internal.result);
-                successful_indices.push(i);
-            }
-            Err(e) => {
-                if skip_errors {
-                    failures.push((i, format!("{}", e)));
-                } else {
-                    return Err(e);
+    // par_iter().collect() preserves input order, which keeps album_peak
+    // / album_histogram folding deterministic and matches the serial path
+    // bit-for-bit. Strict mode short-circuits at the first error; lenient
+    // collects all outcomes so failures can be reported alongside successes.
+    if skip_errors {
+        let internals: Vec<Result<TrackAnalysisInternal>> = files
+            .par_iter()
+            .enumerate()
+            .map(|(i, file)| {
+                let r = analyze_track_internal(file, track_index, None);
+                if let Some(cb) = on_complete {
+                    cb(i, file);
                 }
+                r
+            })
+            .collect();
+        for (i, r) in internals.into_iter().enumerate() {
+            match r {
+                Ok(internal) => {
+                    album_peak = album_peak.max(internal.result.peak);
+                    album_histogram.accumulate(&internal.histogram);
+                    track_results.push(internal.result);
+                    successful_indices.push(i);
+                }
+                Err(e) => failures.push((i, format!("{}", e))),
             }
+        }
+    } else {
+        // collect::<Result<Vec<_>>>() short-circuits at the first error,
+        // matching the serial path's fail-fast behavior.
+        let internals: Vec<TrackAnalysisInternal> = files
+            .par_iter()
+            .enumerate()
+            .map(|(i, file)| {
+                let r = analyze_track_internal(file, track_index, None);
+                if let Some(cb) = on_complete {
+                    cb(i, file);
+                }
+                r
+            })
+            .collect::<Result<Vec<_>>>()?;
+        for (i, internal) in internals.into_iter().enumerate() {
+            album_peak = album_peak.max(internal.result.peak);
+            album_histogram.accumulate(&internal.histogram);
+            track_results.push(internal.result);
+            successful_indices.push(i);
         }
     }
 

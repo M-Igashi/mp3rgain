@@ -1,10 +1,10 @@
 use anyhow::Result;
 use colored::*;
 use indicatif::MultiProgress;
-use mp3rgain::replaygain::{self, AlbumAnalysisReport, REPLAYGAIN_REFERENCE_DB};
+use mp3rgain::replaygain::{self, AlbumAnalysisReport, AlbumGainResult, REPLAYGAIN_REFERENCE_DB};
 use rayon::prelude::*;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::cli::options::{AacAlbumInfo, Options, OutputFormat};
 use crate::commands::threading::effective_threads;
@@ -26,6 +26,25 @@ fn require_replaygain_feature() {
         );
         eprintln!("  Install with: cargo install mp3rgain --features replaygain");
         std::process::exit(1);
+    }
+}
+
+/// Wrap a strict `AlbumGainResult` in the lenient report shape so the rest of
+/// `cmd_album_gain` can handle both paths uniformly.
+fn lift_strict(album: AlbumGainResult, file_count: usize) -> AlbumAnalysisReport {
+    AlbumAnalysisReport {
+        album,
+        failures: Vec::new(),
+        successful_indices: (0..file_count).collect(),
+    }
+}
+
+fn failure_json_result(file: &Path, msg: Option<String>) -> JsonFileResult {
+    JsonFileResult {
+        file: file.display().to_string(),
+        status: Some(FileStatus::Error),
+        error: msg,
+        ..Default::default()
     }
 }
 
@@ -166,7 +185,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         println!("  {} Analyzing tracks...", "->".cyan());
     }
 
-    let file_refs: Vec<&std::path::Path> = files.iter().map(|p| p.as_path()).collect();
+    let file_refs: Vec<&Path> = files.iter().map(|p| p.as_path()).collect();
 
     let threads = effective_threads(opts);
     let parallel = threads > 1 && files.len() > 1;
@@ -174,91 +193,66 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     let show_progress = !opts.quiet && opts.output_format == OutputFormat::Text;
     let mp = MultiProgress::new();
 
-    let album_analysis: mp3rgain::error::Result<AlbumAnalysisReport> = if opts.skip_errors {
-        if show_progress && !parallel {
-            let analysis_pb = create_album_progress_pb_in(&mp, files.len(), false);
-            let file_names: Vec<&str> = files.iter().map(|f| get_filename(f)).collect();
-            let result = replaygain::analyze_album_lenient_with_progress(
-                &file_refs,
-                opts.track_index,
-                &|file_idx, bytes, total| {
-                    analysis_pb.set_length(total);
-                    analysis_pb.set_position(bytes);
-                    analysis_pb.set_message(format!(
-                        "({}/{}) {}",
-                        file_idx + 1,
-                        files.len(),
-                        file_names[file_idx]
-                    ));
-                },
-            );
-            analysis_pb.finish_and_clear();
-            result
-        } else if show_progress && parallel {
-            let analysis_pb = create_album_progress_pb_in(&mp, files.len(), true);
-            let pb_ref = &analysis_pb;
-            let result = replaygain::analyze_album_lenient_parallel_with_completion(
-                &file_refs,
-                opts.track_index,
-                threads,
-                &|completed_idx, _path| {
-                    pb_ref.set_position((completed_idx + 1) as u64);
-                },
-            );
-            analysis_pb.finish_and_clear();
-            result
-        } else if parallel {
-            replaygain::analyze_album_lenient_parallel(&file_refs, opts.track_index, threads)
-        } else {
-            replaygain::analyze_album_lenient_with_index(&file_refs, opts.track_index)
-        }
+    // One progress bar shared between strict/lenient and serial/parallel paths.
+    // Serial paths drive byte-level progress via `on_progress`; parallel paths
+    // drive file-count progress via `on_complete`.
+    let analysis_pb = if show_progress {
+        Some(create_album_progress_pb_in(&mp, files.len(), parallel))
     } else {
-        let strict = if show_progress && !parallel {
-            let analysis_pb = create_album_progress_pb_in(&mp, files.len(), false);
-            let file_names: Vec<&str> = files.iter().map(|f| get_filename(f)).collect();
-            let result = replaygain::analyze_album_with_progress(
-                &file_refs,
-                opts.track_index,
-                &|file_idx, bytes, total| {
-                    analysis_pb.set_length(total);
-                    analysis_pb.set_position(bytes);
-                    analysis_pb.set_message(format!(
-                        "({}/{}) {}",
-                        file_idx + 1,
-                        files.len(),
-                        file_names[file_idx]
-                    ));
-                },
-            );
-            analysis_pb.finish_and_clear();
-            result
-        } else if show_progress && parallel {
-            let analysis_pb = create_album_progress_pb_in(&mp, files.len(), true);
-            let pb_ref = &analysis_pb;
-            let result = replaygain::analyze_album_parallel_with_completion(
+        None
+    };
+    let file_names: Vec<&str> = files.iter().map(|f| get_filename(f)).collect();
+    let files_len = files.len();
+
+    let pb_for_progress = analysis_pb.clone();
+    let on_progress = move |file_idx: usize, bytes: u64, total: u64| {
+        if let Some(pb) = &pb_for_progress {
+            pb.set_length(total);
+            pb.set_position(bytes);
+            pb.set_message(format!(
+                "({}/{}) {}",
+                file_idx + 1,
+                files_len,
+                file_names[file_idx]
+            ));
+        }
+    };
+    let pb_for_complete = analysis_pb.clone();
+    let on_complete = move |completed_idx: usize, _path: &Path| {
+        if let Some(pb) = &pb_for_complete {
+            pb.set_position((completed_idx + 1) as u64);
+        }
+    };
+
+    let album_analysis: mp3rgain::error::Result<AlbumAnalysisReport> =
+        match (parallel, opts.skip_errors) {
+            (false, false) => {
+                replaygain::analyze_album_with_progress(&file_refs, opts.track_index, &on_progress)
+                    .map(|album| lift_strict(album, files.len()))
+            }
+            (true, false) => replaygain::analyze_album_parallel_with_completion(
                 &file_refs,
                 opts.track_index,
                 threads,
-                &|completed_idx, _path| {
-                    pb_ref.set_position((completed_idx + 1) as u64);
-                },
-            );
-            analysis_pb.finish_and_clear();
-            result
-        } else if parallel {
-            replaygain::analyze_album_parallel(&file_refs, opts.track_index, threads)
-        } else {
-            replaygain::analyze_album_with_index(&file_refs, opts.track_index)
+                &on_complete,
+            )
+            .map(|album| lift_strict(album, files.len())),
+            (false, true) => replaygain::analyze_album_lenient_with_progress(
+                &file_refs,
+                opts.track_index,
+                &on_progress,
+            ),
+            (true, true) => replaygain::analyze_album_lenient_parallel_with_completion(
+                &file_refs,
+                opts.track_index,
+                threads,
+                &on_complete,
+            ),
         };
 
-        // Lift the strict result into the unified report shape so the rest of
-        // this function can handle both paths uniformly.
-        strict.map(|album| AlbumAnalysisReport {
-            album,
-            failures: Vec::new(),
-            successful_indices: (0..files.len()).collect(),
-        })
-    };
+    if let Some(pb) = analysis_pb {
+        pb.finish_and_clear();
+    }
 
     match album_analysis {
         Ok(report) => {
@@ -268,12 +262,18 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 successful_indices,
             } = report;
 
-            // Report skipped files up front (only happens with --skip-errors).
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
-                for (idx, msg) in &failures {
-                    let filename = get_filename(&files[*idx]);
+            // Index failures by file position for O(1) lookup during the
+            // apply phase (only --skip-errors produces non-empty failures).
+            // Walk failures once, reporting skipped files in text mode.
+            let failure_count = failures.len();
+            let mut failure_msgs: Vec<Option<String>> = vec![None; files.len()];
+            let report_skipped = opts.output_format == OutputFormat::Text && !opts.quiet;
+            for (idx, msg) in failures {
+                if report_skipped {
+                    let filename = get_filename(&files[idx]);
                     eprintln!("  {} {} - {} (skipped)", "x".red(), filename, msg);
                 }
+                failure_msgs[idx] = Some(msg);
             }
 
             // Build a mapping from file index -> track-result index. Files that
@@ -339,15 +339,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                                     ..Default::default()
                                 }
                             }
-                            None => JsonFileResult {
-                                file: file.display().to_string(),
-                                status: Some(FileStatus::Error),
-                                error: failures
-                                    .iter()
-                                    .find(|(idx, _)| *idx == i)
-                                    .map(|(_, msg)| msg.clone()),
-                                ..Default::default()
-                            },
+                            None => failure_json_result(file, failure_msgs[i].clone()),
                         })
                         .collect();
 
@@ -357,7 +349,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                         summary: Some(create_json_summary(
                             files.len(),
                             0,
-                            failures.len(),
+                            failure_count,
                             opts.dry_run,
                         )),
                     };
@@ -417,13 +409,12 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                     for (file_idx, result, _) in &collected {
                         by_index[*file_idx] = Some(result.clone());
                     }
-                    for (file_idx, msg) in &failures {
-                        by_index[*file_idx] = Some(JsonFileResult {
-                            file: files[*file_idx].display().to_string(),
-                            status: Some(FileStatus::Error),
-                            error: Some(msg.clone()),
-                            ..Default::default()
-                        });
+                    for (i, slot) in by_index.iter_mut().enumerate() {
+                        if slot.is_none() {
+                            if let Some(msg) = failure_msgs[i].clone() {
+                                *slot = Some(failure_json_result(&files[i], Some(msg)));
+                            }
+                        }
                     }
                     for entry in by_index.into_iter().flatten() {
                         update_counters(&entry, &mut successful, &mut failed);
@@ -433,7 +424,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                     for (_, result, _) in collected {
                         update_counters(&result, &mut successful, &mut failed);
                     }
-                    failed += failures.len();
+                    failed += failure_count;
                 }
             } else {
                 for (i, file) in files.iter().enumerate() {
@@ -455,15 +446,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                             }
                             result
                         }
-                        None => JsonFileResult {
-                            file: file.display().to_string(),
-                            status: Some(FileStatus::Error),
-                            error: failures
-                                .iter()
-                                .find(|(idx, _)| *idx == i)
-                                .map(|(_, msg)| msg.clone()),
-                            ..Default::default()
-                        },
+                        None => failure_json_result(file, failure_msgs[i].clone()),
                     };
                     update_counters(&result, &mut successful, &mut failed);
 
