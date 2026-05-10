@@ -19,6 +19,12 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
             continue;
         }
 
+        if arg == "--skip-errors" {
+            opts.skip_errors = true;
+            i += 1;
+            continue;
+        }
+
         if arg == "--help" {
             print_usage();
             std::process::exit(0);
@@ -608,6 +614,16 @@ mod tests {
     fn invalid_attached_gain_returns_error() {
         let result = parse_args(&args(&["-gabc"]));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn skip_errors_long_flag() {
+        let opts = parse_args(&args(&["--skip-errors", "song.mp3"])).unwrap();
+        assert!(opts.skip_errors);
+        assert_eq!(opts.files.len(), 1);
+
+        let opts = parse_args(&args(&["song.mp3"])).unwrap();
+        assert!(!opts.skip_errors);
     }
 
     #[test]

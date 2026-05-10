@@ -85,6 +85,9 @@ pub enum Error {
     #[error("Failed to parse any AAC samples ({warnings} errors)")]
     AacParseFailure { warnings: u32 },
 
+    #[error("All {count} file(s) failed to analyze")]
+    AllFilesFailed { count: usize },
+
     // ID3v2
     #[error("ID3v2 tag error: {message}")]
     Id3v2Error { message: String },

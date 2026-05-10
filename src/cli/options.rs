@@ -55,6 +55,7 @@ pub struct Options {
     pub wrap_gain: bool,             // -w: wrap gain values
     pub use_temp_file: bool,         // -t: use temp file for writing
     pub assume_mpeg2: bool,          // -f: assume MPEG 2 Layer III
+    pub skip_errors: bool,           // --skip-errors: skip files that fail to analyze
 
     // Parallelism
     // -j N / --threads N. None = auto (available_parallelism). Some(0) = auto. Some(1) = serial.

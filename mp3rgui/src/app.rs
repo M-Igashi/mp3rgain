@@ -166,24 +166,40 @@ impl Mp3rgainApp {
 
         let paths: Vec<&std::path::Path> = self.files.iter().map(|f| f.path.as_path()).collect();
 
-        match replaygain::analyze_album(&paths) {
-            Ok(result) => {
+        // Use the lenient variant so a single bad file does not abort the
+        // whole album scan — the failed file is shown as Error in the table
+        // and the rest is analyzed normally (issue #144).
+        match replaygain::analyze_album_lenient_with_index(&paths, None) {
+            Ok(report) => {
                 let album_gain =
-                    self.target_volume - REPLAYGAIN_REFERENCE_DB + result.album_gain_db();
-                let album_volume = REPLAYGAIN_REFERENCE_DB - result.album_gain_db();
-                let album_clip = Self::would_clip(result.album_peak(), album_gain);
+                    self.target_volume - REPLAYGAIN_REFERENCE_DB + report.album.album_gain_db();
+                let album_volume = REPLAYGAIN_REFERENCE_DB - report.album.album_gain_db();
+                let album_clip = Self::would_clip(report.album.album_peak(), album_gain);
 
-                for (i, file) in self.files.iter_mut().enumerate() {
-                    if let Some(track_result) = result.tracks().get(i) {
-                        Self::populate_track_analysis(file, track_result, self.target_volume);
-                    }
+                for (track_idx, &file_idx) in report.successful_indices.iter().enumerate() {
+                    let track_result = &report.album.tracks()[track_idx];
+                    let file = &mut self.files[file_idx];
+                    Self::populate_track_analysis(file, track_result, self.target_volume);
                     file.album_volume = Some(album_volume);
                     file.album_gain = Some(album_gain);
                     file.album_clip = album_clip;
                     file.status = FileStatus::Analyzed;
                 }
-                self.status_message =
-                    format!("Album analysis complete ({} tracks)", self.files.len());
+
+                for (file_idx, msg) in &report.failures {
+                    self.files[*file_idx].status = FileStatus::Error(msg.clone());
+                }
+
+                let analyzed = report.successful_indices.len();
+                let skipped = report.failures.len();
+                self.status_message = if skipped > 0 {
+                    format!(
+                        "Album analysis complete ({} tracks, {} skipped)",
+                        analyzed, skipped
+                    )
+                } else {
+                    format!("Album analysis complete ({} tracks)", analyzed)
+                };
             }
             Err(e) => {
                 self.status_message = format!("Album analysis failed: {}", e);
