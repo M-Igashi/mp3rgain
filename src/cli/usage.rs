@@ -49,6 +49,8 @@ pub fn print_usage() {
     println!("    -R          Process directories recursively");
     println!("    -n          Dry-run mode (show what would be done)");
     println!("    --dry-run   Same as -n");
+    println!("    --skip-errors  Skip files that fail to analyze instead of");
+    println!("                   aborting (useful for `-a` on large libraries)");
     println!("    -j <n>      Worker threads for analysis (default: auto, 0=auto, 1=serial)");
     println!("    --threads <n>  Same as -j (also honors MP3RGAIN_THREADS env var)");
     println!("    -o <fmt>    Output format: 'text' (default), 'json', or 'tsv'");
@@ -73,6 +75,8 @@ pub fn print_usage() {
     println!("    mp3rgain -w -g 10 song.mp3     Apply gain with wrapping");
     println!("    mp3rgain -t -g 2 song.mp3      Apply gain using temp file");
     println!("    mp3rgain -R /path/to/music     Process directory recursively");
+    println!("    mp3rgain -Rpa --skip-errors /music  Album-scan a library, skipping");
+    println!("                                        files that fail to decode");
     println!("    mp3rgain -n -g 2 *.mp3         Dry-run (preview changes)");
     println!("    mp3rgain -o json song.mp3      Output in JSON format");
     println!("    mp3rgain -o tsv *.mp3          Output in tab-separated format");

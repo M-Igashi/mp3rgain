@@ -181,6 +181,19 @@ impl std::fmt::Display for AlbumGainResult {
     }
 }
 
+/// Report from a "lenient" album analysis that may skip files.
+///
+/// Returned by `analyze_album_lenient_*` family. `album` is computed from the
+/// successfully-analyzed tracks only; `failures` lists `(file_index,
+/// error_message)` pairs in input order; `successful_indices` maps
+/// `album.tracks()[k]` back to `files[successful_indices[k]]`.
+#[derive(Debug, Clone)]
+pub struct AlbumAnalysisReport {
+    pub album: AlbumGainResult,
+    pub failures: Vec<(usize, String)>,
+    pub successful_indices: Vec<usize>,
+}
+
 // =============================================================================
 // Equal-loudness filter coefficients
 // =============================================================================
@@ -1222,7 +1235,7 @@ pub fn analyze_album_with_index(
     files: &[&Path],
     track_index: Option<u32>,
 ) -> Result<AlbumGainResult> {
-    analyze_album_internal(files, track_index, None)
+    Ok(analyze_album_internal(files, track_index, None, false)?.album)
 }
 
 /// Analyze multiple tracks for album gain with progress reporting
@@ -1239,7 +1252,29 @@ pub fn analyze_album_with_progress(
     track_index: Option<u32>,
     on_progress: &dyn Fn(usize, u64, u64),
 ) -> Result<AlbumGainResult> {
-    analyze_album_internal(files, track_index, Some(on_progress))
+    Ok(analyze_album_internal(files, track_index, Some(on_progress), false)?.album)
+}
+
+/// Lenient counterpart of [`analyze_album_with_index`]: files that fail to
+/// analyze are skipped instead of aborting the whole album. Returns an
+/// [`AlbumAnalysisReport`] describing both the album result and the skipped
+/// files. Errors only when every file fails (or argument validation fails).
+#[cfg(feature = "replaygain")]
+pub fn analyze_album_lenient_with_index(
+    files: &[&Path],
+    track_index: Option<u32>,
+) -> Result<AlbumAnalysisReport> {
+    analyze_album_internal(files, track_index, None, true)
+}
+
+/// Lenient counterpart of [`analyze_album_with_progress`].
+#[cfg(feature = "replaygain")]
+pub fn analyze_album_lenient_with_progress(
+    files: &[&Path],
+    track_index: Option<u32>,
+    on_progress: &dyn Fn(usize, u64, u64),
+) -> Result<AlbumAnalysisReport> {
+    analyze_album_internal(files, track_index, Some(on_progress), true)
 }
 
 #[cfg(feature = "replaygain")]
@@ -1247,11 +1282,14 @@ fn analyze_album_internal(
     files: &[&Path],
     track_index: Option<u32>,
     on_progress: Option<&dyn Fn(usize, u64, u64)>,
-) -> Result<AlbumGainResult> {
+    skip_errors: bool,
+) -> Result<AlbumAnalysisReport> {
     let mut track_results = Vec::with_capacity(files.len());
     let mut album_peak: f64 = 0.0;
     // Album histogram accumulates all track histograms (like B[] in original mp3gain)
     let mut album_histogram = LoudnessHistogram::new();
+    let mut failures: Vec<(usize, String)> = Vec::new();
+    let mut successful_indices: Vec<usize> = Vec::with_capacity(files.len());
 
     for (i, file) in files.iter().enumerate() {
         // Create a per-file progress callback that includes the file index
@@ -1259,25 +1297,37 @@ fn analyze_album_internal(
             on_progress.map(|cb| Box::new(move |bytes, total| cb(i, bytes, total)) as _);
 
         // Analyze each track and get histogram
-        let internal = analyze_track_internal(file, track_index, file_progress.as_deref())?;
-        album_peak = album_peak.max(internal.result.peak);
+        match analyze_track_internal(file, track_index, file_progress.as_deref()) {
+            Ok(internal) => {
+                album_peak = album_peak.max(internal.result.peak);
+                album_histogram.accumulate(&internal.histogram);
+                track_results.push(internal.result);
+                successful_indices.push(i);
+            }
+            Err(e) => {
+                if skip_errors {
+                    failures.push((i, format!("{}", e)));
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
 
-        // Accumulate track histogram into album histogram
-        album_histogram.accumulate(&internal.histogram);
-
-        track_results.push(internal.result);
+    if track_results.is_empty() && !files.is_empty() {
+        return Err(Error::AllFilesFailed { count: files.len() });
     }
 
     // Calculate album loudness from combined histogram (95th percentile)
     let album_loudness_db = album_histogram.get_loudness();
     let album_gain_db = PINK_REF - album_loudness_db;
 
-    Ok(AlbumGainResult::new(
-        track_results,
-        album_loudness_db,
-        album_gain_db,
-        album_peak,
-    ))
+    let album = AlbumGainResult::new(track_results, album_loudness_db, album_gain_db, album_peak);
+    Ok(AlbumAnalysisReport {
+        album,
+        failures,
+        successful_indices,
+    })
 }
 
 /// Analyze multiple tracks for album gain in parallel.
@@ -1294,9 +1344,9 @@ pub fn analyze_album_parallel(
     threads: usize,
 ) -> Result<AlbumGainResult> {
     if threads <= 1 || files.len() <= 1 {
-        return analyze_album_internal(files, track_index, None);
+        return Ok(analyze_album_internal(files, track_index, None, false)?.album);
     }
-    analyze_album_parallel_internal::<fn(usize, &Path)>(files, track_index, None)
+    Ok(analyze_album_parallel_internal::<fn(usize, &Path)>(files, track_index, None, false)?.album)
 }
 
 /// Analyze multiple tracks for album gain in parallel, with a per-file
@@ -1317,13 +1367,48 @@ where
 {
     if threads <= 1 || files.len() <= 1 {
         // Serial fallback still drives the completion callback in input order.
-        let result = analyze_album_internal(files, track_index, None)?;
+        let result = analyze_album_internal(files, track_index, None, false)?.album;
         for (i, f) in files.iter().enumerate() {
             on_complete(i, f);
         }
         return Ok(result);
     }
-    analyze_album_parallel_internal(files, track_index, Some(on_complete))
+    Ok(analyze_album_parallel_internal(files, track_index, Some(on_complete), false)?.album)
+}
+
+/// Lenient counterpart of [`analyze_album_parallel`]: files that fail to
+/// analyze are skipped instead of aborting the whole album.
+#[cfg(feature = "replaygain")]
+pub fn analyze_album_lenient_parallel(
+    files: &[&Path],
+    track_index: Option<u32>,
+    threads: usize,
+) -> Result<AlbumAnalysisReport> {
+    if threads <= 1 || files.len() <= 1 {
+        return analyze_album_internal(files, track_index, None, true);
+    }
+    analyze_album_parallel_internal::<fn(usize, &Path)>(files, track_index, None, true)
+}
+
+/// Lenient counterpart of [`analyze_album_parallel_with_completion`].
+#[cfg(feature = "replaygain")]
+pub fn analyze_album_lenient_parallel_with_completion<F>(
+    files: &[&Path],
+    track_index: Option<u32>,
+    threads: usize,
+    on_complete: &F,
+) -> Result<AlbumAnalysisReport>
+where
+    F: Fn(usize, &Path) + Sync,
+{
+    if threads <= 1 || files.len() <= 1 {
+        let report = analyze_album_internal(files, track_index, None, true)?;
+        for (i, f) in files.iter().enumerate() {
+            on_complete(i, f);
+        }
+        return Ok(report);
+    }
+    analyze_album_parallel_internal(files, track_index, Some(on_complete), true)
 }
 
 #[cfg(feature = "replaygain")]
@@ -1331,7 +1416,8 @@ fn analyze_album_parallel_internal<F>(
     files: &[&Path],
     track_index: Option<u32>,
     on_complete: Option<&F>,
-) -> Result<AlbumGainResult>
+    skip_errors: bool,
+) -> Result<AlbumAnalysisReport>
 where
     F: Fn(usize, &Path) + Sync,
 {
@@ -1340,7 +1426,7 @@ where
     // par_iter().collect() preserves input order, which keeps album_peak
     // / album_histogram folding deterministic and matches the serial path
     // bit-for-bit.
-    let internals: Vec<TrackAnalysisInternal> = files
+    let internals: Vec<Result<TrackAnalysisInternal>> = files
         .par_iter()
         .enumerate()
         .map(|(i, file)| {
@@ -1350,27 +1436,45 @@ where
             }
             r
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect();
 
     let mut track_results = Vec::with_capacity(internals.len());
     let mut album_peak: f64 = 0.0;
     let mut album_histogram = LoudnessHistogram::new();
+    let mut failures: Vec<(usize, String)> = Vec::new();
+    let mut successful_indices: Vec<usize> = Vec::with_capacity(internals.len());
 
-    for internal in internals {
-        album_peak = album_peak.max(internal.result.peak);
-        album_histogram.accumulate(&internal.histogram);
-        track_results.push(internal.result);
+    for (i, internal) in internals.into_iter().enumerate() {
+        match internal {
+            Ok(internal) => {
+                album_peak = album_peak.max(internal.result.peak);
+                album_histogram.accumulate(&internal.histogram);
+                track_results.push(internal.result);
+                successful_indices.push(i);
+            }
+            Err(e) => {
+                if skip_errors {
+                    failures.push((i, format!("{}", e)));
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    if track_results.is_empty() && !files.is_empty() {
+        return Err(Error::AllFilesFailed { count: files.len() });
     }
 
     let album_loudness_db = album_histogram.get_loudness();
     let album_gain_db = PINK_REF - album_loudness_db;
 
-    Ok(AlbumGainResult::new(
-        track_results,
-        album_loudness_db,
-        album_gain_db,
-        album_peak,
-    ))
+    let album = AlbumGainResult::new(track_results, album_loudness_db, album_gain_db, album_peak);
+    Ok(AlbumAnalysisReport {
+        album,
+        failures,
+        successful_indices,
+    })
 }
 
 // =============================================================================
@@ -1458,6 +1562,57 @@ pub fn analyze_album_parallel_with_completion<F>(
     _threads: usize,
     _on_complete: &F,
 ) -> Result<AlbumGainResult>
+where
+    F: Fn(usize, &Path) + Sync,
+{
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
+}
+
+#[cfg(not(feature = "replaygain"))]
+pub fn analyze_album_lenient_with_index(
+    _files: &[&Path],
+    _track_index: Option<u32>,
+) -> Result<AlbumAnalysisReport> {
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
+}
+
+#[cfg(not(feature = "replaygain"))]
+pub fn analyze_album_lenient_with_progress(
+    _files: &[&Path],
+    _track_index: Option<u32>,
+    _on_progress: &dyn Fn(usize, u64, u64),
+) -> Result<AlbumAnalysisReport> {
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
+}
+
+#[cfg(not(feature = "replaygain"))]
+pub fn analyze_album_lenient_parallel(
+    _files: &[&Path],
+    _track_index: Option<u32>,
+    _threads: usize,
+) -> Result<AlbumAnalysisReport> {
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
+}
+
+#[cfg(not(feature = "replaygain"))]
+pub fn analyze_album_lenient_parallel_with_completion<F>(
+    _files: &[&Path],
+    _track_index: Option<u32>,
+    _threads: usize,
+    _on_complete: &F,
+) -> Result<AlbumAnalysisReport>
 where
     F: Fn(usize, &Path) + Sync,
 {
@@ -1713,6 +1868,40 @@ mod tests {
             "Loudness should be below 100 dB: {}",
             loudness
         );
+    }
+
+    #[cfg(feature = "replaygain")]
+    #[test]
+    fn lenient_album_skips_failed_files() {
+        // Issue #144: --skip-errors should let album analysis continue when a
+        // single file fails to probe. Mix one good fixture with one bogus path.
+        let good = std::path::PathBuf::from("tests/fixtures/test_stereo.mp3");
+        let bad = std::path::PathBuf::from("tests/fixtures/this-file-does-not-exist.mp3");
+        let files = vec![good.as_path(), bad.as_path()];
+
+        let strict = analyze_album_with_index(&files, None);
+        assert!(
+            strict.is_err(),
+            "strict variant must fail when any file is unreadable"
+        );
+
+        let report =
+            analyze_album_lenient_with_index(&files, None).expect("lenient must skip the bad file");
+        assert_eq!(report.album.tracks().len(), 1);
+        assert_eq!(report.successful_indices, vec![0]);
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(report.failures[0].0, 1);
+    }
+
+    #[cfg(feature = "replaygain")]
+    #[test]
+    fn lenient_album_errors_when_all_fail() {
+        let bad1 = std::path::PathBuf::from("tests/fixtures/missing-1.mp3");
+        let bad2 = std::path::PathBuf::from("tests/fixtures/missing-2.mp3");
+        let files = vec![bad1.as_path(), bad2.as_path()];
+
+        let result = analyze_album_lenient_with_index(&files, None);
+        assert!(matches!(result, Err(Error::AllFilesFailed { count: 2 })));
     }
 
     #[cfg(feature = "replaygain")]
