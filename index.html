@@ -147,7 +147,7 @@
         <tbody></tbody>
       </table>
     </div>
-    <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">Totals aggregate monthly <a href="https://pkgstats.archlinux.de/" style="color:var(--blue)">pkgstats</a> submissions across the collected window. Popularity is computed as total installs / total samples.</p>
+    <p style="color:var(--muted);font-size:0.75rem;margin-top:0.75rem">Totals aggregate monthly <a href="https://pkgstats.archlinux.de/" style="color:var(--blue)">pkgstats</a> submissions across closed months only — the current in-progress month is excluded so per-package totals are comparable. Popularity is computed as total installs / total samples.</p>
   </div>
 
   <div class="section">
@@ -423,15 +423,21 @@ async function main() {
   }
 
   // pkgstats table: one row per package, totalling installs/samples across
-  // every collected month. Falls back to single-row legacy schema for older
-  // snapshots that lack a `series` field.
+  // closed months only. The in-progress current month is excluded so the
+  // per-package totals are comparable (otherwise a package whose API response
+  // happens to include the partial current month gets a distorted sample
+  // base). Falls back to single-row legacy schema for older snapshots that
+  // lack a `series` field.
   const fmtMonth = m => m ? String(m).replace(/^(\d{4})(\d{2})$/, '$1-$2') : '-';
+  const now = new Date();
+  const currentMonth = now.getUTCFullYear() * 100 + (now.getUTCMonth() + 1);
   const pkgTbody = document.querySelector('#table-pkgstats tbody');
   const pkgPackages = (latest.pkgstats || []).filter(p => p.name);
   const pkgRows = pkgPackages.map(p => {
-    const months = Array.isArray(p.series) && p.series.length > 0
+    const allMonths = Array.isArray(p.series) && p.series.length > 0
       ? [...p.series].sort((a, b) => a.month - b.month)
       : [{ month: p.startMonth, count: p.count, samples: p.samples, popularity: p.popularity }];
+    const months = allMonths.filter(m => Number(m.month) !== currentMonth);
     const totalCount = months.reduce((s, m) => s + (m.count || 0), 0);
     const totalSamples = months.reduce((s, m) => s + (m.samples || 0), 0);
     const popularity = totalSamples > 0 ? (totalCount / totalSamples * 100) : 0;
