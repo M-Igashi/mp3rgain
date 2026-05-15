@@ -1059,7 +1059,7 @@ fn analyze_track_internal(
             Err(e) => return Err(Error::Decode(Box::new(e))),
         };
 
-        if packet.track_id() != track_id {
+        if packet.track_id != track_id {
             continue;
         }
 
@@ -1742,7 +1742,7 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
             Err(e) => return Err(Error::Decode(Box::new(e))),
         };
 
-        if packet.track_id() != track_id {
+        if packet.track_id != track_id {
             continue;
         }
 
