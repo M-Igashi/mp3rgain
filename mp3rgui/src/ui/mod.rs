@@ -1,4 +1,5 @@
 mod menu;
+mod options;
 mod status;
 mod table;
 mod toolbar;
@@ -9,6 +10,7 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     handle_dropped_files(app, ctx);
     menu::render(app, ctx);
     toolbar::render(app, ctx);
+    options::render(app, ctx);
     status::render(app, ctx);
     render_central_panel(app, ctx);
 }

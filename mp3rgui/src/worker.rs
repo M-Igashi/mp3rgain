@@ -80,6 +80,31 @@ pub struct ApplyJob {
     pub album_info: Option<AacAlbumInfo>,
 }
 
+/// User-facing apply toggles, captured at the moment the worker is
+/// spawned. Worker combines these with the per-job data to build the
+/// final `ApplyOptions`.
+#[derive(Debug, Clone, Copy)]
+pub struct ApplyOptionsUi {
+    pub prevent_clipping: bool,
+    pub wrap: bool,
+    pub preserve_timestamp: bool,
+    pub use_id3v2: bool,
+}
+
+impl Default for ApplyOptionsUi {
+    fn default() -> Self {
+        // Safe defaults: prevent clipping, keep mtime, no wrap, no
+        // ID3v2-on-MP3 (the existing APE undo path is still the more
+        // widely compatible option).
+        Self {
+            prevent_clipping: true,
+            wrap: false,
+            preserve_timestamp: true,
+            use_id3v2: false,
+        }
+    }
+}
+
 /// Spawn a serial track-analysis worker.
 ///
 /// Files are processed in order; cancel is checked between files.
@@ -241,6 +266,7 @@ pub fn spawn_apply(
     ctx: egui::Context,
     jobs: Vec<ApplyJob>,
     action_label: &'static str,
+    ui_opts: ApplyOptionsUi,
 ) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -257,7 +283,7 @@ pub fn spawn_apply(
             }
             send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
-            let opts = build_apply_options(job.steps, job.track_result, job.album_info);
+            let opts = build_apply_options(job.steps, job.track_result, job.album_info, ui_opts);
             match apply_with_options(&job.path, &opts) {
                 Ok(_) => {
                     applied += 1;
@@ -294,19 +320,27 @@ pub fn spawn_apply(
     WorkerHandle { rx, cancel }
 }
 
-/// GUI defaults: undo + RG tags + atomic temp file + mtime preserve.
+/// Build the final `ApplyOptions` by combining always-on safety rails
+/// (undo, RG tag write, atomic temp file) with the user-toggleable
+/// flags from the Options panel.
 fn build_apply_options(
     steps: i32,
     track_result: Option<ReplayGainResult>,
     album_info: Option<AacAlbumInfo>,
+    ui_opts: ApplyOptionsUi,
 ) -> ApplyOptions {
     let mut opts = ApplyOptions::new(steps);
     opts.track_result = track_result;
     opts.album_info = album_info;
+    // Always-on safety rails.
     opts.write_undo = true;
     opts.write_replaygain_tags = true;
     opts.use_temp_file = true;
-    opts.preserve_timestamp = true;
+    // User-toggleable.
+    opts.prevent_clipping = ui_opts.prevent_clipping;
+    opts.wrap = ui_opts.wrap;
+    opts.preserve_timestamp = ui_opts.preserve_timestamp;
+    opts.use_id3v2 = ui_opts.use_id3v2;
     opts
 }
 

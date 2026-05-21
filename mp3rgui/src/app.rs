@@ -1,4 +1,4 @@
-use crate::worker::{self, ApplyJob, WorkerEvent, WorkerHandle};
+use crate::worker::{self, ApplyJob, ApplyOptionsUi, WorkerEvent, WorkerHandle};
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{db_to_steps, AacAlbumInfo};
 use std::path::{Path, PathBuf};
@@ -66,6 +66,8 @@ pub struct Mp3rgainApp {
     /// Most-recent album analysis. Feeds `replaygain_album_*` tag fields
     /// when `apply_album_gain` runs.
     pub album_info: Option<AacAlbumInfo>,
+    /// User-toggleable apply flags surfaced in the Options panel.
+    pub apply_options: ApplyOptionsUi,
 
     /// Active worker thread + its mpsc receiver and cancel flag.
     /// `None` when nothing is running.
@@ -90,6 +92,7 @@ impl Mp3rgainApp {
             is_processing: false,
             status_message: String::new(),
             album_info: None,
+            apply_options: ApplyOptionsUi::default(),
             worker: None,
             worker_kind: None,
             started_files: 0,
@@ -255,10 +258,11 @@ impl Mp3rgainApp {
             self.files[job_idx].status = FileStatus::Pending;
         }
         let count = jobs.len();
+        let ui_opts = self.apply_options;
         self.begin_worker(
             WorkerKind::TrackApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "track gain"),
+            worker::spawn_apply(ctx.clone(), jobs, "track gain", ui_opts),
         );
     }
 
@@ -292,10 +296,11 @@ impl Mp3rgainApp {
             self.files[job_idx].status = FileStatus::Pending;
         }
         let count = jobs.len();
+        let ui_opts = self.apply_options;
         self.begin_worker(
             WorkerKind::AlbumApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "album gain"),
+            worker::spawn_apply(ctx.clone(), jobs, "album gain", ui_opts),
         );
     }
 
