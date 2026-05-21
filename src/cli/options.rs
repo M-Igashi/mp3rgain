@@ -73,4 +73,11 @@ impl Options {
             ""
         }
     }
+
+    /// Combined `-m` (steps) and `-d` (dB) modifier expressed as mp3 gain steps.
+    /// `-d` is rounded to the nearest 1.5 dB step; sub-step values silently
+    /// round to zero, matching mp3gain's quantized step model.
+    pub fn gain_modifier_steps(&self) -> i32 {
+        self.gain_modifier + mp3rgain::db_to_steps(self.gain_modifier_db)
+    }
 }

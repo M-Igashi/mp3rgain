@@ -388,6 +388,33 @@ mod tests {
     }
 
     #[test]
+    fn gain_modifier_steps_combines_d_and_m() {
+        // -d alone: 3.0 dB rounds to +2 steps (1.5 dB per step)
+        let opts = parse_args(&args(&["-d", "3.0", "song.mp3"])).unwrap();
+        assert_eq!(opts.gain_modifier_steps(), 2);
+
+        // -m alone: untouched
+        let opts = parse_args(&args(&["-m", "3", "song.mp3"])).unwrap();
+        assert_eq!(opts.gain_modifier_steps(), 3);
+
+        // -d + -m: sum
+        let opts = parse_args(&args(&["-d", "3.0", "-m", "1", "song.mp3"])).unwrap();
+        assert_eq!(opts.gain_modifier_steps(), 3);
+
+        // Negative -d
+        let opts = parse_args(&args(&["-d", "-3.0", "song.mp3"])).unwrap();
+        assert_eq!(opts.gain_modifier_steps(), -2);
+
+        // Sub-step -d (0.5 dB < 0.75 dB threshold) rounds to zero
+        let opts = parse_args(&args(&["-d", "0.5", "song.mp3"])).unwrap();
+        assert_eq!(opts.gain_modifier_steps(), 0);
+
+        // No modifiers
+        let opts = parse_args(&args(&["song.mp3"])).unwrap();
+        assert_eq!(opts.gain_modifier_steps(), 0);
+    }
+
+    #[test]
     fn boolean_flags_individual() {
         let opts = parse_args(&args(&[
             "-r", "-p", "-q", "-k", "-c", "-w", "-t", "-R", "-n",

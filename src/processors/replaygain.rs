@@ -55,9 +55,10 @@ fn process_track_gain_into(
 
     match rg_result {
         Ok(result) => {
-            // Apply gain modifier
+            // Apply gain modifier (-m steps + -d dB, combined into steps)
             let base_steps = result.gain_steps();
-            let modified_steps = base_steps + opts.gain_modifier;
+            let modifier_steps = opts.gain_modifier_steps();
+            let modified_steps = base_steps + modifier_steps;
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 writeln!(
@@ -66,8 +67,8 @@ fn process_track_gain_into(
                     result.loudness_db(),
                     result.gain_db(),
                     base_steps,
-                    if opts.gain_modifier != 0 {
-                        format!(" + {} = {}", opts.gain_modifier, modified_steps)
+                    if modifier_steps != 0 {
+                        format!(" + {} = {}", modifier_steps, modified_steps)
                     } else {
                         String::new()
                     },

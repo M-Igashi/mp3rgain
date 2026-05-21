@@ -2,6 +2,7 @@ use anyhow::Result;
 use colored::*;
 use indicatif::MultiProgress;
 use mp3rgain::replaygain::{self, AlbumAnalysisReport, AlbumGainResult, REPLAYGAIN_REFERENCE_DB};
+use mp3rgain::steps_to_db;
 use rayon::prelude::*;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -17,6 +18,21 @@ use crate::progress::{
     progress_set_message,
 };
 use crate::util::get_filename;
+
+fn print_target_with_modifier(opts: &Options) {
+    let modifier_steps = opts.gain_modifier_steps();
+    if modifier_steps != 0 {
+        let modifier_db = steps_to_db(modifier_steps);
+        println!(
+            "  Target: {:.1} dB (ReplayGain {} dB {:+.1} dB modifier)",
+            REPLAYGAIN_REFERENCE_DB + modifier_db,
+            REPLAYGAIN_REFERENCE_DB,
+            modifier_db,
+        );
+    } else {
+        println!("  Target: {} dB (ReplayGain 1.0)", REPLAYGAIN_REFERENCE_DB);
+    }
+}
 
 fn require_replaygain_feature() {
     if !replaygain::is_available() {
@@ -65,10 +81,7 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             },
             files.len()
         );
-        println!("  Target: {} dB (ReplayGain 1.0)", REPLAYGAIN_REFERENCE_DB);
-        if opts.gain_modifier != 0 {
-            println!("  Gain modifier: {:+} steps", opts.gain_modifier);
-        }
+        print_target_with_modifier(opts);
         println!();
     }
 
@@ -173,10 +186,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             "mp3rgain".green().bold(),
             files.len()
         );
-        println!("  Target: {} dB (ReplayGain 1.0)", REPLAYGAIN_REFERENCE_DB);
-        if opts.gain_modifier != 0 {
-            println!("  Gain modifier: {:+} steps", opts.gain_modifier);
-        }
+        print_target_with_modifier(opts);
         println!();
     }
 
@@ -283,8 +293,9 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 file_to_track[*file_idx] = Some(track_idx);
             }
 
-            // Apply gain modifier
-            let modified_gain_steps = album_result.album_gain_steps() + opts.gain_modifier;
+            // Apply gain modifier (-m steps + -d dB, combined into steps)
+            let modifier_steps = opts.gain_modifier_steps();
+            let modified_gain_steps = album_result.album_gain_steps() + modifier_steps;
 
             let json_album = JsonAlbumResult {
                 loudness_db: album_result.album_loudness_db(),
@@ -308,8 +319,8 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                     "  Album gain:     {:+.1} dB ({} steps{})",
                     album_result.album_gain_db(),
                     album_result.album_gain_steps(),
-                    if opts.gain_modifier != 0 {
-                        format!(" + {} = {}", opts.gain_modifier, modified_gain_steps)
+                    if modifier_steps != 0 {
+                        format!(" + {} = {}", modifier_steps, modified_gain_steps)
                     } else {
                         String::new()
                     }
