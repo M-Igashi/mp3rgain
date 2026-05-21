@@ -12,7 +12,7 @@ use crate::json_output::{FileStatus, JsonFileResult};
 use crate::progress::update_analysis_progress;
 use crate::util::get_filename;
 
-use super::utils::warn_aac_multi_track;
+use super::utils::{restore_timestamp, save_original_mtime, warn_aac_multi_track};
 
 pub fn process_track_gain(
     file: &Path,
@@ -372,12 +372,18 @@ fn apply_replaygain_aac_with_album_into(
 
     warn_aac_multi_track(file, filename, opts, "");
 
+    // mtime must be restored AFTER the ReplayGain tag write, not after the
+    // apply step alone — otherwise `mp4meta::write_replaygain_tags` below
+    // bumps the timestamp again. So we keep mtime handling on this side
+    // and tell apply_with_options to leave it alone.
+    let original_mtime = save_original_mtime(file, opts);
+
     let mut apply_opts = ApplyOptions::new(requested_steps);
     apply_opts.track_result = Some(result.clone());
     apply_opts.album_info = album_info.copied();
     apply_opts.prevent_clipping = opts.prevent_clipping;
     apply_opts.wrap = opts.wrap_gain;
-    apply_opts.preserve_timestamp = opts.preserve_timestamp;
+    apply_opts.preserve_timestamp = false;
     apply_opts.use_temp_file = opts.use_temp_file;
     // AAC tag writing is fail-soft, so we drive it ourselves below.
     apply_opts.write_replaygain_tags = false;
@@ -422,6 +428,10 @@ fn apply_replaygain_aac_with_album_into(
 
     match mp4meta::write_replaygain_tags(file, &tags) {
         Ok(()) => {
+            if let Some(mtime) = original_mtime {
+                restore_timestamp(file, mtime);
+            }
+
             let tag_type = if album_info.is_some() {
                 "track+album tags"
             } else {
