@@ -1,7 +1,8 @@
-use mp3rgain::apply::{apply_with_options, ApplyOptions};
+use crate::worker::{self, ApplyJob, WorkerEvent, WorkerHandle};
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{db_to_steps, AacAlbumInfo};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::TryRecvError;
 
 #[derive(Default, Clone, PartialEq)]
 pub enum FileStatus {
@@ -40,9 +41,19 @@ pub struct FileEntry {
     pub album_clip: bool,
     pub status: FileStatus,
     /// Cached per-track ReplayGain analysis. Required by `apply_with_options`
-    /// to drive the peak-based clipping check and to write ReplayGain tags
-    /// (`replaygain_track_gain` / `replaygain_track_peak`) on apply.
+    /// for the peak-based clipping check and for writing
+    /// `replaygain_track_*` tags on apply.
     pub track_result: Option<ReplayGainResult>,
+}
+
+/// What kind of work the active worker is doing — drives messaging and
+/// final-event handling.
+#[derive(Clone, Copy, PartialEq)]
+enum WorkerKind {
+    TrackAnalysis,
+    AlbumAnalysis,
+    TrackApply,
+    AlbumApply,
 }
 
 pub struct Mp3rgainApp {
@@ -52,9 +63,21 @@ pub struct Mp3rgainApp {
     pub total_progress: f32,
     pub is_processing: bool,
     pub status_message: String,
-    /// Most-recent album analysis. Feeds the `replaygain_album_*` tag fields
+    /// Most-recent album analysis. Feeds `replaygain_album_*` tag fields
     /// when `apply_album_gain` runs.
     pub album_info: Option<AacAlbumInfo>,
+
+    /// Active worker thread + its mpsc receiver and cancel flag.
+    /// `None` when nothing is running.
+    worker: Option<WorkerHandle>,
+    /// What kind of work the active worker is doing.
+    worker_kind: Option<WorkerKind>,
+    /// Counter incremented as worker emits `FileStart` events — drives the
+    /// progress bar without needing to know the total in advance.
+    started_files: usize,
+    /// Total files the worker was launched against (denominator for the
+    /// progress bar).
+    total_files_in_job: usize,
 }
 
 impl Mp3rgainApp {
@@ -67,10 +90,17 @@ impl Mp3rgainApp {
             is_processing: false,
             status_message: String::new(),
             album_info: None,
+            worker: None,
+            worker_kind: None,
+            started_files: 0,
+            total_files_in_job: 0,
         }
     }
 
     pub fn add_files(&mut self, paths: Vec<PathBuf>) {
+        if self.is_processing {
+            return;
+        }
         let mut added = 0;
         let mut skipped = 0;
 
@@ -106,11 +136,17 @@ impl Mp3rgainApp {
     }
 
     pub fn add_folder(&mut self, folder: PathBuf, recursive: bool) {
+        if self.is_processing {
+            return;
+        }
         let paths_to_add = mp3rgain::collect_audio_files(&folder, recursive).unwrap_or_default();
         self.add_files(paths_to_add);
     }
 
     pub fn remove_selected(&mut self) {
+        if self.is_processing {
+            return;
+        }
         let mut indices = self.selected_indices.clone();
         indices.sort_unstable();
         for &idx in indices.iter().rev() {
@@ -122,115 +158,276 @@ impl Mp3rgainApp {
     }
 
     pub fn clear_files(&mut self) {
+        if self.is_processing {
+            return;
+        }
         self.files.clear();
         self.selected_indices.clear();
         self.album_info = None;
     }
 
-    pub fn analyze_tracks(&mut self) {
-        if self.files.is_empty() || !replaygain::is_available() {
-            if !replaygain::is_available() {
-                self.status_message = "ReplayGain feature not available".to_string();
-            }
-            return;
+    pub fn cancel_current_work(&mut self) {
+        if let Some(worker) = self.worker.as_ref() {
+            worker.request_cancel();
+            self.status_message = "Cancelling...".to_string();
         }
-
-        self.is_processing = true;
-        self.total_progress = 0.0;
-        // Track-only analysis invalidates any previously-computed album info.
-        self.album_info = None;
-
-        let total = self.files.len();
-        let mut analyzed = 0;
-        let mut errors = 0;
-
-        for (i, file) in self.files.iter_mut().enumerate() {
-            file.status = FileStatus::Analyzing;
-            self.total_progress = i as f32 / total as f32;
-
-            match replaygain::analyze_track(&file.path) {
-                Ok(result) => {
-                    Self::populate_track_analysis(file, &result, self.target_volume);
-                    file.track_result = Some(result);
-                    file.status = FileStatus::Analyzed;
-                    analyzed += 1;
-                }
-                Err(e) => {
-                    file.track_result = None;
-                    file.status = FileStatus::Error(e.to_string());
-                    errors += 1;
-                }
-            }
-        }
-
-        self.total_progress = 1.0;
-        self.is_processing = false;
-        self.status_message = Self::format_result_message("Analyzed", analyzed, errors);
     }
 
-    pub fn analyze_album(&mut self) {
-        if self.files.is_empty() || !replaygain::is_available() {
+    pub fn start_analyze_tracks(&mut self, ctx: &egui::Context) {
+        if self.files.is_empty() || self.is_processing || !replaygain::is_available() {
             if !replaygain::is_available() {
                 self.status_message = "ReplayGain feature not available".to_string();
             }
             return;
         }
 
-        self.is_processing = true;
-        self.total_progress = 0.0;
+        // Track-only analysis invalidates any previously-computed album info.
         self.album_info = None;
-
-        let paths: Vec<&std::path::Path> = self.files.iter().map(|f| f.path.as_path()).collect();
-
-        // Use the lenient variant so a single bad file does not abort the
-        // whole album scan — the failed file is shown as Error in the table
-        // and the rest is analyzed normally (issue #144).
-        match replaygain::analyze_album_lenient_with_index(&paths, None) {
-            Ok(report) => {
-                let album_gain =
-                    self.target_volume - REPLAYGAIN_REFERENCE_DB + report.album.album_gain_db();
-                let album_volume = REPLAYGAIN_REFERENCE_DB - report.album.album_gain_db();
-                let album_clip = Self::would_clip(report.album.album_peak(), album_gain);
-
-                for (track_idx, &file_idx) in report.successful_indices.iter().enumerate() {
-                    let track_result = &report.album.tracks()[track_idx];
-                    let file = &mut self.files[file_idx];
-                    Self::populate_track_analysis(file, track_result, self.target_volume);
-                    file.track_result = Some(track_result.clone());
-                    file.album_volume = Some(album_volume);
-                    file.album_gain = Some(album_gain);
-                    file.album_clip = album_clip;
-                    file.status = FileStatus::Analyzed;
-                }
-
-                for (file_idx, msg) in &report.failures {
-                    self.files[*file_idx].track_result = None;
-                    self.files[*file_idx].status = FileStatus::Error(msg.clone());
-                }
-
-                self.album_info = Some(AacAlbumInfo {
-                    album_gain_db: report.album.album_gain_db(),
-                    album_peak: report.album.album_peak(),
-                });
-
-                let analyzed = report.successful_indices.len();
-                let skipped = report.failures.len();
-                self.status_message = if skipped > 0 {
-                    format!(
-                        "Album analysis complete ({} tracks, {} skipped)",
-                        analyzed, skipped
-                    )
-                } else {
-                    format!("Album analysis complete ({} tracks)", analyzed)
-                };
-            }
-            Err(e) => {
-                self.status_message = format!("Album analysis failed: {}", e);
-            }
+        for file in &mut self.files {
+            file.status = FileStatus::Pending;
         }
 
-        self.total_progress = 1.0;
-        self.is_processing = false;
+        let jobs: Vec<(usize, PathBuf)> = self
+            .files
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (i, f.path.clone()))
+            .collect();
+        self.begin_worker(
+            WorkerKind::TrackAnalysis,
+            jobs.len(),
+            worker::spawn_track_analysis(ctx.clone(), jobs),
+        );
+    }
+
+    pub fn start_analyze_album(&mut self, ctx: &egui::Context) {
+        if self.files.is_empty() || self.is_processing || !replaygain::is_available() {
+            if !replaygain::is_available() {
+                self.status_message = "ReplayGain feature not available".to_string();
+            }
+            return;
+        }
+
+        self.album_info = None;
+        for file in &mut self.files {
+            file.status = FileStatus::Pending;
+        }
+
+        let jobs: Vec<(usize, PathBuf)> = self
+            .files
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (i, f.path.clone()))
+            .collect();
+        self.begin_worker(
+            WorkerKind::AlbumAnalysis,
+            jobs.len(),
+            worker::spawn_album_analysis(ctx.clone(), jobs),
+        );
+    }
+
+    pub fn start_apply_track_gain(&mut self, ctx: &egui::Context) {
+        if self.files.is_empty() || self.is_processing {
+            return;
+        }
+
+        let jobs: Vec<ApplyJob> = self
+            .files
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, f)| {
+                f.track_gain.map(|gain_db| ApplyJob {
+                    idx,
+                    path: f.path.clone(),
+                    steps: db_to_steps(gain_db),
+                    track_result: f.track_result.clone(),
+                    album_info: None,
+                })
+            })
+            .collect();
+
+        if jobs.is_empty() {
+            self.status_message = "No track gain values — run Track Analysis first".to_string();
+            return;
+        }
+
+        for &job_idx in jobs.iter().map(|j| &j.idx) {
+            self.files[job_idx].status = FileStatus::Pending;
+        }
+        let count = jobs.len();
+        self.begin_worker(
+            WorkerKind::TrackApply,
+            count,
+            worker::spawn_apply(ctx.clone(), jobs, "track gain"),
+        );
+    }
+
+    pub fn start_apply_album_gain(&mut self, ctx: &egui::Context) {
+        if self.files.is_empty() || self.is_processing {
+            return;
+        }
+
+        let album_info = self.album_info;
+        let jobs: Vec<ApplyJob> = self
+            .files
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, f)| {
+                f.album_gain.map(|gain_db| ApplyJob {
+                    idx,
+                    path: f.path.clone(),
+                    steps: db_to_steps(gain_db),
+                    track_result: f.track_result.clone(),
+                    album_info,
+                })
+            })
+            .collect();
+
+        if jobs.is_empty() {
+            self.status_message = "No album gain values — run Album Analysis first".to_string();
+            return;
+        }
+
+        for &job_idx in jobs.iter().map(|j| &j.idx) {
+            self.files[job_idx].status = FileStatus::Pending;
+        }
+        let count = jobs.len();
+        self.begin_worker(
+            WorkerKind::AlbumApply,
+            count,
+            worker::spawn_apply(ctx.clone(), jobs, "album gain"),
+        );
+    }
+
+    fn begin_worker(&mut self, kind: WorkerKind, total: usize, handle: WorkerHandle) {
+        self.worker = Some(handle);
+        self.worker_kind = Some(kind);
+        self.is_processing = true;
+        self.total_progress = 0.0;
+        self.status_message = match kind {
+            WorkerKind::TrackAnalysis => "Analyzing tracks...".to_string(),
+            WorkerKind::AlbumAnalysis => "Analyzing album...".to_string(),
+            WorkerKind::TrackApply => "Applying track gain...".to_string(),
+            WorkerKind::AlbumApply => "Applying album gain...".to_string(),
+        };
+        self.started_files = 0;
+        self.total_files_in_job = total;
+    }
+
+    /// Drain pending worker events into UI state. Called from `update()`.
+    pub fn pump_worker_events(&mut self) {
+        // Drain into a local Vec first so we can hand `&mut self` to
+        // `apply_event` without conflicting with the receiver borrow.
+        let mut events = Vec::new();
+        let mut worker_finished = false;
+        if let Some(worker) = self.worker.as_ref() {
+            loop {
+                match worker.rx.try_recv() {
+                    Ok(event) => events.push(event),
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        worker_finished = true;
+                        break;
+                    }
+                }
+            }
+        }
+        for event in events {
+            self.apply_event(event);
+        }
+        if worker_finished {
+            self.worker = None;
+            self.worker_kind = None;
+            self.is_processing = false;
+        }
+    }
+
+    fn apply_event(&mut self, event: WorkerEvent) {
+        match event {
+            WorkerEvent::FileStart { idx } => {
+                if let Some(file) = self.files.get_mut(idx) {
+                    file.status = match self.worker_kind {
+                        Some(WorkerKind::TrackApply) | Some(WorkerKind::AlbumApply) => {
+                            FileStatus::Applying
+                        }
+                        _ => FileStatus::Analyzing,
+                    };
+                }
+                self.started_files = self.started_files.saturating_add(1);
+                self.bump_progress();
+            }
+            WorkerEvent::TrackAnalyzed { idx, result } => {
+                let target = self.target_volume;
+                if let Some(file) = self.files.get_mut(idx) {
+                    Self::populate_track_analysis(file, &result, target);
+                    file.track_result = Some(result);
+                    file.status = FileStatus::Analyzed;
+                }
+            }
+            WorkerEvent::TrackAnalysisFailed { idx, message } => {
+                if let Some(file) = self.files.get_mut(idx) {
+                    file.track_result = None;
+                    file.status = FileStatus::Error(message);
+                }
+            }
+            WorkerEvent::AlbumAnalysisDone {
+                successful,
+                failures,
+                album_info,
+            } => {
+                let target = self.target_volume;
+                let album_gain = target - REPLAYGAIN_REFERENCE_DB + album_info.album_gain_db;
+                let album_volume = REPLAYGAIN_REFERENCE_DB - album_info.album_gain_db;
+                let album_clip = Self::would_clip(album_info.album_peak, album_gain);
+
+                for (idx, track_result) in successful {
+                    if let Some(file) = self.files.get_mut(idx) {
+                        Self::populate_track_analysis(file, &track_result, target);
+                        file.track_result = Some(track_result);
+                        file.album_volume = Some(album_volume);
+                        file.album_gain = Some(album_gain);
+                        file.album_clip = album_clip;
+                        file.status = FileStatus::Analyzed;
+                    }
+                }
+                for (idx, msg) in failures {
+                    if let Some(file) = self.files.get_mut(idx) {
+                        file.track_result = None;
+                        file.status = FileStatus::Error(msg);
+                    }
+                }
+
+                self.album_info = Some(album_info);
+            }
+            WorkerEvent::AlbumAnalysisFailed(msg) => {
+                self.status_message = format!("Album analysis failed: {}", msg);
+            }
+            WorkerEvent::FileApplied { idx } => {
+                if let Some(file) = self.files.get_mut(idx) {
+                    file.status = FileStatus::Done;
+                }
+            }
+            WorkerEvent::FileApplyFailed { idx, message } => {
+                if let Some(file) = self.files.get_mut(idx) {
+                    file.status = FileStatus::Error(message);
+                }
+            }
+            WorkerEvent::Cancelled => {
+                self.status_message = "Cancelled".to_string();
+                self.total_progress = 0.0;
+            }
+            WorkerEvent::Done { message } => {
+                self.status_message = message;
+                self.total_progress = 1.0;
+            }
+        }
+    }
+
+    fn bump_progress(&mut self) {
+        if self.total_files_in_job == 0 {
+            return;
+        }
+        self.total_progress = (self.started_files as f32) / (self.total_files_in_job as f32);
     }
 
     /// Populate a file entry with track-level analysis results.
@@ -247,122 +444,15 @@ impl Mp3rgainApp {
         file.track_clip = Self::would_clip(result.peak(), gain);
     }
 
-    fn format_result_message(action: &str, count: usize, errors: usize) -> String {
-        if errors > 0 {
-            format!("{} {} file(s), {} error(s)", action, count, errors)
-        } else {
-            format!("{} {} file(s)", action, count)
-        }
-    }
-
     fn would_clip(peak: f64, gain_db: f64) -> bool {
         let gain_linear = 10.0_f64.powf(gain_db / 20.0);
         peak * gain_linear > 1.0
     }
-
-    pub fn apply_track_gain(&mut self) {
-        if self.files.is_empty() {
-            return;
-        }
-
-        self.is_processing = true;
-        self.total_progress = 0.0;
-
-        let total = self.files.len();
-        let mut applied = 0;
-        let mut errors = 0;
-
-        for (i, file) in self.files.iter_mut().enumerate() {
-            self.total_progress = i as f32 / total as f32;
-
-            let Some(gain_db) = file.track_gain else {
-                continue;
-            };
-            file.status = FileStatus::Applying;
-            // Track-only path: no album info, only the per-track RG result.
-            let opts = build_apply_options(db_to_steps(gain_db), file.track_result.clone(), None);
-            match apply_with_options(&file.path, &opts) {
-                Ok(_) => {
-                    file.status = FileStatus::Done;
-                    applied += 1;
-                }
-                Err(e) => {
-                    file.status = FileStatus::Error(e.to_string());
-                    errors += 1;
-                }
-            }
-        }
-
-        self.total_progress = 1.0;
-        self.is_processing = false;
-        self.status_message = Self::format_result_message("Applied track gain to", applied, errors);
-    }
-
-    pub fn apply_album_gain(&mut self) {
-        if self.files.is_empty() {
-            return;
-        }
-
-        self.is_processing = true;
-        self.total_progress = 0.0;
-
-        let total = self.files.len();
-        let mut applied = 0;
-        let mut errors = 0;
-
-        // Copy out so we can iterate `self.files` mutably without holding a
-        // borrow of `self`.
-        let album_info = self.album_info;
-
-        for (i, file) in self.files.iter_mut().enumerate() {
-            self.total_progress = i as f32 / total as f32;
-
-            let Some(gain_db) = file.album_gain else {
-                continue;
-            };
-            file.status = FileStatus::Applying;
-            let opts =
-                build_apply_options(db_to_steps(gain_db), file.track_result.clone(), album_info);
-            match apply_with_options(&file.path, &opts) {
-                Ok(_) => {
-                    file.status = FileStatus::Done;
-                    applied += 1;
-                }
-                Err(e) => {
-                    file.status = FileStatus::Error(e.to_string());
-                    errors += 1;
-                }
-            }
-        }
-
-        self.total_progress = 1.0;
-        self.is_processing = false;
-        self.status_message = Self::format_result_message("Applied album gain to", applied, errors);
-    }
-}
-
-/// Build `ApplyOptions` with the GUI's "safe defaults":
-///   - `write_undo`             — files can be reverted later (was missing pre-#153, A1)
-///   - `write_replaygain_tags`  — RG metadata is recorded so players see it (A2 for AAC)
-///   - `use_temp_file`          — atomic rename so a crash mid-apply can't corrupt (A4)
-///   - `preserve_timestamp`     — playlist sort order doesn't get jumbled (A5)
-fn build_apply_options(
-    steps: i32,
-    track_result: Option<ReplayGainResult>,
-    album_info: Option<AacAlbumInfo>,
-) -> ApplyOptions {
-    let mut opts = ApplyOptions::new(steps);
-    opts.track_result = track_result;
-    opts.album_info = album_info;
-    opts.write_undo = true;
-    opts.write_replaygain_tags = true;
-    opts.use_temp_file = true;
-    opts.preserve_timestamp = true;
-    opts
 }
 
 impl eframe::App for Mp3rgainApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.pump_worker_events();
         crate::ui::render(self, ctx);
     }
 }

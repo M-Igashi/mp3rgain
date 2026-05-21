@@ -6,31 +6,32 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             ui.spacing_mut().button_padding = egui::vec2(8.0, 4.0);
 
             // Add Files button
-            if ui.button("Add Files").clicked() {
-                if let Some(paths) = rfd::FileDialog::new()
-                    .add_filter("Audio files", &["mp3", "m4a", "aac"])
-                    .pick_files()
-                {
-                    app.add_files(paths);
+            ui.add_enabled_ui(!app.is_processing, |ui| {
+                if ui.button("Add Files").clicked() {
+                    if let Some(paths) = rfd::FileDialog::new()
+                        .add_filter("Audio files", &["mp3", "m4a", "aac"])
+                        .pick_files()
+                    {
+                        app.add_files(paths);
+                    }
                 }
-            }
 
-            // Add Folder button
-            if ui.button("Add Folder").clicked() {
-                if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-                    app.add_folder(folder, true);
+                if ui.button("Add Folder").clicked() {
+                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                        app.add_folder(folder, true);
+                    }
                 }
-            }
+            });
 
             ui.separator();
 
             // Analysis buttons
             ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing, |ui| {
                 if ui.button("Track Analysis").clicked() {
-                    app.analyze_tracks();
+                    app.start_analyze_tracks(ctx);
                 }
                 if ui.button("Album Analysis").clicked() {
-                    app.analyze_album();
+                    app.start_analyze_album(ctx);
                 }
             });
 
@@ -39,10 +40,10 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             // Gain buttons
             ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing, |ui| {
                 if ui.button("Track Gain").clicked() {
-                    app.apply_track_gain();
+                    app.start_apply_track_gain(ctx);
                 }
                 if ui.button("Album Gain").clicked() {
-                    app.apply_album_gain();
+                    app.start_apply_album_gain(ctx);
                 }
             });
 
@@ -66,9 +67,19 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
 
             ui.separator();
 
+            // Cancel — only enabled while a worker is running.
+            ui.add_enabled_ui(app.is_processing, |ui| {
+                if ui.button("Cancel").clicked() {
+                    app.cancel_current_work();
+                }
+            });
+
+            ui.separator();
+
             // Target volume
             ui.label("Target:");
-            ui.add(
+            ui.add_enabled(
+                !app.is_processing,
                 egui::DragValue::new(&mut app.target_volume)
                     .speed(0.1)
                     .range(75.0..=100.0)

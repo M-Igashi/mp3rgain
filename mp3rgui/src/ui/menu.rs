@@ -4,8 +4,8 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
             file_menu(app, ui, ctx);
-            analysis_menu(app, ui);
-            modify_menu(app, ui);
+            analysis_menu(app, ui, ctx);
+            modify_menu(app, ui, ctx);
         });
     });
 }
@@ -45,30 +45,30 @@ fn file_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     });
 }
 
-fn analysis_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
+fn analysis_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     ui.menu_button("Analysis", |ui| {
         ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing, |ui| {
             if ui.button("Track Analysis").clicked() {
-                app.analyze_tracks();
+                app.start_analyze_tracks(ctx);
                 ui.close_menu();
             }
             if ui.button("Album Analysis").clicked() {
-                app.analyze_album();
+                app.start_analyze_album(ctx);
                 ui.close_menu();
             }
         });
     });
 }
 
-fn modify_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
+fn modify_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     ui.menu_button("Modify Gain", |ui| {
         ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing, |ui| {
             if ui.button("Apply Track Gain").clicked() {
-                app.apply_track_gain();
+                app.start_apply_track_gain(ctx);
                 ui.close_menu();
             }
             if ui.button("Apply Album Gain").clicked() {
-                app.apply_album_gain();
+                app.start_apply_album_gain(ctx);
                 ui.close_menu();
             }
         });
