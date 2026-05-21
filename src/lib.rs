@@ -124,6 +124,25 @@ pub fn collect_audio_files(dir: &Path, recursive: bool) -> Result<Vec<PathBuf>> 
     Ok(result)
 }
 
+/// Apply gain in dB, auto-dispatching by file format.
+///
+/// Detects MP4/AAC files via [`mp4meta::is_aac_file`] and routes them through
+/// the AAC pipeline (which rewrites only the AAC `global_gain` bitfields inside
+/// `mdat`). All other files fall back to the MP3 pipeline.
+///
+/// Calling [`gain::apply_gain_db`] directly on an M4A file would scan the raw
+/// bytes for MP3 sync words and overwrite the byte following any match,
+/// corrupting the MP4 container — see issue #149.
+pub fn apply_gain_db_auto(file_path: &Path, gain_db: f64) -> Result<usize> {
+    #[cfg(feature = "aac")]
+    {
+        if mp4meta::is_aac_file(file_path) {
+            return aac::apply_aac_gain_to_path(file_path, file_path, gain::db_to_steps(gain_db));
+        }
+    }
+    gain::apply_gain_db(file_path, gain_db)
+}
+
 fn collect_audio_files_into(dir: &Path, recursive: bool, result: &mut Vec<PathBuf>) -> Result<()> {
     let entries = std::fs::read_dir(dir).map_err(|e| Error::io_read(dir, e))?;
     for entry in entries {
@@ -139,4 +158,58 @@ fn collect_audio_files_into(dir: &Path, recursive: bool, result: &mut Vec<PathBu
         }
     }
     Ok(())
+}
+
+#[cfg(all(test, feature = "aac"))]
+mod auto_dispatch_tests {
+    use super::*;
+    use std::io::Write;
+
+    /// Regression for issue #149: applying gain to an MP4 file via the
+    /// auto-dispatcher must NOT run the MP3 sync-word scanner, which would
+    /// overwrite bytes inside MP4 atoms whenever they happen to look like a
+    /// valid MPEG L3 frame header and corrupt the container.
+    ///
+    /// The crafted MP4 below embeds a 72-byte MPEG2.5 L3 8kbps frame header
+    /// immediately after the ftyp box. The buggy MP3 path would treat byte 27
+    /// (the `global_gain` location inside the side info) as a writable gain
+    /// slot and rewrite it. The dispatch must hand the file to the AAC path
+    /// (which rejects it cleanly because there's no `mdat`) and leave the
+    /// bytes untouched.
+    #[test]
+    fn auto_dispatch_does_not_corrupt_mp4_when_payload_mimics_mp3_frame() {
+        let dir = std::env::temp_dir().join("mp3rgain_issue_149");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("fake.m4a");
+
+        // ftyp box (20 bytes) + two back-to-back MPEG2.5 L3 8kbps/11025Hz stereo
+        // "frames" (52 bytes each). The MP3 scanner validates a frame by looking
+        // for another sync word at next_pos or by next_pos == audio_end — so two
+        // chained frames make the first one parse as valid.
+        let mut bytes = vec![
+            0x00, 0x00, 0x00, 0x14, b'f', b't', b'y', b'p', b'M', b'4', b'A', b' ', 0x00, 0x00,
+            0x00, 0x00, b'M', b'4', b'A', b' ', // ftyp box (20 bytes, accepted brand)
+        ];
+        let frame_header = [0xFFu8, 0xE3, 0x10, 0x00];
+        bytes.extend_from_slice(&frame_header);
+        bytes.resize(20 + 52, 0x55); // pad first frame to 52 bytes
+        bytes.extend_from_slice(&frame_header);
+        bytes.resize(20 + 52 + 52, 0x55); // pad second frame to 52 bytes
+        let original = bytes.clone();
+
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(&bytes)
+            .unwrap();
+
+        let _ = apply_gain_db_auto(&path, 3.0);
+
+        let after = std::fs::read(&path).unwrap();
+        assert_eq!(
+            after, original,
+            "MP4 bytes must be untouched by auto dispatch"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
