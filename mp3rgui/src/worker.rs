@@ -10,12 +10,13 @@
 
 use mp3rgain::apply::{apply_with_options, ApplyOptions};
 use mp3rgain::replaygain::{self, ReplayGainResult};
-use mp3rgain::AacAlbumInfo;
+use mp3rgain::{mp4meta, AacAlbumInfo};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
+use std::time::SystemTime;
 
 /// One message from a worker thread to the UI thread.
 pub enum WorkerEvent {
@@ -50,6 +51,18 @@ pub enum WorkerEvent {
         message: String,
     },
 
+    /// Undo succeeded on `idx`. Distinct from `FileApplied` so the UI can
+    /// restore the row to its post-analyze state instead of marking it Done.
+    FileUndone {
+        idx: usize,
+    },
+    /// `frames == 0` outcome: undo ran but the file had no recorded changes
+    /// to roll back. Kept separate so the row status reads "no changes" rather
+    /// than "Done" or "Error".
+    FileUndoSkipped {
+        idx: usize,
+    },
+
     /// Worker observed the cancel flag and stopped early.
     Cancelled,
 
@@ -78,6 +91,12 @@ pub struct ApplyJob {
     pub steps: i32,
     pub track_result: Option<ReplayGainResult>,
     pub album_info: Option<AacAlbumInfo>,
+}
+
+/// A single undo job.
+pub struct UndoJob {
+    pub idx: usize,
+    pub path: PathBuf,
 }
 
 /// User-facing apply toggles, captured at the moment the worker is
@@ -318,6 +337,105 @@ pub fn spawn_apply(
     });
 
     WorkerHandle { rx, cancel }
+}
+
+/// Spawn the undo worker. Iterates jobs serially, checks cancel between
+/// files. Dispatches per file to the correct undo path:
+///   - AAC: `mp3rgain::aac::undo_aac_gain`
+///   - MP3 + `use_id3v2`: `mp3rgain::undo_gain_id3v2`
+///   - MP3 (default APE): `mp3rgain::undo_gain`
+///
+/// Mirrors the CLI's `process_undo` dispatch so behavior matches.
+pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsUi) -> WorkerHandle {
+    let (tx, rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_w = Arc::clone(&cancel);
+
+    thread::spawn(move || {
+        let mut undone = 0usize;
+        let mut skipped = 0usize;
+        let mut errors = 0usize;
+
+        for job in jobs {
+            if cancel_w.load(Ordering::Relaxed) {
+                send(&tx, &ctx, WorkerEvent::Cancelled);
+                return;
+            }
+            send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
+
+            let original_mtime = if ui_opts.preserve_timestamp {
+                read_mtime(&job.path)
+            } else {
+                None
+            };
+
+            let result = run_undo(&job.path, ui_opts.use_id3v2);
+            match result {
+                Ok(0) => {
+                    skipped += 1;
+                    send(&tx, &ctx, WorkerEvent::FileUndoSkipped { idx: job.idx });
+                }
+                Ok(_) => {
+                    if let Some(mtime) = original_mtime {
+                        restore_mtime(&job.path, mtime);
+                    }
+                    undone += 1;
+                    send(&tx, &ctx, WorkerEvent::FileUndone { idx: job.idx });
+                }
+                Err(e) => {
+                    errors += 1;
+                    send(
+                        &tx,
+                        &ctx,
+                        WorkerEvent::FileApplyFailed {
+                            idx: job.idx,
+                            message: e.to_string(),
+                        },
+                    );
+                }
+            }
+        }
+
+        let mut parts: Vec<String> = Vec::new();
+        parts.push(format!("Undone {} file(s)", undone));
+        if skipped > 0 {
+            parts.push(format!("{} had no changes to undo", skipped));
+        }
+        if errors > 0 {
+            parts.push(format!("{} error(s)", errors));
+        }
+        send(
+            &tx,
+            &ctx,
+            WorkerEvent::Done {
+                message: parts.join(", "),
+            },
+        );
+    });
+
+    WorkerHandle { rx, cancel }
+}
+
+fn run_undo(path: &Path, use_id3v2: bool) -> mp3rgain::error::Result<usize> {
+    if mp4meta::is_aac_file(path) {
+        return mp3rgain::aac::undo_aac_gain(path);
+    }
+    if use_id3v2 {
+        mp3rgain::undo_gain_id3v2(path)
+    } else {
+        mp3rgain::gain::undo_gain(path)
+    }
+}
+
+fn read_mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
+}
+
+fn restore_mtime(path: &Path, mtime: SystemTime) {
+    let _ = std::fs::File::options()
+        .write(true)
+        .open(path)
+        .and_then(|f| f.set_times(std::fs::FileTimes::new().set_modified(mtime)));
 }
 
 /// Build the final `ApplyOptions` by combining always-on safety rails

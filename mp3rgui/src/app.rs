@@ -1,4 +1,4 @@
-use crate::worker::{self, ApplyJob, ApplyOptionsUi, WorkerEvent, WorkerHandle};
+use crate::worker::{self, ApplyJob, ApplyOptionsUi, UndoJob, WorkerEvent, WorkerHandle};
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{db_to_steps, AacAlbumInfo};
 use std::path::{Path, PathBuf};
@@ -11,7 +11,9 @@ pub enum FileStatus {
     Analyzing,
     Analyzed,
     Applying,
+    Undoing,
     Done,
+    NoChangesToUndo,
     Error(String),
 }
 
@@ -22,7 +24,9 @@ impl FileStatus {
             FileStatus::Analyzing => "Analyzing...",
             FileStatus::Analyzed => "OK",
             FileStatus::Applying => "Applying...",
+            FileStatus::Undoing => "Undoing...",
             FileStatus::Done => "Done",
+            FileStatus::NoChangesToUndo => "Nothing to undo",
             FileStatus::Error(_) => "Error",
         }
     }
@@ -54,6 +58,7 @@ enum WorkerKind {
     AlbumAnalysis,
     TrackApply,
     AlbumApply,
+    Undo,
 }
 
 pub struct Mp3rgainApp {
@@ -266,6 +271,48 @@ impl Mp3rgainApp {
         );
     }
 
+    /// Undo gain changes on selected files (or all files when no selection).
+    /// Library calls dispatch internally on file format and `use_id3v2`.
+    pub fn start_undo(&mut self, ctx: &egui::Context) {
+        if self.files.is_empty() || self.is_processing {
+            return;
+        }
+
+        let indices: Vec<usize> = if self.selected_indices.is_empty() {
+            (0..self.files.len()).collect()
+        } else {
+            let mut v = self.selected_indices.clone();
+            v.sort_unstable();
+            v.dedup();
+            v
+        };
+
+        let jobs: Vec<UndoJob> = indices
+            .iter()
+            .filter_map(|&idx| {
+                self.files.get(idx).map(|f| UndoJob {
+                    idx,
+                    path: f.path.clone(),
+                })
+            })
+            .collect();
+
+        if jobs.is_empty() {
+            return;
+        }
+
+        for &job_idx in jobs.iter().map(|j| &j.idx) {
+            self.files[job_idx].status = FileStatus::Pending;
+        }
+        let count = jobs.len();
+        let ui_opts = self.apply_options;
+        self.begin_worker(
+            WorkerKind::Undo,
+            count,
+            worker::spawn_undo(ctx.clone(), jobs, ui_opts),
+        );
+    }
+
     pub fn start_apply_album_gain(&mut self, ctx: &egui::Context) {
         if self.files.is_empty() || self.is_processing {
             return;
@@ -314,6 +361,7 @@ impl Mp3rgainApp {
             WorkerKind::AlbumAnalysis => "Analyzing album...".to_string(),
             WorkerKind::TrackApply => "Applying track gain...".to_string(),
             WorkerKind::AlbumApply => "Applying album gain...".to_string(),
+            WorkerKind::Undo => "Undoing gain changes...".to_string(),
         };
         self.started_files = 0;
         self.total_files_in_job = total;
@@ -355,6 +403,7 @@ impl Mp3rgainApp {
                         Some(WorkerKind::TrackApply) | Some(WorkerKind::AlbumApply) => {
                             FileStatus::Applying
                         }
+                        Some(WorkerKind::Undo) => FileStatus::Undoing,
                         _ => FileStatus::Analyzing,
                     };
                 }
@@ -415,6 +464,16 @@ impl Mp3rgainApp {
             WorkerEvent::FileApplyFailed { idx, message } => {
                 if let Some(file) = self.files.get_mut(idx) {
                     file.status = FileStatus::Error(message);
+                }
+            }
+            WorkerEvent::FileUndone { idx } => {
+                if let Some(file) = self.files.get_mut(idx) {
+                    file.status = FileStatus::Done;
+                }
+            }
+            WorkerEvent::FileUndoSkipped { idx } => {
+                if let Some(file) = self.files.get_mut(idx) {
+                    file.status = FileStatus::NoChangesToUndo;
                 }
             }
             WorkerEvent::Cancelled => {

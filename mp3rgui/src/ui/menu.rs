@@ -71,6 +71,16 @@ fn modify_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                 app.start_apply_album_gain(ctx);
                 ui.close_menu();
             }
+            ui.separator();
+            let undo_label = if app.selected_indices.is_empty() {
+                "Undo All"
+            } else {
+                "Undo Selected"
+            };
+            if ui.button(undo_label).clicked() {
+                app.start_undo(ctx);
+                ui.close_menu();
+            }
         });
     });
 }
