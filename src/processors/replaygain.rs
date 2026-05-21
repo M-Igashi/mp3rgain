@@ -135,7 +135,7 @@ fn apply_replaygain_with_album_into(
     // ReplayGain-peak cap here without touching the file.
     if opts.dry_run {
         let (actual_steps, warning_msg) =
-            dry_run_clipping_summary(steps, result, opts, &dry_run_prefix, filename);
+            dry_run_clipping_summary(steps, result, opts, dry_run_prefix, filename);
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             writeln!(
                 out,
@@ -170,7 +170,7 @@ fn apply_replaygain_with_album_into(
             result,
             opts,
             album_info,
-            &dry_run_prefix,
+            dry_run_prefix,
             out,
         );
     }
@@ -191,7 +191,7 @@ fn apply_replaygain_with_album_into(
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {
             let warning_msg =
-                emit_clipping_warning_peak(steps, result, &report, opts, &dry_run_prefix, filename);
+                emit_clipping_warning_peak(steps, result, &report, opts, dry_run_prefix, filename);
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 writeln!(
