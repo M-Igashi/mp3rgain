@@ -254,7 +254,7 @@ impl Mp3rgainApp {
 
             if let Some(gain_db) = file.track_gain {
                 file.status = FileStatus::Applying;
-                match mp3rgain::apply_gain_db(&file.path, gain_db) {
+                match mp3rgain::apply_gain_db_auto(&file.path, gain_db) {
                     Ok(_) => {
                         file.status = FileStatus::Done;
                         applied += 1;
@@ -289,7 +289,7 @@ impl Mp3rgainApp {
 
             if let Some(gain_db) = file.album_gain {
                 file.status = FileStatus::Applying;
-                match mp3rgain::apply_gain_db(&file.path, gain_db) {
+                match mp3rgain::apply_gain_db_auto(&file.path, gain_db) {
                     Ok(_) => {
                         file.status = FileStatus::Done;
                         applied += 1;
