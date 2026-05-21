@@ -1,4 +1,6 @@
+use mp3rgain::apply::{apply_with_options, ApplyOptions};
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
+use mp3rgain::{db_to_steps, AacAlbumInfo};
 use std::path::{Path, PathBuf};
 
 #[derive(Default, Clone, PartialEq)]
@@ -37,6 +39,10 @@ pub struct FileEntry {
     pub album_gain: Option<f64>,
     pub album_clip: bool,
     pub status: FileStatus,
+    /// Cached per-track ReplayGain analysis. Required by `apply_with_options`
+    /// to drive the peak-based clipping check and to write ReplayGain tags
+    /// (`replaygain_track_gain` / `replaygain_track_peak`) on apply.
+    pub track_result: Option<ReplayGainResult>,
 }
 
 pub struct Mp3rgainApp {
@@ -46,6 +52,9 @@ pub struct Mp3rgainApp {
     pub total_progress: f32,
     pub is_processing: bool,
     pub status_message: String,
+    /// Most-recent album analysis. Feeds the `replaygain_album_*` tag fields
+    /// when `apply_album_gain` runs.
+    pub album_info: Option<AacAlbumInfo>,
 }
 
 impl Mp3rgainApp {
@@ -57,6 +66,7 @@ impl Mp3rgainApp {
             total_progress: 0.0,
             is_processing: false,
             status_message: String::new(),
+            album_info: None,
         }
     }
 
@@ -114,6 +124,7 @@ impl Mp3rgainApp {
     pub fn clear_files(&mut self) {
         self.files.clear();
         self.selected_indices.clear();
+        self.album_info = None;
     }
 
     pub fn analyze_tracks(&mut self) {
@@ -126,6 +137,8 @@ impl Mp3rgainApp {
 
         self.is_processing = true;
         self.total_progress = 0.0;
+        // Track-only analysis invalidates any previously-computed album info.
+        self.album_info = None;
 
         let total = self.files.len();
         let mut analyzed = 0;
@@ -138,10 +151,12 @@ impl Mp3rgainApp {
             match replaygain::analyze_track(&file.path) {
                 Ok(result) => {
                     Self::populate_track_analysis(file, &result, self.target_volume);
+                    file.track_result = Some(result);
                     file.status = FileStatus::Analyzed;
                     analyzed += 1;
                 }
                 Err(e) => {
+                    file.track_result = None;
                     file.status = FileStatus::Error(e.to_string());
                     errors += 1;
                 }
@@ -163,6 +178,7 @@ impl Mp3rgainApp {
 
         self.is_processing = true;
         self.total_progress = 0.0;
+        self.album_info = None;
 
         let paths: Vec<&std::path::Path> = self.files.iter().map(|f| f.path.as_path()).collect();
 
@@ -180,6 +196,7 @@ impl Mp3rgainApp {
                     let track_result = &report.album.tracks()[track_idx];
                     let file = &mut self.files[file_idx];
                     Self::populate_track_analysis(file, track_result, self.target_volume);
+                    file.track_result = Some(track_result.clone());
                     file.album_volume = Some(album_volume);
                     file.album_gain = Some(album_gain);
                     file.album_clip = album_clip;
@@ -187,8 +204,14 @@ impl Mp3rgainApp {
                 }
 
                 for (file_idx, msg) in &report.failures {
+                    self.files[*file_idx].track_result = None;
                     self.files[*file_idx].status = FileStatus::Error(msg.clone());
                 }
+
+                self.album_info = Some(AacAlbumInfo {
+                    album_gain_db: report.album.album_gain_db(),
+                    album_peak: report.album.album_peak(),
+                });
 
                 let analyzed = report.successful_indices.len();
                 let skipped = report.failures.len();
@@ -252,17 +275,20 @@ impl Mp3rgainApp {
         for (i, file) in self.files.iter_mut().enumerate() {
             self.total_progress = i as f32 / total as f32;
 
-            if let Some(gain_db) = file.track_gain {
-                file.status = FileStatus::Applying;
-                match mp3rgain::apply_gain_db_auto(&file.path, gain_db) {
-                    Ok(_) => {
-                        file.status = FileStatus::Done;
-                        applied += 1;
-                    }
-                    Err(e) => {
-                        file.status = FileStatus::Error(e.to_string());
-                        errors += 1;
-                    }
+            let Some(gain_db) = file.track_gain else {
+                continue;
+            };
+            file.status = FileStatus::Applying;
+            // Track-only path: no album info, only the per-track RG result.
+            let opts = build_apply_options(db_to_steps(gain_db), file.track_result.clone(), None);
+            match apply_with_options(&file.path, &opts) {
+                Ok(_) => {
+                    file.status = FileStatus::Done;
+                    applied += 1;
+                }
+                Err(e) => {
+                    file.status = FileStatus::Error(e.to_string());
+                    errors += 1;
                 }
             }
         }
@@ -284,20 +310,27 @@ impl Mp3rgainApp {
         let mut applied = 0;
         let mut errors = 0;
 
+        // Copy out so we can iterate `self.files` mutably without holding a
+        // borrow of `self`.
+        let album_info = self.album_info;
+
         for (i, file) in self.files.iter_mut().enumerate() {
             self.total_progress = i as f32 / total as f32;
 
-            if let Some(gain_db) = file.album_gain {
-                file.status = FileStatus::Applying;
-                match mp3rgain::apply_gain_db_auto(&file.path, gain_db) {
-                    Ok(_) => {
-                        file.status = FileStatus::Done;
-                        applied += 1;
-                    }
-                    Err(e) => {
-                        file.status = FileStatus::Error(e.to_string());
-                        errors += 1;
-                    }
+            let Some(gain_db) = file.album_gain else {
+                continue;
+            };
+            file.status = FileStatus::Applying;
+            let opts =
+                build_apply_options(db_to_steps(gain_db), file.track_result.clone(), album_info);
+            match apply_with_options(&file.path, &opts) {
+                Ok(_) => {
+                    file.status = FileStatus::Done;
+                    applied += 1;
+                }
+                Err(e) => {
+                    file.status = FileStatus::Error(e.to_string());
+                    errors += 1;
                 }
             }
         }
@@ -306,6 +339,26 @@ impl Mp3rgainApp {
         self.is_processing = false;
         self.status_message = Self::format_result_message("Applied album gain to", applied, errors);
     }
+}
+
+/// Build `ApplyOptions` with the GUI's "safe defaults":
+///   - `write_undo`             — files can be reverted later (was missing pre-#153, A1)
+///   - `write_replaygain_tags`  — RG metadata is recorded so players see it (A2 for AAC)
+///   - `use_temp_file`          — atomic rename so a crash mid-apply can't corrupt (A4)
+///   - `preserve_timestamp`     — playlist sort order doesn't get jumbled (A5)
+fn build_apply_options(
+    steps: i32,
+    track_result: Option<ReplayGainResult>,
+    album_info: Option<AacAlbumInfo>,
+) -> ApplyOptions {
+    let mut opts = ApplyOptions::new(steps);
+    opts.track_result = track_result;
+    opts.album_info = album_info;
+    opts.write_undo = true;
+    opts.write_replaygain_tags = true;
+    opts.use_temp_file = true;
+    opts.preserve_timestamp = true;
+    opts
 }
 
 impl eframe::App for Mp3rgainApp {
