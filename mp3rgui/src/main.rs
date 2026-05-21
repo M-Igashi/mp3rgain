@@ -2,6 +2,7 @@
 
 mod app;
 mod ui;
+mod worker;
 
 use app::Mp3rgainApp;
 

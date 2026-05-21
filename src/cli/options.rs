@@ -20,12 +20,6 @@ pub enum StoredTagMode {
     UseApev2, // -s a: Use APEv2 tags (default)
 }
 
-/// Album gain info for AAC files
-pub struct AacAlbumInfo {
-    pub album_gain_db: f64,
-    pub album_peak: f64,
-}
-
 #[derive(Default)]
 pub struct Options {
     // Gain options

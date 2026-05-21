@@ -65,6 +65,7 @@ mod aac_codebooks;
 
 pub mod analysis;
 pub mod ape;
+pub mod apply;
 pub mod error;
 mod frame;
 pub mod gain;
@@ -80,6 +81,7 @@ pub use ape::{
     TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN,
     TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
+pub use apply::{apply_with_options, AacAlbumInfo, ApplyOptions, ApplyReport, ClippingDetection};
 pub use error::{Error, Result};
 pub use gain::{
     apply_gain, apply_gain_db, db_to_steps, peak_to_headroom_db, peak_to_pcm_sample, steps_to_db,

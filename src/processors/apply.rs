@@ -1,6 +1,7 @@
 use anyhow::Result;
 use colored::*;
-use mp3rgain::{aac, analyze, mp4meta, steps_to_db, Channel, GainOptions, Mp3Analysis};
+use mp3rgain::apply::{apply_with_options, ApplyOptions, ClippingDetection};
+use mp3rgain::{analyze, mp4meta, steps_to_db, Channel, GainOptions};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -9,8 +10,7 @@ use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
 
 use super::utils::{
-    apply_with_temp_file, restore_timestamp, save_original_mtime, warn_aac_multi_track,
-    write_id3v2_undo_after_apply,
+    restore_timestamp, save_original_mtime, warn_aac_multi_track, write_id3v2_undo_after_apply,
 };
 
 pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<(JsonFileResult, String)> {
@@ -28,79 +28,16 @@ fn process_apply_into(
     let filename = get_filename(file);
     let dry_run_prefix = opts.dry_run_prefix();
 
-    let original_mtime = save_original_mtime(file, opts);
-
     let is_aac = mp4meta::is_aac_file(file);
-
     if is_aac {
         warn_aac_multi_track(file, filename, opts, dry_run_prefix);
     }
 
-    // Check for clipping and possibly prevent it
-    let mut actual_steps = steps;
-    let mut warning_msg: Option<String> = None;
-
-    // For MP3, hold onto the pre-apply analysis so the ID3v2 undo write below
-    // can reuse it instead of triggering a second `analyze(file)` on the same
-    // bytes (issue #135).
-    let mut mp3_analysis: Option<Mp3Analysis> = None;
-
-    if steps > 0 && !opts.wrap_gain {
-        let headroom = if is_aac {
-            aac::analyze_aac_gains(file)
-                .ok()
-                .map(|a| (255u8.saturating_sub(a.max_gain())) as i32)
-        } else {
-            let info = analyze(file).ok();
-            let headroom = info.as_ref().map(|i| i.headroom_steps());
-            mp3_analysis = info;
-            headroom
-        };
-
-        if let Some(headroom_steps) = headroom {
-            if steps > headroom_steps {
-                if opts.prevent_clipping {
-                    let original_steps = steps;
-                    actual_steps = headroom_steps;
-                    if opts.output_format == OutputFormat::Text && !opts.quiet {
-                        eprintln!(
-                            "  {} {}{} - gain reduced from {} to {} steps to prevent clipping",
-                            "!".yellow(),
-                            dry_run_prefix,
-                            filename,
-                            original_steps,
-                            actual_steps
-                        );
-                    }
-                    warning_msg = Some(format!(
-                        "gain reduced from {} to {} steps to prevent clipping",
-                        original_steps, actual_steps
-                    ));
-                } else if !opts.ignore_clipping && !opts.quiet {
-                    if opts.output_format == OutputFormat::Text {
-                        eprintln!(
-                            "  {} {}{} - clipping warning: requested {} steps but only {} headroom",
-                            "!".yellow(),
-                            dry_run_prefix,
-                            filename,
-                            steps,
-                            headroom_steps
-                        );
-                        eprintln!(
-                            "      Use -c to ignore clipping warnings or -k to prevent clipping"
-                        );
-                    }
-                    warning_msg = Some(format!(
-                        "clipping warning: requested {} steps but only {} headroom",
-                        steps, headroom_steps
-                    ));
-                }
-            }
-        }
-    }
-
-    // Dry run: don't actually modify
+    // Dry run: don't touch the file. Headroom-based clipping prevention
+    // still needs to be reflected in the "would apply N steps" line.
     if opts.dry_run {
+        let (actual_steps, warning_msg) =
+            dry_run_clipping_summary(file, steps, opts, is_aac, dry_run_prefix, filename);
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             writeln!(
                 out,
@@ -121,68 +58,18 @@ fn process_apply_into(
         });
     }
 
-    // Apply gain
-    let apply_result = if is_aac {
-        if opts.stored_tag_mode == StoredTagMode::Skip {
-            apply_with_temp_file(
-                file,
-                |r, w| Ok(aac::apply_aac_gain_to_path(r, w, actual_steps)?),
-                opts,
-            )
-        } else {
-            apply_with_temp_file(
-                file,
-                |r, w| Ok(aac::apply_aac_gain_with_undo_to_path(r, w, actual_steps)?),
-                opts,
-            )
-        }
-    } else if opts.use_id3v2 {
-        // MP3 with -s i: apply gain without APE undo, write undo to ID3v2
-        let skip_undo = opts.stored_tag_mode == StoredTagMode::Skip;
-        // Materialize analysis lazily so unwrap-mode skip path stays free.
-        if !skip_undo && mp3_analysis.is_none() {
-            mp3_analysis = analyze(file).ok();
-        }
-        let result = apply_with_temp_file(
-            file,
-            |r, w| {
-                Ok(GainOptions::new(actual_steps)
-                    .wrap(opts.wrap_gain)
-                    .undo(false)
-                    .apply_to_path(r, w)?)
-            },
-            opts,
-        );
-        if !skip_undo && result.is_ok() {
-            write_id3v2_undo_after_apply(
-                file,
-                actual_steps,
-                actual_steps,
-                opts.wrap_gain,
-                mp3_analysis.as_ref(),
-            )?;
-        }
-        result
-    } else {
-        let use_undo = opts.stored_tag_mode != StoredTagMode::Skip;
-        apply_with_temp_file(
-            file,
-            |r, w| {
-                Ok(GainOptions::new(actual_steps)
-                    .wrap(opts.wrap_gain)
-                    .undo(use_undo)
-                    .apply_to_path(r, w)?)
-            },
-            opts,
-        )
-    };
+    let mut apply_opts = ApplyOptions::new(steps);
+    apply_opts.prevent_clipping = opts.prevent_clipping;
+    apply_opts.wrap = opts.wrap_gain;
+    apply_opts.preserve_timestamp = opts.preserve_timestamp;
+    apply_opts.use_temp_file = opts.use_temp_file;
+    apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
+    apply_opts.use_id3v2 = opts.use_id3v2;
 
-    match apply_result {
-        Ok(modified) => {
-            // Restore timestamp if needed
-            if let Some(mtime) = original_mtime {
-                restore_timestamp(file, mtime);
-            }
+    match apply_with_options(file, &apply_opts) {
+        Ok(report) => {
+            let warning_msg =
+                emit_clipping_warning_headroom(steps, &report, opts, dry_run_prefix, filename);
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 if is_aac {
@@ -191,19 +78,25 @@ fn process_apply_into(
                         "  {} {} ({} gains modified)",
                         "v".green(),
                         filename,
-                        modified
+                        report.modified
                     )?;
                 } else {
-                    writeln!(out, "  {} {} ({} frames)", "v".green(), filename, modified)?;
+                    writeln!(
+                        out,
+                        "  {} {} ({} frames)",
+                        "v".green(),
+                        filename,
+                        report.modified
+                    )?;
                 }
             }
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
                 status: Some(FileStatus::Success),
-                frames: Some(modified),
-                gain_applied_steps: Some(actual_steps),
-                gain_applied_db: Some(steps_to_db(actual_steps)),
+                frames: Some(report.modified),
+                gain_applied_steps: Some(report.actual_steps),
+                gain_applied_db: Some(steps_to_db(report.actual_steps)),
                 warning: warning_msg,
                 ..Default::default()
             })
@@ -221,6 +114,133 @@ fn process_apply_into(
             })
         }
     }
+}
+
+/// Recompute the headroom-based clipping cap purely for the dry-run
+/// branch. Mirrors [`mp3rgain::apply::apply_with_options`]'s check.
+fn dry_run_clipping_summary(
+    file: &Path,
+    steps: i32,
+    opts: &Options,
+    is_aac: bool,
+    dry_run_prefix: &str,
+    filename: &str,
+) -> (i32, Option<String>) {
+    if steps <= 0 || opts.wrap_gain {
+        return (steps, None);
+    }
+
+    let headroom = if is_aac {
+        #[cfg(feature = "aac")]
+        {
+            mp3rgain::aac::analyze_aac_gains(file)
+                .ok()
+                .map(|a| 255u8.saturating_sub(a.max_gain()) as i32)
+        }
+        #[cfg(not(feature = "aac"))]
+        {
+            let _ = file;
+            None
+        }
+    } else {
+        analyze(file).ok().map(|i| i.headroom_steps())
+    };
+
+    let Some(headroom_steps) = headroom else {
+        return (steps, None);
+    };
+    if steps <= headroom_steps {
+        return (steps, None);
+    }
+    if opts.prevent_clipping {
+        let actual = headroom_steps;
+        if opts.output_format == OutputFormat::Text && !opts.quiet {
+            eprintln!(
+                "  {} {}{} - gain reduced from {} to {} steps to prevent clipping",
+                "!".yellow(),
+                dry_run_prefix,
+                filename,
+                steps,
+                actual
+            );
+        }
+        return (
+            actual,
+            Some(format!(
+                "gain reduced from {} to {} steps to prevent clipping",
+                steps, actual
+            )),
+        );
+    }
+    if !opts.ignore_clipping && !opts.quiet {
+        if opts.output_format == OutputFormat::Text {
+            eprintln!(
+                "  {} {}{} - clipping warning: requested {} steps but only {} headroom",
+                "!".yellow(),
+                dry_run_prefix,
+                filename,
+                steps,
+                headroom_steps
+            );
+            eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
+        }
+        return (
+            steps,
+            Some(format!(
+                "clipping warning: requested {} steps but only {} headroom",
+                steps, headroom_steps
+            )),
+        );
+    }
+    (steps, None)
+}
+
+/// Render the user-visible clipping warning after a real apply, using the
+/// headroom diagnostic from [`ApplyReport`].
+fn emit_clipping_warning_headroom(
+    requested_steps: i32,
+    report: &mp3rgain::ApplyReport,
+    opts: &Options,
+    dry_run_prefix: &str,
+    filename: &str,
+) -> Option<String> {
+    let Some(ClippingDetection::Headroom(headroom_steps)) = report.clipping_detected else {
+        return None;
+    };
+    if report.clipping_prevented {
+        if opts.output_format == OutputFormat::Text && !opts.quiet {
+            eprintln!(
+                "  {} {}{} - gain reduced from {} to {} steps to prevent clipping",
+                "!".yellow(),
+                dry_run_prefix,
+                filename,
+                requested_steps,
+                report.actual_steps
+            );
+        }
+        return Some(format!(
+            "gain reduced from {} to {} steps to prevent clipping",
+            requested_steps, report.actual_steps
+        ));
+    }
+    if opts.ignore_clipping || opts.quiet {
+        return None;
+    }
+    if opts.output_format == OutputFormat::Text {
+        eprintln!(
+            "  {} {}{} - clipping warning: requested {} steps but only {} headroom",
+            "!".yellow(),
+            dry_run_prefix,
+            filename,
+            requested_steps,
+            headroom_steps
+        );
+        eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
+    }
+    Some(format!(
+        "clipping warning: requested {} steps but only {} headroom",
+        requested_steps, headroom_steps
+    ))
 }
 
 pub fn process_apply_channel(
