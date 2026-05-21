@@ -1,54 +1,10 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::{analyze, ape, id3v2, mp4meta, Mp3Analysis};
-use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use crate::cli::options::{Options, OutputFormat};
-
-// Per-process counter so that parallel apply tasks operating on files in the
-// same parent directory don't collide on a shared temp filename. The previous
-// `.mp3rgain_temp_{pid}.mp3` template was racy under rayon parallelism.
-static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// Run a gain operation, optionally going through a sibling temp file.
-///
-/// The closure receives `(read_from, write_to)`. When `-t` is in effect they
-/// differ (read original, write temp file, rename) — when it isn't, both are
-/// the original path and the operation works in place.
-///
-/// Compared with the old "copy original to temp, then operate on temp" flow,
-/// the split-path variant saves one full-file pass on the `-t` apply path
-/// (issue #135).
-pub fn apply_with_temp_file<F>(file: &Path, operation: F, opts: &Options) -> Result<usize>
-where
-    F: FnOnce(&Path, &Path) -> Result<usize>,
-{
-    if opts.use_temp_file {
-        let parent = file.parent().unwrap_or(Path::new("."));
-        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let temp_path = parent.join(format!(
-            ".mp3rgain_temp_{}_{}.mp3",
-            std::process::id(),
-            counter
-        ));
-
-        match operation(file, &temp_path) {
-            Ok(frames) => {
-                fs::rename(&temp_path, file)?;
-                Ok(frames)
-            }
-            Err(e) => {
-                let _ = fs::remove_file(&temp_path);
-                Err(e)
-            }
-        }
-    } else {
-        operation(file, file)
-    }
-}
 
 pub fn restore_timestamp(file: &Path, mtime: SystemTime) {
     let _ = std::fs::File::options()

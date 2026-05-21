@@ -2,12 +2,12 @@ use anyhow::Result;
 use colored::*;
 use indicatif::MultiProgress;
 use mp3rgain::replaygain::{self, AlbumAnalysisReport, AlbumGainResult, REPLAYGAIN_REFERENCE_DB};
-use mp3rgain::steps_to_db;
+use mp3rgain::{steps_to_db, AacAlbumInfo};
 use rayon::prelude::*;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use crate::cli::options::{AacAlbumInfo, Options, OutputFormat};
+use crate::cli::options::{Options, OutputFormat};
 use crate::commands::threading::effective_threads;
 use crate::commands::utils::{create_json_summary, print_dry_run_notice, update_counters};
 use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};

@@ -1,20 +1,18 @@
 use anyhow::Result;
 use colored::*;
 use indicatif::ProgressBar;
+use mp3rgain::apply::{apply_with_options, ApplyOptions, ClippingDetection};
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult};
-use mp3rgain::{aac, db_to_steps, id3v2, mp4meta, peak_to_headroom_db, steps_to_db, GainOptions};
+use mp3rgain::{mp4meta, steps_to_db, AacAlbumInfo};
 use std::fmt::Write as _;
 use std::path::Path;
 
-use crate::cli::options::{AacAlbumInfo, Options, OutputFormat};
+use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::json_output::{FileStatus, JsonFileResult};
 use crate::progress::update_analysis_progress;
 use crate::util::get_filename;
 
-use super::utils::{
-    apply_with_temp_file, restore_timestamp, save_original_mtime, warn_aac_multi_track,
-    write_id3v2_undo_after_apply,
-};
+use super::utils::warn_aac_multi_track;
 
 pub fn process_track_gain(
     file: &Path,
@@ -130,63 +128,14 @@ fn apply_replaygain_with_album_into(
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
     let dry_run_prefix = opts.dry_run_prefix();
+    let is_aac = result.file_type() == AudioFileType::Aac;
 
-    let original_mtime = save_original_mtime(file, opts);
-
-    let mut actual_steps = steps;
-    let mut warning_msg: Option<String> = None;
-
-    if steps > 0 && !opts.wrap_gain {
-        // Check if applying this gain would cause clipping
-        let gain_linear = 10.0_f64.powf(result.gain_db() / 20.0);
-        let new_peak = result.peak() * gain_linear;
-        if new_peak > 1.0 {
-            if opts.prevent_clipping {
-                // Calculate the maximum safe gain. The outer `new_peak > 1.0`
-                // guard implies peak > 0, so headroom is always defined here.
-                let max_safe_db = peak_to_headroom_db(result.peak()).unwrap_or(0.0);
-                let max_safe_steps = db_to_steps(max_safe_db);
-                actual_steps = max_safe_steps.max(0);
-
-                if opts.output_format == OutputFormat::Text && !opts.quiet {
-                    eprintln!(
-                        "  {} {}{} - gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
-                        "!".yellow(),
-                        dry_run_prefix,
-                        filename,
-                        steps,
-                        actual_steps,
-                        result.peak()
-                    );
-                }
-                warning_msg = Some(format!(
-                    "gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
-                    steps,
-                    actual_steps,
-                    result.peak()
-                ));
-            } else if !opts.ignore_clipping && !opts.quiet {
-                if opts.output_format == OutputFormat::Text {
-                    eprintln!(
-                        "  {} {}{} - clipping warning: peak would be {:.2} (>{:.2})",
-                        "!".yellow(),
-                        dry_run_prefix,
-                        filename,
-                        new_peak,
-                        1.0
-                    );
-                    eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
-                }
-                warning_msg = Some(format!(
-                    "clipping warning: peak would be {:.2} (>1.00)",
-                    new_peak
-                ));
-            }
-        }
-    }
-
-    // Dry run: don't actually modify
+    // Dry run: don't actually modify. Clipping prevention still needs to
+    // be reflected in the "would apply N steps" message, so mirror the
+    // ReplayGain-peak cap here without touching the file.
     if opts.dry_run {
+        let (actual_steps, warning_msg) =
+            dry_run_clipping_summary(steps, result, opts, &dry_run_prefix, filename);
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             writeln!(
                 out,
@@ -210,63 +159,39 @@ fn apply_replaygain_with_album_into(
         });
     }
 
-    // Handle AAC/M4A files differently - only write ReplayGain tags
-    if result.file_type() == AudioFileType::Aac {
-        let ctx = AacApplyContext {
-            warning_msg,
-            original_mtime,
+    // AAC keeps a fail-soft tag-writing path: bitstream gain failures
+    // print a warning but still let us record ReplayGain tags. Branch
+    // before calling into the unified pipeline so we can apply that
+    // policy.
+    if is_aac {
+        return apply_replaygain_aac_with_album_into(
+            file,
+            steps,
+            result,
+            opts,
             album_info,
-        };
-        return apply_replaygain_aac_with_album_into(file, actual_steps, result, opts, ctx, out);
+            &dry_run_prefix,
+            out,
+        );
     }
 
-    // MP3: Apply gain to audio frames
-    let use_id3v2_undo = opts.use_id3v2;
-    // Pre-apply analysis is reused for the ID3v2 undo write below so we don't
-    // re-read the file just to fetch min/max (issue #135).
-    let pre_analysis = if use_id3v2_undo {
-        mp3rgain::analyze(file).ok()
-    } else {
-        None
-    };
-    let apply_result = apply_with_temp_file(
-        file,
-        |r, w| {
-            Ok(GainOptions::new(actual_steps)
-                .wrap(opts.wrap_gain)
-                .undo(!use_id3v2_undo) // APE undo only when not using ID3v2
-                .apply_to_path(r, w)?)
-        },
-        opts,
-    );
+    // MP3 path: hand the whole pipeline to apply_with_options.
+    let mut apply_opts = ApplyOptions::new(steps);
+    apply_opts.track_result = Some(result.clone());
+    apply_opts.album_info = album_info.copied();
+    apply_opts.prevent_clipping = opts.prevent_clipping;
+    apply_opts.wrap = opts.wrap_gain;
+    apply_opts.preserve_timestamp = opts.preserve_timestamp;
+    apply_opts.use_temp_file = opts.use_temp_file;
+    // RG path writes undo unless -s s.
+    apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
+    apply_opts.write_replaygain_tags = opts.use_id3v2;
+    apply_opts.use_id3v2 = opts.use_id3v2;
 
-    match apply_result {
-        Ok(frames) => {
-            // Write ID3v2 tags if -s i mode
-            if opts.use_id3v2 {
-                write_id3v2_undo_after_apply(
-                    file,
-                    actual_steps,
-                    actual_steps,
-                    opts.wrap_gain,
-                    pre_analysis.as_ref(),
-                )?;
-
-                // Write ReplayGain metadata tags
-                let rg = mp3rgain::Id3v2ReplayGain {
-                    track_gain: Some(format!("{:+.2} dB", result.gain_db())),
-                    track_peak: Some(format!("{:.6}", result.peak())),
-                    album_gain: album_info.map(|a| format!("{:+.2} dB", a.album_gain_db)),
-                    album_peak: album_info.map(|a| format!("{:.6}", a.album_peak)),
-                    ..Default::default()
-                };
-                id3v2::write_id3v2_replaygain(file, &rg)?;
-            }
-
-            // Restore timestamp if needed
-            if let Some(mtime) = original_mtime {
-                restore_timestamp(file, mtime);
-            }
+    match apply_with_options(file, &apply_opts) {
+        Ok(report) => {
+            let warning_msg =
+                emit_clipping_warning_peak(steps, result, &report, opts, &dry_run_prefix, filename);
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 writeln!(
@@ -274,19 +199,19 @@ fn apply_replaygain_with_album_into(
                     "  {} {} ({} frames, {:+.1} dB)",
                     "v".green(),
                     filename,
-                    frames,
-                    steps_to_db(actual_steps)
+                    report.modified,
+                    steps_to_db(report.actual_steps)
                 )?;
             }
 
             Ok(JsonFileResult {
                 file: file.display().to_string(),
                 status: Some(FileStatus::Success),
-                frames: Some(frames),
+                frames: Some(report.modified),
                 loudness_db: Some(result.loudness_db()),
                 peak: Some(result.peak()),
-                gain_applied_steps: Some(actual_steps),
-                gain_applied_db: Some(steps_to_db(actual_steps)),
+                gain_applied_steps: Some(report.actual_steps),
+                gain_applied_db: Some(steps_to_db(report.actual_steps)),
                 warning: warning_msg,
                 ..Default::default()
             })
@@ -306,66 +231,197 @@ fn apply_replaygain_with_album_into(
     }
 }
 
-struct AacApplyContext<'a> {
-    warning_msg: Option<String>,
-    original_mtime: Option<std::time::SystemTime>,
-    album_info: Option<&'a AacAlbumInfo>,
-}
-
-/// Apply ReplayGain to AAC/M4A files with optional album info
-fn apply_replaygain_aac_with_album_into(
-    file: &Path,
-    actual_steps: i32,
+/// Recompute the ReplayGain-peak clipping cap purely for the dry-run
+/// branch (no file writes). Mirrors [`mp3rgain::apply::apply_with_options`]
+/// for the same inputs so the displayed "would apply N steps" matches what
+/// a real apply would do.
+fn dry_run_clipping_summary(
+    steps: i32,
     result: &ReplayGainResult,
     opts: &Options,
-    ctx: AacApplyContext<'_>,
+    dry_run_prefix: &str,
+    filename: &str,
+) -> (i32, Option<String>) {
+    if steps <= 0 || opts.wrap_gain {
+        return (steps, None);
+    }
+    let gain_linear = 10.0_f64.powf(steps_to_db(steps) / 20.0);
+    let new_peak = result.peak() * gain_linear;
+    if new_peak <= 1.0 {
+        return (steps, None);
+    }
+    if opts.prevent_clipping {
+        let max_safe_db = mp3rgain::peak_to_headroom_db(result.peak()).unwrap_or(0.0);
+        let actual = mp3rgain::db_to_steps(max_safe_db).max(0);
+        if opts.output_format == OutputFormat::Text && !opts.quiet {
+            eprintln!(
+                "  {} {}{} - gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
+                "!".yellow(),
+                dry_run_prefix,
+                filename,
+                steps,
+                actual,
+                result.peak()
+            );
+        }
+        return (
+            actual,
+            Some(format!(
+                "gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
+                steps,
+                actual,
+                result.peak()
+            )),
+        );
+    }
+    if !opts.ignore_clipping && !opts.quiet {
+        if opts.output_format == OutputFormat::Text {
+            eprintln!(
+                "  {} {}{} - clipping warning: peak would be {:.2} (>{:.2})",
+                "!".yellow(),
+                dry_run_prefix,
+                filename,
+                new_peak,
+                1.0
+            );
+            eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
+        }
+        return (
+            steps,
+            Some(format!(
+                "clipping warning: peak would be {:.2} (>1.00)",
+                new_peak
+            )),
+        );
+    }
+    (steps, None)
+}
+
+/// Render the user-visible clipping warning after a real apply, using the
+/// ReplayGain-peak diagnostic from [`ApplyReport`].
+fn emit_clipping_warning_peak(
+    requested_steps: i32,
+    result: &ReplayGainResult,
+    report: &mp3rgain::ApplyReport,
+    opts: &Options,
+    dry_run_prefix: &str,
+    filename: &str,
+) -> Option<String> {
+    let Some(ClippingDetection::Peak(new_peak)) = report.clipping_detected else {
+        return None;
+    };
+    if report.clipping_prevented {
+        if opts.output_format == OutputFormat::Text && !opts.quiet {
+            eprintln!(
+                "  {} {}{} - gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
+                "!".yellow(),
+                dry_run_prefix,
+                filename,
+                requested_steps,
+                report.actual_steps,
+                result.peak()
+            );
+        }
+        return Some(format!(
+            "gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
+            requested_steps,
+            report.actual_steps,
+            result.peak()
+        ));
+    }
+    if opts.ignore_clipping || opts.quiet {
+        return None;
+    }
+    if opts.output_format == OutputFormat::Text {
+        eprintln!(
+            "  {} {}{} - clipping warning: peak would be {:.2} (>{:.2})",
+            "!".yellow(),
+            dry_run_prefix,
+            filename,
+            new_peak,
+            1.0
+        );
+        eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
+    }
+    Some(format!(
+        "clipping warning: peak would be {:.2} (>1.00)",
+        new_peak
+    ))
+}
+
+/// Apply ReplayGain to AAC/M4A files with optional album info.
+///
+/// Differs from the MP3 path in two ways the unified API can't model
+/// directly:
+///   - bitstream gain failures are logged and swallowed so we still
+///     write the ReplayGain tags (matches pre-issue-#153 behavior),
+///   - tag writing always runs (independent of `--stored-tag-mode`).
+///
+/// We therefore drive the apply step with `write_replaygain_tags=false`
+/// and call `mp4meta::write_replaygain_tags` afterwards directly.
+fn apply_replaygain_aac_with_album_into(
+    file: &Path,
+    requested_steps: i32,
+    result: &ReplayGainResult,
+    opts: &Options,
+    album_info: Option<&AacAlbumInfo>,
+    dry_run_prefix: &str,
     out: &mut String,
 ) -> Result<JsonFileResult> {
-    let AacApplyContext {
-        warning_msg,
-        original_mtime,
-        album_info,
-    } = ctx;
     let filename = get_filename(file);
 
     warn_aac_multi_track(file, filename, opts, "");
 
-    let gain_modified = if actual_steps != 0 {
-        match aac::apply_aac_gain_with_undo(file, actual_steps) {
-            Ok(n) => n,
-            Err(e) => {
-                if opts.output_format == OutputFormat::Text && !opts.quiet {
-                    eprintln!(
-                        "  {} {} - bitstream gain failed: {} (tags still written)",
-                        "!".yellow(),
-                        filename,
-                        e
-                    );
-                }
-                0
+    let mut apply_opts = ApplyOptions::new(requested_steps);
+    apply_opts.track_result = Some(result.clone());
+    apply_opts.album_info = album_info.copied();
+    apply_opts.prevent_clipping = opts.prevent_clipping;
+    apply_opts.wrap = opts.wrap_gain;
+    apply_opts.preserve_timestamp = opts.preserve_timestamp;
+    apply_opts.use_temp_file = opts.use_temp_file;
+    // AAC tag writing is fail-soft, so we drive it ourselves below.
+    apply_opts.write_replaygain_tags = false;
+
+    let mut actual_steps = requested_steps;
+    let mut warning_msg: Option<String> = None;
+    let mut gain_modified: usize = 0;
+
+    // apply_with_options handles temp file, mtime restore, and the
+    // clipping check. We only swallow bitstream errors so we can still
+    // record the ReplayGain tags afterwards.
+    match apply_with_options(file, &apply_opts) {
+        Ok(report) => {
+            actual_steps = report.actual_steps;
+            gain_modified = report.modified;
+            warning_msg = emit_clipping_warning_peak(
+                requested_steps,
+                result,
+                &report,
+                opts,
+                dry_run_prefix,
+                filename,
+            );
+        }
+        Err(e) => {
+            if opts.output_format == OutputFormat::Text && !opts.quiet {
+                eprintln!(
+                    "  {} {} - bitstream gain failed: {} (tags still written)",
+                    "!".yellow(),
+                    filename,
+                    e
+                );
             }
         }
-    } else {
-        0
-    };
+    }
 
-    // Create ReplayGain tags for AAC
     let mut tags = mp4meta::ReplayGainTags::default();
     tags.set_track(result.gain_db(), result.peak());
-
-    // Add album tags if available
     if let Some(album) = album_info {
         tags.set_album(album.album_gain_db, album.album_peak);
     }
 
-    // Write tags to file
     match mp4meta::write_replaygain_tags(file, &tags) {
         Ok(()) => {
-            // Restore timestamp if needed
-            if let Some(mtime) = original_mtime {
-                restore_timestamp(file, mtime);
-            }
-
             let tag_type = if album_info.is_some() {
                 "track+album tags"
             } else {
