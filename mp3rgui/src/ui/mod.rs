@@ -8,6 +8,7 @@ use crate::app::Mp3rgainApp;
 
 pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     handle_dropped_files(app, ctx);
+    handle_selection_shortcuts(app, ctx);
     menu::render(app, ctx);
     toolbar::render(app, ctx);
     options::render(app, ctx);
@@ -184,6 +185,31 @@ fn render_delete_confirm(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     if close_via_confirm {
         app.confirm_delete_tags = false;
         app.start_delete_tags(ctx);
+    }
+}
+
+/// Global keyboard shortcuts for the file table.
+///
+/// - Cmd/Ctrl+A: select every loaded file
+/// - Esc: clear the current selection
+///
+/// Both use `consume_key`, so egui text-edit widgets (e.g. the modal
+/// numeric inputs) get first shot at the keys — Cmd+A in a DragValue's
+/// edit mode selects the text inside, not the file table. We also skip
+/// the Esc handler while any modal is up so the user can dismiss it
+/// without also losing their selection underneath.
+fn handle_selection_shortcuts(app: &mut Mp3rgainApp, ctx: &egui::Context) {
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
+        app.select_all();
+    }
+
+    let modal_open = app.confirm_delete_tags
+        || app.manual_gain_modal.open
+        || app.channel_gain_modal.open;
+    if !modal_open
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        app.clear_selection();
     }
 }
 

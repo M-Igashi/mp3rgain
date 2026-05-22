@@ -1,4 +1,4 @@
-use crate::app::Mp3rgainApp;
+use crate::app::{ClickMode, Mp3rgainApp};
 use crate::worker::StoredTagsView;
 
 /// Render the "Stored RG" column for one row.
@@ -90,6 +90,11 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                 });
             })
             .body(|mut body| {
+                // Defer click handling: the row closure borrows `app.files`,
+                // so it can't also mutate `app.selected_indices` during the
+                // iteration. Capture the requested action and apply it after
+                // the loop.
+                let mut pending_click: Option<(usize, ClickMode)> = None;
                 for (idx, file) in app.files.iter().enumerate() {
                     let is_selected = app.selected_indices.contains(&idx);
                     body.row(18.0, |mut row| {
@@ -97,16 +102,17 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
 
                         row.col(|ui| {
                             if ui.selectable_label(is_selected, &file.filename).clicked() {
-                                if ui.input(|i| i.modifiers.ctrl || i.modifiers.command) {
-                                    if is_selected {
-                                        app.selected_indices.retain(|&i| i != idx);
-                                    } else {
-                                        app.selected_indices.push(idx);
+                                let mode = ui.input(|i| {
+                                    let toggle = i.modifiers.ctrl || i.modifiers.command;
+                                    let shift = i.modifiers.shift;
+                                    match (shift, toggle) {
+                                        (true, true) => ClickMode::RangeAdd,
+                                        (true, false) => ClickMode::Range,
+                                        (false, true) => ClickMode::Toggle,
+                                        (false, false) => ClickMode::Replace,
                                     }
-                                } else {
-                                    app.selected_indices.clear();
-                                    app.selected_indices.push(idx);
-                                }
+                                });
+                                pending_click = Some((idx, mode));
                             }
                         });
                         row.col(|ui| {
@@ -161,6 +167,9 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                             ui.label(file.status.label());
                         });
                     });
+                }
+                if let Some((idx, mode)) = pending_click {
+                    app.click_row(idx, mode);
                 }
             });
     });

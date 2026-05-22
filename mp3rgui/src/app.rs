@@ -107,6 +107,20 @@ impl Default for ChannelGainModal {
     }
 }
 
+/// Modifier-combo classification for a table-row click.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClickMode {
+    /// Plain click. Replaces the selection with `idx`.
+    Replace,
+    /// Cmd / Ctrl + click. Toggles `idx` in/out of the selection.
+    Toggle,
+    /// Shift + click. Selects the inclusive range anchor..=idx, replacing.
+    Range,
+    /// Shift + Cmd / Ctrl + click. Adds the inclusive range to the existing
+    /// selection (set union).
+    RangeAdd,
+}
+
 /// What kind of work the active worker is doing — drives messaging and
 /// final-event handling.
 #[derive(Clone, Copy, PartialEq)]
@@ -145,6 +159,12 @@ pub struct Mp3rgainApp {
     /// Channel-gain modal state.
     pub channel_gain_modal: ChannelGainModal,
 
+    /// Last row the user clicked on (without Shift). Acts as the anchor for
+    /// subsequent Shift+click range selections, the way Finder / Explorer
+    /// behave. `None` when no anchor has been set yet (fresh table, or after
+    /// a full clear).
+    pub selection_anchor: Option<usize>,
+
     /// Active worker thread + its mpsc receiver and cancel flag.
     /// `None` when nothing is running.
     worker: Option<WorkerHandle>,
@@ -172,6 +192,7 @@ impl Mp3rgainApp {
             confirm_delete_tags: false,
             manual_gain_modal: ManualGainModal::default(),
             channel_gain_modal: ChannelGainModal::default(),
+            selection_anchor: None,
             worker: None,
             worker_kind: None,
             started_files: 0,
@@ -245,7 +266,75 @@ impl Mp3rgainApp {
         }
         self.files.clear();
         self.selected_indices.clear();
+        self.selection_anchor = None;
         self.album_info = None;
+    }
+
+    /// Replace the current selection with every file in the table. Used by
+    /// the Cmd+A / Ctrl+A shortcut.
+    pub fn select_all(&mut self) {
+        if self.is_processing || self.files.is_empty() {
+            return;
+        }
+        self.selected_indices = (0..self.files.len()).collect();
+        // Anchor at the first row so a follow-up Shift+click extends a sane
+        // range. (Without this, an Esc-then-Cmd-A flow would lose the
+        // anchor and Shift+click would behave like a plain click.)
+        self.selection_anchor = Some(0);
+    }
+
+    /// Drop the current selection. Used by Escape (when no modal is open).
+    pub fn clear_selection(&mut self) {
+        self.selected_indices.clear();
+        self.selection_anchor = None;
+    }
+
+    /// Apply a click on `idx` with the given modifier combination. Anchor
+    /// management follows Finder: a plain click moves the anchor, a Shift
+    /// click extends from the anchor without moving it, a Cmd/Ctrl click
+    /// toggles a single row and updates the anchor.
+    pub fn click_row(&mut self, idx: usize, mode: ClickMode) {
+        if idx >= self.files.len() {
+            return;
+        }
+        match mode {
+            ClickMode::Replace => {
+                self.selected_indices.clear();
+                self.selected_indices.push(idx);
+                self.selection_anchor = Some(idx);
+            }
+            ClickMode::Toggle => {
+                if let Some(pos) = self.selected_indices.iter().position(|&i| i == idx) {
+                    self.selected_indices.remove(pos);
+                } else {
+                    self.selected_indices.push(idx);
+                }
+                self.selection_anchor = Some(idx);
+            }
+            ClickMode::Range => {
+                let anchor = self.selection_anchor.unwrap_or(idx);
+                let (lo, hi) = if anchor <= idx {
+                    (anchor, idx)
+                } else {
+                    (idx, anchor)
+                };
+                self.selected_indices = (lo..=hi).collect();
+                // Anchor stays put.
+            }
+            ClickMode::RangeAdd => {
+                let anchor = self.selection_anchor.unwrap_or(idx);
+                let (lo, hi) = if anchor <= idx {
+                    (anchor, idx)
+                } else {
+                    (idx, anchor)
+                };
+                for i in lo..=hi {
+                    if !self.selected_indices.contains(&i) {
+                        self.selected_indices.push(i);
+                    }
+                }
+            }
+        }
     }
 
     pub fn cancel_current_work(&mut self) {
