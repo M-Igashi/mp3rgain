@@ -140,18 +140,25 @@ pub(crate) fn parse_header(header: &[u8]) -> Option<FrameHeader> {
 }
 
 /// Location of a global_gain field within the file
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct GainLocation {
     pub byte_offset: usize,
     pub bit_offset: u8,
 }
 
-/// Calculate global_gain locations within a frame's side information
+/// A frame has at most 2 granules × 2 channels = 4 global_gain locations.
+pub(crate) const MAX_GAIN_LOCATIONS: usize = 4;
+
+/// Calculate global_gain locations within a frame's side information.
+///
+/// Writes into the caller-supplied `out` buffer and returns the populated
+/// length. Avoids the per-frame `Vec` allocation the previous version paid on
+/// every frame (~7500/file for a typical 3-minute MP3).
 pub(crate) fn calculate_gain_locations(
     frame_offset: usize,
     header: &FrameHeader,
-) -> Vec<GainLocation> {
-    let mut locations = Vec::new();
+    out: &mut [GainLocation; MAX_GAIN_LOCATIONS],
+) -> usize {
     let side_info_start = frame_offset + header.side_info_offset();
 
     let num_channels = header.channel_mode.channel_count();
@@ -169,23 +176,22 @@ pub(crate) fn calculate_gain_locations(
         _ => 63,
     };
 
+    let mut len = 0;
     for gr in 0..num_granules {
         for ch in 0..num_channels {
             let granule_start_bit =
                 bits_before_granules + (gr * num_channels + ch) * bits_per_granule_channel;
             let global_gain_bit = granule_start_bit + 21;
 
-            let byte_offset = side_info_start + global_gain_bit / 8;
-            let bit_offset = (global_gain_bit % 8) as u8;
-
-            locations.push(GainLocation {
-                byte_offset,
-                bit_offset,
-            });
+            out[len] = GainLocation {
+                byte_offset: side_info_start + global_gain_bit / 8,
+                bit_offset: (global_gain_bit % 8) as u8,
+            };
+            len += 1;
         }
     }
 
-    locations
+    len
 }
 
 /// Read 8-bit value at bit-unaligned position (raw byte/bit offset)
@@ -307,6 +313,10 @@ where
     let audio_end = find_audio_end(data);
     let mut pos = skip_id3v2(data);
     let mut frame_count = 0;
+    let mut locations = [GainLocation {
+        byte_offset: 0,
+        bit_offset: 0,
+    }; MAX_GAIN_LOCATIONS];
 
     while pos + 4 <= audio_end {
         let header = match parse_header(&data[pos..]) {
@@ -335,8 +345,8 @@ where
             continue;
         }
 
-        let locations = calculate_gain_locations(pos, &header);
-        callback(pos, &header, &locations);
+        let len = calculate_gain_locations(pos, &header, &mut locations);
+        callback(pos, &header, &locations[..len]);
 
         frame_count += 1;
         pos = next_pos;
@@ -374,6 +384,10 @@ pub(crate) fn apply_gain_to_data(data: &mut [u8], gain_steps: i32, mode: GainMod
     let audio_end = find_audio_end(data);
     let mut pos = skip_id3v2(data);
     let mut modified_frames = 0;
+    let mut locations = [GainLocation {
+        byte_offset: 0,
+        bit_offset: 0,
+    }; MAX_GAIN_LOCATIONS];
 
     while pos + 4 <= audio_end {
         let header = match parse_header(&data[pos..]) {
@@ -402,9 +416,9 @@ pub(crate) fn apply_gain_to_data(data: &mut [u8], gain_steps: i32, mode: GainMod
             continue;
         }
 
-        let locations = calculate_gain_locations(pos, &header);
+        let len = calculate_gain_locations(pos, &header, &mut locations);
 
-        for loc in &locations {
+        for loc in &locations[..len] {
             let current_gain = read_gain_at(data, loc);
             let new_gain = adjust_gain_value(current_gain, gain_steps, mode);
             write_gain_at(data, loc, new_gain);
@@ -426,6 +440,10 @@ pub(crate) fn apply_gain_to_channel_data(
     let audio_end = find_audio_end(data);
     let mut pos = skip_id3v2(data);
     let mut modified_frames = 0;
+    let mut locations = [GainLocation {
+        byte_offset: 0,
+        bit_offset: 0,
+    }; MAX_GAIN_LOCATIONS];
 
     while pos + 4 <= audio_end {
         let header = match parse_header(&data[pos..]) {
@@ -454,13 +472,13 @@ pub(crate) fn apply_gain_to_channel_data(
             continue;
         }
 
-        let locations = calculate_gain_locations(pos, &header);
+        let len = calculate_gain_locations(pos, &header, &mut locations);
         let num_channels = header.channel_mode.channel_count();
         let num_granules = header.granule_count();
 
         for gr in 0..num_granules {
             let loc_index = gr * num_channels + channel_index;
-            if loc_index < locations.len() {
+            if loc_index < len {
                 let loc = &locations[loc_index];
                 let current_gain = read_gain_at(data, loc);
                 let new_gain = adjust_gain_value(current_gain, gain_steps, GainMode::Saturating);

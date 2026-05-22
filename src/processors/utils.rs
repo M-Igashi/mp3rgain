@@ -3,18 +3,13 @@ use mp3rgain::mp4meta;
 use std::path::Path;
 use std::time::SystemTime;
 
-use crate::cli::options::{Options, OutputFormat};
+pub use mp3rgain::apply::restore_timestamp;
 
-pub fn restore_timestamp(file: &Path, mtime: SystemTime) {
-    let _ = std::fs::File::options()
-        .write(true)
-        .open(file)
-        .and_then(|f| f.set_times(std::fs::FileTimes::new().set_modified(mtime)));
-}
+use crate::cli::options::{Options, OutputFormat};
 
 pub fn save_original_mtime(file: &Path, opts: &Options) -> Option<SystemTime> {
     if opts.preserve_timestamp && !opts.dry_run {
-        std::fs::metadata(file).ok().and_then(|m| m.modified().ok())
+        mp3rgain::apply::read_mtime(file)
     } else {
         None
     }

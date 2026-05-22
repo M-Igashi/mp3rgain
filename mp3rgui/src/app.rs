@@ -158,9 +158,6 @@ pub struct Mp3rgainApp {
     pub total_progress: f32,
     pub is_processing: bool,
     pub status_message: String,
-    /// Most-recent album analysis. Feeds `replaygain_album_*` tag fields
-    /// when `apply_album_gain` runs.
-    pub album_info: Option<AacAlbumInfo>,
     /// User-toggleable apply flags surfaced in the Options panel.
     pub apply_options: ApplyOptionsUi,
 
@@ -213,7 +210,6 @@ impl Mp3rgainApp {
             total_progress: 0.0,
             is_processing: false,
             status_message: String::new(),
-            album_info: None,
             apply_options: ApplyOptionsUi::default(),
             confirm_delete_tags: false,
             manual_gain_modal: ManualGainModal::default(),
@@ -291,11 +287,11 @@ impl Mp3rgainApp {
                 let peak = track.peak();
                 file.track_clip = file
                     .track_gain
-                    .map(|g| peak * 10.0_f64.powf(g / 20.0) > 1.0)
+                    .map(|g| Self::would_clip(peak, g))
                     .unwrap_or(false);
                 file.album_clip = file
                     .album_gain
-                    .map(|g| peak * 10.0_f64.powf(g / 20.0) > 1.0)
+                    .map(|g| Self::would_clip(peak, g))
                     .unwrap_or(false);
             }
         }
@@ -369,7 +365,6 @@ impl Mp3rgainApp {
         self.files.clear();
         self.selected_indices.clear();
         self.selection_anchor = None;
-        self.album_info = None;
     }
 
     /// Replace the current selection with every file in the table. Used by
@@ -474,8 +469,6 @@ impl Mp3rgainApp {
             return;
         }
 
-        // Track-only analysis invalidates any previously-computed album info.
-        self.album_info = None;
         // Issue #161: act on the current selection (or all files when nothing
         // is selected). Selected rows go to Pending; unselected rows keep their
         // existing state so partial analyses don't wipe prior results.
@@ -507,7 +500,6 @@ impl Mp3rgainApp {
             return;
         }
 
-        self.album_info = None;
         // Issue #161: scope to current selection (or all files when none
         // selected). Issue #159: group those targets by parent directory so
         // each folder is treated as its own album.
@@ -947,12 +939,6 @@ impl Mp3rgainApp {
                         file.status = FileStatus::Error(msg);
                     }
                 }
-
-                // Keep the last group's summary as the legacy global field.
-                // Per-file album_info above is now the source of truth for
-                // Apply Album Gain (issue #159); this assignment is kept so
-                // any code still reading the global sees a consistent value.
-                self.album_info = Some(album_info);
             }
             WorkerEvent::AlbumAnalysisFailed(msg) => {
                 self.status_message = format!("Album analysis failed: {}", msg);
@@ -1092,11 +1078,11 @@ impl Mp3rgainApp {
             file.clipping = new_peak >= 1.0;
             file.track_clip = file
                 .track_gain
-                .map(|g| new_peak * 10.0_f64.powf(g / 20.0) > 1.0)
+                .map(|g| Self::would_clip(new_peak, g))
                 .unwrap_or(false);
             file.album_clip = file
                 .album_gain
-                .map(|g| new_peak * 10.0_f64.powf(g / 20.0) > 1.0)
+                .map(|g| Self::would_clip(new_peak, g))
                 .unwrap_or(false);
         }
     }

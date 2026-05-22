@@ -6,6 +6,12 @@ use std::path::PathBuf;
 use super::options::{Options, OutputFormat, StoredTagMode};
 use super::usage::{print_usage, print_version};
 
+fn parse_thread_count(value: &str, flag: &str) -> Result<usize> {
+    value
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid {} value: {}", flag, value))
+}
+
 pub fn parse_args(args: &[String]) -> Result<Options> {
     let mut opts = Options::default();
     let mut i = 0;
@@ -41,20 +47,13 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                 eprintln!("{}: --threads requires an argument", "error".red().bold());
                 std::process::exit(1);
             }
-            opts.threads = Some(
-                args[i]
-                    .parse()
-                    .map_err(|_| anyhow::anyhow!("invalid --threads value: {}", args[i]))?,
-            );
+            opts.threads = Some(parse_thread_count(&args[i], "--threads")?);
             i += 1;
             continue;
         }
 
         if let Some(rest) = arg.strip_prefix("--threads=") {
-            opts.threads = Some(
-                rest.parse()
-                    .map_err(|_| anyhow::anyhow!("invalid --threads value: {}", rest))?,
-            );
+            opts.threads = Some(parse_thread_count(rest, "--threads")?);
             i += 1;
             continue;
         }
@@ -206,11 +205,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                         eprintln!("{}: -j requires an argument", "error".red().bold());
                         std::process::exit(1);
                     }
-                    opts.threads = Some(
-                        args[i]
-                            .parse()
-                            .map_err(|_| anyhow::anyhow!("invalid -j value: {}", args[i]))?,
-                    );
+                    opts.threads = Some(parse_thread_count(&args[i], "-j")?);
                 }
                 "u" => opts.undo = true,
                 "p" => opts.preserve_timestamp = true,
@@ -285,10 +280,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                 // Handle -j with attached value (e.g., -j4)
                 _ if flag.starts_with('j') => {
                     let val = &flag[1..];
-                    opts.threads = Some(
-                        val.parse()
-                            .map_err(|_| anyhow::anyhow!("invalid -j value: {}", val))?,
-                    );
+                    opts.threads = Some(parse_thread_count(val, "-j")?);
                 }
                 _ => {
                     eprintln!("{}: unknown option: -{}", "warning".yellow().bold(), flag);

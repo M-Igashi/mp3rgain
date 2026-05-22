@@ -415,11 +415,19 @@ where
     }
 }
 
-fn restore_timestamp(file: &Path, mtime: SystemTime) {
+/// Restore a previously-captured modified-time on `file`.
+///
+/// Silently no-ops on failure — timestamp preservation is best-effort.
+pub fn restore_timestamp(file: &Path, mtime: SystemTime) {
     let _ = std::fs::File::options()
         .write(true)
         .open(file)
         .and_then(|f| f.set_times(std::fs::FileTimes::new().set_modified(mtime)));
+}
+
+/// Read the current modified-time of `path`, returning `None` on any failure.
+pub fn read_mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
 }
 
 fn write_id3v2_undo_after_apply(

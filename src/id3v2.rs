@@ -155,8 +155,7 @@ pub fn write_id3v2_undo(
 ) -> Result<()> {
     let mut tag = read_tag(path)?;
 
-    let wrap_flag = if wrap { "W" } else { "N" };
-    let undo_value = format!("{:+04},{:+04},{}", left_gain, right_gain, wrap_flag);
+    let undo_value = crate::ape::format_undo_value(left_gain, right_gain, wrap);
     let minmax_value = format!("{},{}", min, max);
 
     tag.add_frame(id3::frame::ExtendedText {

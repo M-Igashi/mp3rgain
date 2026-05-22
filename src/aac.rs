@@ -1395,7 +1395,11 @@ pub fn apply_aac_gain_with_undo_to_path(
         .map(|s| s.to_string())
         .or_else(|| Some(format!("{},{}", analysis.min_gain(), analysis.max_gain())));
     let undo_tags = mp4meta::UndoTags::new(
-        Some(format!("{:+04},{:+04},N", new_undo_gain, new_undo_gain)),
+        Some(crate::ape::format_undo_value(
+            new_undo_gain,
+            new_undo_gain,
+            false,
+        )),
         minmax,
     );
 

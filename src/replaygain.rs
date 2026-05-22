@@ -1146,20 +1146,23 @@ fn process_audio_buffer(
     analyzer: &mut ReplayGainAnalyzer,
     peak: &mut f64,
 ) {
+    // Hoist `plane()` lookups outside the per-sample loop — calling
+    // `buf.plane(N).unwrap()` per frame goes through symphonia's Option
+    // unwrap on every sample (millions per file).
     match buffer {
         GenericAudioBufferRef::F32(buf) => {
             let channels = buf.num_planes();
             let frames = buf.frames();
+            let left_plane = buf.plane(0).unwrap();
+            let right_plane = (channels >= 2).then(|| buf.plane(1).unwrap());
 
             for frame in 0..frames {
-                // Get normalized sample and track peak (in normalized range for peak reporting)
-                let left_norm = buf.plane(0).unwrap()[frame] as f64;
+                let left_norm = left_plane[frame] as f64;
                 *peak = peak.max(left_norm.abs());
-                // Scale to 16-bit range for ReplayGain algorithm compatibility
                 let left_filtered = filters[0].process(left_norm * SAMPLE_SCALE_16BIT);
 
-                if channels >= 2 {
-                    let right_norm = buf.plane(1).unwrap()[frame] as f64;
+                if let Some(right_plane) = right_plane {
+                    let right_norm = right_plane[frame] as f64;
                     *peak = peak.max(right_norm.abs());
                     let right_filtered = filters[1].process(right_norm * SAMPLE_SCALE_16BIT);
                     analyzer.add_sample(left_filtered, right_filtered);
@@ -1171,17 +1174,17 @@ fn process_audio_buffer(
         GenericAudioBufferRef::S16(buf) => {
             let channels = buf.num_planes();
             let frames = buf.frames();
+            let left_plane = buf.plane(0).unwrap();
+            let right_plane = (channels >= 2).then(|| buf.plane(1).unwrap());
 
             for frame in 0..frames {
                 // S16 samples are already in the correct range for ReplayGain algorithm
-                // Convert to f64 directly without normalization for filter processing
-                let left = buf.plane(0).unwrap()[frame] as f64;
-                // Track peak in normalized range (0.0 to 1.0)
+                let left = left_plane[frame] as f64;
                 *peak = peak.max((left / SAMPLE_SCALE_16BIT).abs());
                 let left_filtered = filters[0].process(left);
 
-                if channels >= 2 {
-                    let right = buf.plane(1).unwrap()[frame] as f64;
+                if let Some(right_plane) = right_plane {
+                    let right = right_plane[frame] as f64;
                     *peak = peak.max((right / SAMPLE_SCALE_16BIT).abs());
                     let right_filtered = filters[1].process(right);
                     analyzer.add_sample(left_filtered, right_filtered);
@@ -1195,15 +1198,16 @@ fn process_audio_buffer(
             let frames = buf.frames();
             // Scale S32 to 16-bit range: divide by 2^16 to go from 32-bit to 16-bit range
             let scale = SAMPLE_SCALE_16BIT / 2147483648.0;
+            let left_plane = buf.plane(0).unwrap();
+            let right_plane = (channels >= 2).then(|| buf.plane(1).unwrap());
 
             for frame in 0..frames {
-                let left = buf.plane(0).unwrap()[frame] as f64 * scale;
-                // Track peak in normalized range
+                let left = left_plane[frame] as f64 * scale;
                 *peak = peak.max((left / SAMPLE_SCALE_16BIT).abs());
                 let left_filtered = filters[0].process(left);
 
-                if channels >= 2 {
-                    let right = buf.plane(1).unwrap()[frame] as f64 * scale;
+                if let Some(right_plane) = right_plane {
+                    let right = right_plane[frame] as f64 * scale;
                     *peak = peak.max((right / SAMPLE_SCALE_16BIT).abs());
                     let right_filtered = filters[1].process(right);
                     analyzer.add_sample(left_filtered, right_filtered);
@@ -1761,34 +1765,31 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
         // The F32 buffer from Symphonia is already normalized and clipped.
         // To detect clipping, we check if the peak is exactly 1.0 (or very close),
         // which indicates the audio may have been clipped by the decoder.
+        // Iterate plane-major so `plane(ch).unwrap()` happens once per channel
+        // rather than once per sample.
         match &decoded {
             GenericAudioBufferRef::F32(buf) => {
-                let channels = buf.num_planes();
-                for frame in 0..buf.frames() {
-                    for ch in 0..channels {
-                        let sample = buf.plane(ch).unwrap()[frame].abs() as f64;
-                        max_peak = max_peak.max(sample);
+                for ch in 0..buf.num_planes() {
+                    for &sample in buf.plane(ch).unwrap() {
+                        max_peak = max_peak.max((sample as f64).abs());
                     }
                 }
             }
             GenericAudioBufferRef::S16(buf) => {
-                let channels = buf.num_planes();
-                for frame in 0..buf.frames() {
-                    for ch in 0..channels {
+                for ch in 0..buf.num_planes() {
+                    for &sample in buf.plane(ch).unwrap() {
                         // S16 samples: convert to normalized range
                         // This can exceed 1.0 if sample is at max (32767/32768 ≈ 0.99997)
-                        let sample =
-                            (buf.plane(ch).unwrap()[frame] as f64).abs() / SAMPLE_SCALE_16BIT;
-                        max_peak = max_peak.max(sample);
+                        let s = (sample as f64).abs() / SAMPLE_SCALE_16BIT;
+                        max_peak = max_peak.max(s);
                     }
                 }
             }
             GenericAudioBufferRef::S32(buf) => {
-                let channels = buf.num_planes();
-                for frame in 0..buf.frames() {
-                    for ch in 0..channels {
-                        let sample = (buf.plane(ch).unwrap()[frame] as f64).abs() / 2147483648.0;
-                        max_peak = max_peak.max(sample);
+                for ch in 0..buf.num_planes() {
+                    for &sample in buf.plane(ch).unwrap() {
+                        let s = (sample as f64).abs() / 2147483648.0;
+                        max_peak = max_peak.max(s);
                     }
                 }
             }

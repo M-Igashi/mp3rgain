@@ -114,8 +114,7 @@ impl ApeTag {
 
     /// Set MP3GAIN_UNDO value
     pub fn set_undo_gain(&mut self, left_gain: i32, right_gain: i32, wrap: bool) {
-        let wrap_flag = if wrap { "W" } else { "N" };
-        let value = format!("{:+04},{:+04},{}", left_gain, right_gain, wrap_flag);
+        let value = format_undo_value(left_gain, right_gain, wrap);
         self.set(TAG_MP3GAIN_UNDO, &value);
     }
 
@@ -322,6 +321,12 @@ pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
     fs::write(file_path, &audio_data).map_err(|e| Error::io_write(file_path, e))?;
 
     Ok(())
+}
+
+/// Format MP3GAIN_UNDO tag value: `+LLL,+RRR,W|N`.
+pub fn format_undo_value(left_gain: i32, right_gain: i32, wrap: bool) -> String {
+    let wrap_flag = if wrap { "W" } else { "N" };
+    format!("{:+04},{:+04},{}", left_gain, right_gain, wrap_flag)
 }
 
 /// Parse MP3GAIN_UNDO tag value into (left_gain, right_gain)

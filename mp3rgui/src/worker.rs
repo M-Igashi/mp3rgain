@@ -8,7 +8,9 @@
 //! `mpsc::channel`; the UI side drains it from `update()` and calls
 //! `ctx.request_repaint()` so egui actually redraws.
 
-use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions};
+use mp3rgain::apply::{
+    apply_with_options, predict_apply, read_mtime, restore_timestamp, ApplyOptions,
+};
 use mp3rgain::replaygain::{self, ReplayGainResult};
 use mp3rgain::{
     id3v2, mp4meta, read_ape_tag_from_file, AacAlbumInfo, Channel, TAG_MP3GAIN_MINMAX,
@@ -20,7 +22,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::SystemTime;
 
 /// Stored-tag snapshot for one file, populated by `spawn_check_stored_tags`.
 /// All fields are pre-formatted strings so the UI can render them verbatim.
@@ -613,7 +614,7 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
                 }
                 Ok(_) => {
                     if let Some(mtime) = original_mtime {
-                        restore_mtime(&job.path, mtime);
+                        restore_timestamp(&job.path, mtime);
                     }
                     undone += 1;
                     send(&tx, &ctx, WorkerEvent::FileUndone { idx: job.idx });
@@ -698,7 +699,7 @@ pub fn spawn_delete_tags(
             match result {
                 Ok(()) => {
                     if let Some(m) = original_mtime {
-                        restore_mtime(&job.path, m);
+                        restore_timestamp(&job.path, m);
                     }
                     deleted += 1;
                     // Tag deletion doesn't change audio levels, so the row's
@@ -905,17 +906,6 @@ fn run_undo(path: &Path, use_id3v2: bool) -> mp3rgain::error::Result<usize> {
     } else {
         mp3rgain::gain::undo_gain(path)
     }
-}
-
-fn read_mtime(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
-}
-
-fn restore_mtime(path: &Path, mtime: SystemTime) {
-    let _ = std::fs::File::options()
-        .write(true)
-        .open(path)
-        .and_then(|f| f.set_times(std::fs::FileTimes::new().set_modified(mtime)));
 }
 
 /// Build the final `ApplyOptions` by combining always-on safety rails
