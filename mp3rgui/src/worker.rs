@@ -72,8 +72,14 @@ pub enum WorkerEvent {
     },
     AlbumAnalysisFailed(String),
 
+    /// Apply succeeded for `idx`. `actual_steps` is what `apply_with_options`
+    /// actually wrote (may differ from the requested steps when prevent_clipping
+    /// capped the gain). The UI uses it to refresh the row's volume / gain
+    /// columns in place, so the user sees the post-apply numbers without
+    /// having to re-analyze (issue #160).
     FileApplied {
         idx: usize,
+        actual_steps: i32,
     },
     /// Dry-run analog of `FileApplied`: predict_apply succeeded, no bytes
     /// changed. UI shows "Would apply N steps" in the row status.
@@ -403,7 +409,14 @@ pub fn spawn_apply(
                             },
                         );
                     } else {
-                        send(&tx, &ctx, WorkerEvent::FileApplied { idx: job.idx });
+                        send(
+                            &tx,
+                            &ctx,
+                            WorkerEvent::FileApplied {
+                                idx: job.idx,
+                                actual_steps: report.actual_steps,
+                            },
+                        );
                     }
                 }
                 Err(e) => {
@@ -568,7 +581,17 @@ pub fn spawn_delete_tags(
                         restore_mtime(&job.path, m);
                     }
                     deleted += 1;
-                    send(&tx, &ctx, WorkerEvent::FileApplied { idx: job.idx });
+                    // Tag deletion doesn't change audio levels, so the row's
+                    // volume/gain columns stay valid — pass 0 steps so the UI
+                    // doesn't shift them.
+                    send(
+                        &tx,
+                        &ctx,
+                        WorkerEvent::FileApplied {
+                            idx: job.idx,
+                            actual_steps: 0,
+                        },
+                    );
                 }
                 Err(e) => {
                     errors += 1;
