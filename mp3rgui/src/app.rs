@@ -74,6 +74,22 @@ pub struct FileEntry {
     pub stored_tags: Option<StoredTagsView>,
 }
 
+/// State for the "Apply Manual Gain" modal. `open` toggles visibility;
+/// `steps` is preserved across closes so the next open shows the same value.
+pub struct ManualGainModal {
+    pub open: bool,
+    pub steps: i32,
+}
+
+impl Default for ManualGainModal {
+    fn default() -> Self {
+        Self {
+            open: false,
+            steps: 0,
+        }
+    }
+}
+
 /// What kind of work the active worker is doing — drives messaging and
 /// final-event handling.
 #[derive(Clone, Copy, PartialEq)]
@@ -105,6 +121,10 @@ pub struct Mp3rgainApp {
     /// The destructive worker is only spawned after the user confirms.
     pub confirm_delete_tags: bool,
 
+    /// Manual-gain modal state. Lives across opens so the user can tweak
+    /// the same value across runs.
+    pub manual_gain_modal: ManualGainModal,
+
     /// Active worker thread + its mpsc receiver and cancel flag.
     /// `None` when nothing is running.
     worker: Option<WorkerHandle>,
@@ -130,6 +150,7 @@ impl Mp3rgainApp {
             album_info: None,
             apply_options: ApplyOptionsUi::default(),
             confirm_delete_tags: false,
+            manual_gain_modal: ManualGainModal::default(),
             worker: None,
             worker_kind: None,
             started_files: 0,
@@ -396,6 +417,52 @@ impl Mp3rgainApp {
             WorkerKind::CheckTags,
             count,
             worker::spawn_check_stored_tags(ctx.clone(), jobs, use_id3v2),
+        );
+    }
+
+    /// `-g`: apply a fixed step count to the selected files (or all when no
+    /// selection). Bypasses ReplayGain — `track_result` / `album_info` are
+    /// left None so `apply_with_options` uses the headroom-based clipping
+    /// check.
+    pub fn start_apply_manual_gain(&mut self, ctx: &egui::Context, steps: i32) {
+        if self.files.is_empty() || self.is_processing || steps == 0 {
+            return;
+        }
+
+        let indices: Vec<usize> = if self.selected_indices.is_empty() {
+            (0..self.files.len()).collect()
+        } else {
+            let mut v = self.selected_indices.clone();
+            v.sort_unstable();
+            v.dedup();
+            v
+        };
+
+        let jobs: Vec<ApplyJob> = indices
+            .iter()
+            .filter_map(|&idx| {
+                self.files.get(idx).map(|f| ApplyJob {
+                    idx,
+                    path: f.path.clone(),
+                    steps,
+                    track_result: None,
+                    album_info: None,
+                })
+            })
+            .collect();
+        if jobs.is_empty() {
+            return;
+        }
+
+        for &job_idx in jobs.iter().map(|j| &j.idx) {
+            self.files[job_idx].status = FileStatus::Pending;
+        }
+        let count = jobs.len();
+        let ui_opts = self.apply_options;
+        self.begin_worker(
+            WorkerKind::TrackApply,
+            count,
+            worker::spawn_apply(ctx.clone(), jobs, "manual gain", ui_opts),
         );
     }
 

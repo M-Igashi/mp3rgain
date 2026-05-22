@@ -14,6 +14,63 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     status::render(app, ctx);
     render_central_panel(app, ctx);
     render_delete_confirm(app, ctx);
+    render_manual_gain_modal(app, ctx);
+}
+
+/// Modal for the `-g`-equivalent "Apply Manual Gain" action.
+fn render_manual_gain_modal(app: &mut Mp3rgainApp, ctx: &egui::Context) {
+    if !app.manual_gain_modal.open {
+        return;
+    }
+    let count = if app.selected_indices.is_empty() {
+        app.files.len()
+    } else {
+        app.selected_indices.len()
+    };
+    let mut open = true;
+    let mut close_via_cancel = false;
+    let mut close_via_apply = false;
+    egui::Window::new("Apply manual gain")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .open(&mut open)
+        .show(ctx, |ui| {
+            ui.label(format!("Target: {} file(s)", count));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Steps:");
+                ui.add(
+                    egui::DragValue::new(&mut app.manual_gain_modal.steps)
+                        .range(-64..=64)
+                        .speed(1),
+                );
+                let db = mp3rgain::steps_to_db(app.manual_gain_modal.steps);
+                ui.label(format!("= {:+.2} dB", db));
+            });
+            ui.label("1 step = 1.5 dB. Negative values lower the volume.");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    close_via_cancel = true;
+                }
+                let can_apply = app.manual_gain_modal.steps != 0;
+                if ui
+                    .add_enabled(can_apply, egui::Button::new("Apply"))
+                    .clicked()
+                {
+                    close_via_apply = true;
+                }
+            });
+        });
+    if !open || close_via_cancel {
+        app.manual_gain_modal.open = false;
+    }
+    if close_via_apply {
+        let steps = app.manual_gain_modal.steps;
+        app.manual_gain_modal.open = false;
+        app.start_apply_manual_gain(ctx, steps);
+    }
 }
 
 /// Modal dialog gating the destructive Delete Stored Tags worker.
