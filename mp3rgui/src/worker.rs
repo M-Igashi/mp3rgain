@@ -11,9 +11,9 @@
 use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions};
 use mp3rgain::replaygain::{self, ReplayGainResult};
 use mp3rgain::{
-    id3v2, mp4meta, read_ape_tag_from_file, AacAlbumInfo, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
-    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK,
+    id3v2, mp4meta, read_ape_tag_from_file, AacAlbumInfo, Channel, TAG_MP3GAIN_MINMAX,
+    TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
+    TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -147,6 +147,8 @@ pub struct ApplyJob {
     pub steps: i32,
     pub track_result: Option<ReplayGainResult>,
     pub album_info: Option<AacAlbumInfo>,
+    /// Per-channel gain (`-l`). `None` means the gain hits all channels.
+    pub channel: Option<Channel>,
 }
 
 /// A single undo job.
@@ -375,7 +377,13 @@ pub fn spawn_apply(
             }
             send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
-            let opts = build_apply_options(job.steps, job.track_result, job.album_info, ui_opts);
+            let opts = build_apply_options(
+                job.steps,
+                job.track_result,
+                job.album_info,
+                job.channel,
+                ui_opts,
+            );
             let result = if ui_opts.dry_run {
                 predict_apply(&job.path, &opts)
             } else {
@@ -780,14 +788,16 @@ fn build_apply_options(
     steps: i32,
     track_result: Option<ReplayGainResult>,
     album_info: Option<AacAlbumInfo>,
+    channel: Option<Channel>,
     ui_opts: ApplyOptionsUi,
 ) -> ApplyOptions {
     let mut opts = ApplyOptions::new(steps);
     opts.track_result = track_result;
     opts.album_info = album_info;
+    opts.channel = channel;
     // Always-on safety rails.
     opts.write_undo = true;
-    opts.write_replaygain_tags = true;
+    opts.write_replaygain_tags = channel.is_none();
     opts.use_temp_file = true;
     // User-toggleable.
     opts.prevent_clipping = ui_opts.prevent_clipping;

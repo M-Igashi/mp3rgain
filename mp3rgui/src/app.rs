@@ -3,7 +3,7 @@ use crate::worker::{
     WorkerEvent, WorkerHandle,
 };
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
-use mp3rgain::{db_to_steps, AacAlbumInfo};
+use mp3rgain::{db_to_steps, AacAlbumInfo, Channel};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::TryRecvError;
 
@@ -90,6 +90,23 @@ impl Default for ManualGainModal {
     }
 }
 
+/// State for the "Apply Channel Gain" modal (`-l`).
+pub struct ChannelGainModal {
+    pub open: bool,
+    pub channel: Channel,
+    pub steps: i32,
+}
+
+impl Default for ChannelGainModal {
+    fn default() -> Self {
+        Self {
+            open: false,
+            channel: Channel::Left,
+            steps: 0,
+        }
+    }
+}
+
 /// What kind of work the active worker is doing — drives messaging and
 /// final-event handling.
 #[derive(Clone, Copy, PartialEq)]
@@ -125,6 +142,9 @@ pub struct Mp3rgainApp {
     /// the same value across runs.
     pub manual_gain_modal: ManualGainModal,
 
+    /// Channel-gain modal state.
+    pub channel_gain_modal: ChannelGainModal,
+
     /// Active worker thread + its mpsc receiver and cancel flag.
     /// `None` when nothing is running.
     worker: Option<WorkerHandle>,
@@ -151,6 +171,7 @@ impl Mp3rgainApp {
             apply_options: ApplyOptionsUi::default(),
             confirm_delete_tags: false,
             manual_gain_modal: ManualGainModal::default(),
+            channel_gain_modal: ChannelGainModal::default(),
             worker: None,
             worker_kind: None,
             started_files: 0,
@@ -303,6 +324,7 @@ impl Mp3rgainApp {
                     steps: db_to_steps(gain_db),
                     track_result: f.track_result.clone(),
                     album_info: None,
+                    channel: None,
                 })
             })
             .collect();
@@ -447,6 +469,7 @@ impl Mp3rgainApp {
                     steps,
                     track_result: None,
                     album_info: None,
+                    channel: None,
                 })
             })
             .collect();
@@ -463,6 +486,58 @@ impl Mp3rgainApp {
             WorkerKind::TrackApply,
             count,
             worker::spawn_apply(ctx.clone(), jobs, "manual gain", ui_opts),
+        );
+    }
+
+    /// `-l`: apply gain to a single channel of the targeted files. AAC files
+    /// are silently skipped (channel gain is MP3-only).
+    pub fn start_apply_channel_gain(
+        &mut self,
+        ctx: &egui::Context,
+        channel: Channel,
+        steps: i32,
+    ) {
+        if self.files.is_empty() || self.is_processing || steps == 0 {
+            return;
+        }
+
+        let indices: Vec<usize> = if self.selected_indices.is_empty() {
+            (0..self.files.len()).collect()
+        } else {
+            let mut v = self.selected_indices.clone();
+            v.sort_unstable();
+            v.dedup();
+            v
+        };
+
+        let jobs: Vec<ApplyJob> = indices
+            .iter()
+            .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
+            .filter(|(_, f)| !mp3rgain::mp4meta::is_aac_file(&f.path))
+            .map(|(idx, f)| ApplyJob {
+                idx,
+                path: f.path.clone(),
+                steps,
+                track_result: None,
+                album_info: None,
+                channel: Some(channel),
+            })
+            .collect();
+        if jobs.is_empty() {
+            self.status_message =
+                "Channel gain only applies to MP3 — selection had no eligible files".into();
+            return;
+        }
+
+        for &job_idx in jobs.iter().map(|j| &j.idx) {
+            self.files[job_idx].status = FileStatus::Pending;
+        }
+        let count = jobs.len();
+        let ui_opts = self.apply_options;
+        self.begin_worker(
+            WorkerKind::TrackApply,
+            count,
+            worker::spawn_apply(ctx.clone(), jobs, "channel gain", ui_opts),
         );
     }
 
@@ -525,6 +600,7 @@ impl Mp3rgainApp {
                     steps: db_to_steps(gain_db),
                     track_result: f.track_result.clone(),
                     album_info,
+                    channel: None,
                 })
             })
             .collect();

@@ -21,7 +21,7 @@ use std::time::SystemTime;
 #[cfg(feature = "aac")]
 use crate::aac;
 use crate::error::{Error, Result};
-use crate::gain::{db_to_steps, peak_to_headroom_db, steps_to_db, GainOptions, MAX_GAIN};
+use crate::gain::{db_to_steps, peak_to_headroom_db, steps_to_db, Channel, GainOptions, MAX_GAIN};
 use crate::replaygain::ReplayGainResult;
 use crate::{ape, id3v2, mp4meta};
 
@@ -87,6 +87,11 @@ pub struct ApplyOptions {
     /// `-s i`: MP3 only — use ID3v2 TXXX frames for undo and ReplayGain
     /// instead of APE.
     pub use_id3v2: bool,
+
+    /// `-l`: MP3 only — apply gain to a single channel (Stereo / Dual
+    /// Channel) instead of all channels. AAC has no per-channel apply
+    /// path; setting this on an AAC file is an error.
+    pub channel: Option<Channel>,
 }
 
 impl ApplyOptions {
@@ -104,6 +109,7 @@ impl ApplyOptions {
             write_undo: true,
             write_replaygain_tags: false,
             use_id3v2: false,
+            channel: None,
         }
     }
 }
@@ -150,6 +156,10 @@ pub enum ClippingDetection {
 /// 5. Mtime restoration when [`ApplyOptions::preserve_timestamp`] is on.
 pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
     let is_aac = mp4meta::is_aac_file(file_path);
+
+    if is_aac && opts.channel.is_some() {
+        return Err(Error::ChannelGainOnAac);
+    }
 
     let original_mtime = if opts.preserve_timestamp {
         std::fs::metadata(file_path)
@@ -324,10 +334,13 @@ fn apply_aac_bytes(_file_path: &Path, _steps: i32, _opts: &ApplyOptions) -> Resu
 
 fn apply_mp3_ape_bytes(file_path: &Path, steps: i32, opts: &ApplyOptions) -> Result<usize> {
     with_temp_file(file_path, opts.use_temp_file, |r, w| {
-        GainOptions::new(steps)
+        let mut gain = GainOptions::new(steps)
             .wrap(opts.wrap)
-            .undo(opts.write_undo)
-            .apply_to_path(r, w)
+            .undo(opts.write_undo);
+        if let Some(ch) = opts.channel {
+            gain = gain.channel(ch);
+        }
+        gain.apply_to_path(r, w)
     })
 }
 
@@ -346,14 +359,26 @@ fn apply_mp3_id3v2_bytes(
     // APE undo is never written in `-s i` mode; the undo goes into a
     // TXXX:MP3GAIN_UNDO frame instead, written below.
     let modified = with_temp_file(file_path, opts.use_temp_file, |r, w| {
-        GainOptions::new(steps)
-            .wrap(opts.wrap)
-            .undo(false)
-            .apply_to_path(r, w)
+        let mut gain = GainOptions::new(steps).wrap(opts.wrap).undo(false);
+        if let Some(ch) = opts.channel {
+            gain = gain.channel(ch);
+        }
+        gain.apply_to_path(r, w)
     })?;
 
     if opts.write_undo {
-        write_id3v2_undo_after_apply(file_path, steps, steps, opts.wrap, mp3_analysis.as_ref())?;
+        let (delta_left, delta_right) = match opts.channel {
+            Some(Channel::Left) => (steps, 0),
+            Some(Channel::Right) => (0, steps),
+            None => (steps, steps),
+        };
+        write_id3v2_undo_after_apply(
+            file_path,
+            delta_left,
+            delta_right,
+            opts.wrap,
+            mp3_analysis.as_ref(),
+        )?;
     }
     Ok(modified)
 }

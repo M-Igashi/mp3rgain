@@ -15,6 +15,78 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     render_central_panel(app, ctx);
     render_delete_confirm(app, ctx);
     render_manual_gain_modal(app, ctx);
+    render_channel_gain_modal(app, ctx);
+}
+
+/// Modal for the `-l`-equivalent "Apply Channel Gain" action. MP3 only
+/// (the apply pipeline rejects AAC files with `Error::ChannelGainOnAac`).
+fn render_channel_gain_modal(app: &mut Mp3rgainApp, ctx: &egui::Context) {
+    if !app.channel_gain_modal.open {
+        return;
+    }
+    let count = if app.selected_indices.is_empty() {
+        app.files.len()
+    } else {
+        app.selected_indices.len()
+    };
+    let mut open = true;
+    let mut close_via_cancel = false;
+    let mut close_via_apply = false;
+    egui::Window::new("Apply channel gain")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .open(&mut open)
+        .show(ctx, |ui| {
+            ui.label(format!("Target: {} file(s) (MP3 only)", count));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Channel:");
+                ui.selectable_value(
+                    &mut app.channel_gain_modal.channel,
+                    mp3rgain::Channel::Left,
+                    "Left",
+                );
+                ui.selectable_value(
+                    &mut app.channel_gain_modal.channel,
+                    mp3rgain::Channel::Right,
+                    "Right",
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Steps:");
+                ui.add(
+                    egui::DragValue::new(&mut app.channel_gain_modal.steps)
+                        .range(-64..=64)
+                        .speed(1),
+                );
+                let db = mp3rgain::steps_to_db(app.channel_gain_modal.steps);
+                ui.label(format!("= {:+.2} dB", db));
+            });
+            ui.label("Stereo / Dual Channel MP3s only. Joint-Stereo files will warn.");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    close_via_cancel = true;
+                }
+                let can_apply = app.channel_gain_modal.steps != 0;
+                if ui
+                    .add_enabled(can_apply, egui::Button::new("Apply"))
+                    .clicked()
+                {
+                    close_via_apply = true;
+                }
+            });
+        });
+    if !open || close_via_cancel {
+        app.channel_gain_modal.open = false;
+    }
+    if close_via_apply {
+        let channel = app.channel_gain_modal.channel;
+        let steps = app.channel_gain_modal.steps;
+        app.channel_gain_modal.open = false;
+        app.start_apply_channel_gain(ctx, channel, steps);
+    }
 }
 
 /// Modal for the `-g`-equivalent "Apply Manual Gain" action.

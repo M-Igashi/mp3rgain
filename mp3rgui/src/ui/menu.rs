@@ -84,6 +84,10 @@ fn modify_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                 app.manual_gain_modal.open = true;
                 ui.close_menu();
             }
+            if ui.button("Apply Channel Gain (MP3)...").clicked() {
+                app.channel_gain_modal.open = true;
+                ui.close_menu();
+            }
             ui.separator();
             let undo_label = if app.selected_indices.is_empty() {
                 "Undo All"
