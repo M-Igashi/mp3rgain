@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 
 PackageIdentifier: M-Igashi.mp3rgain
-PackageVersion: 2.7.0
+PackageVersion: 2.7.1
 InstallerLocale: en-US
 InstallerType: zip
 NestedInstallerType: portable
@@ -10,10 +10,10 @@ NestedInstallerFiles:
 ReleaseDate: 2026-05-22
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/M-Igashi/mp3rgain/releases/download/v2.7.0/mp3rgain-v2.7.0-windows-x86_64.zip
-    InstallerSha256: B2DB5040183CB6AFCC478BA30945582DA233E664F67D0B8CCB126A43D6EC461A
+    InstallerUrl: https://github.com/M-Igashi/mp3rgain/releases/download/v2.7.1/mp3rgain-v2.7.1-windows-x86_64.zip
+    InstallerSha256: 6044816729C520B2DBC9A17FE61AAA187AF264E01C5E30749049AD846C14D3DB
   - Architecture: arm64
-    InstallerUrl: https://github.com/M-Igashi/mp3rgain/releases/download/v2.7.0/mp3rgain-v2.7.0-windows-arm64.zip
-    InstallerSha256: 8549685F53A7C9B6BE6DDA4BAB21D8C323E23CA447A98D9C3DFDFE31E7F7AEC5
+    InstallerUrl: https://github.com/M-Igashi/mp3rgain/releases/download/v2.7.1/mp3rgain-v2.7.1-windows-arm64.zip
+    InstallerSha256: E2E8DB9FEE86F97BB778874BF57FD5C84A922358AA800A0E204D54881FDF793D
 ManifestType: installer
 ManifestVersion: 1.12.0
