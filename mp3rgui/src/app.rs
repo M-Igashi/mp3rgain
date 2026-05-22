@@ -69,6 +69,11 @@ pub struct FileEntry {
     /// for the peak-based clipping check and for writing
     /// `replaygain_track_*` tags on apply.
     pub track_result: Option<ReplayGainResult>,
+    /// Album-level ReplayGain summary for the folder this file belongs to,
+    /// populated by Album Analysis. Used to write `replaygain_album_*` tags
+    /// on Apply Album Gain. Per-file (not global) so adding multiple folders
+    /// treats each as its own album (issue #159).
+    pub album_info: Option<AacAlbumInfo>,
     /// Pre-existing ReplayGain / undo tags read from the file, populated by
     /// the "Check Stored Tags" action. `None` = not scanned yet.
     pub stored_tags: Option<StoredTagsView>,
@@ -356,6 +361,7 @@ impl Mp3rgainApp {
         self.album_info = None;
         for file in &mut self.files {
             file.status = FileStatus::Pending;
+            file.album_info = None;
         }
 
         let jobs: Vec<(usize, PathBuf)> = self
@@ -382,18 +388,30 @@ impl Mp3rgainApp {
         self.album_info = None;
         for file in &mut self.files {
             file.status = FileStatus::Pending;
+            file.album_info = None;
         }
 
-        let jobs: Vec<(usize, PathBuf)> = self
-            .files
-            .iter()
-            .enumerate()
-            .map(|(i, f)| (i, f.path.clone()))
-            .collect();
+        // Group by parent directory so each folder is treated as its own
+        // album, matching classic MP3GainGUI behavior (issue #159). Files
+        // without a parent (e.g. root paths) fall back to a single anonymous
+        // group keyed by empty string.
+        let mut groups: std::collections::BTreeMap<PathBuf, Vec<(usize, PathBuf)>> =
+            std::collections::BTreeMap::new();
+        for (i, f) in self.files.iter().enumerate() {
+            let parent = f
+                .path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(PathBuf::new);
+            groups.entry(parent).or_default().push((i, f.path.clone()));
+        }
+        let group_jobs: Vec<Vec<(usize, PathBuf)>> = groups.into_values().collect();
+        let total: usize = group_jobs.iter().map(|g| g.len()).sum();
+
         self.begin_worker(
             WorkerKind::AlbumAnalysis,
-            jobs.len(),
-            worker::spawn_album_analysis(ctx.clone(), jobs),
+            total,
+            worker::spawn_album_analysis(ctx.clone(), group_jobs),
         );
     }
 
@@ -648,7 +666,8 @@ impl Mp3rgainApp {
             return;
         }
 
-        let album_info = self.album_info;
+        // Use the per-file album_info (issue #159) so files from different
+        // folders get the album RG tags computed for their own album.
         let jobs: Vec<ApplyJob> = self
             .files
             .iter()
@@ -659,7 +678,7 @@ impl Mp3rgainApp {
                     path: f.path.clone(),
                     steps: db_to_steps(gain_db),
                     track_result: f.track_result.clone(),
-                    album_info,
+                    album_info: f.album_info,
                     channel: None,
                 })
             })
@@ -785,6 +804,7 @@ impl Mp3rgainApp {
                         file.album_volume = Some(album_volume);
                         file.album_gain = Some(album_gain);
                         file.album_clip = album_clip;
+                        file.album_info = Some(album_info);
                         file.status = FileStatus::Analyzed;
                     }
                 }
@@ -795,6 +815,10 @@ impl Mp3rgainApp {
                     }
                 }
 
+                // Keep the last group's summary as the legacy global field.
+                // Per-file album_info above is now the source of truth for
+                // Apply Album Gain (issue #159); this assignment is kept so
+                // any code still reading the global sees a consistent value.
                 self.album_info = Some(album_info);
             }
             WorkerEvent::AlbumAnalysisFailed(msg) => {

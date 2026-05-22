@@ -306,103 +306,130 @@ pub fn spawn_track_analysis(ctx: egui::Context, files: Vec<(usize, PathBuf)>) ->
 /// Spawn the album-analysis worker. Uses the parallel variant from the
 /// library (auto thread count) and reports per-file completion via the
 /// `on_complete` callback.
+/// Spawn an album-analysis worker for one or more groups of files.
+///
+/// Each inner Vec is treated as its own album, so loading files from
+/// multiple folders no longer collapses them into a single album with
+/// the wrong gain (issue #159). Groups are analyzed sequentially; the
+/// per-group call still fans out across cores via the library's
+/// rayon-backed parallel analyzer, so a single-group invocation is
+/// behavior-identical to the pre-fix code.
 pub fn spawn_album_analysis(
     ctx: egui::Context,
-    indexed_paths: Vec<(usize, PathBuf)>,
+    groups: Vec<Vec<(usize, PathBuf)>>,
 ) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_w = Arc::clone(&cancel);
 
     thread::spawn(move || {
-        let paths: Vec<PathBuf> = indexed_paths.iter().map(|(_, p)| p.clone()).collect();
-        let original_indices: Vec<usize> = indexed_paths.iter().map(|(i, _)| *i).collect();
-
-        let path_refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
+        let group_count = groups.len();
         let threads = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1);
 
-        let tx_cb = tx.clone();
-        let ctx_cb = ctx.clone();
-        let indices_cb = original_indices.clone();
-        let cancel_cb = Arc::clone(&cancel_w);
-        let on_complete = move |idx_in_paths: usize, _path: &Path| {
-            // Cancellation is best-effort: parallel analysis can't be
-            // interrupted mid-file, but we can suppress further repaints
-            // and final events.
-            if cancel_cb.load(Ordering::Relaxed) {
+        let mut analyzed_total = 0usize;
+        let mut skipped_total = 0usize;
+        let mut error_groups = 0usize;
+
+        for group in groups {
+            if cancel_w.load(Ordering::Relaxed) {
+                send(&tx, &ctx, WorkerEvent::Cancelled);
                 return;
             }
-            if let Some(&original_idx) = indices_cb.get(idx_in_paths) {
-                let _ = tx_cb.send(WorkerEvent::FileStart { idx: original_idx });
-                ctx_cb.request_repaint();
+            if group.is_empty() {
+                continue;
             }
+
+            let paths: Vec<PathBuf> = group.iter().map(|(_, p)| p.clone()).collect();
+            let original_indices: Vec<usize> = group.iter().map(|(i, _)| *i).collect();
+            let path_refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
+
+            let tx_cb = tx.clone();
+            let ctx_cb = ctx.clone();
+            let indices_cb = original_indices.clone();
+            let cancel_cb = Arc::clone(&cancel_w);
+            let on_complete = move |idx_in_paths: usize, _path: &Path| {
+                if cancel_cb.load(Ordering::Relaxed) {
+                    return;
+                }
+                if let Some(&original_idx) = indices_cb.get(idx_in_paths) {
+                    let _ = tx_cb.send(WorkerEvent::FileStart { idx: original_idx });
+                    ctx_cb.request_repaint();
+                }
+            };
+
+            let result = replaygain::analyze_album_lenient_parallel_with_completion(
+                &path_refs,
+                None,
+                threads,
+                &on_complete,
+            );
+
+            if cancel_w.load(Ordering::Relaxed) {
+                send(&tx, &ctx, WorkerEvent::Cancelled);
+                return;
+            }
+
+            match result {
+                Ok(report) => {
+                    let successful: Vec<(usize, ReplayGainResult)> = report
+                        .successful_indices
+                        .iter()
+                        .zip(report.album.tracks().iter())
+                        .map(|(&pos, track)| (original_indices[pos], track.clone()))
+                        .collect();
+                    let failures: Vec<(usize, String)> = report
+                        .failures
+                        .iter()
+                        .map(|(pos, msg)| (original_indices[*pos], msg.clone()))
+                        .collect();
+                    let album_info = AacAlbumInfo {
+                        album_gain_db: report.album.album_gain_db(),
+                        album_peak: report.album.album_peak(),
+                    };
+                    analyzed_total += successful.len();
+                    skipped_total += failures.len();
+
+                    send(
+                        &tx,
+                        &ctx,
+                        WorkerEvent::AlbumAnalysisDone {
+                            successful,
+                            failures,
+                            album_info,
+                        },
+                    );
+                }
+                Err(e) => {
+                    error_groups += 1;
+                    send(&tx, &ctx, WorkerEvent::AlbumAnalysisFailed(e.to_string()));
+                }
+            }
+        }
+
+        let message = match (group_count, error_groups) {
+            (1, 0) if skipped_total == 0 => {
+                format!("Album analysis complete ({} tracks)", analyzed_total)
+            }
+            (1, 0) => format!(
+                "Album analysis complete ({} tracks, {} skipped)",
+                analyzed_total, skipped_total
+            ),
+            (_, 0) if skipped_total == 0 => format!(
+                "Album analysis complete ({} albums, {} tracks)",
+                group_count, analyzed_total
+            ),
+            (_, 0) => format!(
+                "Album analysis complete ({} albums, {} tracks, {} skipped)",
+                group_count, analyzed_total, skipped_total
+            ),
+            (_, n) => format!(
+                "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed",
+                analyzed_total, skipped_total, n
+            ),
         };
-
-        let result = replaygain::analyze_album_lenient_parallel_with_completion(
-            &path_refs,
-            None,
-            threads,
-            &on_complete,
-        );
-
-        if cancel_w.load(Ordering::Relaxed) {
-            send(&tx, &ctx, WorkerEvent::Cancelled);
-            return;
-        }
-
-        match result {
-            Ok(report) => {
-                let successful: Vec<(usize, ReplayGainResult)> = report
-                    .successful_indices
-                    .iter()
-                    .zip(report.album.tracks().iter())
-                    .map(|(&pos, track)| (original_indices[pos], track.clone()))
-                    .collect();
-                let failures: Vec<(usize, String)> = report
-                    .failures
-                    .iter()
-                    .map(|(pos, msg)| (original_indices[*pos], msg.clone()))
-                    .collect();
-                let album_info = AacAlbumInfo {
-                    album_gain_db: report.album.album_gain_db(),
-                    album_peak: report.album.album_peak(),
-                };
-                let analyzed = successful.len();
-                let skipped = failures.len();
-
-                send(
-                    &tx,
-                    &ctx,
-                    WorkerEvent::AlbumAnalysisDone {
-                        successful,
-                        failures,
-                        album_info,
-                    },
-                );
-
-                let message = if skipped > 0 {
-                    format!(
-                        "Album analysis complete ({} tracks, {} skipped)",
-                        analyzed, skipped
-                    )
-                } else {
-                    format!("Album analysis complete ({} tracks)", analyzed)
-                };
-                send(&tx, &ctx, WorkerEvent::Done { message });
-            }
-            Err(e) => {
-                send(&tx, &ctx, WorkerEvent::AlbumAnalysisFailed(e.to_string()));
-                send(
-                    &tx,
-                    &ctx,
-                    WorkerEvent::Done {
-                        message: format!("Album analysis failed: {}", e),
-                    },
-                );
-            }
-        }
+        send(&tx, &ctx, WorkerEvent::Done { message });
     });
 
     WorkerHandle { rx, cancel }
