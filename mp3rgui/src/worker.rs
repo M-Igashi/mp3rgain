@@ -16,9 +16,9 @@ use mp3rgain::{
     TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
 
@@ -205,49 +205,97 @@ impl Default for ApplyOptionsUi {
     }
 }
 
-/// Spawn a serial track-analysis worker.
+/// Spawn a parallel track-analysis worker.
 ///
-/// Files are processed in order; cancel is checked between files.
+/// Files are pulled from a shared queue by a pool of `available_parallelism`
+/// worker threads, so total wall time is comparable to Album Analysis
+/// (issue #158, which was previously serial). Each completed file emits a
+/// `TrackAnalyzed` event immediately so the table updates as work happens
+/// instead of in a single batch at the end. Cancellation is checked
+/// between files.
 pub fn spawn_track_analysis(ctx: egui::Context, files: Vec<(usize, PathBuf)>) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_w = Arc::clone(&cancel);
 
     thread::spawn(move || {
-        let mut analyzed = 0usize;
-        let mut errors = 0usize;
+        let total = files.len();
+        if total == 0 {
+            send(
+                &tx,
+                &ctx,
+                WorkerEvent::Done {
+                    message: "Analyzed 0 file(s)".to_string(),
+                },
+            );
+            return;
+        }
 
-        for (idx, path) in files {
-            if cancel_w.load(Ordering::Relaxed) {
-                send(&tx, &ctx, WorkerEvent::Cancelled);
-                return;
-            }
-            send(&tx, &ctx, WorkerEvent::FileStart { idx });
+        let parallelism = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .max(1);
+        let pool_size = parallelism.min(total);
 
-            match replaygain::analyze_track(&path) {
-                Ok(result) => {
-                    analyzed += 1;
-                    send(&tx, &ctx, WorkerEvent::TrackAnalyzed { idx, result });
-                }
-                Err(e) => {
-                    errors += 1;
-                    send(
-                        &tx,
-                        &ctx,
-                        WorkerEvent::TrackAnalysisFailed {
-                            idx,
-                            message: e.to_string(),
-                        },
-                    );
-                }
-            }
+        let queue: Arc<Mutex<Vec<(usize, PathBuf)>>> = Arc::new(Mutex::new(files));
+        let analyzed = Arc::new(AtomicUsize::new(0));
+        let errors = Arc::new(AtomicUsize::new(0));
+
+        let handles: Vec<_> = (0..pool_size)
+            .map(|_| {
+                let queue = Arc::clone(&queue);
+                let cancel = Arc::clone(&cancel_w);
+                let tx = tx.clone();
+                let ctx = ctx.clone();
+                let analyzed = Arc::clone(&analyzed);
+                let errors = Arc::clone(&errors);
+                thread::spawn(move || loop {
+                    if cancel.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let next = {
+                        let mut q = queue.lock().expect("track analysis queue poisoned");
+                        q.pop()
+                    };
+                    let Some((idx, path)) = next else { break };
+                    let _ = tx.send(WorkerEvent::FileStart { idx });
+                    ctx.request_repaint();
+                    match replaygain::analyze_track(&path) {
+                        Ok(result) => {
+                            analyzed.fetch_add(1, Ordering::Relaxed);
+                            let _ = tx.send(WorkerEvent::TrackAnalyzed { idx, result });
+                        }
+                        Err(e) => {
+                            errors.fetch_add(1, Ordering::Relaxed);
+                            let _ = tx.send(WorkerEvent::TrackAnalysisFailed {
+                                idx,
+                                message: e.to_string(),
+                            });
+                        }
+                    }
+                    ctx.request_repaint();
+                })
+            })
+            .collect();
+
+        for h in handles {
+            let _ = h.join();
+        }
+
+        if cancel_w.load(Ordering::Relaxed) {
+            send(&tx, &ctx, WorkerEvent::Cancelled);
+            return;
         }
 
         send(
             &tx,
             &ctx,
             WorkerEvent::Done {
-                message: format_result_message("Analyzed", analyzed, errors),
+                message: format_result_message(
+                    "Analyzed",
+                    analyzed.load(Ordering::Relaxed),
+                    errors.load(Ordering::Relaxed),
+                ),
             },
         );
     });
