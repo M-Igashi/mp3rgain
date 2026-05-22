@@ -10,13 +10,42 @@
 
 use mp3rgain::apply::{apply_with_options, ApplyOptions};
 use mp3rgain::replaygain::{self, ReplayGainResult};
-use mp3rgain::{mp4meta, AacAlbumInfo};
+use mp3rgain::{
+    id3v2, mp4meta, read_ape_tag_from_file, AacAlbumInfo, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
+    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN,
+    TAG_REPLAYGAIN_TRACK_PEAK,
+};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
 use std::time::SystemTime;
+
+/// Stored-tag snapshot for one file, populated by `spawn_check_stored_tags`.
+/// All fields are pre-formatted strings so the UI can render them verbatim.
+/// `None` means the tag was absent (not an error).
+#[derive(Default, Clone)]
+pub struct StoredTagsView {
+    pub format: Option<&'static str>,
+    pub track_gain: Option<String>,
+    pub track_peak: Option<String>,
+    pub album_gain: Option<String>,
+    pub album_peak: Option<String>,
+    pub undo: Option<String>,
+    pub minmax: Option<String>,
+}
+
+impl StoredTagsView {
+    pub fn is_empty(&self) -> bool {
+        self.track_gain.is_none()
+            && self.track_peak.is_none()
+            && self.album_gain.is_none()
+            && self.album_peak.is_none()
+            && self.undo.is_none()
+            && self.minmax.is_none()
+    }
+}
 
 /// One message from a worker thread to the UI thread.
 pub enum WorkerEvent {
@@ -49,6 +78,14 @@ pub enum WorkerEvent {
     FileApplyFailed {
         idx: usize,
         message: String,
+    },
+
+    /// Stored-tag scan completed for `idx`. `view` carries pre-formatted
+    /// strings; `view.is_empty()` distinguishes "no tags" from "all tags
+    /// read successfully and present".
+    StoredTagsRead {
+        idx: usize,
+        view: StoredTagsView,
     },
 
     /// Undo succeeded on `idx`. Distinct from `FileApplied` so the UI can
@@ -95,6 +132,12 @@ pub struct ApplyJob {
 
 /// A single undo job.
 pub struct UndoJob {
+    pub idx: usize,
+    pub path: PathBuf,
+}
+
+/// A single stored-tag scan job.
+pub struct CheckTagsJob {
     pub idx: usize,
     pub path: PathBuf,
 }
@@ -414,6 +457,97 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
     });
 
     WorkerHandle { rx, cancel }
+}
+
+/// Spawn the stored-tag scanner. Iterates files serially (tag reads are
+/// I/O-light) and emits `StoredTagsRead` for each.
+///
+/// Dispatch mirrors the CLI's `process_check_tags`:
+///   - AAC: MP4 freeform RG + undo
+///   - MP3 + `use_id3v2`: ID3v2 TXXX RG
+///   - MP3: APE
+pub fn spawn_check_stored_tags(
+    ctx: egui::Context,
+    jobs: Vec<CheckTagsJob>,
+    use_id3v2: bool,
+) -> WorkerHandle {
+    let (tx, rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_w = Arc::clone(&cancel);
+
+    thread::spawn(move || {
+        let total = jobs.len();
+        for job in jobs {
+            if cancel_w.load(Ordering::Relaxed) {
+                send(&tx, &ctx, WorkerEvent::Cancelled);
+                return;
+            }
+            send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
+            let view = read_stored_tags(&job.path, use_id3v2);
+            send(
+                &tx,
+                &ctx,
+                WorkerEvent::StoredTagsRead {
+                    idx: job.idx,
+                    view,
+                },
+            );
+        }
+
+        send(
+            &tx,
+            &ctx,
+            WorkerEvent::Done {
+                message: format!("Checked stored tags for {} file(s)", total),
+            },
+        );
+    });
+
+    WorkerHandle { rx, cancel }
+}
+
+fn read_stored_tags(path: &Path, use_id3v2: bool) -> StoredTagsView {
+    if mp4meta::is_aac_file(path) {
+        let undo_tags = mp4meta::read_undo_tags(path).unwrap_or_default();
+        let rg_tags = mp4meta::read_replaygain_tags(path).unwrap_or_default();
+        return StoredTagsView {
+            format: Some("MP4"),
+            track_gain: rg_tags.track_gain().map(str::to_string),
+            track_peak: rg_tags.track_peak().map(str::to_string),
+            album_gain: rg_tags.album_gain().map(str::to_string),
+            album_peak: rg_tags.album_peak().map(str::to_string),
+            undo: undo_tags.undo().map(str::to_string),
+            minmax: undo_tags.minmax().map(str::to_string),
+        };
+    }
+    if use_id3v2 {
+        let rg = id3v2::read_id3v2_replaygain(path).unwrap_or_default();
+        return StoredTagsView {
+            format: Some("ID3v2"),
+            track_gain: rg.track_gain,
+            track_peak: rg.track_peak,
+            album_gain: rg.album_gain,
+            album_peak: rg.album_peak,
+            undo: rg.undo,
+            minmax: rg.minmax,
+        };
+    }
+    // APE
+    if let Ok(Some(tag)) = read_ape_tag_from_file(path) {
+        return StoredTagsView {
+            format: Some("APE"),
+            track_gain: tag.get(TAG_REPLAYGAIN_TRACK_GAIN).map(str::to_string),
+            track_peak: tag.get(TAG_REPLAYGAIN_TRACK_PEAK).map(str::to_string),
+            album_gain: tag.get(TAG_REPLAYGAIN_ALBUM_GAIN).map(str::to_string),
+            album_peak: tag.get(TAG_REPLAYGAIN_ALBUM_PEAK).map(str::to_string),
+            undo: tag.get(TAG_MP3GAIN_UNDO).map(str::to_string),
+            minmax: tag.get(TAG_MP3GAIN_MINMAX).map(str::to_string),
+        };
+    }
+    StoredTagsView {
+        format: Some("APE"),
+        ..Default::default()
+    }
 }
 
 fn run_undo(path: &Path, use_id3v2: bool) -> mp3rgain::error::Result<usize> {

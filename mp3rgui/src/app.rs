@@ -1,4 +1,7 @@
-use crate::worker::{self, ApplyJob, ApplyOptionsUi, UndoJob, WorkerEvent, WorkerHandle};
+use crate::worker::{
+    self, ApplyJob, ApplyOptionsUi, CheckTagsJob, StoredTagsView, UndoJob, WorkerEvent,
+    WorkerHandle,
+};
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{db_to_steps, AacAlbumInfo};
 use std::path::{Path, PathBuf};
@@ -48,6 +51,9 @@ pub struct FileEntry {
     /// for the peak-based clipping check and for writing
     /// `replaygain_track_*` tags on apply.
     pub track_result: Option<ReplayGainResult>,
+    /// Pre-existing ReplayGain / undo tags read from the file, populated by
+    /// the "Check Stored Tags" action. `None` = not scanned yet.
+    pub stored_tags: Option<StoredTagsView>,
 }
 
 /// What kind of work the active worker is doing — drives messaging and
@@ -59,6 +65,7 @@ enum WorkerKind {
     TrackApply,
     AlbumApply,
     Undo,
+    CheckTags,
 }
 
 pub struct Mp3rgainApp {
@@ -271,6 +278,31 @@ impl Mp3rgainApp {
         );
     }
 
+    /// Scan every loaded file for existing ReplayGain / undo tags and
+    /// populate `FileEntry::stored_tags`. Read-only.
+    pub fn start_check_stored_tags(&mut self, ctx: &egui::Context) {
+        if self.files.is_empty() || self.is_processing {
+            return;
+        }
+
+        let jobs: Vec<CheckTagsJob> = self
+            .files
+            .iter()
+            .enumerate()
+            .map(|(idx, f)| CheckTagsJob {
+                idx,
+                path: f.path.clone(),
+            })
+            .collect();
+        let count = jobs.len();
+        let use_id3v2 = self.apply_options.use_id3v2;
+        self.begin_worker(
+            WorkerKind::CheckTags,
+            count,
+            worker::spawn_check_stored_tags(ctx.clone(), jobs, use_id3v2),
+        );
+    }
+
     /// Undo gain changes on selected files (or all files when no selection).
     /// Library calls dispatch internally on file format and `use_id3v2`.
     pub fn start_undo(&mut self, ctx: &egui::Context) {
@@ -362,6 +394,7 @@ impl Mp3rgainApp {
             WorkerKind::TrackApply => "Applying track gain...".to_string(),
             WorkerKind::AlbumApply => "Applying album gain...".to_string(),
             WorkerKind::Undo => "Undoing gain changes...".to_string(),
+            WorkerKind::CheckTags => "Checking stored tags...".to_string(),
         };
         self.started_files = 0;
         self.total_files_in_job = total;
@@ -399,13 +432,18 @@ impl Mp3rgainApp {
         match event {
             WorkerEvent::FileStart { idx } => {
                 if let Some(file) = self.files.get_mut(idx) {
-                    file.status = match self.worker_kind {
+                    match self.worker_kind {
                         Some(WorkerKind::TrackApply) | Some(WorkerKind::AlbumApply) => {
-                            FileStatus::Applying
+                            file.status = FileStatus::Applying;
                         }
-                        Some(WorkerKind::Undo) => FileStatus::Undoing,
-                        _ => FileStatus::Analyzing,
-                    };
+                        Some(WorkerKind::Undo) => {
+                            file.status = FileStatus::Undoing;
+                        }
+                        // Tag scan is read-only; don't disturb the
+                        // user-visible status (e.g. Analyzed) for the row.
+                        Some(WorkerKind::CheckTags) => {}
+                        _ => file.status = FileStatus::Analyzing,
+                    }
                 }
                 self.started_files = self.started_files.saturating_add(1);
                 self.bump_progress();
@@ -459,6 +497,8 @@ impl Mp3rgainApp {
             WorkerEvent::FileApplied { idx } => {
                 if let Some(file) = self.files.get_mut(idx) {
                     file.status = FileStatus::Done;
+                    // File contents changed; cached tag snapshot is stale.
+                    file.stored_tags = None;
                 }
             }
             WorkerEvent::FileApplyFailed { idx, message } => {
@@ -469,11 +509,17 @@ impl Mp3rgainApp {
             WorkerEvent::FileUndone { idx } => {
                 if let Some(file) = self.files.get_mut(idx) {
                     file.status = FileStatus::Done;
+                    file.stored_tags = None;
                 }
             }
             WorkerEvent::FileUndoSkipped { idx } => {
                 if let Some(file) = self.files.get_mut(idx) {
                     file.status = FileStatus::NoChangesToUndo;
+                }
+            }
+            WorkerEvent::StoredTagsRead { idx, view } => {
+                if let Some(file) = self.files.get_mut(idx) {
+                    file.stored_tags = Some(view);
                 }
             }
             WorkerEvent::Cancelled => {

@@ -56,6 +56,11 @@ fn analysis_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) 
                 app.start_analyze_album(ctx);
                 ui.close_menu();
             }
+            ui.separator();
+            if ui.button("Check Stored Tags").clicked() {
+                app.start_check_stored_tags(ctx);
+                ui.close_menu();
+            }
         });
     });
 }
