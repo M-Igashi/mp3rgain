@@ -435,9 +435,9 @@ impl Mp3rgainApp {
         );
     }
 
-    /// Selected (or all, if no selection) files chosen for stored-tag
-    /// deletion. Pure read; used by the confirmation modal to show a count.
-    pub fn delete_target_indices(&self) -> Vec<usize> {
+    /// Selected files, or all loaded files when nothing is selected.
+    /// Returned indices are sorted and deduplicated.
+    pub fn target_indices(&self) -> Vec<usize> {
         if self.selected_indices.is_empty() {
             (0..self.files.len()).collect()
         } else {
@@ -456,7 +456,7 @@ impl Mp3rgainApp {
             return;
         }
 
-        let indices = self.delete_target_indices();
+        let indices = self.target_indices();
         let jobs: Vec<DeleteTagsJob> = indices
             .iter()
             .filter_map(|&idx| {
@@ -540,16 +540,8 @@ impl Mp3rgainApp {
             return;
         }
 
-        let indices: Vec<usize> = if self.selected_indices.is_empty() {
-            (0..self.files.len()).collect()
-        } else {
-            let mut v = self.selected_indices.clone();
-            v.sort_unstable();
-            v.dedup();
-            v
-        };
-
-        let jobs: Vec<ApplyJob> = indices
+        let jobs: Vec<ApplyJob> = self
+            .target_indices()
             .iter()
             .filter_map(|&idx| {
                 self.files.get(idx).map(|f| ApplyJob {
@@ -580,26 +572,13 @@ impl Mp3rgainApp {
 
     /// `-l`: apply gain to a single channel of the targeted files. AAC files
     /// are silently skipped (channel gain is MP3-only).
-    pub fn start_apply_channel_gain(
-        &mut self,
-        ctx: &egui::Context,
-        channel: Channel,
-        steps: i32,
-    ) {
+    pub fn start_apply_channel_gain(&mut self, ctx: &egui::Context, channel: Channel, steps: i32) {
         if self.files.is_empty() || self.is_processing || steps == 0 {
             return;
         }
 
-        let indices: Vec<usize> = if self.selected_indices.is_empty() {
-            (0..self.files.len()).collect()
-        } else {
-            let mut v = self.selected_indices.clone();
-            v.sort_unstable();
-            v.dedup();
-            v
-        };
-
-        let jobs: Vec<ApplyJob> = indices
+        let jobs: Vec<ApplyJob> = self
+            .target_indices()
             .iter()
             .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
             .filter(|(_, f)| !mp3rgain::mp4meta::is_aac_file(&f.path))
@@ -637,16 +616,8 @@ impl Mp3rgainApp {
             return;
         }
 
-        let indices: Vec<usize> = if self.selected_indices.is_empty() {
-            (0..self.files.len()).collect()
-        } else {
-            let mut v = self.selected_indices.clone();
-            v.sort_unstable();
-            v.dedup();
-            v
-        };
-
-        let jobs: Vec<UndoJob> = indices
+        let jobs: Vec<UndoJob> = self
+            .target_indices()
             .iter()
             .filter_map(|&idx| {
                 self.files.get(idx).map(|f| UndoJob {

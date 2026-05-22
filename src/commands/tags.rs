@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::threading::effective_threads;
-use crate::commands::utils::{create_json_summary, print_dry_run_notice};
+use crate::commands::utils::{create_json_summary, print_dry_run_notice, update_counters};
 use crate::json_output::{FileStatus, JsonFileResult, JsonOutput};
 use crate::processors::utils::{restore_timestamp, save_original_mtime};
 use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
@@ -152,11 +152,7 @@ pub fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
         drop(handle);
 
         for (result, _) in collected {
-            match result.status {
-                Some(FileStatus::Success) => successful += 1,
-                Some(FileStatus::Error) => failed += 1,
-                _ => {}
-            }
+            update_counters(&result, &mut successful, &mut failed);
             json_results.push(result);
         }
     } else {
@@ -168,11 +164,7 @@ pub fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
             if !text.is_empty() {
                 print!("{}", text);
             }
-            match result.status {
-                Some(FileStatus::Success) => successful += 1,
-                Some(FileStatus::Error) => failed += 1,
-                _ => {}
-            }
+            update_counters(&result, &mut successful, &mut failed);
             json_results.push(result);
 
             progress_inc(&pb);

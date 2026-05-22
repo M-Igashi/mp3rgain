@@ -605,10 +605,7 @@ pub fn spawn_delete_tags(
 /// `cmd_max_amplitude`: walks MP3 frame headers (and AAC `global_gain`
 /// fields) to compute peak amplitude + headroom, no audio decoding,
 /// no ReplayGain machinery.
-pub fn spawn_find_max_amplitude(
-    ctx: egui::Context,
-    files: Vec<(usize, PathBuf)>,
-) -> WorkerHandle {
+pub fn spawn_find_max_amplitude(ctx: egui::Context, files: Vec<(usize, PathBuf)>) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_w = Arc::clone(&cancel);
@@ -696,10 +693,7 @@ pub fn spawn_check_stored_tags(
             send(
                 &tx,
                 &ctx,
-                WorkerEvent::StoredTagsRead {
-                    idx: job.idx,
-                    view,
-                },
+                WorkerEvent::StoredTagsRead { idx: job.idx, view },
             );
         }
 

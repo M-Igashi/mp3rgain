@@ -151,7 +151,7 @@ fn render_delete_confirm(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     if !app.confirm_delete_tags {
         return;
     }
-    let count = app.delete_target_indices().len();
+    let count = app.target_indices().len();
     let mut open = true;
     let mut close_via_cancel = false;
     let mut close_via_confirm = false;
@@ -203,12 +203,9 @@ fn handle_selection_shortcuts(app: &mut Mp3rgainApp, ctx: &egui::Context) {
         app.select_all();
     }
 
-    let modal_open = app.confirm_delete_tags
-        || app.manual_gain_modal.open
-        || app.channel_gain_modal.open;
-    if !modal_open
-        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-    {
+    let modal_open =
+        app.confirm_delete_tags || app.manual_gain_modal.open || app.channel_gain_modal.open;
+    if !modal_open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         app.clear_selection();
     }
 }
