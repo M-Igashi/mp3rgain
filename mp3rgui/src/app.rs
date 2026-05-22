@@ -17,20 +17,38 @@ pub enum FileStatus {
     Undoing,
     Done,
     NoChangesToUndo,
+    /// Dry-run apply finished without touching the file. `steps` is what
+    /// would have been applied; `clipping_prevented` indicates the cap.
+    DryRunPredicted {
+        steps: i32,
+        clipping_prevented: bool,
+    },
     Error(String),
 }
 
 impl FileStatus {
-    pub fn as_str(&self) -> &str {
+    /// Short label for the Status column. For dynamic variants only the
+    /// category is returned; the detail goes in a tooltip / extra label.
+    pub fn label(&self) -> String {
         match self {
-            FileStatus::Pending => "",
-            FileStatus::Analyzing => "Analyzing...",
-            FileStatus::Analyzed => "OK",
-            FileStatus::Applying => "Applying...",
-            FileStatus::Undoing => "Undoing...",
-            FileStatus::Done => "Done",
-            FileStatus::NoChangesToUndo => "Nothing to undo",
-            FileStatus::Error(_) => "Error",
+            FileStatus::Pending => "".into(),
+            FileStatus::Analyzing => "Analyzing...".into(),
+            FileStatus::Analyzed => "OK".into(),
+            FileStatus::Applying => "Applying...".into(),
+            FileStatus::Undoing => "Undoing...".into(),
+            FileStatus::Done => "Done".into(),
+            FileStatus::NoChangesToUndo => "Nothing to undo".into(),
+            FileStatus::DryRunPredicted {
+                steps,
+                clipping_prevented,
+            } => {
+                if *clipping_prevented {
+                    format!("Dry run: +{} steps (capped)", steps)
+                } else {
+                    format!("Dry run: {:+} steps", steps)
+                }
+            }
+            FileStatus::Error(_) => "Error".into(),
         }
     }
 }
@@ -66,6 +84,7 @@ enum WorkerKind {
     AlbumApply,
     Undo,
     CheckTags,
+    MaxAmplitude,
 }
 
 pub struct Mp3rgainApp {
@@ -278,6 +297,29 @@ impl Mp3rgainApp {
         );
     }
 
+    /// `-x`: scan each file for its max amplitude / headroom without any
+    /// ReplayGain decoding. Faster than Track Analysis.
+    pub fn start_find_max_amplitude(&mut self, ctx: &egui::Context) {
+        if self.files.is_empty() || self.is_processing {
+            return;
+        }
+        for file in &mut self.files {
+            file.status = FileStatus::Pending;
+        }
+        let jobs: Vec<(usize, PathBuf)> = self
+            .files
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (i, f.path.clone()))
+            .collect();
+        let count = jobs.len();
+        self.begin_worker(
+            WorkerKind::MaxAmplitude,
+            count,
+            worker::spawn_find_max_amplitude(ctx.clone(), jobs),
+        );
+    }
+
     /// Scan every loaded file for existing ReplayGain / undo tags and
     /// populate `FileEntry::stored_tags`. Read-only.
     pub fn start_check_stored_tags(&mut self, ctx: &egui::Context) {
@@ -395,6 +437,7 @@ impl Mp3rgainApp {
             WorkerKind::AlbumApply => "Applying album gain...".to_string(),
             WorkerKind::Undo => "Undoing gain changes...".to_string(),
             WorkerKind::CheckTags => "Checking stored tags...".to_string(),
+            WorkerKind::MaxAmplitude => "Finding max amplitude...".to_string(),
         };
         self.started_files = 0;
         self.total_files_in_job = total;
@@ -442,6 +485,9 @@ impl Mp3rgainApp {
                         // Tag scan is read-only; don't disturb the
                         // user-visible status (e.g. Analyzed) for the row.
                         Some(WorkerKind::CheckTags) => {}
+                        Some(WorkerKind::MaxAmplitude) => {
+                            file.status = FileStatus::Analyzing;
+                        }
                         _ => file.status = FileStatus::Analyzing,
                     }
                 }
@@ -501,6 +547,18 @@ impl Mp3rgainApp {
                     file.stored_tags = None;
                 }
             }
+            WorkerEvent::FileApplyDryRun {
+                idx,
+                actual_steps,
+                clipping_prevented,
+            } => {
+                if let Some(file) = self.files.get_mut(idx) {
+                    file.status = FileStatus::DryRunPredicted {
+                        steps: actual_steps,
+                        clipping_prevented,
+                    };
+                }
+            }
             WorkerEvent::FileApplyFailed { idx, message } => {
                 if let Some(file) = self.files.get_mut(idx) {
                     file.status = FileStatus::Error(message);
@@ -520,6 +578,32 @@ impl Mp3rgainApp {
             WorkerEvent::StoredTagsRead { idx, view } => {
                 if let Some(file) = self.files.get_mut(idx) {
                     file.stored_tags = Some(view);
+                }
+            }
+            WorkerEvent::MaxAmplitudeFound {
+                idx,
+                peak,
+                headroom_db,
+            } => {
+                if let Some(file) = self.files.get_mut(idx) {
+                    // Reuse the existing Volume column to show headroom.
+                    // ReplayGain volume and max-amp headroom are different
+                    // measures but both express "loudness ceiling"; the
+                    // Volume column header tooltip explains both.
+                    file.volume = headroom_db;
+                    file.clipping = peak >= 1.0;
+                    // Max amplitude is not a ReplayGain analysis — clear
+                    // any prior RG-derived gain so the row doesn't claim
+                    // an out-of-date target.
+                    file.track_gain = None;
+                    file.track_clip = false;
+                    file.track_result = None;
+                    file.status = FileStatus::Analyzed;
+                }
+            }
+            WorkerEvent::MaxAmplitudeFailed { idx, message } => {
+                if let Some(file) = self.files.get_mut(idx) {
+                    file.status = FileStatus::Error(message);
                 }
             }
             WorkerEvent::Cancelled => {

@@ -219,6 +219,26 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
     })
 }
 
+/// Dry-run companion to [`apply_with_options`]: runs the same clipping
+/// check (headroom-based or ReplayGain-peak based depending on `opts`)
+/// without touching the file. `report.modified` is always 0.
+///
+/// Frontends drive `-n` / a "Dry run" toggle through this so the
+/// "would apply N steps" message lines up with what a real apply
+/// would do.
+pub fn predict_apply(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
+    let is_aac = mp4meta::is_aac_file(file_path);
+    let mut mp3_analysis: Option<crate::Mp3Analysis> = None;
+    let (actual_steps, clipping_prevented, clipping_detected) =
+        check_clipping(file_path, opts, is_aac, &mut mp3_analysis)?;
+    Ok(ApplyReport {
+        modified: 0,
+        actual_steps,
+        clipping_prevented,
+        clipping_detected,
+    })
+}
+
 fn check_clipping(
     file_path: &Path,
     opts: &ApplyOptions,

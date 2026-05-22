@@ -35,6 +35,15 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
                          instead of APE. Required for foobar2000 / Winamp / Rockbox \
                          to see ReplayGain values on MP3. CLI -s i.",
                     );
+
+                ui.separator();
+
+                ui.checkbox(&mut app.apply_options.dry_run, "Dry run")
+                    .on_hover_text(
+                        "Preview Apply Track / Album Gain without modifying any file. \
+                         The Status column shows the steps that would be applied. \
+                         CLI -n.",
+                    );
             });
         });
     });

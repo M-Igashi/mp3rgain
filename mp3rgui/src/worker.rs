@@ -8,7 +8,7 @@
 //! `mpsc::channel`; the UI side drains it from `update()` and calls
 //! `ctx.request_repaint()` so egui actually redraws.
 
-use mp3rgain::apply::{apply_with_options, ApplyOptions};
+use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions};
 use mp3rgain::replaygain::{self, ReplayGainResult};
 use mp3rgain::{
     id3v2, mp4meta, read_ape_tag_from_file, AacAlbumInfo, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
@@ -75,6 +75,13 @@ pub enum WorkerEvent {
     FileApplied {
         idx: usize,
     },
+    /// Dry-run analog of `FileApplied`: predict_apply succeeded, no bytes
+    /// changed. UI shows "Would apply N steps" in the row status.
+    FileApplyDryRun {
+        idx: usize,
+        actual_steps: i32,
+        clipping_prevented: bool,
+    },
     FileApplyFailed {
         idx: usize,
         message: String,
@@ -86,6 +93,18 @@ pub enum WorkerEvent {
     StoredTagsRead {
         idx: usize,
         view: StoredTagsView,
+    },
+
+    /// `-x` Find Max Amplitude result for `idx`. Light alternative to
+    /// `TrackAnalyzed`: only walks MP3 frame headers, no decoding.
+    MaxAmplitudeFound {
+        idx: usize,
+        peak: f64,
+        headroom_db: Option<f64>,
+    },
+    MaxAmplitudeFailed {
+        idx: usize,
+        message: String,
     },
 
     /// Undo succeeded on `idx`. Distinct from `FileApplied` so the UI can
@@ -151,6 +170,10 @@ pub struct ApplyOptionsUi {
     pub wrap: bool,
     pub preserve_timestamp: bool,
     pub use_id3v2: bool,
+    /// When true, Apply Track / Album Gain runs in dry-run mode: the worker
+    /// reports what `apply_with_options` *would* do but doesn't touch the
+    /// file. Equivalent to the CLI's -n flag.
+    pub dry_run: bool,
 }
 
 impl Default for ApplyOptionsUi {
@@ -163,6 +186,7 @@ impl Default for ApplyOptionsUi {
             wrap: false,
             preserve_timestamp: true,
             use_id3v2: false,
+            dry_run: false,
         }
     }
 }
@@ -346,10 +370,27 @@ pub fn spawn_apply(
             send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
             let opts = build_apply_options(job.steps, job.track_result, job.album_info, ui_opts);
-            match apply_with_options(&job.path, &opts) {
-                Ok(_) => {
+            let result = if ui_opts.dry_run {
+                predict_apply(&job.path, &opts)
+            } else {
+                apply_with_options(&job.path, &opts)
+            };
+            match result {
+                Ok(report) => {
                     applied += 1;
-                    send(&tx, &ctx, WorkerEvent::FileApplied { idx: job.idx });
+                    if ui_opts.dry_run {
+                        send(
+                            &tx,
+                            &ctx,
+                            WorkerEvent::FileApplyDryRun {
+                                idx: job.idx,
+                                actual_steps: report.actual_steps,
+                                clipping_prevented: report.clipping_prevented,
+                            },
+                        );
+                    } else {
+                        send(&tx, &ctx, WorkerEvent::FileApplied { idx: job.idx });
+                    }
                 }
                 Err(e) => {
                     errors += 1;
@@ -370,11 +411,16 @@ pub fn spawn_apply(
         } else {
             String::new()
         };
+        let verb = if ui_opts.dry_run {
+            "Dry-ran"
+        } else {
+            "Applied"
+        };
         send(
             &tx,
             &ctx,
             WorkerEvent::Done {
-                message: format!("Applied {} to {} file(s){}", action_label, applied, suffix),
+                message: format!("{} {} on {} file(s){}", verb, action_label, applied, suffix),
             },
         );
     });
@@ -452,6 +498,73 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
             &ctx,
             WorkerEvent::Done {
                 message: parts.join(", "),
+            },
+        );
+    });
+
+    WorkerHandle { rx, cancel }
+}
+
+/// Spawn the max-amplitude scanner. Mirrors the CLI's `-x` /
+/// `cmd_max_amplitude`: walks MP3 frame headers (and AAC `global_gain`
+/// fields) to compute peak amplitude + headroom, no audio decoding,
+/// no ReplayGain machinery.
+pub fn spawn_find_max_amplitude(
+    ctx: egui::Context,
+    files: Vec<(usize, PathBuf)>,
+) -> WorkerHandle {
+    let (tx, rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_w = Arc::clone(&cancel);
+
+    thread::spawn(move || {
+        let mut found = 0usize;
+        let mut errors = 0usize;
+        for (idx, path) in files {
+            if cancel_w.load(Ordering::Relaxed) {
+                send(&tx, &ctx, WorkerEvent::Cancelled);
+                return;
+            }
+            send(&tx, &ctx, WorkerEvent::FileStart { idx });
+
+            match mp3rgain::find_max_amplitude(&path) {
+                Ok(amp) => {
+                    found += 1;
+                    let peak = amp.max_amplitude();
+                    let headroom_db = mp3rgain::peak_to_headroom_db(peak);
+                    send(
+                        &tx,
+                        &ctx,
+                        WorkerEvent::MaxAmplitudeFound {
+                            idx,
+                            peak,
+                            headroom_db,
+                        },
+                    );
+                }
+                Err(e) => {
+                    errors += 1;
+                    send(
+                        &tx,
+                        &ctx,
+                        WorkerEvent::MaxAmplitudeFailed {
+                            idx,
+                            message: e.to_string(),
+                        },
+                    );
+                }
+            }
+        }
+        let suffix = if errors > 0 {
+            format!(", {} error(s)", errors)
+        } else {
+            String::new()
+        };
+        send(
+            &tx,
+            &ctx,
+            WorkerEvent::Done {
+                message: format!("Max amplitude scanned on {} file(s){}", found, suffix),
             },
         );
     });

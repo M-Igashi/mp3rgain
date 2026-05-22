@@ -55,7 +55,10 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                     ui.strong("Path/File");
                 });
                 header.col(|ui| {
-                    ui.strong("Volume");
+                    ui.strong("Volume").on_hover_text(
+                        "Track Analysis: current loudness relative to ReplayGain reference (89 dB). \
+                         Find Max Amplitude: available headroom in dB before clipping.",
+                    );
                 });
                 header.col(|ui| {
                     ui.strong("Clip");
@@ -155,7 +158,7 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                             render_stored_tags_cell(ui, file.stored_tags.as_ref());
                         });
                         row.col(|ui| {
-                            ui.label(file.status.as_str());
+                            ui.label(file.status.label());
                         });
                     });
                 }
