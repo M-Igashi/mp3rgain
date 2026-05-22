@@ -21,7 +21,7 @@ use std::time::SystemTime;
 #[cfg(feature = "aac")]
 use crate::aac;
 use crate::error::{Error, Result};
-use crate::gain::{db_to_steps, peak_to_headroom_db, steps_to_db, Channel, GainOptions, MAX_GAIN};
+use crate::gain::{peak_to_headroom_db, steps_to_db, Channel, GainOptions, GAIN_STEP_DB, MAX_GAIN};
 use crate::replaygain::ReplayGainResult;
 use crate::{ape, id3v2, mp4meta};
 
@@ -269,7 +269,11 @@ fn check_clipping(
                 // `new_peak > 1.0` implies `peak > 0`, so headroom is
                 // well-defined here.
                 let max_safe_db = peak_to_headroom_db(track.peak()).unwrap_or(0.0);
-                let max_safe_steps = db_to_steps(max_safe_db).max(0);
+                // Floor (not round) so the cap never exceeds true headroom —
+                // round() would, e.g., turn 0.8 dB of headroom into 1 step
+                // (1.5 dB) and re-introduce clipping.
+                let max_safe_steps = (max_safe_db / GAIN_STEP_DB).floor() as i32;
+                let max_safe_steps = max_safe_steps.max(0);
                 return Ok((
                     max_safe_steps,
                     true,
@@ -445,4 +449,64 @@ fn write_id3v2_undo_after_apply(
         min,
         max,
     )
+}
+
+#[cfg(test)]
+#[cfg(feature = "replaygain")]
+mod tests {
+    use super::*;
+    use crate::replaygain::AudioFileType;
+
+    fn track_with_peak(peak: f64) -> ReplayGainResult {
+        ReplayGainResult::new(0.0, 0.0, peak, 44_100, AudioFileType::Mp3)
+    }
+
+    fn opts_with_track(steps: i32, peak: f64, prevent_clipping: bool) -> ApplyOptions {
+        let mut opts = ApplyOptions::new(steps);
+        opts.track_result = Some(track_with_peak(peak));
+        opts.prevent_clipping = prevent_clipping;
+        opts
+    }
+
+    /// Issue #162: a peak of 0.9 leaves ~0.915 dB of headroom. The old
+    /// `round()`-based cap returned 1 step (1.5 dB) — overshooting headroom
+    /// and re-introducing clipping. The `floor()` fix must return 0 steps.
+    #[test]
+    fn prevent_clipping_caps_at_floor_not_round() {
+        let opts = opts_with_track(5, 0.9, true);
+        let (steps, prevented, _) =
+            check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
+        assert!(prevented);
+        assert_eq!(steps, 0);
+        let new_peak = 0.9 * 10.0_f64.powf(steps_to_db(steps) / 20.0);
+        assert!(new_peak <= 1.0, "capped output still clips ({new_peak})");
+    }
+
+    /// Sweep a range of sub-unity peaks. The cap may never push the new
+    /// peak above 1.0.
+    #[test]
+    fn prevent_clipping_never_overshoots_headroom() {
+        for &peak in &[0.55_f64, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.99] {
+            let opts = opts_with_track(20, peak, true);
+            let (steps, prevented, _) =
+                check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
+            assert!(prevented, "peak {peak} should trigger prevention");
+            let new_peak = peak * 10.0_f64.powf(steps_to_db(steps) / 20.0);
+            assert!(
+                new_peak <= 1.0,
+                "peak {peak} -> capped steps {steps} still clips ({new_peak})"
+            );
+        }
+    }
+
+    /// Sanity: when there is no clipping risk, prevent_clipping must pass
+    /// the requested steps through unchanged.
+    #[test]
+    fn prevent_clipping_passthrough_when_safe() {
+        let opts = opts_with_track(3, 0.5, true);
+        let (steps, prevented, _) =
+            check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
+        assert!(!prevented);
+        assert_eq!(steps, 3);
+    }
 }
