@@ -126,6 +126,17 @@ pub enum ClickMode {
     RangeAdd,
 }
 
+/// Which table column the rows are currently sorted by (issue #167).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortColumn {
+    Filename,
+    Volume,
+    TrackGain,
+    AlbumVolume,
+    AlbumGain,
+    Status,
+}
+
 /// What kind of work the active worker is doing — drives messaging and
 /// final-event handling.
 #[derive(Clone, Copy, PartialEq)]
@@ -186,6 +197,11 @@ pub struct Mp3rgainApp {
     /// `recompute_targets_if_changed` to detect Target edits and refresh
     /// the gain columns without rerunning analysis (issue #161 item 1).
     last_target_volume: f64,
+
+    /// Active sort column, or `None` for insertion order (issue #167).
+    pub sort_column: Option<SortColumn>,
+    /// Direction of the active sort. Ignored when `sort_column` is `None`.
+    pub sort_descending: bool,
 }
 
 impl Mp3rgainApp {
@@ -208,7 +224,51 @@ impl Mp3rgainApp {
             started_files: 0,
             total_files_in_job: 0,
             last_target_volume: 89.0,
+            sort_column: None,
+            sort_descending: false,
         }
+    }
+
+    /// Toggle the sort state when the given header is clicked. First click on
+    /// a column sorts ascending; subsequent clicks cycle desc → unsorted.
+    pub fn toggle_sort(&mut self, column: SortColumn) {
+        match self.sort_column {
+            Some(active) if active == column => {
+                if !self.sort_descending {
+                    self.sort_descending = true;
+                } else {
+                    self.sort_column = None;
+                    self.sort_descending = false;
+                }
+            }
+            _ => {
+                self.sort_column = Some(column);
+                self.sort_descending = false;
+            }
+        }
+    }
+
+    /// Indices into `self.files` in current display (sort) order. Returned
+    /// fresh every call — cheap relative to the per-frame render cost.
+    pub fn compute_display_order(&self) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..self.files.len()).collect();
+        let Some(col) = self.sort_column else {
+            return order;
+        };
+        let desc = self.sort_descending;
+        order.sort_by(|&a, &b| {
+            let fa = &self.files[a];
+            let fb = &self.files[b];
+            match col {
+                SortColumn::Filename => cmp_str(&fa.filename, &fb.filename, desc),
+                SortColumn::Volume => cmp_opt_f64(fa.volume, fb.volume, desc),
+                SortColumn::TrackGain => cmp_opt_f64(fa.track_gain, fb.track_gain, desc),
+                SortColumn::AlbumVolume => cmp_opt_f64(fa.album_volume, fb.album_volume, desc),
+                SortColumn::AlbumGain => cmp_opt_f64(fa.album_gain, fb.album_gain, desc),
+                SortColumn::Status => cmp_str(&fa.status.label(), &fb.status.label(), desc),
+            }
+        });
+        order
     }
 
     /// Detect Target edits and shift each row's track_gain / album_gain by
@@ -355,27 +415,37 @@ impl Mp3rgainApp {
             }
             ClickMode::Range => {
                 let anchor = self.selection_anchor.unwrap_or(idx);
-                let (lo, hi) = if anchor <= idx {
-                    (anchor, idx)
-                } else {
-                    (idx, anchor)
-                };
-                self.selected_indices = (lo..=hi).collect();
+                // Range must follow visible (display) order so that a sorted
+                // table still extends "between these two visible rows"
+                // (issue #167).
+                self.selected_indices = self.range_in_display_order(anchor, idx);
                 // Anchor stays put.
             }
             ClickMode::RangeAdd => {
                 let anchor = self.selection_anchor.unwrap_or(idx);
-                let (lo, hi) = if anchor <= idx {
-                    (anchor, idx)
-                } else {
-                    (idx, anchor)
-                };
-                for i in lo..=hi {
+                for i in self.range_in_display_order(anchor, idx) {
                     if !self.selected_indices.contains(&i) {
                         self.selected_indices.push(i);
                     }
                 }
             }
+        }
+    }
+
+    /// File indices spanning the visible range between two file indices,
+    /// inclusive. The two endpoints are translated to display positions via
+    /// `compute_display_order`, the inclusive range is collected in display
+    /// order, then mapped back to file indices.
+    fn range_in_display_order(&self, anchor: usize, idx: usize) -> Vec<usize> {
+        let order = self.compute_display_order();
+        let anchor_pos = order.iter().position(|&i| i == anchor);
+        let idx_pos = order.iter().position(|&i| i == idx);
+        match (anchor_pos, idx_pos) {
+            (Some(a), Some(b)) => {
+                let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+                order[lo..=hi].to_vec()
+            }
+            _ => vec![idx],
         }
     }
 
@@ -458,7 +528,10 @@ impl Mp3rgainApp {
                     .parent()
                     .map(|p| p.to_path_buf())
                     .unwrap_or_else(PathBuf::new);
-                groups.entry(parent).or_default().push((idx, f.path.clone()));
+                groups
+                    .entry(parent)
+                    .or_default()
+                    .push((idx, f.path.clone()));
             }
         }
         let group_jobs: Vec<Vec<(usize, PathBuf)>> = groups.into_values().collect();
@@ -1026,6 +1099,43 @@ impl Mp3rgainApp {
                 .map(|g| new_peak * 10.0_f64.powf(g / 20.0) > 1.0)
                 .unwrap_or(false);
         }
+    }
+}
+
+/// Compare two `Option<f64>` values, putting `None` always at the bottom
+/// regardless of direction (spreadsheet-style empty-cell handling).
+fn cmp_opt_f64(a: Option<f64>, b: Option<f64>, desc: bool) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a, b) {
+        (Some(x), Some(y)) => {
+            let o = x.partial_cmp(&y).unwrap_or(Ordering::Equal);
+            if desc {
+                o.reverse()
+            } else {
+                o
+            }
+        }
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+/// Case-insensitive string compare with empty-strings-last semantics.
+fn cmp_str(a: &str, b: &str, desc: bool) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a.is_empty(), b.is_empty()) {
+        (false, false) => {
+            let o = a.to_lowercase().cmp(&b.to_lowercase());
+            if desc {
+                o.reverse()
+            } else {
+                o
+            }
+        }
+        (true, false) => Ordering::Greater,
+        (false, true) => Ordering::Less,
+        (true, true) => Ordering::Equal,
     }
 }
 

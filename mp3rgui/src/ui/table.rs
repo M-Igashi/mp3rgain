@@ -1,4 +1,4 @@
-use crate::app::{ClickMode, Mp3rgainApp};
+use crate::app::{ClickMode, Mp3rgainApp, SortColumn};
 use crate::worker::StoredTagsView;
 
 /// Render the "Stored RG" column for one row.
@@ -34,7 +34,41 @@ fn render_stored_tags_cell(ui: &mut egui::Ui, tags: Option<&StoredTagsView>) {
     });
 }
 
+/// Clickable sort-header. Shows ▴ / ▾ on the active column and toggles
+/// `app.sort_column` / `app.sort_descending` on click (issue #167).
+/// `hover_text` is the tooltip shown when the header is hovered; pass an
+/// empty string for the default "Click to sort" hint.
+fn sort_header(
+    ui: &mut egui::Ui,
+    app: &mut Mp3rgainApp,
+    label: &str,
+    column: SortColumn,
+    hover_text: &str,
+) {
+    let active = app.sort_column == Some(column);
+    let arrow = if active {
+        if app.sort_descending {
+            " ▾"
+        } else {
+            " ▴"
+        }
+    } else {
+        ""
+    };
+    let text = egui::RichText::new(format!("{}{}", label, arrow)).strong();
+    let resp = ui.add(egui::Button::new(text).frame(false));
+    let resp = if hover_text.is_empty() {
+        resp.on_hover_text("Click to sort")
+    } else {
+        resp.on_hover_text(hover_text)
+    };
+    if resp.clicked() {
+        app.toggle_sort(column);
+    }
+}
+
 pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
+    let display_order = app.compute_display_order();
     egui::ScrollArea::both().show(ui, |ui| {
         egui_extras::TableBuilder::new(ui)
             .striped(true)
@@ -52,28 +86,33 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
             .column(egui_extras::Column::remainder()) // Status
             .header(20.0, |mut header| {
                 header.col(|ui| {
-                    ui.strong("Path/File");
+                    sort_header(ui, app, "Path/File", SortColumn::Filename, "");
                 });
                 header.col(|ui| {
-                    ui.strong("Volume").on_hover_text(
+                    sort_header(
+                        ui,
+                        app,
+                        "Volume",
+                        SortColumn::Volume,
                         "Track Analysis: current loudness relative to ReplayGain reference (89 dB). \
-                         Find Max Amplitude: available headroom in dB before clipping.",
+                         Find Max Amplitude: available headroom in dB before clipping. \
+                         Click to sort.",
                     );
                 });
                 header.col(|ui| {
                     ui.strong("Clip");
                 });
                 header.col(|ui| {
-                    ui.strong("Track Gain");
+                    sort_header(ui, app, "Track Gain", SortColumn::TrackGain, "");
                 });
                 header.col(|ui| {
                     ui.strong("Clip(T)");
                 });
                 header.col(|ui| {
-                    ui.strong("Album Vol");
+                    sort_header(ui, app, "Album Vol", SortColumn::AlbumVolume, "");
                 });
                 header.col(|ui| {
-                    ui.strong("Album Gain");
+                    sort_header(ui, app, "Album Gain", SortColumn::AlbumGain, "");
                 });
                 header.col(|ui| {
                     ui.strong("Clip(A)");
@@ -86,7 +125,7 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                     );
                 });
                 header.col(|ui| {
-                    ui.strong("Status");
+                    sort_header(ui, app, "Status", SortColumn::Status, "");
                 });
             })
             .body(|mut body| {
@@ -96,7 +135,10 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                 // the loop.
                 let mut pending_click: Option<(usize, ClickMode)> = None;
                 let mut pending_reveal: Option<std::path::PathBuf> = None;
-                for (idx, file) in app.files.iter().enumerate() {
+                for &idx in &display_order {
+                    let Some(file) = app.files.get(idx) else {
+                        continue;
+                    };
                     let is_selected = app.selected_indices.contains(&idx);
                     body.row(18.0, |mut row| {
                         row.set_selected(is_selected);
