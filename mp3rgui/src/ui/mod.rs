@@ -13,6 +13,49 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     options::render(app, ctx);
     status::render(app, ctx);
     render_central_panel(app, ctx);
+    render_delete_confirm(app, ctx);
+}
+
+/// Modal dialog gating the destructive Delete Stored Tags worker.
+fn render_delete_confirm(app: &mut Mp3rgainApp, ctx: &egui::Context) {
+    if !app.confirm_delete_tags {
+        return;
+    }
+    let count = app.delete_target_indices().len();
+    let mut open = true;
+    let mut close_via_cancel = false;
+    let mut close_via_confirm = false;
+    egui::Window::new("Delete stored tags")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .open(&mut open)
+        .show(ctx, |ui| {
+            ui.label(format!(
+                "Delete stored ReplayGain / undo tags from {} file(s)?",
+                count
+            ));
+            ui.label("This cannot be undone.");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    close_via_cancel = true;
+                }
+                if ui
+                    .add(egui::Button::new("Delete").fill(egui::Color32::DARK_RED))
+                    .clicked()
+                {
+                    close_via_confirm = true;
+                }
+            });
+        });
+    if !open || close_via_cancel {
+        app.confirm_delete_tags = false;
+    }
+    if close_via_confirm {
+        app.confirm_delete_tags = false;
+        app.start_delete_tags(ctx);
+    }
 }
 
 fn handle_dropped_files(app: &mut Mp3rgainApp, ctx: &egui::Context) {

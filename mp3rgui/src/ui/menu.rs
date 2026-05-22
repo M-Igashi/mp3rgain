@@ -90,6 +90,15 @@ fn modify_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                 app.start_undo(ctx);
                 ui.close_menu();
             }
+            let delete_label = if app.selected_indices.is_empty() {
+                "Delete Stored Tags (All)..."
+            } else {
+                "Delete Stored Tags (Selected)..."
+            };
+            if ui.button(delete_label).clicked() {
+                app.confirm_delete_tags = true;
+                ui.close_menu();
+            }
         });
     });
 }

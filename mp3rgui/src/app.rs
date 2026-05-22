@@ -1,6 +1,6 @@
 use crate::worker::{
-    self, ApplyJob, ApplyOptionsUi, CheckTagsJob, StoredTagsView, UndoJob, WorkerEvent,
-    WorkerHandle,
+    self, ApplyJob, ApplyOptionsUi, CheckTagsJob, DeleteTagsJob, StoredTagsView, UndoJob,
+    WorkerEvent, WorkerHandle,
 };
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{db_to_steps, AacAlbumInfo};
@@ -85,6 +85,7 @@ enum WorkerKind {
     Undo,
     CheckTags,
     MaxAmplitude,
+    DeleteTags,
 }
 
 pub struct Mp3rgainApp {
@@ -99,6 +100,10 @@ pub struct Mp3rgainApp {
     pub album_info: Option<AacAlbumInfo>,
     /// User-toggleable apply flags surfaced in the Options panel.
     pub apply_options: ApplyOptionsUi,
+
+    /// Set true while the "Delete stored tags" confirmation modal is up.
+    /// The destructive worker is only spawned after the user confirms.
+    pub confirm_delete_tags: bool,
 
     /// Active worker thread + its mpsc receiver and cancel flag.
     /// `None` when nothing is running.
@@ -124,6 +129,7 @@ impl Mp3rgainApp {
             status_message: String::new(),
             album_info: None,
             apply_options: ApplyOptionsUi::default(),
+            confirm_delete_tags: false,
             worker: None,
             worker_kind: None,
             started_files: 0,
@@ -297,6 +303,54 @@ impl Mp3rgainApp {
         );
     }
 
+    /// Selected (or all, if no selection) files chosen for stored-tag
+    /// deletion. Pure read; used by the confirmation modal to show a count.
+    pub fn delete_target_indices(&self) -> Vec<usize> {
+        if self.selected_indices.is_empty() {
+            (0..self.files.len()).collect()
+        } else {
+            let mut v = self.selected_indices.clone();
+            v.sort_unstable();
+            v.dedup();
+            v
+        }
+    }
+
+    /// `-s d`: delete stored RG / undo tags from selected files. Destructive,
+    /// so the UI funnels the click through `confirm_delete_tags` first and
+    /// this is only called after the user confirms.
+    pub fn start_delete_tags(&mut self, ctx: &egui::Context) {
+        if self.files.is_empty() || self.is_processing {
+            return;
+        }
+
+        let indices = self.delete_target_indices();
+        let jobs: Vec<DeleteTagsJob> = indices
+            .iter()
+            .filter_map(|&idx| {
+                self.files.get(idx).map(|f| DeleteTagsJob {
+                    idx,
+                    path: f.path.clone(),
+                })
+            })
+            .collect();
+        if jobs.is_empty() {
+            return;
+        }
+
+        for &job_idx in jobs.iter().map(|j| &j.idx) {
+            self.files[job_idx].status = FileStatus::Pending;
+        }
+        let count = jobs.len();
+        let use_id3v2 = self.apply_options.use_id3v2;
+        let preserve = self.apply_options.preserve_timestamp;
+        self.begin_worker(
+            WorkerKind::DeleteTags,
+            count,
+            worker::spawn_delete_tags(ctx.clone(), jobs, use_id3v2, preserve),
+        );
+    }
+
     /// `-x`: scan each file for its max amplitude / headroom without any
     /// ReplayGain decoding. Faster than Track Analysis.
     pub fn start_find_max_amplitude(&mut self, ctx: &egui::Context) {
@@ -438,6 +492,7 @@ impl Mp3rgainApp {
             WorkerKind::Undo => "Undoing gain changes...".to_string(),
             WorkerKind::CheckTags => "Checking stored tags...".to_string(),
             WorkerKind::MaxAmplitude => "Finding max amplitude...".to_string(),
+            WorkerKind::DeleteTags => "Deleting stored tags...".to_string(),
         };
         self.started_files = 0;
         self.total_files_in_job = total;
@@ -476,7 +531,9 @@ impl Mp3rgainApp {
             WorkerEvent::FileStart { idx } => {
                 if let Some(file) = self.files.get_mut(idx) {
                     match self.worker_kind {
-                        Some(WorkerKind::TrackApply) | Some(WorkerKind::AlbumApply) => {
+                        Some(WorkerKind::TrackApply)
+                        | Some(WorkerKind::AlbumApply)
+                        | Some(WorkerKind::DeleteTags) => {
                             file.status = FileStatus::Applying;
                         }
                         Some(WorkerKind::Undo) => {

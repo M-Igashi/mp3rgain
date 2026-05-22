@@ -161,6 +161,12 @@ pub struct CheckTagsJob {
     pub path: PathBuf,
 }
 
+/// A single stored-tag deletion job.
+pub struct DeleteTagsJob {
+    pub idx: usize,
+    pub path: PathBuf,
+}
+
 /// User-facing apply toggles, captured at the moment the worker is
 /// spawned. Worker combines these with the per-job data to build the
 /// final `ApplyOptions`.
@@ -498,6 +504,88 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
             &ctx,
             WorkerEvent::Done {
                 message: parts.join(", "),
+            },
+        );
+    });
+
+    WorkerHandle { rx, cancel }
+}
+
+/// Spawn the stored-tag deletion worker. Destructive: removes APE /
+/// ID3v2 RG / MP4 freeform RG+undo tags from each file in order.
+///
+/// Dispatch mirrors the CLI's `process_delete_tags`:
+///   - AAC: `mp4meta::delete_replaygain_tags` + `delete_undo_tags`
+///   - MP3 + `use_id3v2`: `mp3rgain::delete_id3v2_replaygain`
+///   - MP3 (default APE): `mp3rgain::delete_ape_tag`
+pub fn spawn_delete_tags(
+    ctx: egui::Context,
+    jobs: Vec<DeleteTagsJob>,
+    use_id3v2: bool,
+    preserve_timestamp: bool,
+) -> WorkerHandle {
+    let (tx, rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_w = Arc::clone(&cancel);
+
+    thread::spawn(move || {
+        let mut deleted = 0usize;
+        let mut errors = 0usize;
+
+        for job in jobs {
+            if cancel_w.load(Ordering::Relaxed) {
+                send(&tx, &ctx, WorkerEvent::Cancelled);
+                return;
+            }
+            send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
+
+            let original_mtime = if preserve_timestamp {
+                read_mtime(&job.path)
+            } else {
+                None
+            };
+
+            let result = if mp4meta::is_aac_file(&job.path) {
+                mp4meta::delete_replaygain_tags(&job.path)
+                    .and_then(|()| mp4meta::delete_undo_tags(&job.path))
+            } else if use_id3v2 {
+                mp3rgain::delete_id3v2_replaygain(&job.path)
+            } else {
+                mp3rgain::delete_ape_tag(&job.path)
+            };
+
+            match result {
+                Ok(()) => {
+                    if let Some(m) = original_mtime {
+                        restore_mtime(&job.path, m);
+                    }
+                    deleted += 1;
+                    send(&tx, &ctx, WorkerEvent::FileApplied { idx: job.idx });
+                }
+                Err(e) => {
+                    errors += 1;
+                    send(
+                        &tx,
+                        &ctx,
+                        WorkerEvent::FileApplyFailed {
+                            idx: job.idx,
+                            message: e.to_string(),
+                        },
+                    );
+                }
+            }
+        }
+
+        let suffix = if errors > 0 {
+            format!(", {} error(s)", errors)
+        } else {
+            String::new()
+        };
+        send(
+            &tx,
+            &ctx,
+            WorkerEvent::Done {
+                message: format!("Deleted stored tags from {} file(s){}", deleted, suffix),
             },
         );
     });
