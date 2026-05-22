@@ -83,7 +83,16 @@ See **[docs/migrating-from-mp3gain.md](docs/migrating-from-mp3gain.md)** for the
 
 A native GUI application (`mp3rgui`) is available for users who prefer a graphical interface.
 
-**Features:** Drag-and-drop, track/album analysis, one-click gain application, clipping warnings, progress indicators.
+**Features:**
+
+- Drag-and-drop file / folder loading (recurses subfolders)
+- Track and Album ReplayGain analysis (parallel, with Cancel)
+- Apply Track / Album Gain — shares the same `apply_with_options` pipeline as the CLI
+- **Options panel:** Prevent clipping (`-k`), Preserve mtime (`-p`), Wrap mode (`-w`), Use ID3v2 (`-s i`), Dry run (`-n`)
+- **Modify Gain menu:** Apply Track / Album / Manual (`-g`) / Channel (`-l`) Gain, Undo (`-u`), Delete Stored Tags (`-s d`)
+- **Analysis menu:** Track / Album Analysis, Find Max Amplitude (`-x`), Check Stored Tags (`-s c`)
+- **Stored RG** table column shows existing ReplayGain / undo tags (APE / ID3v2 / MP4 freeform) with a per-tag breakdown on hover
+- Responsive UI: all batch work runs on a worker thread with per-file progress and a Cancel button
 
 **Install:** See [Installation](#installation) above for Homebrew, Winget, and AUR options. Binaries are also available from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
 - `mp3rgui-*-macos-universal.dmg` (macOS)
