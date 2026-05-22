@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::apply::{apply_with_options, ApplyOptions, ClippingDetection};
-use mp3rgain::{analyze, mp4meta, steps_to_db, Channel, GainOptions};
+use mp3rgain::{analyze, mp4meta, steps_to_db, Channel};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -9,9 +9,7 @@ use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
 
-use super::utils::{
-    restore_timestamp, save_original_mtime, warn_aac_multi_track, write_id3v2_undo_after_apply,
-};
+use super::utils::warn_aac_multi_track;
 
 pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<(JsonFileResult, String)> {
     let mut out = String::new();
@@ -278,8 +276,6 @@ fn process_apply_channel_into(
         }
     }
 
-    let original_mtime = save_original_mtime(file, opts);
-
     if opts.dry_run {
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             writeln!(
@@ -301,51 +297,22 @@ fn process_apply_channel_into(
         });
     }
 
-    let apply_result = if opts.use_id3v2 {
-        // Apply gain without APE undo, then write undo to ID3v2.
-        // Capture the pre-apply analysis so the undo write can reuse min/max
-        // without a second file scan (issue #135).
-        let pre_analysis = analyze(file).ok();
-        let result = GainOptions::new(steps)
-            .channel(channel)
-            .undo(false)
-            .apply(file);
-        if result.is_ok() {
-            let (delta_left, delta_right) = match channel {
-                Channel::Left => (steps, 0),
-                Channel::Right => (0, steps),
-                _ => unreachable!(),
-            };
-            write_id3v2_undo_after_apply(
-                file,
-                delta_left,
-                delta_right,
-                false,
-                pre_analysis.as_ref(),
-            )?;
-        }
-        result
-    } else {
-        GainOptions::new(steps)
-            .channel(channel)
-            .undo(true)
-            .apply(file)
-    };
+    let mut apply_opts = ApplyOptions::new(steps);
+    apply_opts.channel = Some(channel);
+    apply_opts.preserve_timestamp = opts.preserve_timestamp;
+    apply_opts.use_temp_file = opts.use_temp_file;
+    apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
+    apply_opts.use_id3v2 = opts.use_id3v2;
 
-    match apply_result {
-        Ok(frames) => {
-            // Restore timestamp if needed
-            if let Some(mtime) = original_mtime {
-                restore_timestamp(file, mtime);
-            }
-
+    match apply_with_options(file, &apply_opts) {
+        Ok(report) => {
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 writeln!(
                     out,
                     "  {} {} ({} frames, {} channel)",
                     "v".green(),
                     filename,
-                    frames,
+                    report.modified,
                     channel_name
                 )?;
             }
@@ -353,7 +320,7 @@ fn process_apply_channel_into(
             Ok(JsonFileResult {
                 file: file.display().to_string(),
                 status: Some(FileStatus::Success),
-                frames: Some(frames),
+                frames: Some(report.modified),
                 gain_applied_steps: Some(steps),
                 gain_applied_db: Some(steps_to_db(steps)),
                 ..Default::default()

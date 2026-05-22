@@ -37,6 +37,9 @@ pub enum Error {
     #[error("Cannot apply channel-specific gain to mono file. Use -g for mono files.")]
     ChannelGainOnMono,
 
+    #[error("Channel-specific gain is not supported for AAC/M4A files")]
+    ChannelGainOnAac,
+
     #[error("No APE tag found - cannot undo")]
     NoApeTag,
 

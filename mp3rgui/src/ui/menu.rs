@@ -56,6 +56,15 @@ fn analysis_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) 
                 app.start_analyze_album(ctx);
                 ui.close_menu();
             }
+            if ui.button("Find Max Amplitude").clicked() {
+                app.start_find_max_amplitude(ctx);
+                ui.close_menu();
+            }
+            ui.separator();
+            if ui.button("Check Stored Tags").clicked() {
+                app.start_check_stored_tags(ctx);
+                ui.close_menu();
+            }
         });
     });
 }
@@ -69,6 +78,33 @@ fn modify_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) {
             }
             if ui.button("Apply Album Gain").clicked() {
                 app.start_apply_album_gain(ctx);
+                ui.close_menu();
+            }
+            if ui.button("Apply Manual Gain...").clicked() {
+                app.manual_gain_modal.open = true;
+                ui.close_menu();
+            }
+            if ui.button("Apply Channel Gain (MP3)...").clicked() {
+                app.channel_gain_modal.open = true;
+                ui.close_menu();
+            }
+            ui.separator();
+            let undo_label = if app.selected_indices.is_empty() {
+                "Undo All"
+            } else {
+                "Undo Selected"
+            };
+            if ui.button(undo_label).clicked() {
+                app.start_undo(ctx);
+                ui.close_menu();
+            }
+            let delete_label = if app.selected_indices.is_empty() {
+                "Delete Stored Tags (All)..."
+            } else {
+                "Delete Stored Tags (Selected)..."
+            };
+            if ui.button(delete_label).clicked() {
+                app.confirm_delete_tags = true;
                 ui.close_menu();
             }
         });

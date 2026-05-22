@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current Status: v2.3.0 (Production Ready)
+## Current Status: v2.6.3 (Production Ready)
 
 **Positioning:** mp3rgain is the only actively maintained CLI that performs lossless `global_gain` rewrite on AAC/M4A files (aacgain has been abandoned since ~2009; foobar2000's "Apply ReplayGain to file content" offers a comparable scalefactor-based AAC rewrite but is Windows GUI only with no undo). For MP3 it's a modern drop-in replacement for mp3gain; for AAC on the command line it has no equivalent.
 
@@ -138,6 +138,35 @@ All core functionality complete:
   - `linux/amd64` + `linux/arm64`, native build per arch
   - `FROM scratch` + musl static binary, ~2 MB
   - Drop-in replacement for `mp3gain` containers in cron / Plex pipelines
+
+### v2.4.0 - Parallel ReplayGain Analysis (Issues #125, #126)
+
+- [x] `-j` / `--threads` flag + `MP3RGAIN_THREADS` env var
+- [x] Parallel album analysis via `analyze_album_lenient_parallel_with_completion`
+- [x] Auto-tune via `std::thread::available_parallelism`; `-j 1` reproduces the legacy serial path
+- [x] CLI structure refactor (`processors/` per-file work, `commands/` dispatchers)
+
+### v2.5.0 - Robustness
+
+- [x] `--skip-errors` keeps album analysis going past unreadable files (#145)
+- [x] Default-features gate for the binary so library-only consumers stay lean
+
+### v2.6.x - Bug Fixes (Issues #147, #149)
+
+- [x] v2.6.2: apply the `-d` dB modifier during `-a` / `-r` gain application (#147 / #148)
+- [x] v2.6.3: fix GUI corrupting M4A files when applying gain — the dispatcher now routes MP4 files to the AAC path instead of the MP3 sync-word scanner (#149 / #150)
+
+### v2.7.0 (in progress) - Apply Pipeline Refactor & GUI Feature Parity (Issue #153, closes #152)
+
+- [x] `mp3rgain::apply::apply_with_options` — unified pipeline shared by CLI and GUI (Step 1-2, PR #154)
+- [x] GUI worker threads + mpsc progress channel + Cancel button (Step 3, closes #152, PR #154)
+- [x] GUI Options panel: Prevent clipping / Preserve mtime / Wrap / Use ID3v2 (Step 4, PR #154)
+- [x] GUI Step 5 menus (PR #155):
+  - Undo, Check Stored Tags (+ Stored RG table column), Delete Stored Tags (with confirm modal)
+  - Find Max Amplitude, Dry Run toggle
+  - Apply Manual Gain, Apply Channel Gain
+- [x] `mp3rgain::apply::predict_apply` — dry-run companion to `apply_with_options`
+- [x] Channel gain routed through the unified pipeline; CLI `processors/utils::write_id3v2_undo_after_apply` removed
 
 ## Upcoming Goals
 
