@@ -435,8 +435,14 @@ pub fn spawn_album_analysis(
     WorkerHandle { rx, cancel }
 }
 
-/// Spawn the apply worker (used by both Track Gain and Album Gain). Each
-/// job is processed in turn; the cancel flag is checked between files.
+/// Spawn the apply worker (used by both Track Gain and Album Gain).
+///
+/// Jobs are pulled from a shared queue by a pool of `available_parallelism`
+/// worker threads, matching the parallel Track Analysis path so wall time
+/// scales with cores (issue #158 follow-up comment). Each file's apply is
+/// independent — the temp-file rename in `apply_with_options` uses an
+/// AtomicU64 counter so concurrent writes in the same directory don't
+/// collide. Cancellation is checked between files.
 pub fn spawn_apply(
     ctx: egui::Context,
     jobs: Vec<ApplyJob>,
@@ -448,76 +454,107 @@ pub fn spawn_apply(
     let cancel_w = Arc::clone(&cancel);
 
     thread::spawn(move || {
-        let mut applied = 0usize;
-        let mut errors = 0usize;
-
-        for job in jobs {
-            if cancel_w.load(Ordering::Relaxed) {
-                send(&tx, &ctx, WorkerEvent::Cancelled);
-                return;
-            }
-            send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
-
-            let opts = build_apply_options(
-                job.steps,
-                job.track_result,
-                job.album_info,
-                job.channel,
-                ui_opts,
+        let total = jobs.len();
+        if total == 0 {
+            let verb = if ui_opts.dry_run { "Dry-ran" } else { "Applied" };
+            send(
+                &tx,
+                &ctx,
+                WorkerEvent::Done {
+                    message: format!("{} {} on 0 file(s)", verb, action_label),
+                },
             );
-            let result = if ui_opts.dry_run {
-                predict_apply(&job.path, &opts)
-            } else {
-                apply_with_options(&job.path, &opts)
-            };
-            match result {
-                Ok(report) => {
-                    applied += 1;
-                    if ui_opts.dry_run {
-                        send(
-                            &tx,
-                            &ctx,
-                            WorkerEvent::FileApplyDryRun {
-                                idx: job.idx,
-                                actual_steps: report.actual_steps,
-                                clipping_prevented: report.clipping_prevented,
-                            },
-                        );
-                    } else {
-                        send(
-                            &tx,
-                            &ctx,
-                            WorkerEvent::FileApplied {
-                                idx: job.idx,
-                                actual_steps: report.actual_steps,
-                            },
-                        );
-                    }
-                }
-                Err(e) => {
-                    errors += 1;
-                    send(
-                        &tx,
-                        &ctx,
-                        WorkerEvent::FileApplyFailed {
-                            idx: job.idx,
-                            message: e.to_string(),
-                        },
-                    );
-                }
-            }
+            return;
         }
 
+        let parallelism = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .max(1);
+        let pool_size = parallelism.min(total);
+
+        let queue: Arc<Mutex<Vec<ApplyJob>>> = Arc::new(Mutex::new(jobs));
+        let applied = Arc::new(AtomicUsize::new(0));
+        let errors = Arc::new(AtomicUsize::new(0));
+
+        let handles: Vec<_> = (0..pool_size)
+            .map(|_| {
+                let queue = Arc::clone(&queue);
+                let cancel = Arc::clone(&cancel_w);
+                let tx = tx.clone();
+                let ctx = ctx.clone();
+                let applied = Arc::clone(&applied);
+                let errors = Arc::clone(&errors);
+                thread::spawn(move || loop {
+                    if cancel.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let next = {
+                        let mut q = queue.lock().expect("apply queue poisoned");
+                        q.pop()
+                    };
+                    let Some(job) = next else { break };
+                    let _ = tx.send(WorkerEvent::FileStart { idx: job.idx });
+                    ctx.request_repaint();
+
+                    let opts = build_apply_options(
+                        job.steps,
+                        job.track_result,
+                        job.album_info,
+                        job.channel,
+                        ui_opts,
+                    );
+                    let result = if ui_opts.dry_run {
+                        predict_apply(&job.path, &opts)
+                    } else {
+                        apply_with_options(&job.path, &opts)
+                    };
+                    match result {
+                        Ok(report) => {
+                            applied.fetch_add(1, Ordering::Relaxed);
+                            if ui_opts.dry_run {
+                                let _ = tx.send(WorkerEvent::FileApplyDryRun {
+                                    idx: job.idx,
+                                    actual_steps: report.actual_steps,
+                                    clipping_prevented: report.clipping_prevented,
+                                });
+                            } else {
+                                let _ = tx.send(WorkerEvent::FileApplied {
+                                    idx: job.idx,
+                                    actual_steps: report.actual_steps,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            errors.fetch_add(1, Ordering::Relaxed);
+                            let _ = tx.send(WorkerEvent::FileApplyFailed {
+                                idx: job.idx,
+                                message: e.to_string(),
+                            });
+                        }
+                    }
+                    ctx.request_repaint();
+                })
+            })
+            .collect();
+
+        for h in handles {
+            let _ = h.join();
+        }
+
+        if cancel_w.load(Ordering::Relaxed) {
+            send(&tx, &ctx, WorkerEvent::Cancelled);
+            return;
+        }
+
+        let applied = applied.load(Ordering::Relaxed);
+        let errors = errors.load(Ordering::Relaxed);
         let suffix = if errors > 0 {
             format!(", {} error(s)", errors)
         } else {
             String::new()
         };
-        let verb = if ui_opts.dry_run {
-            "Dry-ran"
-        } else {
-            "Applied"
-        };
+        let verb = if ui_opts.dry_run { "Dry-ran" } else { "Applied" };
         send(
             &tx,
             &ctx,
