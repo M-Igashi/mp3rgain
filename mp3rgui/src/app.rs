@@ -181,6 +181,11 @@ pub struct Mp3rgainApp {
     /// Total files the worker was launched against (denominator for the
     /// progress bar).
     total_files_in_job: usize,
+
+    /// Last `target_volume` we propagated into the file rows. Used by
+    /// `recompute_targets_if_changed` to detect Target edits and refresh
+    /// the gain columns without rerunning analysis (issue #161 item 1).
+    last_target_volume: f64,
 }
 
 impl Mp3rgainApp {
@@ -202,7 +207,39 @@ impl Mp3rgainApp {
             worker_kind: None,
             started_files: 0,
             total_files_in_job: 0,
+            last_target_volume: 89.0,
         }
+    }
+
+    /// Detect Target edits and shift each row's track_gain / album_gain by
+    /// the delta. Cheap (just arithmetic on cached values), so it can run
+    /// every frame (issue #161 item 1). Clipping flags are recomputed
+    /// against the cached pre-apply peak.
+    pub fn recompute_targets_if_changed(&mut self) {
+        if (self.target_volume - self.last_target_volume).abs() < f64::EPSILON {
+            return;
+        }
+        let delta = self.target_volume - self.last_target_volume;
+        for file in &mut self.files {
+            if let Some(g) = file.track_gain {
+                file.track_gain = Some(g + delta);
+            }
+            if let Some(g) = file.album_gain {
+                file.album_gain = Some(g + delta);
+            }
+            if let Some(track) = file.track_result.as_ref() {
+                let peak = track.peak();
+                file.track_clip = file
+                    .track_gain
+                    .map(|g| peak * 10.0_f64.powf(g / 20.0) > 1.0)
+                    .unwrap_or(false);
+                file.album_clip = file
+                    .album_gain
+                    .map(|g| peak * 10.0_f64.powf(g / 20.0) > 1.0)
+                    .unwrap_or(false);
+            }
+        }
+        self.last_target_volume = self.target_volume;
     }
 
     pub fn add_files(&mut self, paths: Vec<PathBuf>) {
@@ -349,6 +386,16 @@ impl Mp3rgainApp {
         }
     }
 
+    /// Open the platform file manager focused on `path` (issue #161 item 4).
+    /// Best-effort: failures land in `status_message` so the user gets a hint
+    /// instead of a silent no-op.
+    pub fn reveal_in_file_manager(&mut self, path: &Path) {
+        let result = open_in_file_manager(path);
+        if let Err(msg) = result {
+            self.status_message = format!("Could not open file location: {}", msg);
+        }
+    }
+
     pub fn start_analyze_tracks(&mut self, ctx: &egui::Context) {
         if self.files.is_empty() || self.is_processing || !replaygain::is_available() {
             if !replaygain::is_available() {
@@ -359,16 +406,21 @@ impl Mp3rgainApp {
 
         // Track-only analysis invalidates any previously-computed album info.
         self.album_info = None;
-        for file in &mut self.files {
-            file.status = FileStatus::Pending;
-            file.album_info = None;
+        // Issue #161: act on the current selection (or all files when nothing
+        // is selected). Selected rows go to Pending; unselected rows keep their
+        // existing state so partial analyses don't wipe prior results.
+        // Issue #159: also clear stale per-file album_info on rescan.
+        let targets = self.target_indices();
+        for &idx in &targets {
+            if let Some(f) = self.files.get_mut(idx) {
+                f.status = FileStatus::Pending;
+                f.album_info = None;
+            }
         }
 
-        let jobs: Vec<(usize, PathBuf)> = self
-            .files
+        let jobs: Vec<(usize, PathBuf)> = targets
             .iter()
-            .enumerate()
-            .map(|(i, f)| (i, f.path.clone()))
+            .filter_map(|&i| self.files.get(i).map(|f| (i, f.path.clone())))
             .collect();
         self.begin_worker(
             WorkerKind::TrackAnalysis,
@@ -386,24 +438,28 @@ impl Mp3rgainApp {
         }
 
         self.album_info = None;
-        for file in &mut self.files {
-            file.status = FileStatus::Pending;
-            file.album_info = None;
+        // Issue #161: scope to current selection (or all files when none
+        // selected). Issue #159: group those targets by parent directory so
+        // each folder is treated as its own album.
+        let targets = self.target_indices();
+        for &idx in &targets {
+            if let Some(f) = self.files.get_mut(idx) {
+                f.status = FileStatus::Pending;
+                f.album_info = None;
+            }
         }
 
-        // Group by parent directory so each folder is treated as its own
-        // album, matching classic MP3GainGUI behavior (issue #159). Files
-        // without a parent (e.g. root paths) fall back to a single anonymous
-        // group keyed by empty string.
         let mut groups: std::collections::BTreeMap<PathBuf, Vec<(usize, PathBuf)>> =
             std::collections::BTreeMap::new();
-        for (i, f) in self.files.iter().enumerate() {
-            let parent = f
-                .path
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(PathBuf::new);
-            groups.entry(parent).or_default().push((i, f.path.clone()));
+        for &idx in &targets {
+            if let Some(f) = self.files.get(idx) {
+                let parent = f
+                    .path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(PathBuf::new);
+                groups.entry(parent).or_default().push((idx, f.path.clone()));
+            }
         }
         let group_jobs: Vec<Vec<(usize, PathBuf)>> = groups.into_values().collect();
         let total: usize = group_jobs.iter().map(|g| g.len()).sum();
@@ -420,10 +476,12 @@ impl Mp3rgainApp {
             return;
         }
 
-        let jobs: Vec<ApplyJob> = self
-            .files
+        // Issue #161: act on the current selection (or all files when none
+        // selected).
+        let targets = self.target_indices();
+        let jobs: Vec<ApplyJob> = targets
             .iter()
-            .enumerate()
+            .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
             .filter_map(|(idx, f)| {
                 f.track_gain.map(|gain_db| ApplyJob {
                     idx,
@@ -666,12 +724,14 @@ impl Mp3rgainApp {
             return;
         }
 
-        // Use the per-file album_info (issue #159) so files from different
-        // folders get the album RG tags computed for their own album.
-        let jobs: Vec<ApplyJob> = self
-            .files
+        // Issue #161: act on the current selection (or all files when none
+        // selected). Issue #159: use each file's per-folder album_info so
+        // tracks from different folders get the album RG tags for their own
+        // album.
+        let targets = self.target_indices();
+        let jobs: Vec<ApplyJob> = targets
             .iter()
-            .enumerate()
+            .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
             .filter_map(|(idx, f)| {
                 f.album_gain.map(|gain_db| ApplyJob {
                     idx,
@@ -969,9 +1029,48 @@ impl Mp3rgainApp {
     }
 }
 
+/// Platform-specific reveal-in-file-manager. macOS uses `open -R` so Finder
+/// highlights the file inside its folder; Windows uses `explorer /select,`
+/// for the same effect; Linux falls back to opening the parent directory
+/// (xdg-open has no general "select" verb).
+fn open_in_file_manager(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // /select, must be a single argument followed by the path. CreateProcess
+        // re-parses the command line so quoting is handled by Command.
+        std::process::Command::new("explorer.exe")
+            .arg(format!("/select,{}", path.display()))
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        let dir = path.parent().unwrap_or(path);
+        std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+}
+
 impl eframe::App for Mp3rgainApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump_worker_events();
+        // Run after the user's toolbar input is already in self.target_volume
+        // (which is mutated by the DragValue in toolbar.rs from the previous
+        // frame), and before this frame's render reads track_gain.
+        self.recompute_targets_if_changed();
         crate::ui::render(self, ctx);
     }
 }

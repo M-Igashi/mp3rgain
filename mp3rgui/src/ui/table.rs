@@ -95,13 +95,15 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                 // iteration. Capture the requested action and apply it after
                 // the loop.
                 let mut pending_click: Option<(usize, ClickMode)> = None;
+                let mut pending_reveal: Option<std::path::PathBuf> = None;
                 for (idx, file) in app.files.iter().enumerate() {
                     let is_selected = app.selected_indices.contains(&idx);
                     body.row(18.0, |mut row| {
                         row.set_selected(is_selected);
 
                         row.col(|ui| {
-                            if ui.selectable_label(is_selected, &file.filename).clicked() {
+                            let resp = ui.selectable_label(is_selected, &file.filename);
+                            if resp.clicked() {
                                 let mode = ui.input(|i| {
                                     let toggle = i.modifiers.ctrl || i.modifiers.command;
                                     let shift = i.modifiers.shift;
@@ -114,6 +116,14 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                                 });
                                 pending_click = Some((idx, mode));
                             }
+                            // Issue #161 item 4: right-click → reveal in
+                            // file manager. Captured for after-loop apply.
+                            resp.context_menu(|ui| {
+                                if ui.button("Open file location").clicked() {
+                                    pending_reveal = Some(file.path.clone());
+                                    ui.close_menu();
+                                }
+                            });
                         });
                         row.col(|ui| {
                             if let Some(v) = file.volume {
@@ -170,6 +180,9 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                 }
                 if let Some((idx, mode)) = pending_click {
                     app.click_row(idx, mode);
+                }
+                if let Some(path) = pending_reveal {
+                    app.reveal_in_file_manager(&path);
                 }
             });
     });
