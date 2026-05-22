@@ -456,7 +456,11 @@ pub fn spawn_apply(
     thread::spawn(move || {
         let total = jobs.len();
         if total == 0 {
-            let verb = if ui_opts.dry_run { "Dry-ran" } else { "Applied" };
+            let verb = if ui_opts.dry_run {
+                "Dry-ran"
+            } else {
+                "Applied"
+            };
             send(
                 &tx,
                 &ctx,
@@ -554,7 +558,11 @@ pub fn spawn_apply(
         } else {
             String::new()
         };
-        let verb = if ui_opts.dry_run { "Dry-ran" } else { "Applied" };
+        let verb = if ui_opts.dry_run {
+            "Dry-ran"
+        } else {
+            "Applied"
+        };
         send(
             &tx,
             &ctx,
