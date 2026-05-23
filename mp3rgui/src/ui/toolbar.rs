@@ -9,7 +9,7 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             ui.add_enabled_ui(!app.is_processing, |ui| {
                 if ui.button("Add Files").clicked() {
                     if let Some(paths) = rfd::FileDialog::new()
-                        .add_filter("Audio files", &["mp3", "m4a", "aac"])
+                        .add_filter("Audio files", mp3rgain::SUPPORTED_EXTENSIONS)
                         .pick_files()
                     {
                         app.add_files(paths);

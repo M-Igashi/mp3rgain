@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::*;
-use mp3rgain::{aac, id3v2, mp4meta, undo_gain};
+use mp3rgain::undo_gain_auto;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -34,14 +34,7 @@ fn process_undo_into(file: &Path, opts: &Options, out: &mut String) -> Result<Js
         });
     }
 
-    let is_aac = mp4meta::is_aac_file(file);
-    let undo_result = if is_aac {
-        aac::undo_aac_gain(file)
-    } else if opts.use_id3v2 {
-        id3v2::undo_gain_id3v2(file)
-    } else {
-        undo_gain(file)
-    };
+    let undo_result = undo_gain_auto(file, opts.use_id3v2);
 
     match undo_result {
         Ok(frames) => {

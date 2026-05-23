@@ -268,6 +268,21 @@ pub fn peak_to_headroom_db(peak: f64) -> Option<f64> {
     }
 }
 
+/// Linear gain ratio for a dB value (`10^(db/20)`).
+pub fn db_to_linear(db: f64) -> f64 {
+    10.0_f64.powf(db / 20.0)
+}
+
+/// Predicted normalized peak after applying `gain_db` to `peak`.
+pub fn apply_gain_to_peak(peak: f64, gain_db: f64) -> f64 {
+    peak * db_to_linear(gain_db)
+}
+
+/// Whether applying `gain_db` to `peak` would clip (post-gain peak > 1.0).
+pub fn would_clip(peak: f64, gain_db: f64) -> bool {
+    apply_gain_to_peak(peak, gain_db) > 1.0
+}
+
 // =============================================================================
 // Internal implementation functions
 // =============================================================================

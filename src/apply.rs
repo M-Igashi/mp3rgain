@@ -21,7 +21,10 @@ use std::time::SystemTime;
 #[cfg(feature = "aac")]
 use crate::aac;
 use crate::error::{Error, Result};
-use crate::gain::{peak_to_headroom_db, steps_to_db, Channel, GainOptions, GAIN_STEP_DB, MAX_GAIN};
+use crate::gain::{
+    apply_gain_to_peak, peak_to_headroom_db, steps_to_db, Channel, GainOptions, GAIN_STEP_DB,
+    MAX_GAIN,
+};
 use crate::replaygain::ReplayGainResult;
 use crate::{ape, id3v2, mp4meta};
 
@@ -262,8 +265,7 @@ fn check_clipping(
 
     // ReplayGain-peak branch.
     if let Some(track) = opts.track_result.as_ref() {
-        let gain_linear = 10.0_f64.powf(steps_to_db(steps) / 20.0);
-        let new_peak = track.peak() * gain_linear;
+        let new_peak = apply_gain_to_peak(track.peak(), steps_to_db(steps));
         if new_peak > 1.0 {
             if opts.prevent_clipping {
                 // `new_peak > 1.0` implies `peak > 0`, so headroom is

@@ -3,7 +3,7 @@ use crate::worker::{
     WorkerEvent, WorkerHandle,
 };
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
-use mp3rgain::{db_to_steps, AacAlbumInfo, Channel};
+use mp3rgain::{db_to_linear, db_to_steps, would_clip, AacAlbumInfo, Channel};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::TryRecvError;
 
@@ -287,11 +287,11 @@ impl Mp3rgainApp {
                 let peak = track.peak();
                 file.track_clip = file
                     .track_gain
-                    .map(|g| Self::would_clip(peak, g))
+                    .map(|g| would_clip(peak, g))
                     .unwrap_or(false);
                 file.album_clip = file
                     .album_gain
-                    .map(|g| Self::would_clip(peak, g))
+                    .map(|g| would_clip(peak, g))
                     .unwrap_or(false);
             }
         }
@@ -920,7 +920,7 @@ impl Mp3rgainApp {
                 let target = self.target_volume;
                 let album_gain = target - REPLAYGAIN_REFERENCE_DB + album_info.album_gain_db;
                 let album_volume = REPLAYGAIN_REFERENCE_DB - album_info.album_gain_db;
-                let album_clip = Self::would_clip(album_info.album_peak, album_gain);
+                let album_clip = would_clip(album_info.album_peak, album_gain);
 
                 for (idx, track_result) in successful {
                     if let Some(file) = self.files.get_mut(idx) {
@@ -1052,12 +1052,7 @@ impl Mp3rgainApp {
         file.clipping = result.peak() >= 1.0;
         let gain = target_volume - REPLAYGAIN_REFERENCE_DB + result.gain_db();
         file.track_gain = Some(gain);
-        file.track_clip = Self::would_clip(result.peak(), gain);
-    }
-
-    fn would_clip(peak: f64, gain_db: f64) -> bool {
-        let gain_linear = 10.0_f64.powf(gain_db / 20.0);
-        peak * gain_linear > 1.0
+        file.track_clip = would_clip(result.peak(), gain);
     }
 
     /// Shift the row's cached display values by the dB that was actually
@@ -1068,7 +1063,6 @@ impl Mp3rgainApp {
     /// prevent-clipping checks see the file's current peak (issue #172).
     fn shift_displayed_values(file: &mut FileEntry, actual_steps: i32) {
         let db_applied = mp3rgain::steps_to_db(actual_steps);
-        let gain_linear = 10.0_f64.powf(db_applied / 20.0);
 
         if let Some(v) = file.volume {
             file.volume = Some(v + db_applied);
@@ -1083,15 +1077,15 @@ impl Mp3rgainApp {
             file.album_gain = Some(g - db_applied);
         }
         if let Some(track) = file.track_result.take() {
-            let new_peak = track.peak() * gain_linear;
+            let new_peak = track.peak() * db_to_linear(db_applied);
             file.clipping = new_peak >= 1.0;
             file.track_clip = file
                 .track_gain
-                .map(|g| Self::would_clip(new_peak, g))
+                .map(|g| would_clip(new_peak, g))
                 .unwrap_or(false);
             file.album_clip = file
                 .album_gain
-                .map(|g| Self::would_clip(new_peak, g))
+                .map(|g| would_clip(new_peak, g))
                 .unwrap_or(false);
             file.track_result = Some(track.with_peak(new_peak));
         }

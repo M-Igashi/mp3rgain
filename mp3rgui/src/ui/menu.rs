@@ -14,7 +14,7 @@ fn file_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     ui.menu_button("File", |ui| {
         if ui.button("Add Files...").clicked() {
             if let Some(paths) = rfd::FileDialog::new()
-                .add_filter("Audio files", &["mp3", "m4a", "aac"])
+                .add_filter("Audio files", mp3rgain::SUPPORTED_EXTENSIONS)
                 .pick_files()
             {
                 app.add_files(paths);

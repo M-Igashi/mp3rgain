@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::apply::{apply_with_options, ApplyOptions, ClippingDetection};
-use mp3rgain::{analyze, mp4meta, steps_to_db, Channel};
+use mp3rgain::{analyze, mp4meta, steps_to_db, Channel, MAX_GAIN};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -133,7 +133,7 @@ fn dry_run_clipping_summary(
         {
             mp3rgain::aac::analyze_aac_gains(file)
                 .ok()
-                .map(|a| 255u8.saturating_sub(a.max_gain()) as i32)
+                .map(|a| MAX_GAIN.saturating_sub(a.max_gain()) as i32)
         }
         #[cfg(not(feature = "aac"))]
         {

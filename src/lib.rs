@@ -86,8 +86,9 @@ pub use apply::{
 };
 pub use error::{Error, Result};
 pub use gain::{
-    apply_gain, apply_gain_db, db_to_steps, peak_to_headroom_db, peak_to_pcm_sample, steps_to_db,
-    undo_gain, Channel, GainOptions, GAIN_STEP_DB, MAX_GAIN, MIN_GAIN,
+    apply_gain, apply_gain_db, apply_gain_to_peak, db_to_linear, db_to_steps, peak_to_headroom_db,
+    peak_to_pcm_sample, steps_to_db, undo_gain, would_clip, Channel, GainOptions, GAIN_STEP_DB,
+    MAX_GAIN, MIN_GAIN,
 };
 pub use id3v2::{
     delete_id3v2_replaygain, read_id3v2_replaygain, undo_gain_id3v2, write_id3v2_replaygain,
@@ -145,6 +146,65 @@ pub fn apply_gain_db_auto(file_path: &Path, gain_db: f64) -> Result<usize> {
         }
     }
     gain::apply_gain_db(file_path, gain_db)
+}
+
+/// Undo previously-applied gain, auto-dispatching by file format and tag mode.
+///
+/// AAC files go through the AAC undo path. For MP3, `use_id3v2 = true` routes
+/// to ID3v2; otherwise the default APE undo is used.
+pub fn undo_gain_auto(file_path: &Path, use_id3v2: bool) -> Result<usize> {
+    #[cfg(feature = "aac")]
+    {
+        if mp4meta::is_aac_file(file_path) {
+            return aac::undo_aac_gain(file_path);
+        }
+    }
+    if use_id3v2 {
+        id3v2::undo_gain_id3v2(file_path)
+    } else {
+        gain::undo_gain(file_path)
+    }
+}
+
+/// Delete ReplayGain / undo tags, auto-dispatching by file format and tag mode.
+///
+/// For AAC, deletes both the ReplayGain and undo freeform tags. For MP3,
+/// `use_id3v2 = true` removes the ID3v2 frames; otherwise the APE tag is
+/// removed.
+pub fn delete_gain_tags_auto(file_path: &Path, use_id3v2: bool) -> Result<()> {
+    #[cfg(feature = "aac")]
+    {
+        if mp4meta::is_aac_file(file_path) {
+            mp4meta::delete_replaygain_tags(file_path)?;
+            return mp4meta::delete_undo_tags(file_path);
+        }
+    }
+    if use_id3v2 {
+        id3v2::delete_id3v2_replaygain(file_path)
+    } else {
+        ape::delete_ape_tag(file_path)
+    }
+}
+
+/// Read the left-channel undo step count without modifying the file.
+///
+/// Mirrors [`undo_gain_auto`]'s dispatch so the returned value matches what
+/// `undo_gain_auto` would roll back. Returns `None` if the tag is absent or
+/// unreadable.
+pub fn read_undo_steps(file_path: &Path, use_id3v2: bool) -> Option<i32> {
+    #[cfg(feature = "aac")]
+    {
+        if mp4meta::is_aac_file(file_path) {
+            let undo_tags = mp4meta::read_undo_tags(file_path).ok()?;
+            return Some(ape::parse_undo_values(undo_tags.undo()).0);
+        }
+    }
+    if use_id3v2 {
+        let rg = id3v2::read_id3v2_replaygain(file_path).ok()?;
+        return Some(ape::parse_undo_values(rg.undo.as_deref()).0);
+    }
+    let tag = ape::read_ape_tag_from_file(file_path).ok()??;
+    tag.get_undo_gain()
 }
 
 fn collect_audio_files_into(dir: &Path, recursive: bool, result: &mut Vec<PathBuf>) -> Result<()> {

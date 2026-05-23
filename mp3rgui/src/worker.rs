@@ -613,10 +613,10 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
 
             // Peek at the undo tag before running undo, so we can tell the
             // UI how many steps to reverse on the display. We can't read
-            // it after undo because run_undo deletes the tag (issue #171).
-            let steps_undone = peek_undo_steps(&job.path, ui_opts.use_id3v2).unwrap_or(0);
+            // it after undo because undo_gain_auto deletes the tag (issue #171).
+            let steps_undone = mp3rgain::read_undo_steps(&job.path, ui_opts.use_id3v2).unwrap_or(0);
 
-            let result = run_undo(&job.path, ui_opts.use_id3v2);
+            let result = mp3rgain::undo_gain_auto(&job.path, ui_opts.use_id3v2);
             match result {
                 Ok(0) => {
                     skipped += 1;
@@ -704,14 +704,7 @@ pub fn spawn_delete_tags(
                 None
             };
 
-            let result = if mp4meta::is_aac_file(&job.path) {
-                mp4meta::delete_replaygain_tags(&job.path)
-                    .and_then(|()| mp4meta::delete_undo_tags(&job.path))
-            } else if use_id3v2 {
-                mp3rgain::delete_id3v2_replaygain(&job.path)
-            } else {
-                mp3rgain::delete_ape_tag(&job.path)
-            };
+            let result = mp3rgain::delete_gain_tags_auto(&job.path, use_id3v2);
 
             match result {
                 Ok(()) => {
@@ -912,36 +905,6 @@ fn read_stored_tags(path: &Path, use_id3v2: bool) -> StoredTagsView {
         format: Some("APE"),
         ..Default::default()
     }
-}
-
-fn run_undo(path: &Path, use_id3v2: bool) -> mp3rgain::error::Result<usize> {
-    if mp4meta::is_aac_file(path) {
-        return mp3rgain::aac::undo_aac_gain(path);
-    }
-    if use_id3v2 {
-        mp3rgain::undo_gain_id3v2(path)
-    } else {
-        mp3rgain::gain::undo_gain(path)
-    }
-}
-
-/// Read the left-channel step value from the file's undo tag without
-/// modifying anything. Returns `None` when the tag is absent or unreadable.
-/// Dispatch mirrors `run_undo` so the value reflects what `run_undo` will
-/// roll back. Used by `spawn_undo` to tell the UI how far to reverse-shift
-/// the row's displayed volume / gain on undo (issue #171).
-fn peek_undo_steps(path: &Path, use_id3v2: bool) -> Option<i32> {
-    if mp4meta::is_aac_file(path) {
-        let undo_tags = mp4meta::read_undo_tags(path).ok()?;
-        let undo_str = undo_tags.undo()?;
-        return Some(mp3rgain::ape::parse_undo_values(Some(undo_str)).0);
-    }
-    if use_id3v2 {
-        let rg = id3v2::read_id3v2_replaygain(path).ok()?;
-        return Some(mp3rgain::ape::parse_undo_values(rg.undo.as_deref()).0);
-    }
-    let tag = read_ape_tag_from_file(path).ok()??;
-    tag.get_undo_gain()
 }
 
 /// Build the final `ApplyOptions` by combining always-on safety rails

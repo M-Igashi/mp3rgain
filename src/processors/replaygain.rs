@@ -3,7 +3,7 @@ use colored::*;
 use indicatif::ProgressBar;
 use mp3rgain::apply::{apply_with_options, ApplyOptions, ClippingDetection};
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult};
-use mp3rgain::{mp4meta, steps_to_db, AacAlbumInfo};
+use mp3rgain::{apply_gain_to_peak, mp4meta, steps_to_db, AacAlbumInfo};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -245,8 +245,7 @@ fn dry_run_clipping_summary(
     if steps <= 0 || opts.wrap_gain {
         return (steps, None);
     }
-    let gain_linear = 10.0_f64.powf(steps_to_db(steps) / 20.0);
-    let new_peak = result.peak() * gain_linear;
+    let new_peak = apply_gain_to_peak(result.peak(), steps_to_db(steps));
     if new_peak <= 1.0 {
         return (steps, None);
     }

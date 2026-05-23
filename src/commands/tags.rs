@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::{
-    delete_ape_tag, id3v2, mp4meta, read_ape_tag_from_file, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
+    id3v2, mp4meta, read_ape_tag_from_file, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
     TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN,
     TAG_REPLAYGAIN_TRACK_PEAK,
 };
@@ -218,14 +218,7 @@ fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, S
 
     let original_mtime = save_original_mtime(file, opts);
 
-    let delete_result = if mp4meta::is_aac_file(file) {
-        // AAC: delete both ReplayGain and undo freeform tags
-        mp4meta::delete_replaygain_tags(file).and_then(|()| mp4meta::delete_undo_tags(file))
-    } else if opts.use_id3v2 {
-        id3v2::delete_id3v2_replaygain(file)
-    } else {
-        delete_ape_tag(file)
-    };
+    let delete_result = mp3rgain::delete_gain_tags_auto(file, opts.use_id3v2);
 
     match delete_result {
         Ok(()) => {
