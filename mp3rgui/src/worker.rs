@@ -746,9 +746,9 @@ pub fn spawn_delete_tags(
 }
 
 /// Spawn the max-amplitude scanner. Mirrors the CLI's `-x` /
-/// `cmd_max_amplitude`: walks MP3 frame headers (and AAC `global_gain`
-/// fields) to compute peak amplitude + headroom, no audio decoding,
-/// no ReplayGain machinery.
+/// `cmd_max_amplitude`: walks MP3 frame headers (or AAC `global_gain`
+/// fields) for the gain range and decodes the audio peak via
+/// `find_peak_amplitude` (no ReplayGain machinery).
 pub fn spawn_find_max_amplitude(ctx: egui::Context, files: Vec<(usize, PathBuf)>) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
