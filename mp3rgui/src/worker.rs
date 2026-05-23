@@ -114,10 +114,15 @@ pub enum WorkerEvent {
         message: String,
     },
 
-    /// Undo succeeded on `idx`. Distinct from `FileApplied` so the UI can
-    /// restore the row to its post-analyze state instead of marking it Done.
+    /// Undo succeeded on `idx`. `steps_undone` is the left-channel gain
+    /// step value that was stored in the undo tag — i.e. the cumulative
+    /// gain that was applied to this file across previous applies, and
+    /// that the undo just rolled back. The UI uses it to reverse the
+    /// post-apply display shift so the volume / gain columns return to
+    /// their pre-apply values without forcing a re-analyze (issue #171).
     FileUndone {
         idx: usize,
+        steps_undone: i32,
     },
     /// `frames == 0` outcome: undo ran but the file had no recorded changes
     /// to roll back. Kept separate so the row status reads "no changes" rather
@@ -606,6 +611,11 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
                 None
             };
 
+            // Peek at the undo tag before running undo, so we can tell the
+            // UI how many steps to reverse on the display. We can't read
+            // it after undo because run_undo deletes the tag (issue #171).
+            let steps_undone = peek_undo_steps(&job.path, ui_opts.use_id3v2).unwrap_or(0);
+
             let result = run_undo(&job.path, ui_opts.use_id3v2);
             match result {
                 Ok(0) => {
@@ -617,7 +627,14 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
                         restore_timestamp(&job.path, mtime);
                     }
                     undone += 1;
-                    send(&tx, &ctx, WorkerEvent::FileUndone { idx: job.idx });
+                    send(
+                        &tx,
+                        &ctx,
+                        WorkerEvent::FileUndone {
+                            idx: job.idx,
+                            steps_undone,
+                        },
+                    );
                 }
                 Err(e) => {
                     errors += 1;
@@ -906,6 +923,25 @@ fn run_undo(path: &Path, use_id3v2: bool) -> mp3rgain::error::Result<usize> {
     } else {
         mp3rgain::gain::undo_gain(path)
     }
+}
+
+/// Read the left-channel step value from the file's undo tag without
+/// modifying anything. Returns `None` when the tag is absent or unreadable.
+/// Dispatch mirrors `run_undo` so the value reflects what `run_undo` will
+/// roll back. Used by `spawn_undo` to tell the UI how far to reverse-shift
+/// the row's displayed volume / gain on undo (issue #171).
+fn peek_undo_steps(path: &Path, use_id3v2: bool) -> Option<i32> {
+    if mp4meta::is_aac_file(path) {
+        let undo_tags = mp4meta::read_undo_tags(path).ok()?;
+        let undo_str = undo_tags.undo()?;
+        return Some(mp3rgain::ape::parse_undo_values(Some(undo_str)).0);
+    }
+    if use_id3v2 {
+        let rg = id3v2::read_id3v2_replaygain(path).ok()?;
+        return Some(mp3rgain::ape::parse_undo_values(rg.undo.as_deref()).0);
+    }
+    let tag = read_ape_tag_from_file(path).ok()??;
+    tag.get_undo_gain()
 }
 
 /// Build the final `ApplyOptions` by combining always-on safety rails

@@ -117,10 +117,11 @@ impl ReplayGainResult {
     }
 
     /// Return a copy of this result with `peak` overwritten. Used by
-    /// frontends that have applied gain to the file and need the cached
-    /// analysis to reflect the new peak for subsequent clipping checks
-    /// (issue #172). `gain_db` is not touched — the caller can decide
-    /// whether to re-analyze or keep the original target value.
+    /// frontends that have applied (or undone) gain on the file and
+    /// need the cached analysis to reflect the file's new peak for
+    /// subsequent clipping checks (issues #171, #172). `gain_db` is
+    /// not touched — the caller can decide whether to re-analyze or
+    /// keep the original target value.
     pub fn with_peak(mut self, peak: f64) -> Self {
         self.peak = peak;
         self
