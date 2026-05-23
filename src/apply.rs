@@ -271,9 +271,13 @@ fn check_clipping(
                 let max_safe_db = peak_to_headroom_db(track.peak()).unwrap_or(0.0);
                 // Floor (not round) so the cap never exceeds true headroom —
                 // round() would, e.g., turn 0.8 dB of headroom into 1 step
-                // (1.5 dB) and re-introduce clipping.
+                // (1.5 dB) and re-introduce clipping. Negative results are
+                // allowed: when the source file already clips (peak > 1.0),
+                // headroom is negative and the cap legitimately needs to
+                // attenuate the file below its current loudness to remove
+                // clipping — matching the original MP3GainGUI behavior
+                // (issue #173).
                 let max_safe_steps = (max_safe_db / GAIN_STEP_DB).floor() as i32;
-                let max_safe_steps = max_safe_steps.max(0);
                 return Ok((
                     max_safe_steps,
                     true,
@@ -516,5 +520,44 @@ mod tests {
             check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
         assert!(!prevented);
         assert_eq!(steps, 3);
+    }
+
+    /// Issue #173: when the source file already clips (peak > 1.0), the cap
+    /// must be allowed to go negative so the file is attenuated below its
+    /// current loudness, matching the original MP3GainGUI behavior. The old
+    /// `max(0)` clamp left such files clipping because it pinned the cap at
+    /// 0 steps.
+    #[test]
+    fn prevent_clipping_returns_negative_for_already_clipping_source() {
+        // peak 1.2 = ~ -1.58 dB of (negative) headroom -> floor(-1.58/1.5)
+        // = -2 steps (= -3 dB). Resulting peak = 1.2 * 10^(-3/20) = 0.85.
+        let opts = opts_with_track(1, 1.2, true);
+        let (steps, prevented, _) =
+            check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
+        assert!(prevented);
+        assert!(steps < 0, "expected negative steps, got {steps}");
+        let new_peak = 1.2 * 10.0_f64.powf(steps_to_db(steps) / 20.0);
+        assert!(
+            new_peak <= 1.0,
+            "capped output still clips ({new_peak}) at steps={steps}"
+        );
+    }
+
+    /// Sweep clipping peaks (> 1.0). Cap must always produce a non-clipping
+    /// post-apply peak — independent of how many positive steps were
+    /// requested.
+    #[test]
+    fn prevent_clipping_never_overshoots_for_clipping_source() {
+        for &peak in &[1.001_f64, 1.05, 1.1, 1.2, 1.5, 2.0] {
+            let opts = opts_with_track(5, peak, true);
+            let (steps, prevented, _) =
+                check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
+            assert!(prevented, "peak {peak} should trigger prevention");
+            let new_peak = peak * 10.0_f64.powf(steps_to_db(steps) / 20.0);
+            assert!(
+                new_peak <= 1.0,
+                "peak {peak} -> capped steps {steps} still clips ({new_peak})"
+            );
+        }
     }
 }

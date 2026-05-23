@@ -233,10 +233,18 @@ pub fn analyze(file_path: &Path) -> Result<Mp3Analysis> {
     ))
 }
 
-/// Find maximum amplitude in an MP3 file by decoding the audio.
+/// Find maximum amplitude in an MP3 or AAC file.
 ///
-/// When the replaygain feature is enabled, this decodes the audio to measure
-/// actual PCM sample values. Otherwise, it falls back to estimation from global_gain.
+/// MP3 files use [`scan_gain_range`] for the global_gain min/max and
+/// `replaygain::find_peak_amplitude` for the decoded peak.
+/// AAC files use `aac::analyze_aac_gains` for the gain range and the same
+/// `find_peak_amplitude` call for the peak (issue #173: previously the
+/// function would `Error::NoMp3Frames` on AAC inputs because the
+/// MP3-frame scanner found nothing).
+///
+/// Without the `replaygain` feature, the peak is estimated from
+/// `global_gain` headroom (MP3 only) — AAC inputs return an error in
+/// that build.
 ///
 /// Note: The max_amplitude is normalized (0.0 to 1.0+), where values > 1.0 indicate clipping.
 /// To get the value in 16-bit PCM scale (like mp3gain), multiply by 32768.
@@ -244,10 +252,8 @@ pub fn analyze(file_path: &Path) -> Result<Mp3Analysis> {
 pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
     use crate::replaygain;
 
-    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-    let (min_gain, max_gain) = scan_gain_range(&data)?;
-
     let peak_result = replaygain::find_peak_amplitude(file_path)?;
+    let (min_gain, max_gain) = read_gain_range(file_path)?;
 
     Ok(MaxAmplitudeResult::new(
         peak_result.peak(),
@@ -259,14 +265,35 @@ pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
 /// Find maximum amplitude in an MP3 file (fallback without replaygain feature)
 #[cfg(not(feature = "replaygain"))]
 pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
-    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-    let (min_gain, max_gain) = scan_gain_range(&data)?;
+    let (min_gain, max_gain) = read_gain_range(file_path)?;
 
     let headroom_steps = (MAX_GAIN - max_gain) as i32;
     let headroom_db = headroom_steps as f64 * GAIN_STEP_DB;
     let max_amplitude = 10.0_f64.powf(-headroom_db / 20.0);
 
     Ok(MaxAmplitudeResult::new(max_amplitude, max_gain, min_gain))
+}
+
+/// Read the min/max gain values from a file, dispatching by format.
+/// MP3 uses the frame scanner; AAC uses the per-frame `global_gain` scan
+/// from [`crate::aac::analyze_aac_gains`].
+fn read_gain_range(file_path: &Path) -> Result<(u8, u8)> {
+    if crate::mp4meta::is_aac_file(file_path) {
+        #[cfg(feature = "aac")]
+        {
+            let analysis = crate::aac::analyze_aac_gains(file_path)?;
+            return Ok((analysis.min_gain(), analysis.max_gain()));
+        }
+        #[cfg(not(feature = "aac"))]
+        {
+            return Err(Error::FeatureNotAvailable {
+                feature: "AAC support",
+                feature_flag: "aac",
+            });
+        }
+    }
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    scan_gain_range(&data)
 }
 
 /// Check if an MP3 file is mono
