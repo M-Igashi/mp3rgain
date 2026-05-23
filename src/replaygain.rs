@@ -115,6 +115,16 @@ impl ReplayGainResult {
     pub fn gain_steps(&self) -> i32 {
         (self.gain_db / crate::GAIN_STEP_DB).round() as i32
     }
+
+    /// Return a copy of this result with `peak` overwritten. Used by
+    /// frontends that have applied gain to the file and need the cached
+    /// analysis to reflect the new peak for subsequent clipping checks
+    /// (issue #172). `gain_db` is not touched — the caller can decide
+    /// whether to re-analyze or keep the original target value.
+    pub fn with_peak(mut self, peak: f64) -> Self {
+        self.peak = peak;
+        self
+    }
 }
 
 impl std::fmt::Display for ReplayGainResult {
@@ -1824,6 +1834,17 @@ mod tests {
         assert!(available);
         #[cfg(not(feature = "replaygain"))]
         assert!(!available);
+    }
+
+    #[test]
+    fn with_peak_replaces_peak_and_preserves_other_fields() {
+        let original = ReplayGainResult::new(-15.0, 6.0, 0.5, 44_100, AudioFileType::Mp3);
+        let updated = original.clone().with_peak(0.8);
+        assert_eq!(updated.peak(), 0.8);
+        assert_eq!(updated.gain_db(), original.gain_db());
+        assert_eq!(updated.loudness_db(), original.loudness_db());
+        assert_eq!(updated.sample_rate(), original.sample_rate());
+        assert_eq!(updated.file_type(), original.file_type());
     }
 
     #[cfg(feature = "replaygain")]

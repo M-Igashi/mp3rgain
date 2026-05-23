@@ -1054,9 +1054,12 @@ impl Mp3rgainApp {
 
     /// Shift the row's cached display values by the dB that was actually
     /// applied. Lets the user see the post-apply state without rerunning
-    /// analysis (issue #160). Subsequent prevent-clipping checks still
-    /// consult the pre-apply `track_result.peak`; that is left as a noted
-    /// approximation — re-analysis after apply gives the exact peak.
+    /// analysis (issue #160). Also rewrites `track_result.peak()` to the
+    /// post-apply peak so the next Apply correctly drives prevent_clipping
+    /// off the file's current loudness (issue #172) — previously the
+    /// cached peak was the pre-apply value, which made a sequence like
+    /// "reduce gain to remove clip → raise gain" re-clip the file because
+    /// the second pass thought the file still had its original headroom.
     fn shift_displayed_values(file: &mut FileEntry, actual_steps: i32) {
         let db_applied = mp3rgain::steps_to_db(actual_steps);
         let gain_linear = 10.0_f64.powf(db_applied / 20.0);
@@ -1073,7 +1076,7 @@ impl Mp3rgainApp {
         if let Some(g) = file.album_gain {
             file.album_gain = Some(g - db_applied);
         }
-        if let Some(track) = file.track_result.as_ref() {
+        if let Some(track) = file.track_result.take() {
             let new_peak = track.peak() * gain_linear;
             file.clipping = new_peak >= 1.0;
             file.track_clip = file
@@ -1084,6 +1087,7 @@ impl Mp3rgainApp {
                 .album_gain
                 .map(|g| Self::would_clip(new_peak, g))
                 .unwrap_or(false);
+            file.track_result = Some(track.with_peak(new_peak));
         }
     }
 }
