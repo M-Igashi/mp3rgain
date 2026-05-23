@@ -973,10 +973,18 @@ impl Mp3rgainApp {
                     file.status = FileStatus::Error(message);
                 }
             }
-            WorkerEvent::FileUndone { idx } => {
+            WorkerEvent::FileUndone { idx, steps_undone } => {
                 if let Some(file) = self.files.get_mut(idx) {
                     file.status = FileStatus::Done;
                     file.stored_tags = None;
+                    // Reverse the post-apply display shift so the row
+                    // returns to its pre-apply numbers (issue #171). The
+                    // file's bytes are back to the original state, so a
+                    // shift of `-steps_undone` lines the display up with
+                    // reality.
+                    if steps_undone != 0 {
+                        Self::shift_displayed_values(file, -steps_undone);
+                    }
                 }
             }
             WorkerEvent::FileUndoSkipped { idx } => {
@@ -1053,13 +1061,11 @@ impl Mp3rgainApp {
     }
 
     /// Shift the row's cached display values by the dB that was actually
-    /// applied. Lets the user see the post-apply state without rerunning
-    /// analysis (issue #160). Also rewrites `track_result.peak()` to the
-    /// post-apply peak so the next Apply correctly drives prevent_clipping
-    /// off the file's current loudness (issue #172) — previously the
-    /// cached peak was the pre-apply value, which made a sequence like
-    /// "reduce gain to remove clip → raise gain" re-clip the file because
-    /// the second pass thought the file still had its original headroom.
+    /// applied (or, for undo, the negative of what was rolled back).
+    /// Lets the user see the post-apply / post-undo state without
+    /// rerunning analysis (issues #160, #171). The cached
+    /// `track_result.peak()` is also rewritten so subsequent
+    /// prevent-clipping checks see the file's current peak (issue #172).
     fn shift_displayed_values(file: &mut FileEntry, actual_steps: i32) {
         let db_applied = mp3rgain::steps_to_db(actual_steps);
         let gain_linear = 10.0_f64.powf(db_applied / 20.0);
