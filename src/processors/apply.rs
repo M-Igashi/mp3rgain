@@ -128,6 +128,14 @@ fn dry_run_clipping_summary(
         return (steps, None);
     }
 
+    // Without -k the steps are never capped, and the clipping warning is only
+    // emitted/recorded when neither -c (ignore) nor -q (quiet) is set. In that
+    // case the analysis below feeds nothing the caller can observe, so skip it
+    // — a `--dry-run -c`/`-q` sweep then avoids a full read per file.
+    if !opts.prevent_clipping && (opts.ignore_clipping || opts.quiet) {
+        return (steps, None);
+    }
+
     let headroom = if is_aac {
         #[cfg(feature = "aac")]
         {
