@@ -18,20 +18,25 @@ pub const ANALYSIS_PROGRESS_MIN_SIZE: u64 = 1_000_000;
 /// Standard file-count progress bar template used across commands.
 const FILE_COUNT_TEMPLATE: &str = "{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}";
 
-fn file_count_style() -> ProgressStyle {
+/// Build a bar style from a template, using the shared progress characters.
+fn bar_style(template: &str) -> ProgressStyle {
     ProgressStyle::default_bar()
-        .template(FILE_COUNT_TEMPLATE)
+        .template(template)
         .unwrap()
         .progress_chars("=>-")
 }
 
+/// Whether a file-count progress bar should be shown for `total` files.
+fn file_count_enabled(total: usize, opts: &Options) -> bool {
+    !opts.quiet && opts.output_format == OutputFormat::Text && total >= PROGRESS_THRESHOLD
+}
+
 pub fn create_progress_bar(total: usize, opts: &Options) -> Option<ProgressBar> {
-    if opts.quiet || opts.output_format != OutputFormat::Text || total < PROGRESS_THRESHOLD {
+    if !file_count_enabled(total, opts) {
         return None;
     }
-
     let pb = ProgressBar::new(total as u64);
-    pb.set_style(file_count_style());
+    pb.set_style(bar_style(FILE_COUNT_TEMPLATE));
     Some(pb)
 }
 
@@ -42,11 +47,11 @@ pub fn create_file_count_pb_in(
     total: usize,
     opts: &Options,
 ) -> Option<ProgressBar> {
-    if opts.quiet || opts.output_format != OutputFormat::Text || total < PROGRESS_THRESHOLD {
+    if !file_count_enabled(total, opts) {
         return None;
     }
     let pb = mp.add(ProgressBar::new(total as u64));
-    pb.set_style(file_count_style());
+    pb.set_style(bar_style(FILE_COUNT_TEMPLATE));
     Some(pb)
 }
 
@@ -66,12 +71,7 @@ pub fn create_album_progress_pb_in(
         "      [{bar:30.cyan/blue}] {bytes}/{total_bytes} {msg}"
     };
     let pb = mp.add(ProgressBar::new(initial_len));
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template(template)
-            .unwrap()
-            .progress_chars("=>-"),
-    );
+    pb.set_style(bar_style(template));
     pb
 }
 
@@ -106,12 +106,9 @@ pub fn create_analysis_progress_bar(
         return None;
     }
     let pb = mp.add(ProgressBar::new(file_size));
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("      [{bar:30.cyan/blue}] {bytes}/{total_bytes}")
-            .unwrap()
-            .progress_chars("=>-"),
-    );
+    pb.set_style(bar_style(
+        "      [{bar:30.cyan/blue}] {bytes}/{total_bytes}",
+    ));
     Some(pb)
 }
 
