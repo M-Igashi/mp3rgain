@@ -251,10 +251,12 @@ fn dry_run_clipping_summary(
     }
     if opts.prevent_clipping {
         let max_safe_db = mp3rgain::peak_to_headroom_db(result.peak()).unwrap_or(0.0);
-        // Floor (not round) to match the real apply path in
-        // `mp3rgain::apply::check_clipping` — round() can push the cap above
-        // true headroom and re-introduce clipping.
-        let actual = ((max_safe_db / mp3rgain::GAIN_STEP_DB).floor() as i32).max(0);
+        // Floor (not round) and allow negative results, matching the real
+        // apply path in `mp3rgain::apply::check_clipping`: round() could push
+        // the cap above true headroom, and clamping to 0 would leave an
+        // already-clipping source (peak > 1.0) still clipping in the preview
+        // while the real apply attenuates it (#173).
+        let actual = (max_safe_db / mp3rgain::GAIN_STEP_DB).floor() as i32;
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             eprintln!(
                 "  {} {}{} - gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
