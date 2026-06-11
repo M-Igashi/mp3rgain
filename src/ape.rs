@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 use crate::frame::{read_u32_le, APE_FLAG_HEADER_PRESENT, APE_PREAMBLE};
 
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 /// APEv2 tag version
@@ -205,10 +206,49 @@ pub fn read_ape_tag(data: &[u8]) -> Option<ApeTag> {
     Some(tag)
 }
 
-/// Read APEv2 tag from file
+/// Read APEv2 tag from file.
+///
+/// Reads only the file tail: the footer lives in the last 32 bytes
+/// (optionally followed by a 128-byte ID3v1 tag), and the tag items in the
+/// `tag_size` bytes before it — so a full-file read is never needed.
 pub fn read_ape_tag_from_file(file_path: &Path) -> Result<Option<ApeTag>> {
-    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-    Ok(read_ape_tag(&data))
+    let mut file = fs::File::open(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    let file_len = file
+        .metadata()
+        .map_err(|e| Error::io_read(file_path, e))?
+        .len() as usize;
+
+    // Footer is at EOF-32, or EOF-160 when an ID3v1 tag follows it.
+    let probe = read_tail(&mut file, file_path, file_len, file_len.min(160))?;
+    let Some(footer_start) = find_ape_footer(&probe) else {
+        return Ok(None);
+    };
+
+    // `tag_size` covers items + footer; add 32 for an optional header so the
+    // tail slice is a superset of what `read_ape_tag` inspects.
+    let tag_size = read_u32_le(&probe[footer_start + 12..]) as usize;
+    let suffix = probe.len() - footer_start;
+    let tail_len = file_len.min(tag_size.saturating_add(32 + suffix));
+
+    if tail_len <= probe.len() {
+        return Ok(read_ape_tag(&probe));
+    }
+    let tail = read_tail(&mut file, file_path, file_len, tail_len)?;
+    Ok(read_ape_tag(&tail))
+}
+
+fn read_tail(
+    file: &mut fs::File,
+    file_path: &Path,
+    file_len: usize,
+    tail_len: usize,
+) -> Result<Vec<u8>> {
+    file.seek(SeekFrom::Start((file_len - tail_len) as u64))
+        .map_err(|e| Error::io_read(file_path, e))?;
+    let mut buf = vec![0u8; tail_len];
+    file.read_exact(&mut buf)
+        .map_err(|e| Error::io_read(file_path, e))?;
+    Ok(buf)
 }
 
 /// Serialize APE tag to bytes
@@ -357,5 +397,71 @@ pub fn parse_undo_values(undo_str: Option<&str>) -> (i32, i32) {
             (left, right)
         }
         None => (0, 0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_temp(name: &str, data: &[u8]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join("mp3rgain_ape_tail_tests");
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join(name);
+        fs::File::create(&path).unwrap().write_all(data).unwrap();
+        path
+    }
+
+    fn sample_tag(value: &str) -> ApeTag {
+        let mut tag = ApeTag::new();
+        tag.set(TAG_MP3GAIN_UNDO, "+002,+002,N");
+        tag.set("COMMENT", value);
+        tag
+    }
+
+    /// The tail read must see exactly what the old full-file read saw,
+    /// for a tag at EOF on a file larger than the 160-byte probe.
+    #[test]
+    fn tail_read_matches_full_read() {
+        let tag = sample_tag("hello");
+        let data = replace_ape_tag(&vec![0u8; 100_000], &tag);
+        let path = write_temp("plain.mp3", &data);
+
+        assert_eq!(read_ape_tag(&data), Some(tag.clone()));
+        assert_eq!(read_ape_tag_from_file(&path).unwrap(), Some(tag));
+    }
+
+    /// APE footer at EOF-160 with a trailing ID3v1 tag.
+    #[test]
+    fn tail_read_with_trailing_id3v1() {
+        let tag = sample_tag("id3v1 case");
+        let mut audio = vec![0u8; 50_000];
+        audio.extend_from_slice(b"TAG");
+        audio.extend_from_slice(&[0u8; 125]);
+        let data = replace_ape_tag(&audio, &tag);
+        let path = write_temp("id3v1.mp3", &data);
+
+        assert_eq!(read_ape_tag_from_file(&path).unwrap(), Some(tag));
+    }
+
+    /// A tag larger than the initial 160-byte probe must trigger the second,
+    /// wider tail read.
+    #[test]
+    fn tail_read_tag_larger_than_probe() {
+        let tag = sample_tag(&"x".repeat(4096));
+        let data = replace_ape_tag(&vec![0u8; 100_000], &tag);
+        let path = write_temp("large.mp3", &data);
+
+        assert_eq!(read_ape_tag_from_file(&path).unwrap(), Some(tag));
+    }
+
+    #[test]
+    fn tail_read_no_tag_returns_none() {
+        let path = write_temp("untagged.mp3", &vec![0u8; 10_000]);
+        assert_eq!(read_ape_tag_from_file(&path).unwrap(), None);
+
+        let tiny = write_temp("tiny.mp3", &[0u8; 10]);
+        assert_eq!(read_ape_tag_from_file(&tiny).unwrap(), None);
     }
 }
