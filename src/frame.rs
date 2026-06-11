@@ -362,20 +362,21 @@ pub(crate) enum GainMode {
     Wrapping,
 }
 
-/// Apply the gain adjustment to a single gain location
+/// Apply the gain adjustment to a single gain location.
+///
+/// `steps` is normalized first (clamp for saturating, modulo for wrapping)
+/// so that extreme values like `i32::MIN` cannot overflow the arithmetic.
 pub(crate) fn adjust_gain_value(current: u8, steps: i32, mode: GainMode) -> u8 {
     match mode {
         GainMode::Saturating => {
+            let steps = steps.clamp(-255, 255);
             if steps > 0 {
-                current.saturating_add(steps.min(255) as u8)
+                current.saturating_add(steps as u8)
             } else {
-                current.saturating_sub((-steps).min(255) as u8)
+                current.saturating_sub((-steps) as u8)
             }
         }
-        GainMode::Wrapping => {
-            let new_gain = (current as i32 + steps) % 256;
-            ((new_gain + 256) % 256) as u8
-        }
+        GainMode::Wrapping => ((current as i32 + steps.rem_euclid(256)) % 256) as u8,
     }
 }
 

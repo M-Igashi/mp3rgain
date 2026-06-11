@@ -94,6 +94,13 @@ impl BoxHeader {
             (size as u64, 8)
         };
 
+        // A box smaller than its own header is malformed; stop parsing here
+        // rather than letting callers compute negative content sizes or
+        // inverted slice ranges.
+        if size != 0 && size < header_size as u64 {
+            return Ok(None);
+        }
+
         Ok(Some(BoxHeader {
             size,
             box_type,
@@ -313,7 +320,12 @@ pub(crate) fn find_box_in_container(
     container_size: usize,
     box_type: u32,
 ) -> Option<(usize, BoxHeader)> {
-    let container_end = container_start + container_size;
+    // Clamp to the actual data length: box sizes come from the file and a
+    // malformed/truncated MP4 can declare a container that overruns the
+    // buffer, which would panic on the slice below.
+    let container_end = container_start
+        .saturating_add(container_size)
+        .min(data.len());
     let mut pos = container_start;
 
     while pos + 8 <= container_end {
@@ -327,7 +339,7 @@ pub(crate) fn find_box_in_container(
                 break;
             }
 
-            pos += header.size as usize;
+            pos = pos.saturating_add(header.size as usize);
         } else {
             break;
         }
@@ -463,7 +475,7 @@ pub(crate) fn read_itunes_freeform_tags_from_data(data: &[u8]) -> Vec<FreeformTa
         };
 
     let meta_content_start = meta_pos + meta_header.header_size as usize + 4;
-    let meta_content_size = meta_header.content_size() as usize - 4;
+    let meta_content_size = (meta_header.content_size() as usize).saturating_sub(4);
 
     let (ilst_pos, ilst_header) =
         match find_box_in_container(data, meta_content_start, meta_content_size, ILST) {
@@ -475,10 +487,18 @@ pub(crate) fn read_itunes_freeform_tags_from_data(data: &[u8]) -> Vec<FreeformTa
     let ilst_content_size = ilst_header.content_size() as usize;
 
     let mut tags = Vec::new();
+    // Clamp to the buffer: a malformed ilst can declare a size past EOF.
+    let ilst_end = ilst_content_start
+        .saturating_add(ilst_content_size)
+        .min(data.len());
     let mut pos = ilst_content_start;
-    while pos + 8 <= ilst_content_start + ilst_content_size {
+    while pos + 8 <= ilst_end {
         let mut cursor = Cursor::new(&data[pos..]);
         if let Ok(Some(header)) = BoxHeader::read(&mut cursor) {
+            if header.size == 0 || pos + header.size as usize > ilst_end {
+                break;
+            }
+
             if header.box_type == FREEFORM {
                 let tag_data = &data[pos + header.header_size as usize..pos + header.size as usize];
                 if let Some(tag) = parse_freeform_tag(tag_data) {
@@ -488,9 +508,6 @@ pub(crate) fn read_itunes_freeform_tags_from_data(data: &[u8]) -> Vec<FreeformTa
                 }
             }
 
-            if header.size == 0 {
-                break;
-            }
             pos += header.size as usize;
         } else {
             break;
@@ -814,7 +831,7 @@ fn find_ilst_location(
         };
 
     let meta_content_start = meta_pos + meta_header.header_size as usize + 4; // +4 for version/flags
-    let meta_content_size = meta_header.content_size() as usize - 4;
+    let meta_content_size = (meta_header.content_size() as usize).saturating_sub(4);
 
     // Find ilst
     let (ilst_pos, ilst_header) =
@@ -833,10 +850,13 @@ fn find_ilst_location(
             }
         };
 
-    // Parse existing ilst and merge with new tags
-    let ilst_content_start = ilst_pos + ilst_header.header_size as usize;
-    let ilst_content_size = ilst_header.content_size() as usize;
-    let existing_content = &data[ilst_content_start..ilst_content_start + ilst_content_size];
+    // Parse existing ilst and merge with new tags. Clamp to the buffer so a
+    // malformed ilst size cannot slice past EOF.
+    let ilst_content_start = (ilst_pos + ilst_header.header_size as usize).min(data.len());
+    let ilst_content_end = ilst_content_start
+        .saturating_add(ilst_header.content_size() as usize)
+        .min(data.len());
+    let existing_content = &data[ilst_content_start..ilst_content_end];
 
     let new_ilst = make_ilst(existing_content);
 
@@ -1240,6 +1260,10 @@ pub fn detect_mp4_audio_codec(file_path: &Path) -> Option<Mp4AudioCodec> {
             return Some(codec);
         }
 
+        // size == 0 means "extends to EOF"; advancing by 0 would loop forever.
+        if trak_header.size == 0 {
+            break;
+        }
         trak_search_pos = trak_pos + trak_header.size as usize;
     }
 
@@ -1260,9 +1284,10 @@ fn detect_codec_in_trak(data: &[u8], trak_start: usize, trak_size: usize) -> Opt
     let stbl_size = stbl_header.content_size() as usize;
 
     let (stsd_pos, stsd_header) = find_box_in_container(data, stbl_start, stbl_size, STSD)?;
-    // stsd has 4-byte version/flags + 4-byte entry count before entries
+    // stsd has 4-byte version/flags + 4-byte entry count before entries.
+    // Clamp to the buffer: the declared stsd size may overrun a truncated file.
     let entries_start = stsd_pos + stsd_header.header_size as usize + 8;
-    let stsd_end = stsd_pos + stsd_header.size as usize;
+    let stsd_end = (stsd_pos + stsd_header.size as usize).min(data.len());
 
     if entries_start + 8 > stsd_end {
         return None;
@@ -1328,6 +1353,10 @@ pub fn count_audio_tracks(file_path: &Path) -> usize {
             count += 1;
         }
 
+        // size == 0 means "extends to EOF"; advancing by 0 would loop forever.
+        if trak_header.size == 0 {
+            break;
+        }
         search_pos = trak_pos + trak_header.size as usize;
     }
 

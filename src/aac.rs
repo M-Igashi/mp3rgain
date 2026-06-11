@@ -410,6 +410,27 @@ fn read_u64_be(data: &[u8], offset: usize) -> u64 {
     ])
 }
 
+/// Verify that `count` entries of `entry_size` bytes starting at `start` fit
+/// inside `data`. Counts come straight from the file, so a malformed MP4 can
+/// otherwise drive out-of-bounds reads or multi-GB allocations.
+fn check_table_bounds(
+    data: &[u8],
+    start: usize,
+    count: usize,
+    entry_size: usize,
+    what: &str,
+) -> Result<()> {
+    let end = count
+        .checked_mul(entry_size)
+        .and_then(|n| start.checked_add(n));
+    match end {
+        Some(end) if end <= data.len() => Ok(()),
+        _ => Err(Error::AacParse {
+            message: format!("{what} table extends past end of file"),
+        }),
+    }
+}
+
 /// Build sample table: for each AAC sample, compute (file_offset, size).
 /// Returns (sample_entries, stsd_pos).
 fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
@@ -425,15 +446,25 @@ fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
             message: "no stsz box".into(),
         })?;
     let stsz_content = stsz_pos + stsz_header.header_size as usize;
+    check_table_bounds(data, stsz_content, 3, 4, "stsz header")?;
     let _version = read_u32_be(data, stsz_content);
     let default_size = read_u32_be(data, stsz_content + 4);
     let sample_count = read_u32_be(data, stsz_content + 8) as usize;
+
+    // Even with a default size (no per-sample table to bound the count),
+    // every sample occupies at least one byte of mdat.
+    if sample_count > data.len() {
+        return Err(Error::AacParse {
+            message: "stsz sample count exceeds file size".into(),
+        });
+    }
 
     let mut sample_sizes = Vec::with_capacity(sample_count);
     if default_size != 0 {
         sample_sizes.resize(sample_count, default_size);
     } else {
         let sizes_start = stsz_content + 12;
+        check_table_bounds(data, sizes_start, sample_count, 4, "stsz")?;
         for i in 0..sample_count {
             sample_sizes.push(read_u32_be(data, sizes_start + i * 4));
         }
@@ -445,8 +476,10 @@ fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
             message: "no stsc box".into(),
         })?;
     let stsc_content = stsc_pos + stsc_header.header_size as usize;
+    check_table_bounds(data, stsc_content, 2, 4, "stsc header")?;
     let stsc_count = read_u32_be(data, stsc_content + 4) as usize;
     let stsc_entries_start = stsc_content + 8;
+    check_table_bounds(data, stsc_entries_start, stsc_count, 12, "stsc")?;
 
     struct StscEntry {
         first_chunk: u32,
@@ -458,6 +491,11 @@ fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
         stsc_entries.push(StscEntry {
             first_chunk: read_u32_be(data, off),
             samples_per_chunk: read_u32_be(data, off + 4),
+        });
+    }
+    if stsc_entries.is_empty() {
+        return Err(Error::AacParse {
+            message: "empty stsc table".into(),
         });
     }
 
@@ -524,6 +562,11 @@ fn find_audio_stbl(
             return Ok(result);
         }
 
+        // size == 0 means "extends to EOF" — nothing can follow, and
+        // advancing by 0 would loop forever on a malformed file.
+        if trak_header.size == 0 {
+            break;
+        }
         search_pos = trak_pos + trak_header.size as usize;
     }
 
@@ -580,7 +623,9 @@ fn parse_chunk_offsets(data: &[u8], stbl_start: usize, stbl_size: usize) -> Resu
         mp4meta::find_box_in_container(data, stbl_start, stbl_size, mp4meta::STCO)
     {
         let content = stco_pos + stco_h.header_size as usize;
+        check_table_bounds(data, content, 2, 4, "stco header")?;
         let count = read_u32_be(data, content + 4) as usize;
+        check_table_bounds(data, content + 8, count, 4, "stco")?;
         let mut offsets = Vec::with_capacity(count);
         for i in 0..count {
             offsets.push(read_u32_be(data, content + 8 + i * 4) as u64);
@@ -592,7 +637,9 @@ fn parse_chunk_offsets(data: &[u8], stbl_start: usize, stbl_size: usize) -> Resu
         mp4meta::find_box_in_container(data, stbl_start, stbl_size, mp4meta::CO64)
     {
         let content = co64_pos + co64_h.header_size as usize;
+        check_table_bounds(data, content, 2, 4, "co64 header")?;
         let count = read_u32_be(data, content + 4) as usize;
+        check_table_bounds(data, content + 8, count, 8, "co64")?;
         let mut offsets = Vec::with_capacity(count);
         for i in 0..count {
             offsets.push(read_u64_be(data, content + 8 + i * 8));
@@ -1171,7 +1218,9 @@ fn skip_fil(reader: &mut BitReader) -> Result<()> {
     // Skipping it is safe — the base layer global_gain is in SCE/CPE elements.
     let mut count = reader.read_bits(4)? as usize;
     if count == 15 {
-        count += reader.read_bits(8)? as usize - 1;
+        // The escape count is normally >= 1; saturate so a malformed 0
+        // cannot underflow.
+        count += (reader.read_bits(8)? as usize).saturating_sub(1);
     }
     reader.skip_bits(count * 8)?;
     Ok(())
