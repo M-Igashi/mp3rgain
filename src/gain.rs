@@ -1,7 +1,7 @@
-use crate::analysis::{analyze, ChannelMode};
+use crate::analysis::{analyze_data, ChannelMode};
 use crate::ape::{
-    delete_ape_tag, parse_undo_values, read_ape_tag_from_file, write_ape_tag, ApeTag,
-    TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
+    parse_undo_values, parse_undo_wrap, read_ape_tag, replace_ape_tag, TAG_MP3GAIN_MINMAX,
+    TAG_MP3GAIN_UNDO,
 };
 use crate::error::{Error, Result};
 use crate::frame::{apply_gain_to_channel_data, apply_gain_to_data, GainMode};
@@ -168,13 +168,10 @@ impl GainOptions {
         }
 
         if let Some(channel) = self.channel {
-            if !same_path {
-                fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
-            }
             if self.undo {
-                apply_gain_channel_with_undo(write_to, channel, self.steps)
+                apply_gain_channel_with_undo(read_from, write_to, channel, self.steps)
             } else {
-                apply_gain_channel_impl(write_to, channel, self.steps)
+                apply_gain_channel_impl(read_from, write_to, channel, self.steps)
             }
         } else if self.undo {
             let mode = if self.wrap {
@@ -215,29 +212,45 @@ pub fn apply_gain_db(file_path: &Path, gain_db: f64) -> Result<usize> {
     GainOptions::from_db(gain_db).apply(file_path)
 }
 
+/// Apply the inverse of recorded undo deltas (`left`, `right`) to MP3 data.
+///
+/// Equal deltas take the whole-file path (honoring `wrap`); unequal deltas
+/// are undone per channel (channel gain is always saturating).
+pub(crate) fn apply_undo_to_data(data: &mut [u8], left: i32, right: i32, wrap: bool) -> usize {
+    if left == right {
+        let mode = if wrap {
+            GainMode::Wrapping
+        } else {
+            GainMode::Saturating
+        };
+        apply_gain_to_data(data, -left, mode)
+    } else {
+        let left_frames = apply_gain_to_channel_data(data, 0, -left);
+        let right_frames = apply_gain_to_channel_data(data, 1, -right);
+        left_frames.max(right_frames)
+    }
+}
+
 /// Undo gain changes based on APEv2 tag information
 pub fn undo_gain(file_path: &Path) -> Result<usize> {
-    let tag = read_ape_tag_from_file(file_path)?.ok_or(Error::NoApeTag)?;
+    let mut data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    let mut tag = read_ape_tag(&data).ok_or(Error::NoApeTag)?;
 
-    let undo_gain = tag.get_undo_gain().ok_or(Error::NoUndoTag)?;
+    let undo_value = tag.get(TAG_MP3GAIN_UNDO).ok_or(Error::NoUndoTag)?;
+    let (left, right) = parse_undo_values(Some(undo_value));
+    let wrap = parse_undo_wrap(Some(undo_value));
 
-    if undo_gain == 0 {
+    if left == 0 && right == 0 {
         return Ok(0);
     }
 
-    // Apply inverse gain
-    let frames = apply_gain(file_path, -undo_gain)?;
+    let frames = apply_undo_to_data(&mut data, left, right, wrap);
 
-    // Update or remove undo tag
-    let mut new_tag = tag.clone();
-    new_tag.remove(TAG_MP3GAIN_UNDO);
-    new_tag.remove(TAG_MP3GAIN_MINMAX);
+    tag.remove(TAG_MP3GAIN_UNDO);
+    tag.remove(TAG_MP3GAIN_MINMAX);
 
-    if new_tag.is_empty() {
-        delete_ape_tag(file_path)?;
-    } else {
-        write_ape_tag(file_path, &new_tag)?;
-    }
+    let new_data = replace_ape_tag(&data, &tag);
+    fs::write(file_path, &new_data).map_err(|e| Error::io_write(file_path, e))?;
 
     Ok(frames)
 }
@@ -305,60 +318,78 @@ fn apply_gain_simple_to_path(
 }
 
 /// Apply gain with APEv2 undo tag support (unified for both saturating and wrapping).
+///
+/// Single-buffer pipeline: one read, all analysis/tag/gain work in memory,
+/// one write. The previous version re-read the file for each step (4 reads +
+/// 2 writes per apply), which dominated batch throughput.
 fn apply_gain_with_undo_impl_to_path(
     read_from: &Path,
     write_to: &Path,
     gain_steps: i32,
     mode: GainMode,
 ) -> Result<usize> {
-    let analysis = analyze(read_from)?;
+    let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
+    let analysis = analyze_data(&data)?;
 
-    let mut tag = read_ape_tag_from_file(read_from)?.unwrap_or_else(ApeTag::new);
+    let mut tag = read_ape_tag(&data).unwrap_or_default();
 
-    let existing_undo = tag.get_undo_gain().unwrap_or(0);
-    let new_undo = existing_undo + gain_steps;
+    // Accumulate into BOTH channel slots independently: a prior `-l`
+    // channel apply may have left them asymmetric, and collapsing them
+    // into a single value corrupts the right channel's undo history.
+    let (existing_left, existing_right) = parse_undo_values(tag.get(TAG_MP3GAIN_UNDO));
     let wrap = mode == GainMode::Wrapping;
-    tag.set_undo_gain(new_undo, new_undo, wrap);
+    tag.set_undo_gain(
+        existing_left + gain_steps,
+        existing_right + gain_steps,
+        wrap,
+    );
 
     if tag.get(TAG_MP3GAIN_MINMAX).is_none() {
         tag.set_minmax(analysis.min_gain(), analysis.max_gain());
     }
 
-    let frames = apply_gain_simple_to_path(read_from, write_to, gain_steps, mode)?;
+    let frames = apply_gain_to_data(&mut data, gain_steps, mode);
 
-    write_ape_tag(write_to, &tag)?;
+    let new_data = replace_ape_tag(&data, &tag);
+    fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
 
     Ok(frames)
 }
 
 /// Apply gain to a specific channel (no undo)
-fn apply_gain_channel_impl(file_path: &Path, channel: Channel, gain_steps: i32) -> Result<usize> {
-    let analysis = analyze(file_path)?;
+fn apply_gain_channel_impl(
+    read_from: &Path,
+    write_to: &Path,
+    channel: Channel,
+    gain_steps: i32,
+) -> Result<usize> {
+    let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
+    let analysis = analyze_data(&data)?;
     if analysis.channel_mode() == ChannelMode::Mono {
         return Err(Error::ChannelGainOnMono);
     }
 
-    let mut data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-
     let modified_frames = apply_gain_to_channel_data(&mut data, channel.index(), gain_steps);
 
-    fs::write(file_path, &data).map_err(|e| Error::io_write(file_path, e))?;
+    fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
 
     Ok(modified_frames)
 }
 
 /// Apply channel-specific gain and store undo information in APEv2 tag
 fn apply_gain_channel_with_undo(
-    file_path: &Path,
+    read_from: &Path,
+    write_to: &Path,
     channel: Channel,
     gain_steps: i32,
 ) -> Result<usize> {
-    let analysis = analyze(file_path)?;
+    let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
+    let analysis = analyze_data(&data)?;
     if analysis.channel_mode() == ChannelMode::Mono {
         return Err(Error::ChannelGainOnMono);
     }
 
-    let mut tag = read_ape_tag_from_file(file_path)?.unwrap_or_else(ApeTag::new);
+    let mut tag = read_ape_tag(&data).unwrap_or_default();
 
     let (existing_left, existing_right) = parse_undo_values(tag.get(TAG_MP3GAIN_UNDO));
 
@@ -373,9 +404,10 @@ fn apply_gain_channel_with_undo(
         tag.set_minmax(analysis.min_gain(), analysis.max_gain());
     }
 
-    let frames = apply_gain_channel_impl(file_path, channel, gain_steps)?;
+    let frames = apply_gain_to_channel_data(&mut data, channel.index(), gain_steps);
 
-    write_ape_tag(file_path, &tag)?;
+    let new_data = replace_ape_tag(&data, &tag);
+    fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
 
     Ok(frames)
 }

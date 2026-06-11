@@ -287,11 +287,10 @@ fn remove_ape_tag(data: &[u8]) -> Vec<u8> {
     }
 }
 
-/// Write APEv2 tag to file
-pub fn write_ape_tag(file_path: &Path, tag: &ApeTag) -> Result<()> {
-    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-
-    let mut audio_data = remove_ape_tag(&data);
+/// Replace (or remove, when `tag` is empty) the APEv2 tag in file data,
+/// keeping a trailing ID3v1 tag after the APE tag.
+pub(crate) fn replace_ape_tag(data: &[u8], tag: &ApeTag) -> Vec<u8> {
+    let mut audio_data = remove_ape_tag(data);
 
     let has_id3v1 = audio_data.len() >= 128
         && &audio_data[audio_data.len() - 128..audio_data.len() - 125] == b"TAG";
@@ -307,8 +306,14 @@ pub fn write_ape_tag(file_path: &Path, tag: &ApeTag) -> Result<()> {
         audio_data.extend_from_slice(&tag_data);
     }
 
-    fs::write(file_path, &audio_data).map_err(|e| Error::io_write(file_path, e))?;
+    audio_data
+}
 
+/// Write APEv2 tag to file
+pub fn write_ape_tag(file_path: &Path, tag: &ApeTag) -> Result<()> {
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    let new_data = replace_ape_tag(&data, tag);
+    fs::write(file_path, &new_data).map_err(|e| Error::io_write(file_path, e))?;
     Ok(())
 }
 
@@ -327,6 +332,13 @@ pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
 pub fn format_undo_value(left_gain: i32, right_gain: i32, wrap: bool) -> String {
     let wrap_flag = if wrap { "W" } else { "N" };
     format!("{:+04},{:+04},{}", left_gain, right_gain, wrap_flag)
+}
+
+/// Parse the wrap flag (third field, `W`/`N`) of an MP3GAIN_UNDO tag value.
+pub fn parse_undo_wrap(undo_str: Option<&str>) -> bool {
+    undo_str
+        .and_then(|v| v.split(',').nth(2))
+        .is_some_and(|s| s.trim().eq_ignore_ascii_case("W"))
 }
 
 /// Parse MP3GAIN_UNDO tag value into (left_gain, right_gain)

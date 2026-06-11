@@ -192,7 +192,11 @@ impl std::fmt::Display for MaxAmplitudeResult {
 /// * Analysis results including frame count, gain range, and headroom
 pub fn analyze(file_path: &Path) -> Result<Mp3Analysis> {
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    analyze_data(&data)
+}
 
+/// Analyze MP3 data already loaded in memory (see [`analyze`]).
+pub fn analyze_data(data: &[u8]) -> Result<Mp3Analysis> {
     let mut min_gain = 255u8;
     let mut max_gain = 0u8;
     let mut total_gain: u64 = 0;
@@ -200,14 +204,14 @@ pub fn analyze(file_path: &Path) -> Result<Mp3Analysis> {
     let mut first_version = None;
     let mut first_channel_mode = None;
 
-    let frame_count = iterate_frames(&data, |_pos, header, locations| {
+    let frame_count = iterate_frames(data, |_pos, header, locations| {
         if first_version.is_none() {
             first_version = Some(header.version);
             first_channel_mode = Some(header.channel_mode);
         }
 
         for loc in locations {
-            let gain = read_gain_at(&data, loc);
+            let gain = read_gain_at(data, loc);
             min_gain = min_gain.min(gain);
             max_gain = max_gain.max(gain);
             total_gain += gain as u64;
@@ -269,7 +273,7 @@ pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
 
     let headroom_steps = (MAX_GAIN - max_gain) as i32;
     let headroom_db = headroom_steps as f64 * GAIN_STEP_DB;
-    let max_amplitude = 10.0_f64.powf(-headroom_db / 20.0);
+    let max_amplitude = crate::gain::db_to_linear(-headroom_db);
 
     Ok(MaxAmplitudeResult::new(max_amplitude, max_gain, min_gain))
 }

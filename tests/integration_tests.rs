@@ -3,7 +3,10 @@
 //! These tests use real MP3 files in tests/fixtures/ to verify
 //! the correctness of gain application, undo, and channel-specific operations.
 
-use mp3rgain::{analyze, apply_gain, undo_gain, Channel, ChannelMode, GainOptions, MpegVersion};
+use mp3rgain::{
+    analyze, apply_gain, read_ape_tag_from_file, undo_gain, Channel, ChannelMode, GainOptions,
+    MpegVersion, TAG_MP3GAIN_UNDO,
+};
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -333,6 +336,97 @@ fn test_channel_zero_gain() {
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 0, "Zero gain should modify 0 frames");
 
+    cleanup(&path);
+}
+
+// =============================================================================
+// Channel/Wrap Undo Round-Trip Tests
+//
+// The fixture's global_gain values are all 255, so negative steps (and
+// wrapping in either direction) are exactly invertible — these tests assert
+// byte-for-byte restoration, the tool's core lossless guarantee.
+// =============================================================================
+
+#[test]
+fn test_undo_restores_asymmetric_channel_gain() {
+    let path = copy_test_file("test_stereo.mp3");
+    let original = fs::read(&path).unwrap();
+
+    GainOptions::new(-3)
+        .channel(Channel::Left)
+        .undo(true)
+        .apply(&path)
+        .unwrap();
+    undo_gain(&path).unwrap();
+
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        original,
+        "undo after a left-channel apply must restore the original bytes"
+    );
+    cleanup(&path);
+}
+
+#[test]
+fn test_undo_restores_right_channel_only_gain() {
+    // Left delta 0 / right delta != 0: the old undo read only the left value
+    // and treated this as "nothing to undo".
+    let path = copy_test_file("test_stereo.mp3");
+    let original = fs::read(&path).unwrap();
+
+    GainOptions::new(-2)
+        .channel(Channel::Right)
+        .undo(true)
+        .apply(&path)
+        .unwrap();
+    let frames = undo_gain(&path).unwrap();
+
+    assert!(frames > 0, "undo must restore the right channel");
+    assert_eq!(fs::read(&path).unwrap(), original);
+    cleanup(&path);
+}
+
+#[test]
+fn test_whole_file_apply_preserves_asymmetric_undo_values() {
+    // A whole-file apply after a channel apply used to collapse the undo tag
+    // to a single value, losing the right channel's history.
+    let path = copy_test_file("test_stereo.mp3");
+    let original = fs::read(&path).unwrap();
+
+    GainOptions::new(-3)
+        .channel(Channel::Left)
+        .undo(true)
+        .apply(&path)
+        .unwrap();
+    GainOptions::new(-1).undo(true).apply(&path).unwrap();
+
+    let tag = read_ape_tag_from_file(&path).unwrap().unwrap();
+    assert_eq!(tag.get(TAG_MP3GAIN_UNDO), Some("-004,-001,N"));
+
+    undo_gain(&path).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), original);
+    cleanup(&path);
+}
+
+#[test]
+fn test_wrap_apply_then_undo_restores_bytes() {
+    // Wrapping is mod-256 bijective, so undo must honor the stored W flag to
+    // wrap back. The old undo always saturated and could not restore.
+    let path = copy_test_file("test_stereo.mp3");
+    let original = fs::read(&path).unwrap();
+
+    GainOptions::new(100)
+        .wrap(true)
+        .undo(true)
+        .apply(&path)
+        .unwrap();
+    undo_gain(&path).unwrap();
+
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        original,
+        "wrap-mode undo must restore the original bytes"
+    );
     cleanup(&path);
 }
 

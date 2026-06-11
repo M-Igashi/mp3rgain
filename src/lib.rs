@@ -74,7 +74,8 @@ pub mod mp4meta;
 pub mod replaygain;
 
 pub use analysis::{
-    analyze, find_max_amplitude, is_mono, ChannelMode, MaxAmplitudeResult, Mp3Analysis, MpegVersion,
+    analyze, analyze_data, find_max_amplitude, is_mono, ChannelMode, MaxAmplitudeResult,
+    Mp3Analysis, MpegVersion,
 };
 pub use ape::{
     delete_ape_tag, read_ape_tag, read_ape_tag_from_file, write_ape_tag, ApeItem, ApeTag,

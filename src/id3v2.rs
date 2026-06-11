@@ -5,11 +5,12 @@
 //! subsumed by a broader rewrite of this module.
 
 use crate::ape::{
-    parse_undo_values, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN,
-    TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
+    parse_undo_values, parse_undo_wrap, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
+    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN,
+    TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use crate::error::{Error, Result};
-use crate::gain::apply_gain;
+use crate::gain::apply_undo_to_data;
 use id3::TagLike;
 
 use std::path::Path;
@@ -95,6 +96,23 @@ fn get_txxx(tag: &id3::Tag, description: &str) -> Option<String> {
         .map(|t| t.value.clone())
 }
 
+/// Remove all TXXX frames matching `description` case-insensitively.
+///
+/// `Tag::add_frame` and `Tag::remove_extended_text` only match the exact
+/// description, but other taggers write these descriptions in lowercase —
+/// without this, writing our uppercase frame would leave a stale lowercase
+/// duplicate behind.
+fn remove_txxx_ci(tag: &mut id3::Tag, description: &str) {
+    let variants: Vec<String> = tag
+        .extended_texts()
+        .filter(|t| t.description.eq_ignore_ascii_case(description))
+        .map(|t| t.description.clone())
+        .collect();
+    for desc in variants {
+        tag.remove_extended_text(Some(&desc), None);
+    }
+}
+
 /// Read ReplayGain and undo data from ID3v2 TXXX frames
 pub fn read_id3v2_replaygain(path: &Path) -> Result<Id3v2ReplayGain> {
     let tag = read_tag(path)?;
@@ -123,6 +141,7 @@ pub fn write_id3v2_replaygain(path: &Path, rg: &Id3v2ReplayGain) -> Result<()> {
 
     for &(desc, value) in fields {
         if let Some(v) = value {
+            remove_txxx_ci(&mut tag, desc);
             tag.add_frame(id3::frame::ExtendedText {
                 description: desc.to_string(),
                 value: v.clone(),
@@ -138,7 +157,7 @@ pub fn delete_id3v2_replaygain(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
 
     for desc in ALL_RG_DESCRIPTIONS {
-        tag.remove_extended_text(Some(desc), None);
+        remove_txxx_ci(&mut tag, desc);
     }
 
     write_tag(path, &tag)
@@ -158,10 +177,12 @@ pub fn write_id3v2_undo(
     let undo_value = crate::ape::format_undo_value(left_gain, right_gain, wrap);
     let minmax_value = format!("{},{}", min, max);
 
+    remove_txxx_ci(&mut tag, TAG_MP3GAIN_UNDO);
     tag.add_frame(id3::frame::ExtendedText {
         description: TAG_MP3GAIN_UNDO.to_string(),
         value: undo_value,
     });
+    remove_txxx_ci(&mut tag, TAG_MP3GAIN_MINMAX);
     tag.add_frame(id3::frame::ExtendedText {
         description: TAG_MP3GAIN_MINMAX.to_string(),
         value: minmax_value,
@@ -175,21 +196,23 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
     let rg = read_id3v2_replaygain(path)?;
 
     let undo_str = rg.undo.as_deref();
-    let (left, _right) = parse_undo_values(undo_str);
+    if undo_str.is_none() {
+        return Err(Error::NoId3v2UndoTag);
+    }
+    let (left, right) = parse_undo_values(undo_str);
 
-    if left == 0 {
-        if undo_str.is_none() {
-            return Err(Error::NoId3v2UndoTag);
-        }
+    if left == 0 && right == 0 {
         return Ok(0);
     }
 
-    let frames = apply_gain(path, -left)?;
+    let mut data = std::fs::read(path).map_err(|e| Error::io_read(path, e))?;
+    let frames = apply_undo_to_data(&mut data, left, right, parse_undo_wrap(undo_str));
+    std::fs::write(path, &data).map_err(|e| Error::io_write(path, e))?;
 
     // Remove undo and minmax tags
     let mut tag = read_tag(path)?;
-    tag.remove_extended_text(Some(TAG_MP3GAIN_UNDO), None);
-    tag.remove_extended_text(Some(TAG_MP3GAIN_MINMAX), None);
+    remove_txxx_ci(&mut tag, TAG_MP3GAIN_UNDO);
+    remove_txxx_ci(&mut tag, TAG_MP3GAIN_MINMAX);
     write_tag(path, &tag)?;
 
     Ok(frames)
@@ -200,6 +223,29 @@ mod tests {
     use super::*;
     use id3::frame::{Content, ExtendedText};
     use id3::Frame;
+
+    #[test]
+    fn write_replaces_lowercase_duplicate_descriptions() {
+        // Other taggers write ReplayGain TXXX descriptions in lowercase; the
+        // id3 crate's add_frame only replaces exact-case matches, so without
+        // remove_txxx_ci a stale lowercase frame would survive next to ours.
+        let mut tag = id3::Tag::new();
+        tag.add_frame(ExtendedText {
+            description: "replaygain_track_gain".to_string(),
+            value: "+1.00 dB".to_string(),
+        });
+
+        remove_txxx_ci(&mut tag, TAG_REPLAYGAIN_TRACK_GAIN);
+        tag.add_frame(ExtendedText {
+            description: TAG_REPLAYGAIN_TRACK_GAIN.to_string(),
+            value: "+2.00 dB".to_string(),
+        });
+
+        let frames: Vec<_> = tag.extended_texts().collect();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].description, TAG_REPLAYGAIN_TRACK_GAIN);
+        assert_eq!(frames[0].value, "+2.00 dB");
+    }
 
     #[test]
     fn extended_text_frame_is_encodable() {
