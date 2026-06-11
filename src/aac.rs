@@ -18,6 +18,7 @@ use std::sync::OnceLock;
 
 use crate::aac_codebooks;
 use crate::mp4meta;
+use crate::mp4meta::{read_u32_be, read_u64_be};
 
 // =============================================================================
 // Public types
@@ -387,29 +388,6 @@ struct SampleEntry {
     size: u32,
 }
 
-/// Read a u32 big-endian from data at offset
-fn read_u32_be(data: &[u8], offset: usize) -> u32 {
-    u32::from_be_bytes([
-        data[offset],
-        data[offset + 1],
-        data[offset + 2],
-        data[offset + 3],
-    ])
-}
-
-fn read_u64_be(data: &[u8], offset: usize) -> u64 {
-    u64::from_be_bytes([
-        data[offset],
-        data[offset + 1],
-        data[offset + 2],
-        data[offset + 3],
-        data[offset + 4],
-        data[offset + 5],
-        data[offset + 6],
-        data[offset + 7],
-    ])
-}
-
 /// Verify that `count` entries of `entry_size` bytes starting at `start` fit
 /// inside `data`. Counts come straight from the file, so a malformed MP4 can
 /// otherwise drive out-of-bounds reads or multi-GB allocations.
@@ -539,82 +517,23 @@ fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
     Ok((entries, stsd_pos))
 }
 
+/// Find the first AAC (mp4a) trak's stbl. Returns
+/// `(stbl_start, stbl_size, stsd_pos)`.
 fn find_audio_stbl(
     data: &[u8],
     moov_start: usize,
     moov_size: usize,
 ) -> Result<(usize, usize, usize)> {
-    let mut search_pos = moov_start;
-    let moov_end = moov_start + moov_size;
-
-    while search_pos < moov_end {
-        let (trak_pos, trak_header) = match mp4meta::find_box_in_container(
-            data,
-            search_pos,
-            moov_end - search_pos,
-            mp4meta::TRAK,
-        ) {
-            Some(x) => x,
-            None => break,
-        };
-
-        if let Some(result) = find_aac_stbl_in_trak(data, &trak_header, trak_pos) {
-            return Ok(result);
-        }
-
-        // size == 0 means "extends to EOF" — nothing can follow, and
-        // advancing by 0 would loop forever on a malformed file.
-        if trak_header.size == 0 {
-            break;
-        }
-        search_pos = trak_pos + trak_header.size as usize;
-    }
-
-    Err(Error::NoAacTrack)
-}
-
-/// Navigate trak -> mdia -> minf -> stbl -> stsd and check for mp4a codec.
-/// Returns (stbl_start, stbl_size, stsd_pos) if this trak contains AAC audio.
-fn find_aac_stbl_in_trak(
-    data: &[u8],
-    trak_header: &mp4meta::BoxHeader,
-    trak_pos: usize,
-) -> Option<(usize, usize, usize)> {
-    let trak_start = trak_pos + trak_header.header_size as usize;
-    let trak_size = trak_header.content_size() as usize;
-
-    let (mdia_pos, mdia_h) =
-        mp4meta::find_box_in_container(data, trak_start, trak_size, mp4meta::MDIA)?;
-    let (minf_pos, minf_h) = mp4meta::find_box_in_container(
-        data,
-        mdia_pos + mdia_h.header_size as usize,
-        mdia_h.content_size() as usize,
-        mp4meta::MINF,
-    )?;
-    let (stbl_pos, stbl_h) = mp4meta::find_box_in_container(
-        data,
-        minf_pos + minf_h.header_size as usize,
-        minf_h.content_size() as usize,
-        mp4meta::STBL,
-    )?;
-
-    let stbl_start = stbl_pos + stbl_h.header_size as usize;
-    let stbl_size = stbl_h.content_size() as usize;
-
-    let (stsd_pos, stsd_h) =
-        mp4meta::find_box_in_container(data, stbl_start, stbl_size, mp4meta::STSD)?;
-
-    let entries_start = stsd_pos + stsd_h.header_size as usize + 8;
-    if entries_start + 8 > data.len() {
-        return None;
-    }
-
-    let entry_type = read_u32_be(data, entries_start + 4);
-    if entry_type == mp4meta::MP4A {
-        Some((stbl_start, stbl_size, stsd_pos))
-    } else {
-        None
-    }
+    mp4meta::traks(data, moov_start, moov_size)
+        .find_map(|(trak_start, trak_size)| {
+            let info = mp4meta::find_trak_sample_info(data, trak_start, trak_size)?;
+            (info.entry_type == mp4meta::MP4A).then_some((
+                info.stbl_start,
+                info.stbl_size,
+                info.stsd_pos,
+            ))
+        })
+        .ok_or(Error::NoAacTrack)
 }
 
 fn parse_chunk_offsets(data: &[u8], stbl_start: usize, stbl_size: usize) -> Result<Vec<u64>> {
