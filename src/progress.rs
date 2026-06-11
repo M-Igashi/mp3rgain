@@ -118,9 +118,3 @@ pub fn update_analysis_progress(pb: &Option<ProgressBar>, bytes_read: u64, total
         pb.set_position(bytes_read);
     }
 }
-
-pub fn finish_analysis_progress(pb: Option<ProgressBar>) {
-    if let Some(pb) = pb {
-        pb.finish_and_clear();
-    }
-}

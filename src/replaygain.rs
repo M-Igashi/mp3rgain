@@ -113,7 +113,7 @@ impl ReplayGainResult {
 
     /// Convert gain in dB to MP3 gain steps (1.5 dB per step)
     pub fn gain_steps(&self) -> i32 {
-        (self.gain_db / crate::GAIN_STEP_DB).round() as i32
+        crate::gain::db_to_steps(self.gain_db)
     }
 
     /// Return a copy of this result with `peak` overwritten. Used by
@@ -176,7 +176,7 @@ impl AlbumGainResult {
 
     /// Convert album gain in dB to MP3 gain steps
     pub fn album_gain_steps(&self) -> i32 {
-        (self.album_gain_db / crate::GAIN_STEP_DB).round() as i32
+        crate::gain::db_to_steps(self.album_gain_db)
     }
 }
 
@@ -1810,7 +1810,7 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
 
     Ok(PeakAmplitudeResult::new(
         max_peak,
-        max_peak * SAMPLE_SCALE_16BIT,
+        crate::gain::peak_to_pcm_sample(max_peak),
         sample_rate,
     ))
 }

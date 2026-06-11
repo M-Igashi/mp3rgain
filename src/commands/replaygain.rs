@@ -15,8 +15,7 @@ use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput
 use crate::processors::replaygain::{process_apply_replaygain_with_album, process_track_gain};
 use crate::progress::{
     create_album_progress_pb_in, create_analysis_progress_bar, create_file_count_pb_in,
-    create_progress_bar, finish_analysis_progress, progress_finish, progress_inc,
-    progress_set_message,
+    create_progress_bar, progress_finish, progress_inc, progress_set_message,
 };
 use crate::util::get_filename;
 
@@ -134,7 +133,7 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
             let analysis_pb = create_analysis_progress_bar(&mp, file, opts);
             let (result, text) = process_track_gain(file, opts, analysis_pb.as_ref())?;
-            finish_analysis_progress(analysis_pb);
+            progress_finish(analysis_pb);
 
             if !text.is_empty() {
                 print!("{}", text);

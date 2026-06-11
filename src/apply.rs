@@ -165,9 +165,7 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
     }
 
     let original_mtime = if opts.preserve_timestamp {
-        std::fs::metadata(file_path)
-            .ok()
-            .and_then(|m| m.modified().ok())
+        read_mtime(file_path)
     } else {
         None
     };
