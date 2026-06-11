@@ -304,8 +304,52 @@ pub(crate) fn is_xing_frame(data: &[u8], frame_offset: usize, header: &FrameHead
     marker == b"Xing" || marker == b"Info"
 }
 
+/// Scan forward from `pos` to the next valid, non-Xing MP3 frame.
+/// Returns `(frame_pos, header, next_pos)`, or `None` when no further
+/// frame exists before `audio_end`. Shared by the frame iterator and the
+/// gain-apply walks so the scan/validate/skip-Xing logic exists once.
+fn next_frame(
+    data: &[u8],
+    mut pos: usize,
+    audio_end: usize,
+) -> Option<(usize, FrameHeader, usize)> {
+    while pos + 4 <= audio_end {
+        let header = match parse_header(&data[pos..]) {
+            Some(h) => h,
+            None => {
+                pos += 1;
+                continue;
+            }
+        };
+
+        let next_pos = pos + header.frame_size;
+
+        // A frame is valid when another sync word follows it, or when it
+        // ends exactly at the audio end.
+        let valid_frame = if next_pos + 2 <= audio_end {
+            data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
+        } else {
+            next_pos <= audio_end
+        };
+
+        if !valid_frame {
+            pos += 1;
+            continue;
+        }
+
+        // Skip Xing/Info VBR header frames to match mp3gain behavior.
+        if is_xing_frame(data, pos, &header) {
+            pos = next_pos;
+            continue;
+        }
+
+        return Some((pos, header, next_pos));
+    }
+
+    None
+}
+
 /// Internal function to iterate over frames
-/// Skips Xing/Info VBR header frames to match mp3gain behavior
 pub(crate) fn iterate_frames<F>(data: &[u8], mut callback: F) -> Result<usize>
 where
     F: FnMut(usize, &FrameHeader, &[GainLocation]),
@@ -318,35 +362,9 @@ where
         bit_offset: 0,
     }; MAX_GAIN_LOCATIONS];
 
-    while pos + 4 <= audio_end {
-        let header = match parse_header(&data[pos..]) {
-            Some(h) => h,
-            None => {
-                pos += 1;
-                continue;
-            }
-        };
-
-        let next_pos = pos + header.frame_size;
-
-        let valid_frame = if next_pos + 2 <= audio_end {
-            data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
-        } else {
-            next_pos <= audio_end
-        };
-
-        if !valid_frame {
-            pos += 1;
-            continue;
-        }
-
-        if is_xing_frame(data, pos, &header) {
-            pos = next_pos;
-            continue;
-        }
-
-        let len = calculate_gain_locations(pos, &header, &mut locations);
-        callback(pos, &header, &locations[..len]);
+    while let Some((frame_pos, header, next_pos)) = next_frame(data, pos, audio_end) {
+        let len = calculate_gain_locations(frame_pos, &header, &mut locations);
+        callback(frame_pos, &header, &locations[..len]);
 
         frame_count += 1;
         pos = next_pos;
@@ -380,63 +398,15 @@ pub(crate) fn adjust_gain_value(current: u8, steps: i32, mode: GainMode) -> u8 {
     }
 }
 
-/// Internal function to apply gain to all frames in data
-pub(crate) fn apply_gain_to_data(data: &mut [u8], gain_steps: i32, mode: GainMode) -> usize {
-    let audio_end = find_audio_end(data);
-    let mut pos = skip_id3v2(data);
-    let mut modified_frames = 0;
-    let mut locations = [GainLocation {
-        byte_offset: 0,
-        bit_offset: 0,
-    }; MAX_GAIN_LOCATIONS];
-
-    while pos + 4 <= audio_end {
-        let header = match parse_header(&data[pos..]) {
-            Some(h) => h,
-            None => {
-                pos += 1;
-                continue;
-            }
-        };
-
-        let next_pos = pos + header.frame_size;
-
-        let valid_frame = if next_pos + 2 <= audio_end {
-            data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
-        } else {
-            next_pos <= audio_end
-        };
-
-        if !valid_frame {
-            pos += 1;
-            continue;
-        }
-
-        if is_xing_frame(data, pos, &header) {
-            pos = next_pos;
-            continue;
-        }
-
-        let len = calculate_gain_locations(pos, &header, &mut locations);
-
-        for loc in &locations[..len] {
-            let current_gain = read_gain_at(data, loc);
-            let new_gain = adjust_gain_value(current_gain, gain_steps, mode);
-            write_gain_at(data, loc, new_gain);
-        }
-
-        modified_frames += 1;
-        pos = next_pos;
-    }
-
-    modified_frames
-}
-
-/// Internal function to apply gain to a specific channel in data
-pub(crate) fn apply_gain_to_channel_data(
+/// Internal function to apply gain to frames in data. With
+/// `channel_index = None` every gain location in each frame is adjusted;
+/// with `Some(ch)` only that channel's location per granule is touched
+/// (always saturating — wrap mode has no channel-specific path).
+pub(crate) fn apply_gain_to_data(
     data: &mut [u8],
-    channel_index: usize,
     gain_steps: i32,
+    mode: GainMode,
+    channel_index: Option<usize>,
 ) -> usize {
     let audio_end = find_audio_end(data);
     let mut pos = skip_id3v2(data);
@@ -446,44 +416,29 @@ pub(crate) fn apply_gain_to_channel_data(
         bit_offset: 0,
     }; MAX_GAIN_LOCATIONS];
 
-    while pos + 4 <= audio_end {
-        let header = match parse_header(&data[pos..]) {
-            Some(h) => h,
+    while let Some((frame_pos, header, next_pos)) = next_frame(data, pos, audio_end) {
+        let len = calculate_gain_locations(frame_pos, &header, &mut locations);
+
+        match channel_index {
             None => {
-                pos += 1;
-                continue;
+                for loc in &locations[..len] {
+                    let current_gain = read_gain_at(data, loc);
+                    let new_gain = adjust_gain_value(current_gain, gain_steps, mode);
+                    write_gain_at(data, loc, new_gain);
+                }
             }
-        };
-
-        let next_pos = pos + header.frame_size;
-
-        let valid_frame = if next_pos + 2 <= audio_end {
-            data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
-        } else {
-            next_pos <= audio_end
-        };
-
-        if !valid_frame {
-            pos += 1;
-            continue;
-        }
-
-        if is_xing_frame(data, pos, &header) {
-            pos = next_pos;
-            continue;
-        }
-
-        let len = calculate_gain_locations(pos, &header, &mut locations);
-        let num_channels = header.channel_mode.channel_count();
-        let num_granules = header.granule_count();
-
-        for gr in 0..num_granules {
-            let loc_index = gr * num_channels + channel_index;
-            if loc_index < len {
-                let loc = &locations[loc_index];
-                let current_gain = read_gain_at(data, loc);
-                let new_gain = adjust_gain_value(current_gain, gain_steps, GainMode::Saturating);
-                write_gain_at(data, loc, new_gain);
+            Some(ch) => {
+                let num_channels = header.channel_mode.channel_count();
+                for gr in 0..header.granule_count() {
+                    let loc_index = gr * num_channels + ch;
+                    if loc_index < len {
+                        let loc = &locations[loc_index];
+                        let current_gain = read_gain_at(data, loc);
+                        let new_gain =
+                            adjust_gain_value(current_gain, gain_steps, GainMode::Saturating);
+                        write_gain_at(data, loc, new_gain);
+                    }
+                }
             }
         }
 
