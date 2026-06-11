@@ -1,15 +1,12 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::{find_max_amplitude, peak_to_headroom_db, peak_to_pcm_sample};
-use rayon::prelude::*;
 use std::fmt::Write as _;
-use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::commands::threading::effective_threads;
-use crate::json_output::{FileStatus, JsonFileResult, JsonOutput};
-use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
+use crate::commands::utils::{finish_without_summary, for_each_file};
+use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
 
 pub fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
@@ -22,68 +19,10 @@ pub fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
         println!();
     }
 
-    let pb = create_progress_bar(files.len(), opts);
-    let mut json_results: Vec<JsonFileResult> = Vec::new();
+    let (json_results, _, _) =
+        for_each_file(files, opts, |file| Ok(process_max_amplitude(file, opts)))?;
 
-    let parallel = effective_threads(opts) > 1 && files.len() > 1;
-
-    if parallel {
-        let pb_ref = pb.as_ref();
-        let collected: Vec<(Option<JsonFileResult>, String)> = files
-            .par_iter()
-            .map(|file| -> Result<(Option<JsonFileResult>, String)> {
-                let r = process_max_amplitude(file, opts);
-                if let Some(pb) = pb_ref {
-                    pb.set_message(get_filename(file).to_string());
-                    pb.inc(1);
-                }
-                Ok(r)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        let stdout = io::stdout();
-        let mut handle = stdout.lock();
-        for (_, text) in &collected {
-            if !text.is_empty() {
-                handle.write_all(text.as_bytes())?;
-            }
-        }
-        drop(handle);
-
-        for (result, _) in collected {
-            if let Some(r) = result {
-                json_results.push(r);
-            }
-        }
-    } else {
-        for file in files {
-            let filename = get_filename(file);
-            progress_set_message(&pb, filename);
-
-            let (result, text) = process_max_amplitude(file, opts);
-            if !text.is_empty() {
-                print!("{}", text);
-            }
-            if let Some(r) = result {
-                json_results.push(r);
-            }
-
-            progress_inc(&pb);
-        }
-    }
-
-    progress_finish(pb);
-
-    if opts.output_format == OutputFormat::Json {
-        let output = JsonOutput {
-            files: Some(json_results),
-            album: None,
-            summary: None,
-        };
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    }
-
-    Ok(())
+    finish_without_summary(json_results, opts)
 }
 
 fn process_max_amplitude(file: &Path, opts: &Options) -> (Option<JsonFileResult>, String) {

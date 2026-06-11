@@ -5,17 +5,13 @@ use mp3rgain::{
     TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN,
     TAG_REPLAYGAIN_TRACK_PEAK,
 };
-use rayon::prelude::*;
 use std::fmt::Write as _;
-use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::commands::threading::effective_threads;
-use crate::commands::utils::{create_json_summary, print_dry_run_notice, update_counters};
-use crate::json_output::{FileStatus, JsonFileResult, JsonOutput};
+use crate::commands::utils::{finish_with_summary, finish_without_summary, for_each_file};
+use crate::json_output::{FileStatus, JsonFileResult};
 use crate::processors::utils::{restore_timestamp, save_original_mtime};
-use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
 use crate::util::get_filename;
 
 /// Tag values and labels for display in cmd_check_tags
@@ -121,75 +117,12 @@ pub fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
         println!();
     }
 
-    let pb = create_progress_bar(files.len(), opts);
-    let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
-    let mut successful = 0;
-    let mut failed = 0;
+    let (json_results, successful, failed) = for_each_file(files, opts, |file| {
+        let (result, text) = process_delete_tags(file, opts)?;
+        Ok((Some(result), text))
+    })?;
 
-    let parallel = effective_threads(opts) > 1 && files.len() > 1;
-
-    if parallel {
-        let pb_ref = pb.as_ref();
-        let collected: Vec<(JsonFileResult, String)> = files
-            .par_iter()
-            .map(|file| -> Result<(JsonFileResult, String)> {
-                let r = process_delete_tags(file, opts)?;
-                if let Some(pb) = pb_ref {
-                    pb.set_message(get_filename(file).to_string());
-                    pb.inc(1);
-                }
-                Ok(r)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        let stdout = io::stdout();
-        let mut handle = stdout.lock();
-        for (_, text) in &collected {
-            if !text.is_empty() {
-                handle.write_all(text.as_bytes())?;
-            }
-        }
-        drop(handle);
-
-        for (result, _) in collected {
-            update_counters(&result, &mut successful, &mut failed);
-            json_results.push(result);
-        }
-    } else {
-        for file in files {
-            let filename = get_filename(file);
-            progress_set_message(&pb, filename);
-
-            let (result, text) = process_delete_tags(file, opts)?;
-            if !text.is_empty() {
-                print!("{}", text);
-            }
-            update_counters(&result, &mut successful, &mut failed);
-            json_results.push(result);
-
-            progress_inc(&pb);
-        }
-    }
-
-    progress_finish(pb);
-
-    if opts.output_format == OutputFormat::Json {
-        let output = JsonOutput {
-            files: Some(json_results),
-            album: None,
-            summary: Some(create_json_summary(
-                files.len(),
-                successful,
-                failed,
-                opts.dry_run,
-            )),
-        };
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        print_dry_run_notice(opts);
-    }
-
-    Ok(())
+    finish_with_summary(files.len(), json_results, successful, failed, opts)
 }
 
 fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, String)> {
@@ -265,68 +198,10 @@ pub fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
         println!();
     }
 
-    let pb = create_progress_bar(files.len(), opts);
-    let mut json_results: Vec<JsonFileResult> = Vec::new();
+    let (json_results, _, _) =
+        for_each_file(files, opts, |file| Ok(process_check_tags(file, opts)))?;
 
-    let parallel = effective_threads(opts) > 1 && files.len() > 1;
-
-    if parallel {
-        let pb_ref = pb.as_ref();
-        let collected: Vec<(Option<JsonFileResult>, String)> = files
-            .par_iter()
-            .map(|file| -> Result<(Option<JsonFileResult>, String)> {
-                let r = process_check_tags(file, opts);
-                if let Some(pb) = pb_ref {
-                    pb.set_message(get_filename(file).to_string());
-                    pb.inc(1);
-                }
-                Ok(r)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        let stdout = io::stdout();
-        let mut handle = stdout.lock();
-        for (_, text) in &collected {
-            if !text.is_empty() {
-                handle.write_all(text.as_bytes())?;
-            }
-        }
-        drop(handle);
-
-        for (result, _) in collected {
-            if let Some(r) = result {
-                json_results.push(r);
-            }
-        }
-    } else {
-        for file in files {
-            let filename = get_filename(file);
-            progress_set_message(&pb, filename);
-
-            let (result, text) = process_check_tags(file, opts);
-            if !text.is_empty() {
-                print!("{}", text);
-            }
-            if let Some(r) = result {
-                json_results.push(r);
-            }
-
-            progress_inc(&pb);
-        }
-    }
-
-    progress_finish(pb);
-
-    if opts.output_format == OutputFormat::Json {
-        let output = JsonOutput {
-            files: Some(json_results),
-            album: None,
-            summary: None,
-        };
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    }
-
-    Ok(())
+    finish_without_summary(json_results, opts)
 }
 
 fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, String) {
