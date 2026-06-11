@@ -199,6 +199,13 @@ pub struct Mp3rgainApp {
     pub sort_column: Option<SortColumn>,
     /// Direction of the active sort. Ignored when `sort_column` is `None`.
     pub sort_descending: bool,
+
+    /// Cached display order, recomputed lazily when `display_order_dirty`
+    /// is set. The old per-frame re-sort allocated per comparison and
+    /// dominated frame time on large tables (issue #190).
+    display_order_cache: Vec<usize>,
+    /// Set whenever the sort key or any row data changes.
+    display_order_dirty: bool,
 }
 
 impl Mp3rgainApp {
@@ -222,6 +229,8 @@ impl Mp3rgainApp {
             last_target_volume: 89.0,
             sort_column: None,
             sort_descending: false,
+            display_order_cache: Vec::new(),
+            display_order_dirty: true,
         }
     }
 
@@ -242,28 +251,58 @@ impl Mp3rgainApp {
                 self.sort_descending = false;
             }
         }
+        self.display_order_dirty = true;
     }
 
-    /// Indices into `self.files` in current display (sort) order. Returned
-    /// fresh every call — cheap relative to the per-frame render cost.
-    pub fn compute_display_order(&self) -> Vec<usize> {
+    /// Indices into `self.files` in current display (sort) order, served
+    /// from the cache. The returned Vec is a clone so the table can iterate
+    /// it while mutably borrowing `self` for click handling.
+    pub fn display_order(&mut self) -> Vec<usize> {
+        if self.display_order_dirty {
+            self.display_order_cache = self.compute_display_order();
+            self.display_order_dirty = false;
+        }
+        self.display_order_cache.clone()
+    }
+
+    /// Sort `0..files.len()` by the active column. String columns
+    /// precompute one key per row instead of allocating lowercased copies
+    /// in every comparison (issue #190).
+    fn compute_display_order(&self) -> Vec<usize> {
         let mut order: Vec<usize> = (0..self.files.len()).collect();
         let Some(col) = self.sort_column else {
             return order;
         };
         let desc = self.sort_descending;
-        order.sort_by(|&a, &b| {
-            let fa = &self.files[a];
-            let fb = &self.files[b];
-            match col {
-                SortColumn::Filename => cmp_str(&fa.filename, &fb.filename, desc),
-                SortColumn::Volume => cmp_opt_f64(fa.volume, fb.volume, desc),
-                SortColumn::TrackGain => cmp_opt_f64(fa.track_gain, fb.track_gain, desc),
-                SortColumn::AlbumVolume => cmp_opt_f64(fa.album_volume, fb.album_volume, desc),
-                SortColumn::AlbumGain => cmp_opt_f64(fa.album_gain, fb.album_gain, desc),
-                SortColumn::Status => cmp_str(&fa.status.label(), &fb.status.label(), desc),
+        match col {
+            SortColumn::Filename => {
+                let keys: Vec<String> = self
+                    .files
+                    .iter()
+                    .map(|f| f.filename.to_lowercase())
+                    .collect();
+                order.sort_by(|&a, &b| cmp_str(&keys[a], &keys[b], desc));
             }
-        });
+            SortColumn::Status => {
+                let keys: Vec<String> = self
+                    .files
+                    .iter()
+                    .map(|f| f.status.label().to_lowercase())
+                    .collect();
+                order.sort_by(|&a, &b| cmp_str(&keys[a], &keys[b], desc));
+            }
+            SortColumn::Volume => order
+                .sort_by(|&a, &b| cmp_opt_f64(self.files[a].volume, self.files[b].volume, desc)),
+            SortColumn::TrackGain => order.sort_by(|&a, &b| {
+                cmp_opt_f64(self.files[a].track_gain, self.files[b].track_gain, desc)
+            }),
+            SortColumn::AlbumVolume => order.sort_by(|&a, &b| {
+                cmp_opt_f64(self.files[a].album_volume, self.files[b].album_volume, desc)
+            }),
+            SortColumn::AlbumGain => order.sort_by(|&a, &b| {
+                cmp_opt_f64(self.files[a].album_gain, self.files[b].album_gain, desc)
+            }),
+        }
         order
     }
 
@@ -275,6 +314,7 @@ impl Mp3rgainApp {
         if (self.target_volume - self.last_target_volume).abs() < f64::EPSILON {
             return;
         }
+        self.display_order_dirty = true;
         let delta = self.target_volume - self.last_target_volume;
         for file in &mut self.files {
             if let Some(g) = file.track_gain {
@@ -324,6 +364,9 @@ impl Mp3rgainApp {
             }
         }
 
+        if added > 0 {
+            self.display_order_dirty = true;
+        }
         if skipped > 0 {
             self.status_message =
                 format!("Added {} file(s), {} duplicate(s) skipped", added, skipped);
@@ -356,6 +399,7 @@ impl Mp3rgainApp {
             }
         }
         self.selected_indices.clear();
+        self.display_order_dirty = true;
     }
 
     pub fn clear_files(&mut self) {
@@ -365,6 +409,7 @@ impl Mp3rgainApp {
         self.files.clear();
         self.selected_indices.clear();
         self.selection_anchor = None;
+        self.display_order_dirty = true;
     }
 
     /// Replace the current selection with every file in the table. Used by
@@ -624,8 +669,9 @@ impl Mp3rgainApp {
         );
     }
 
-    /// `-x`: scan each file for its max amplitude / headroom without any
-    /// ReplayGain decoding. Faster than Track Analysis.
+    /// `-x`: scan each file for its max amplitude / headroom. Decodes the
+    /// audio for the true peak but skips the loudness analysis, so it is
+    /// lighter than Track Analysis (not decode-free).
     pub fn start_find_max_amplitude(&mut self, ctx: &egui::Context) {
         if self.files.is_empty() || self.is_processing {
             return;
@@ -827,6 +873,9 @@ impl Mp3rgainApp {
     }
 
     fn begin_worker(&mut self, kind: WorkerKind, total: usize, handle: WorkerHandle) {
+        // The start_* callers just reset row statuses to Pending, which a
+        // Status sort must observe.
+        self.display_order_dirty = true;
         self.worker = Some(handle);
         self.worker_kind = Some(kind);
         self.is_processing = true;
@@ -862,6 +911,11 @@ impl Mp3rgainApp {
                     }
                 }
             }
+        }
+        // Worker events mutate sortable row fields (volume, gains, status),
+        // so any applied event invalidates the cached display order.
+        if !events.is_empty() {
+            self.display_order_dirty = true;
         }
         for event in events {
             self.apply_event(event);
@@ -1111,12 +1165,12 @@ fn cmp_opt_f64(a: Option<f64>, b: Option<f64>, desc: bool) -> std::cmp::Ordering
     }
 }
 
-/// Case-insensitive string compare with empty-strings-last semantics.
+/// Compare two pre-lowercased sort keys with empty-strings-last semantics.
 fn cmp_str(a: &str, b: &str, desc: bool) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     match (a.is_empty(), b.is_empty()) {
         (false, false) => {
-            let o = a.to_lowercase().cmp(&b.to_lowercase());
+            let o = a.cmp(b);
             if desc {
                 o.reverse()
             } else {
