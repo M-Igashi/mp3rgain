@@ -68,8 +68,12 @@ fn sort_header(
 }
 
 pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
-    let display_order = app.compute_display_order();
-    egui::ScrollArea::both().show(ui, |ui| {
+    let display_order = app.display_order();
+    // Horizontal scrolling only — vertical scrolling is the table's own,
+    // so `body.rows` can virtualize off-screen rows (issue #190). An outer
+    // vertical scroll area would hand the table unbounded height and force
+    // every row to be laid out each frame.
+    egui::ScrollArea::horizontal().show(ui, |ui| {
         egui_extras::TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
@@ -128,20 +132,28 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                     sort_header(ui, app, "Status", SortColumn::Status, "");
                 });
             })
-            .body(|mut body| {
+            .body(|body| {
                 // Defer click handling: the row closure borrows `app.files`,
                 // so it can't also mutate `app.selected_indices` during the
                 // iteration. Capture the requested action and apply it after
                 // the loop.
                 let mut pending_click: Option<(usize, ClickMode)> = None;
                 let mut pending_reveal: Option<std::path::PathBuf> = None;
-                for &idx in &display_order {
-                    let Some(file) = app.files.get(idx) else {
-                        continue;
+                // Set lookup instead of `Vec::contains` per row, which made
+                // selection O(rows × selected) per frame (issue #190).
+                let selected: std::collections::HashSet<usize> =
+                    app.selected_indices.iter().copied().collect();
+                // `rows` (vs per-row `body.row`) lays out only the rows
+                // inside the viewport; fixed 18.0 height makes it a drop-in.
+                body.rows(18.0, display_order.len(), |mut row| {
+                    let Some(&idx) = display_order.get(row.index()) else {
+                        return;
                     };
-                    let is_selected = app.selected_indices.contains(&idx);
-                    body.row(18.0, |mut row| {
-                        row.set_selected(is_selected);
+                    let Some(file) = app.files.get(idx) else {
+                        return;
+                    };
+                    let is_selected = selected.contains(&idx);
+                    row.set_selected(is_selected);
 
                         row.col(|ui| {
                             let resp = ui.selectable_label(is_selected, &file.filename);
@@ -218,8 +230,7 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                         row.col(|ui| {
                             ui.label(file.status.label());
                         });
-                    });
-                }
+                });
                 if let Some((idx, mode)) = pending_click {
                     app.click_row(idx, mode);
                 }

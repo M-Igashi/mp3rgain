@@ -102,8 +102,9 @@ pub enum WorkerEvent {
         view: StoredTagsView,
     },
 
-    /// `-x` Find Max Amplitude result for `idx`. Light alternative to
-    /// `TrackAnalyzed`: only walks MP3 frame headers, no decoding.
+    /// `-x` Find Max Amplitude result for `idx`. Lighter than
+    /// `TrackAnalyzed`: decodes for the true peak but skips the loudness
+    /// analysis.
     MaxAmplitudeFound {
         idx: usize,
         peak: f64,
@@ -213,79 +214,44 @@ impl Default for ApplyOptionsUi {
 
 /// Spawn a parallel track-analysis worker.
 ///
-/// Files are pulled from a shared queue by a pool of `available_parallelism`
-/// worker threads, so total wall time is comparable to Album Analysis
-/// (issue #158, which was previously serial). Each completed file emits a
-/// `TrackAnalyzed` event immediately so the table updates as work happens
-/// instead of in a single batch at the end. Cancellation is checked
-/// between files.
+/// Files run through [`run_job_pool`], so total wall time is comparable to
+/// Album Analysis (issue #158, which was previously serial). Each completed
+/// file emits a `TrackAnalyzed` event immediately so the table updates as
+/// work happens instead of in a single batch at the end. Cancellation is
+/// checked between files.
 pub fn spawn_track_analysis(ctx: egui::Context, files: Vec<(usize, PathBuf)>) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_w = Arc::clone(&cancel);
 
     thread::spawn(move || {
-        let total = files.len();
-        if total == 0 {
-            send(
-                &tx,
-                &ctx,
-                WorkerEvent::Done {
-                    message: "Analyzed 0 file(s)".to_string(),
-                },
-            );
-            return;
-        }
+        let analyzed = AtomicUsize::new(0);
+        let errors = AtomicUsize::new(0);
 
-        let parallelism = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1)
-            .max(1);
-        let pool_size = parallelism.min(total);
-
-        let queue: Arc<Mutex<Vec<(usize, PathBuf)>>> = Arc::new(Mutex::new(files));
-        let analyzed = Arc::new(AtomicUsize::new(0));
-        let errors = Arc::new(AtomicUsize::new(0));
-
-        let handles: Vec<_> = (0..pool_size)
-            .map(|_| {
-                let queue = Arc::clone(&queue);
-                let cancel = Arc::clone(&cancel_w);
-                let tx = tx.clone();
-                let ctx = ctx.clone();
-                let analyzed = Arc::clone(&analyzed);
-                let errors = Arc::clone(&errors);
-                thread::spawn(move || loop {
-                    if cancel.load(Ordering::Relaxed) {
-                        break;
+        {
+            let tx = tx.clone();
+            let ctx = ctx.clone();
+            let (analyzed, errors) = (&analyzed, &errors);
+            run_job_pool(files, &cancel_w, move |(idx, path)| {
+                send(&tx, &ctx, WorkerEvent::FileStart { idx });
+                match replaygain::analyze_track(&path) {
+                    Ok(result) => {
+                        analyzed.fetch_add(1, Ordering::Relaxed);
+                        send(&tx, &ctx, WorkerEvent::TrackAnalyzed { idx, result });
                     }
-                    let next = {
-                        let mut q = queue.lock().expect("track analysis queue poisoned");
-                        q.pop()
-                    };
-                    let Some((idx, path)) = next else { break };
-                    let _ = tx.send(WorkerEvent::FileStart { idx });
-                    ctx.request_repaint();
-                    match replaygain::analyze_track(&path) {
-                        Ok(result) => {
-                            analyzed.fetch_add(1, Ordering::Relaxed);
-                            let _ = tx.send(WorkerEvent::TrackAnalyzed { idx, result });
-                        }
-                        Err(e) => {
-                            errors.fetch_add(1, Ordering::Relaxed);
-                            let _ = tx.send(WorkerEvent::TrackAnalysisFailed {
+                    Err(e) => {
+                        errors.fetch_add(1, Ordering::Relaxed);
+                        send(
+                            &tx,
+                            &ctx,
+                            WorkerEvent::TrackAnalysisFailed {
                                 idx,
                                 message: e.to_string(),
-                            });
-                        }
+                            },
+                        );
                     }
-                    ctx.request_repaint();
-                })
-            })
-            .collect();
-
-        for h in handles {
-            let _ = h.join();
+                }
+            });
         }
 
         if cancel_w.load(Ordering::Relaxed) {
@@ -443,12 +409,11 @@ pub fn spawn_album_analysis(
 
 /// Spawn the apply worker (used by both Track Gain and Album Gain).
 ///
-/// Jobs are pulled from a shared queue by a pool of `available_parallelism`
-/// worker threads, matching the parallel Track Analysis path so wall time
-/// scales with cores (issue #158 follow-up comment). Each file's apply is
-/// independent — the temp-file rename in `apply_with_options` uses an
-/// AtomicU64 counter so concurrent writes in the same directory don't
-/// collide. Cancellation is checked between files.
+/// Jobs run through [`run_job_pool`], matching the parallel Track Analysis
+/// path so wall time scales with cores (issue #158 follow-up comment). Each
+/// file's apply is independent — the temp-file rename in
+/// `apply_with_options` uses an AtomicU64 counter so concurrent writes in
+/// the same directory don't collide. Cancellation is checked between files.
 pub fn spawn_apply(
     ctx: egui::Context,
     jobs: Vec<ApplyJob>,
@@ -460,96 +425,65 @@ pub fn spawn_apply(
     let cancel_w = Arc::clone(&cancel);
 
     thread::spawn(move || {
-        let total = jobs.len();
-        if total == 0 {
-            let verb = if ui_opts.dry_run {
-                "Dry-ran"
-            } else {
-                "Applied"
-            };
-            send(
-                &tx,
-                &ctx,
-                WorkerEvent::Done {
-                    message: format!("{} {} on 0 file(s)", verb, action_label),
-                },
-            );
-            return;
-        }
+        let applied = AtomicUsize::new(0);
+        let errors = AtomicUsize::new(0);
 
-        let parallelism = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1)
-            .max(1);
-        let pool_size = parallelism.min(total);
+        {
+            let tx = tx.clone();
+            let ctx = ctx.clone();
+            let (applied, errors) = (&applied, &errors);
+            run_job_pool(jobs, &cancel_w, move |job: ApplyJob| {
+                send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
-        let queue: Arc<Mutex<Vec<ApplyJob>>> = Arc::new(Mutex::new(jobs));
-        let applied = Arc::new(AtomicUsize::new(0));
-        let errors = Arc::new(AtomicUsize::new(0));
-
-        let handles: Vec<_> = (0..pool_size)
-            .map(|_| {
-                let queue = Arc::clone(&queue);
-                let cancel = Arc::clone(&cancel_w);
-                let tx = tx.clone();
-                let ctx = ctx.clone();
-                let applied = Arc::clone(&applied);
-                let errors = Arc::clone(&errors);
-                thread::spawn(move || loop {
-                    if cancel.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let next = {
-                        let mut q = queue.lock().expect("apply queue poisoned");
-                        q.pop()
-                    };
-                    let Some(job) = next else { break };
-                    let _ = tx.send(WorkerEvent::FileStart { idx: job.idx });
-                    ctx.request_repaint();
-
-                    let opts = build_apply_options(
-                        job.steps,
-                        job.track_result,
-                        job.album_info,
-                        job.channel,
-                        ui_opts,
-                    );
-                    let result = if ui_opts.dry_run {
-                        predict_apply(&job.path, &opts)
-                    } else {
-                        apply_with_options(&job.path, &opts)
-                    };
-                    match result {
-                        Ok(report) => {
-                            applied.fetch_add(1, Ordering::Relaxed);
-                            if ui_opts.dry_run {
-                                let _ = tx.send(WorkerEvent::FileApplyDryRun {
+                let opts = build_apply_options(
+                    job.steps,
+                    job.track_result,
+                    job.album_info,
+                    job.channel,
+                    ui_opts,
+                );
+                let result = if ui_opts.dry_run {
+                    predict_apply(&job.path, &opts)
+                } else {
+                    apply_with_options(&job.path, &opts)
+                };
+                match result {
+                    Ok(report) => {
+                        applied.fetch_add(1, Ordering::Relaxed);
+                        if ui_opts.dry_run {
+                            send(
+                                &tx,
+                                &ctx,
+                                WorkerEvent::FileApplyDryRun {
                                     idx: job.idx,
                                     actual_steps: report.actual_steps,
                                     clipping_prevented: report.clipping_prevented,
-                                });
-                            } else {
-                                let _ = tx.send(WorkerEvent::FileApplied {
+                                },
+                            );
+                        } else {
+                            send(
+                                &tx,
+                                &ctx,
+                                WorkerEvent::FileApplied {
                                     idx: job.idx,
                                     actual_steps: report.actual_steps,
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            errors.fetch_add(1, Ordering::Relaxed);
-                            let _ = tx.send(WorkerEvent::FileApplyFailed {
-                                idx: job.idx,
-                                message: e.to_string(),
-                            });
+                                },
+                            );
                         }
                     }
-                    ctx.request_repaint();
-                })
-            })
-            .collect();
-
-        for h in handles {
-            let _ = h.join();
+                    Err(e) => {
+                        errors.fetch_add(1, Ordering::Relaxed);
+                        send(
+                            &tx,
+                            &ctx,
+                            WorkerEvent::FileApplyFailed {
+                                idx: job.idx,
+                                message: e.to_string(),
+                            },
+                        );
+                    }
+                }
+            });
         }
 
         if cancel_w.load(Ordering::Relaxed) {
@@ -581,8 +515,10 @@ pub fn spawn_apply(
     WorkerHandle { rx, cancel }
 }
 
-/// Spawn the undo worker. Iterates jobs serially, checks cancel between
-/// files. Dispatches per file to the correct undo path:
+/// Spawn the undo worker. Runs jobs through [`run_job_pool`] (undo is
+/// dominated by per-file I/O and, for AAC, a bitstream re-analysis, so it
+/// parallelizes the same way apply does). Dispatches per file to the
+/// correct undo path:
 ///   - AAC: `mp3rgain::aac::undo_aac_gain`
 ///   - MP3 + `use_id3v2`: `mp3rgain::undo_gain_id3v2`
 ///   - MP3 (default APE): `mp3rgain::undo_gain`
@@ -594,64 +530,73 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
     let cancel_w = Arc::clone(&cancel);
 
     thread::spawn(move || {
-        let mut undone = 0usize;
-        let mut skipped = 0usize;
-        let mut errors = 0usize;
+        let undone = AtomicUsize::new(0);
+        let skipped = AtomicUsize::new(0);
+        let errors = AtomicUsize::new(0);
 
-        for job in jobs {
-            if cancel_w.load(Ordering::Relaxed) {
-                send(&tx, &ctx, WorkerEvent::Cancelled);
-                return;
-            }
-            send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
+        {
+            let tx = tx.clone();
+            let ctx = ctx.clone();
+            let (undone, skipped, errors) = (&undone, &skipped, &errors);
+            run_job_pool(jobs, &cancel_w, move |job: UndoJob| {
+                send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
-            let original_mtime = if ui_opts.preserve_timestamp {
-                read_mtime(&job.path)
-            } else {
-                None
-            };
+                let original_mtime = if ui_opts.preserve_timestamp {
+                    read_mtime(&job.path)
+                } else {
+                    None
+                };
 
-            // Peek at the undo tag before running undo, so we can tell the
-            // UI how many steps to reverse on the display. We can't read
-            // it after undo because undo_gain_auto deletes the tag (issue #171).
-            let steps_undone = mp3rgain::read_undo_steps(&job.path, ui_opts.use_id3v2).unwrap_or(0);
+                // Peek at the undo tag before running undo, so we can tell the
+                // UI how many steps to reverse on the display. We can't read
+                // it after undo because undo_gain_auto deletes the tag (issue #171).
+                let steps_undone =
+                    mp3rgain::read_undo_steps(&job.path, ui_opts.use_id3v2).unwrap_or(0);
 
-            let result = mp3rgain::undo_gain_auto(&job.path, ui_opts.use_id3v2);
-            match result {
-                Ok(0) => {
-                    skipped += 1;
-                    send(&tx, &ctx, WorkerEvent::FileUndoSkipped { idx: job.idx });
-                }
-                Ok(_) => {
-                    if let Some(mtime) = original_mtime {
-                        restore_timestamp(&job.path, mtime);
+                let result = mp3rgain::undo_gain_auto(&job.path, ui_opts.use_id3v2);
+                match result {
+                    Ok(0) => {
+                        skipped.fetch_add(1, Ordering::Relaxed);
+                        send(&tx, &ctx, WorkerEvent::FileUndoSkipped { idx: job.idx });
                     }
-                    undone += 1;
-                    send(
-                        &tx,
-                        &ctx,
-                        WorkerEvent::FileUndone {
-                            idx: job.idx,
-                            steps_undone,
-                        },
-                    );
+                    Ok(_) => {
+                        if let Some(mtime) = original_mtime {
+                            restore_timestamp(&job.path, mtime);
+                        }
+                        undone.fetch_add(1, Ordering::Relaxed);
+                        send(
+                            &tx,
+                            &ctx,
+                            WorkerEvent::FileUndone {
+                                idx: job.idx,
+                                steps_undone,
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        errors.fetch_add(1, Ordering::Relaxed);
+                        send(
+                            &tx,
+                            &ctx,
+                            WorkerEvent::FileApplyFailed {
+                                idx: job.idx,
+                                message: e.to_string(),
+                            },
+                        );
+                    }
                 }
-                Err(e) => {
-                    errors += 1;
-                    send(
-                        &tx,
-                        &ctx,
-                        WorkerEvent::FileApplyFailed {
-                            idx: job.idx,
-                            message: e.to_string(),
-                        },
-                    );
-                }
-            }
+            });
+        }
+
+        if cancel_w.load(Ordering::Relaxed) {
+            send(&tx, &ctx, WorkerEvent::Cancelled);
+            return;
         }
 
         let mut parts: Vec<String> = Vec::new();
-        parts.push(format!("Undone {} file(s)", undone));
+        parts.push(format!("Undone {} file(s)", undone.load(Ordering::Relaxed)));
+        let skipped = skipped.load(Ordering::Relaxed);
+        let errors = errors.load(Ordering::Relaxed);
         if skipped > 0 {
             parts.push(format!("{} had no changes to undo", skipped));
         }
@@ -671,7 +616,8 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
 }
 
 /// Spawn the stored-tag deletion worker. Destructive: removes APE /
-/// ID3v2 RG / MP4 freeform RG+undo tags from each file in order.
+/// ID3v2 RG / MP4 freeform RG+undo tags from each file, fanned out via
+/// [`run_job_pool`].
 ///
 /// Dispatch mirrors the CLI's `process_delete_tags`:
 ///   - AAC: `mp4meta::delete_replaygain_tags` + `delete_undo_tags`
@@ -688,56 +634,63 @@ pub fn spawn_delete_tags(
     let cancel_w = Arc::clone(&cancel);
 
     thread::spawn(move || {
-        let mut deleted = 0usize;
-        let mut errors = 0usize;
+        let deleted = AtomicUsize::new(0);
+        let errors = AtomicUsize::new(0);
 
-        for job in jobs {
-            if cancel_w.load(Ordering::Relaxed) {
-                send(&tx, &ctx, WorkerEvent::Cancelled);
-                return;
-            }
-            send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
+        {
+            let tx = tx.clone();
+            let ctx = ctx.clone();
+            let (deleted, errors) = (&deleted, &errors);
+            run_job_pool(jobs, &cancel_w, move |job: DeleteTagsJob| {
+                send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
-            let original_mtime = if preserve_timestamp {
-                read_mtime(&job.path)
-            } else {
-                None
-            };
+                let original_mtime = if preserve_timestamp {
+                    read_mtime(&job.path)
+                } else {
+                    None
+                };
 
-            let result = mp3rgain::delete_gain_tags_auto(&job.path, use_id3v2);
+                let result = mp3rgain::delete_gain_tags_auto(&job.path, use_id3v2);
 
-            match result {
-                Ok(()) => {
-                    if let Some(m) = original_mtime {
-                        restore_timestamp(&job.path, m);
+                match result {
+                    Ok(()) => {
+                        if let Some(m) = original_mtime {
+                            restore_timestamp(&job.path, m);
+                        }
+                        deleted.fetch_add(1, Ordering::Relaxed);
+                        // Tag deletion doesn't change audio levels, so the row's
+                        // volume/gain columns stay valid — pass 0 steps so the UI
+                        // doesn't shift them.
+                        send(
+                            &tx,
+                            &ctx,
+                            WorkerEvent::FileApplied {
+                                idx: job.idx,
+                                actual_steps: 0,
+                            },
+                        );
                     }
-                    deleted += 1;
-                    // Tag deletion doesn't change audio levels, so the row's
-                    // volume/gain columns stay valid — pass 0 steps so the UI
-                    // doesn't shift them.
-                    send(
-                        &tx,
-                        &ctx,
-                        WorkerEvent::FileApplied {
-                            idx: job.idx,
-                            actual_steps: 0,
-                        },
-                    );
+                    Err(e) => {
+                        errors.fetch_add(1, Ordering::Relaxed);
+                        send(
+                            &tx,
+                            &ctx,
+                            WorkerEvent::FileApplyFailed {
+                                idx: job.idx,
+                                message: e.to_string(),
+                            },
+                        );
+                    }
                 }
-                Err(e) => {
-                    errors += 1;
-                    send(
-                        &tx,
-                        &ctx,
-                        WorkerEvent::FileApplyFailed {
-                            idx: job.idx,
-                            message: e.to_string(),
-                        },
-                    );
-                }
-            }
+            });
         }
 
+        if cancel_w.load(Ordering::Relaxed) {
+            send(&tx, &ctx, WorkerEvent::Cancelled);
+            return;
+        }
+
+        let errors = errors.load(Ordering::Relaxed);
         let suffix = if errors > 0 {
             format!(", {} error(s)", errors)
         } else {
@@ -747,7 +700,11 @@ pub fn spawn_delete_tags(
             &tx,
             &ctx,
             WorkerEvent::Done {
-                message: format!("Deleted stored tags from {} file(s){}", deleted, suffix),
+                message: format!(
+                    "Deleted stored tags from {} file(s){}",
+                    deleted.load(Ordering::Relaxed),
+                    suffix
+                ),
             },
         );
     });
@@ -758,50 +715,60 @@ pub fn spawn_delete_tags(
 /// Spawn the max-amplitude scanner. Mirrors the CLI's `-x` /
 /// `cmd_max_amplitude`: walks MP3 frame headers (or AAC `global_gain`
 /// fields) for the gain range and decodes the audio peak via
-/// `find_peak_amplitude` (no ReplayGain machinery).
+/// `find_peak_amplitude` (no loudness analysis, but still a full decode —
+/// hence the [`run_job_pool`] fan-out).
 pub fn spawn_find_max_amplitude(ctx: egui::Context, files: Vec<(usize, PathBuf)>) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_w = Arc::clone(&cancel);
 
     thread::spawn(move || {
-        let mut found = 0usize;
-        let mut errors = 0usize;
-        for (idx, path) in files {
-            if cancel_w.load(Ordering::Relaxed) {
-                send(&tx, &ctx, WorkerEvent::Cancelled);
-                return;
-            }
-            send(&tx, &ctx, WorkerEvent::FileStart { idx });
+        let found = AtomicUsize::new(0);
+        let errors = AtomicUsize::new(0);
 
-            match mp3rgain::find_max_amplitude(&path) {
-                Ok(amp) => {
-                    found += 1;
-                    let peak = amp.max_amplitude();
-                    let headroom_db = mp3rgain::peak_to_headroom_db(peak);
-                    send(
-                        &tx,
-                        &ctx,
-                        WorkerEvent::MaxAmplitudeFound {
-                            idx,
-                            peak,
-                            headroom_db,
-                        },
-                    );
+        {
+            let tx = tx.clone();
+            let ctx = ctx.clone();
+            let (found, errors) = (&found, &errors);
+            run_job_pool(files, &cancel_w, move |(idx, path)| {
+                send(&tx, &ctx, WorkerEvent::FileStart { idx });
+
+                match mp3rgain::find_max_amplitude(&path) {
+                    Ok(amp) => {
+                        found.fetch_add(1, Ordering::Relaxed);
+                        let peak = amp.max_amplitude();
+                        let headroom_db = mp3rgain::peak_to_headroom_db(peak);
+                        send(
+                            &tx,
+                            &ctx,
+                            WorkerEvent::MaxAmplitudeFound {
+                                idx,
+                                peak,
+                                headroom_db,
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        errors.fetch_add(1, Ordering::Relaxed);
+                        send(
+                            &tx,
+                            &ctx,
+                            WorkerEvent::MaxAmplitudeFailed {
+                                idx,
+                                message: e.to_string(),
+                            },
+                        );
+                    }
                 }
-                Err(e) => {
-                    errors += 1;
-                    send(
-                        &tx,
-                        &ctx,
-                        WorkerEvent::MaxAmplitudeFailed {
-                            idx,
-                            message: e.to_string(),
-                        },
-                    );
-                }
-            }
+            });
         }
+
+        if cancel_w.load(Ordering::Relaxed) {
+            send(&tx, &ctx, WorkerEvent::Cancelled);
+            return;
+        }
+
+        let errors = errors.load(Ordering::Relaxed);
         let suffix = if errors > 0 {
             format!(", {} error(s)", errors)
         } else {
@@ -811,7 +778,11 @@ pub fn spawn_find_max_amplitude(ctx: egui::Context, files: Vec<(usize, PathBuf)>
             &tx,
             &ctx,
             WorkerEvent::Done {
-                message: format!("Max amplitude scanned on {} file(s){}", found, suffix),
+                message: format!(
+                    "Max amplitude scanned on {} file(s){}",
+                    found.load(Ordering::Relaxed),
+                    suffix
+                ),
             },
         );
     });
@@ -931,6 +902,47 @@ fn build_apply_options(
     opts.preserve_timestamp = ui_opts.preserve_timestamp;
     opts.use_id3v2 = ui_opts.use_id3v2;
     opts
+}
+
+/// Drain `jobs` through a pool of `available_parallelism` scoped worker
+/// threads, calling `per_job` for each job. Blocks until the queue is empty
+/// or `cancel` is observed (checked between jobs). Each pool thread gets its
+/// own clone of `per_job` — captures like `mpsc::Sender` and `egui::Context`
+/// are cheap reference-counted clones. Jobs start in their original order.
+fn run_job_pool<J, F>(jobs: Vec<J>, cancel: &AtomicBool, per_job: F)
+where
+    J: Send,
+    F: Fn(J) + Clone + Send,
+{
+    let pool_size = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .max(1)
+        .min(jobs.len());
+
+    // Popping takes from the Vec's tail; reverse once so files are picked
+    // up in the order the caller listed them.
+    let mut jobs = jobs;
+    jobs.reverse();
+    let queue = Mutex::new(jobs);
+
+    thread::scope(|scope| {
+        for _ in 0..pool_size {
+            let per_job = per_job.clone();
+            let queue = &queue;
+            scope.spawn(move || loop {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let next = {
+                    let mut q = queue.lock().expect("worker job queue poisoned");
+                    q.pop()
+                };
+                let Some(job) = next else { break };
+                per_job(job);
+            });
+        }
+    });
 }
 
 fn send(tx: &Sender<WorkerEvent>, ctx: &egui::Context, event: WorkerEvent) {
