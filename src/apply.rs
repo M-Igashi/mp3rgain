@@ -427,6 +427,20 @@ fn apply_mp3_id3v2_bytes(
     Ok(modified)
 }
 
+/// Build a unique `.mp3rgain_temp_*` sibling path for `file`. Shared by the
+/// MP3 temp-file write and the MP4 `atomic_write` so parallel tasks writing
+/// in the same directory never collide (one process-wide counter).
+pub(crate) fn temp_sibling_path(file: &Path, ext: &str) -> std::path::PathBuf {
+    let parent = file.parent().unwrap_or(Path::new("."));
+    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    parent.join(format!(
+        ".mp3rgain_temp_{}_{}.{}",
+        std::process::id(),
+        counter,
+        ext
+    ))
+}
+
 fn with_temp_file<F>(file: &Path, use_temp: bool, operation: F) -> Result<usize>
 where
     F: FnOnce(&Path, &Path) -> Result<usize>,
@@ -435,13 +449,7 @@ where
         return operation(file, file);
     }
 
-    let parent = file.parent().unwrap_or(Path::new("."));
-    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let temp_path = parent.join(format!(
-        ".mp3rgain_temp_{}_{}.mp3",
-        std::process::id(),
-        counter
-    ));
+    let temp_path = temp_sibling_path(file, "mp3");
 
     match operation(file, &temp_path) {
         Ok(frames) => {
