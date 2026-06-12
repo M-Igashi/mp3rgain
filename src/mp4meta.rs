@@ -22,7 +22,7 @@
 
 use crate::error::{Error, Result};
 use std::fs;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1237,26 +1237,54 @@ impl std::fmt::Display for Mp4AudioCodec {
     }
 }
 
+/// Read the content of the top-level `moov` box without loading the rest of
+/// the file — the audio payload (`mdat`) is usually orders of magnitude
+/// larger than the metadata, so codec/track inspection shouldn't pay for a
+/// full-file read (issue #188).
+fn read_moov_content(file_path: &Path) -> Option<Vec<u8>> {
+    let mut file = fs::File::open(file_path).ok()?;
+    let file_len = file.metadata().ok()?.len();
+    let mut pos = 0u64;
+
+    while pos + 8 <= file_len {
+        file.seek(SeekFrom::Start(pos)).ok()?;
+        let header = BoxHeader::read(&mut file).ok()??;
+        if header.box_type == MOOV {
+            // Clamp to the bytes actually present: a malformed size must not
+            // drive the allocation or read past EOF.
+            let content_start = pos + header.header_size as u64;
+            let len = header
+                .content_size()
+                .min(file_len.saturating_sub(content_start));
+            let mut buf = vec![0u8; len as usize];
+            file.read_exact(&mut buf).ok()?;
+            return Some(buf);
+        }
+        // size == 0 means "extends to EOF"; advancing by 0 would loop forever.
+        if header.size == 0 {
+            break;
+        }
+        pos = pos.saturating_add(header.size);
+    }
+
+    None
+}
+
 /// Detect the audio codec in an MP4 file by inspecting the stsd box.
 /// Navigates moov → trak → mdia → minf → stbl → stsd to find the codec.
 pub fn detect_mp4_audio_codec(file_path: &Path) -> Option<Mp4AudioCodec> {
-    let data = fs::read(file_path).ok()?;
-
-    let (moov_pos, moov_header) = find_box(&data, MOOV)?;
-    let moov_start = moov_pos + moov_header.header_size as usize;
-    let moov_size = moov_header.content_size() as usize;
+    let moov = read_moov_content(file_path)?;
 
     // Search through all trak boxes for an audio track
-    let mut trak_search_pos = moov_start;
-    let moov_end = moov_start + moov_size;
+    let mut trak_search_pos = 0;
 
-    while trak_search_pos < moov_end {
+    while trak_search_pos < moov.len() {
         let (trak_pos, trak_header) =
-            find_box_in_container(&data, trak_search_pos, moov_end - trak_search_pos, TRAK)?;
+            find_box_in_container(&moov, trak_search_pos, moov.len() - trak_search_pos, TRAK)?;
         let trak_start = trak_pos + trak_header.header_size as usize;
         let trak_size = trak_header.content_size() as usize;
 
-        if let Some(codec) = detect_codec_in_trak(&data, trak_start, trak_size) {
+        if let Some(codec) = detect_codec_in_trak(&moov, trak_start, trak_size) {
             return Some(codec);
         }
 
@@ -1323,25 +1351,17 @@ pub fn is_aac_file(file_path: &Path) -> bool {
 /// Count the number of audio tracks in an MP4 file.
 /// Returns 0 if the file cannot be read or has no moov box.
 pub fn count_audio_tracks(file_path: &Path) -> usize {
-    let data = match fs::read(file_path) {
-        Ok(d) => d,
-        Err(_) => return 0,
-    };
-
-    let (moov_pos, moov_header) = match find_box(&data, MOOV) {
-        Some(x) => x,
+    let moov = match read_moov_content(file_path) {
+        Some(m) => m,
         None => return 0,
     };
 
-    let moov_start = moov_pos + moov_header.header_size as usize;
-    let moov_end = moov_start + moov_header.content_size() as usize;
-
     let mut count = 0;
-    let mut search_pos = moov_start;
+    let mut search_pos = 0;
 
-    while search_pos < moov_end {
+    while search_pos < moov.len() {
         let (trak_pos, trak_header) =
-            match find_box_in_container(&data, search_pos, moov_end - search_pos, TRAK) {
+            match find_box_in_container(&moov, search_pos, moov.len() - search_pos, TRAK) {
                 Some(x) => x,
                 None => break,
             };
@@ -1349,7 +1369,7 @@ pub fn count_audio_tracks(file_path: &Path) -> usize {
         // Check if this trak has an audio codec (mp4a or alac)
         let trak_start = trak_pos + trak_header.header_size as usize;
         let trak_size = trak_header.content_size() as usize;
-        if detect_codec_in_trak(&data, trak_start, trak_size).is_some() {
+        if detect_codec_in_trak(&moov, trak_start, trak_size).is_some() {
             count += 1;
         }
 
@@ -1462,6 +1482,64 @@ mod tests {
         let new_undo = UndoTags::new(Some("+005,+005,N".to_string()), None);
         let result = create_ilst_box_undo(&new_undo, &existing);
         assert!(result.len() > 8);
+    }
+
+    /// Codec detection and track counting must work without a full-file
+    /// read, including the non-faststart layout where moov follows mdat
+    /// (issue #188).
+    #[test]
+    fn test_detect_codec_and_count_tracks_reads_moov_only() {
+        use std::io::Write;
+
+        fn mp4_box(typ: &[u8; 4], content: &[u8]) -> Vec<u8> {
+            let mut v = Vec::with_capacity(8 + content.len());
+            v.extend_from_slice(&((content.len() + 8) as u32).to_be_bytes());
+            v.extend_from_slice(typ);
+            v.extend_from_slice(content);
+            v
+        }
+
+        fn audio_trak(codec: &[u8; 4]) -> Vec<u8> {
+            let entry = mp4_box(codec, &[]);
+            let mut stsd_content = vec![0u8; 4]; // version + flags
+            stsd_content.extend_from_slice(&1u32.to_be_bytes()); // entry count
+            stsd_content.extend_from_slice(&entry);
+            let stsd = mp4_box(b"stsd", &stsd_content);
+            let stbl = mp4_box(b"stbl", &stsd);
+            let minf = mp4_box(b"minf", &stbl);
+            let mdia = mp4_box(b"mdia", &minf);
+            mp4_box(b"trak", &mdia)
+        }
+
+        let ftyp = mp4_box(b"ftyp", b"M4A \x00\x00\x00\x00M4A ");
+        let mdat = mp4_box(b"mdat", &[0u8; 4096]);
+        let mut moov_content = audio_trak(b"mp4a");
+        moov_content.extend_from_slice(&audio_trak(b"alac"));
+        let moov = mp4_box(b"moov", &moov_content);
+
+        let dir = std::env::temp_dir().join("mp3rgain_test_moov_only_read");
+        let _ = std::fs::create_dir_all(&dir);
+
+        for (name, layout) in [
+            ("faststart.m4a", [&ftyp, &moov, &mdat]),
+            ("trailing_moov.m4a", [&ftyp, &mdat, &moov]),
+        ] {
+            let path = dir.join(name);
+            let mut f = std::fs::File::create(&path).unwrap();
+            for part in layout {
+                f.write_all(part).unwrap();
+            }
+
+            assert_eq!(
+                detect_mp4_audio_codec(&path),
+                Some(Mp4AudioCodec::Aac),
+                "{name}"
+            );
+            assert_eq!(count_audio_tracks(&path), 2, "{name}");
+            assert!(is_aac_file(&path), "{name}");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -33,6 +33,14 @@ use crate::{ape, id3v2, mp4meta};
 /// Lifted from `src/processors/utils.rs`.
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// AAC analysis cached between the clipping check and the apply step so a
+/// single apply never walks the bitstream twice (issue #188). Mirrors the
+/// MP3 `mp3_analysis` cache from #135.
+#[cfg(feature = "aac")]
+type AacAnalysisCache = Option<aac::AacAnalysis>;
+#[cfg(not(feature = "aac"))]
+type AacAnalysisCache = Option<std::convert::Infallible>;
+
 /// Album-level ReplayGain info passed alongside per-track results.
 ///
 /// Used to populate the album fields of the ReplayGain tags
@@ -172,16 +180,23 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
 
     // 1) Clipping check + cap.
     //
-    // The MP3 branch caches its `analyze(file)` result so the ID3v2
-    // undo write below can reuse it instead of a second file scan
-    // (issue #135).
+    // Both branches cache their analysis so the apply step below can
+    // reuse it instead of a second file scan: the MP3 `analyze(file)`
+    // result feeds the ID3v2 undo write (issue #135), the AAC bitstream
+    // analysis feeds the gain application itself (issue #188).
     let mut mp3_analysis: Option<crate::Mp3Analysis> = None;
-    let (actual_steps, clipping_prevented, clipping_detected) =
-        check_clipping(file_path, opts, is_aac, &mut mp3_analysis)?;
+    let mut aac_analysis: AacAnalysisCache = None;
+    let (actual_steps, clipping_prevented, clipping_detected) = check_clipping(
+        file_path,
+        opts,
+        is_aac,
+        &mut mp3_analysis,
+        &mut aac_analysis,
+    )?;
 
     // 2) Apply gain to bytes.
     let modified = if is_aac {
-        apply_aac_bytes(file_path, actual_steps, opts)?
+        apply_aac_bytes(file_path, actual_steps, opts, aac_analysis)?
     } else if opts.use_id3v2 {
         apply_mp3_id3v2_bytes(file_path, actual_steps, opts, &mut mp3_analysis)?
     } else {
@@ -240,8 +255,14 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
 pub fn predict_apply(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
     let is_aac = mp4meta::is_aac_file(file_path);
     let mut mp3_analysis: Option<crate::Mp3Analysis> = None;
-    let (actual_steps, clipping_prevented, clipping_detected) =
-        check_clipping(file_path, opts, is_aac, &mut mp3_analysis)?;
+    let mut aac_analysis: AacAnalysisCache = None;
+    let (actual_steps, clipping_prevented, clipping_detected) = check_clipping(
+        file_path,
+        opts,
+        is_aac,
+        &mut mp3_analysis,
+        &mut aac_analysis,
+    )?;
     Ok(ApplyReport {
         modified: 0,
         actual_steps,
@@ -255,6 +276,7 @@ fn check_clipping(
     opts: &ApplyOptions,
     is_aac: bool,
     mp3_analysis: &mut Option<crate::Mp3Analysis>,
+    aac_analysis: &mut AacAnalysisCache,
 ) -> Result<(i32, bool, Option<ClippingDetection>)> {
     let steps = opts.steps;
     if steps <= 0 || opts.wrap {
@@ -293,13 +315,17 @@ fn check_clipping(
     let headroom = if is_aac {
         #[cfg(feature = "aac")]
         {
-            aac::analyze_aac_gains(file_path)
-                .ok()
-                .map(|a| (MAX_GAIN as i32).saturating_sub(a.max_gain() as i32))
+            let analysis = aac::analyze_aac_gains(file_path).ok();
+            let headroom = analysis
+                .as_ref()
+                .map(|a| (MAX_GAIN as i32).saturating_sub(a.max_gain() as i32));
+            *aac_analysis = analysis;
+            headroom
         }
         #[cfg(not(feature = "aac"))]
         {
             let _ = file_path;
+            let _ = &aac_analysis;
             None
         }
     } else {
@@ -322,18 +348,28 @@ fn check_clipping(
 }
 
 #[cfg(feature = "aac")]
-fn apply_aac_bytes(file_path: &Path, steps: i32, opts: &ApplyOptions) -> Result<usize> {
+fn apply_aac_bytes(
+    file_path: &Path,
+    steps: i32,
+    opts: &ApplyOptions,
+    analysis: AacAnalysisCache,
+) -> Result<usize> {
     with_temp_file(file_path, opts.use_temp_file, |r, w| {
         if opts.write_undo {
-            aac::apply_aac_gain_with_undo_to_path(r, w, steps)
+            aac::apply_aac_gain_with_undo_to_path_with_analysis(r, w, steps, analysis)
         } else {
-            aac::apply_aac_gain_to_path(r, w, steps)
+            aac::apply_aac_gain_to_path_with_analysis(r, w, steps, analysis)
         }
     })
 }
 
 #[cfg(not(feature = "aac"))]
-fn apply_aac_bytes(_file_path: &Path, _steps: i32, _opts: &ApplyOptions) -> Result<usize> {
+fn apply_aac_bytes(
+    _file_path: &Path,
+    _steps: i32,
+    _opts: &ApplyOptions,
+    _analysis: AacAnalysisCache,
+) -> Result<usize> {
     Err(Error::FeatureNotAvailable {
         feature: "AAC support",
         feature_flag: "aac",
@@ -487,7 +523,7 @@ mod tests {
     fn prevent_clipping_caps_at_floor_not_round() {
         let opts = opts_with_track(5, 0.9, true);
         let (steps, prevented, _) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
+            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
         assert!(prevented);
         assert_eq!(steps, 0);
         let new_peak = 0.9 * 10.0_f64.powf(steps_to_db(steps) / 20.0);
@@ -501,7 +537,7 @@ mod tests {
         for &peak in &[0.55_f64, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.99] {
             let opts = opts_with_track(20, peak, true);
             let (steps, prevented, _) =
-                check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
+                check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
             assert!(prevented, "peak {peak} should trigger prevention");
             let new_peak = peak * 10.0_f64.powf(steps_to_db(steps) / 20.0);
             assert!(
@@ -517,7 +553,7 @@ mod tests {
     fn prevent_clipping_passthrough_when_safe() {
         let opts = opts_with_track(3, 0.5, true);
         let (steps, prevented, _) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
+            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
         assert!(!prevented);
         assert_eq!(steps, 3);
     }
@@ -533,7 +569,7 @@ mod tests {
         // = -2 steps (= -3 dB). Resulting peak = 1.2 * 10^(-3/20) = 0.85.
         let opts = opts_with_track(1, 1.2, true);
         let (steps, prevented, _) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
+            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
         assert!(prevented);
         assert!(steps < 0, "expected negative steps, got {steps}");
         let new_peak = 1.2 * 10.0_f64.powf(steps_to_db(steps) / 20.0);
@@ -551,7 +587,7 @@ mod tests {
         for &peak in &[1.001_f64, 1.05, 1.1, 1.2, 1.5, 2.0] {
             let opts = opts_with_track(5, peak, true);
             let (steps, prevented, _) =
-                check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
+                check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
             assert!(prevented, "peak {peak} should trigger prevention");
             let new_peak = peak * 10.0_f64.powf(steps_to_db(steps) / 20.0);
             assert!(

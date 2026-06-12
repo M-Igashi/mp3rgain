@@ -1379,6 +1379,20 @@ pub fn apply_aac_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
 /// directly to `write_to` — the caller (e.g. `apply_with_temp_file`) is
 /// responsible for the rename to atomically swap the file (issue #135).
 pub fn apply_aac_gain_to_path(read_from: &Path, write_to: &Path, gain_steps: i32) -> Result<usize> {
+    apply_aac_gain_to_path_with_analysis(read_from, write_to, gain_steps, None)
+}
+
+/// [`apply_aac_gain_to_path`] with an optional pre-computed analysis of
+/// `read_from`, so callers that already analyzed the file (e.g. the clipping
+/// check in `apply_with_options`) don't pay for a second bitstream walk
+/// (issue #188). The caller guarantees the file is unchanged since the
+/// analysis — same contract as the MP3 `mp3_analysis` cache from #135.
+pub(crate) fn apply_aac_gain_to_path_with_analysis(
+    read_from: &Path,
+    write_to: &Path,
+    gain_steps: i32,
+    analysis: Option<AacAnalysis>,
+) -> Result<usize> {
     if gain_steps == 0 {
         if read_from != write_to {
             std::fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
@@ -1388,7 +1402,10 @@ pub fn apply_aac_gain_to_path(read_from: &Path, write_to: &Path, gain_steps: i32
 
     let mut data = std::fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
 
-    let analysis = analyze_aac_gains_from_data(&data)?;
+    let analysis = match analysis {
+        Some(a) => a,
+        None => analyze_aac_gains_from_data(&data)?,
+    };
 
     let modified = apply_aac_gain_to_data(&mut data, &analysis, gain_steps);
 
@@ -1422,6 +1439,17 @@ pub fn apply_aac_gain_with_undo_to_path(
     write_to: &Path,
     gain_steps: i32,
 ) -> Result<usize> {
+    apply_aac_gain_with_undo_to_path_with_analysis(read_from, write_to, gain_steps, None)
+}
+
+/// [`apply_aac_gain_with_undo_to_path`] with an optional pre-computed analysis
+/// of `read_from` — see [`apply_aac_gain_to_path_with_analysis`] (issue #188).
+pub(crate) fn apply_aac_gain_with_undo_to_path_with_analysis(
+    read_from: &Path,
+    write_to: &Path,
+    gain_steps: i32,
+    analysis: Option<AacAnalysis>,
+) -> Result<usize> {
     if gain_steps == 0 {
         if read_from != write_to {
             std::fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
@@ -1431,7 +1459,10 @@ pub fn apply_aac_gain_with_undo_to_path(
 
     let mut data = std::fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
 
-    let analysis = analyze_aac_gains_from_data(&data)?;
+    let analysis = match analysis {
+        Some(a) => a,
+        None => analyze_aac_gains_from_data(&data)?,
+    };
 
     let existing_undo = mp4meta::read_undo_tags_from_data(&data);
     let existing_gain = crate::ape::parse_undo_values(existing_undo.undo()).0;
