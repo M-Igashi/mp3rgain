@@ -24,12 +24,6 @@ use crate::error::{Error, Result};
 use std::fs;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-// Per-process counter for atomic_write temp filenames. Without this, parallel
-// callers writing to MP4 files in the same parent directory would collide on
-// `.mp3rgain_temp_{pid}.m4a`.
-static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// ReplayGain tag keys (iTunes freeform format)
 pub const RG_TRACK_GAIN: &str = "replaygain_track_gain";
@@ -348,6 +342,32 @@ pub(crate) fn find_box_in_container(
     None
 }
 
+/// Read u32 big-endian from data at offset. Shared with the `aac` module —
+/// callers are responsible for bounds (panics on out-of-range, like direct
+/// indexing).
+pub(crate) fn read_u32_be(data: &[u8], offset: usize) -> u32 {
+    u32::from_be_bytes([
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+    ])
+}
+
+/// Read u64 big-endian from data at offset. See [`read_u32_be`].
+pub(crate) fn read_u64_be(data: &[u8], offset: usize) -> u64 {
+    u64::from_be_bytes([
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+        data[offset + 4],
+        data[offset + 5],
+        data[offset + 6],
+        data[offset + 7],
+    ])
+}
+
 /// Parse freeform tag from data
 fn parse_freeform_tag(data: &[u8]) -> Option<FreeformTag> {
     let mut cursor = Cursor::new(data);
@@ -595,13 +615,7 @@ pub fn write_replaygain_tags(file_path: &Path, tags: &ReplayGainTags) -> Result<
 /// Atomic write: write to a temp file then rename over the original.
 /// Falls back to direct write if rename fails (e.g., cross-filesystem).
 pub(crate) fn atomic_write(file_path: &Path, data: &[u8]) -> Result<()> {
-    let parent = file_path.parent().unwrap_or(Path::new("."));
-    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let temp_path = parent.join(format!(
-        ".mp3rgain_temp_{}_{}.m4a",
-        std::process::id(),
-        counter
-    ));
+    let temp_path = crate::apply::temp_sibling_path(file_path, "m4a");
 
     if let Err(e) = fs::write(&temp_path, data) {
         let _ = fs::remove_file(&temp_path);
@@ -1006,12 +1020,7 @@ fn create_udta_box(content: &[u8]) -> Vec<u8> {
 }
 
 fn read_box_size(data: &[u8], box_pos: usize) -> usize {
-    u32::from_be_bytes([
-        data[box_pos],
-        data[box_pos + 1],
-        data[box_pos + 2],
-        data[box_pos + 3],
-    ]) as usize
+    read_u32_be(data, box_pos) as usize
 }
 
 fn update_box_size(data: &mut [u8], box_pos: usize, size_diff: i64) {
@@ -1019,12 +1028,7 @@ fn update_box_size(data: &mut [u8], box_pos: usize, size_diff: i64) {
         return;
     }
 
-    let current_size = u32::from_be_bytes([
-        data[box_pos],
-        data[box_pos + 1],
-        data[box_pos + 2],
-        data[box_pos + 3],
-    ]);
+    let current_size = read_u32_be(data, box_pos);
 
     // Don't update if it's an extended size box (size == 1) or extends to EOF (size == 0)
     if current_size <= 1 {
@@ -1076,9 +1080,8 @@ fn update_offsets_recursive(
     let mut pos = start;
 
     while pos + 8 <= end {
-        let size = u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
-        let box_type =
-            u32::from_be_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]]);
+        let size = read_u32_be(data, pos);
+        let box_type = read_u32_be(data, pos + 4);
 
         if size == 0 || pos + size as usize > end {
             break;
@@ -1090,24 +1093,14 @@ fn update_offsets_recursive(
                 let version_flags_pos = pos + 8;
                 let entry_count_pos = version_flags_pos + 4;
                 if entry_count_pos + 4 <= data.len() {
-                    let entry_count = u32::from_be_bytes([
-                        data[entry_count_pos],
-                        data[entry_count_pos + 1],
-                        data[entry_count_pos + 2],
-                        data[entry_count_pos + 3],
-                    ]);
+                    let entry_count = read_u32_be(data, entry_count_pos);
 
                     let mut offset_pos = entry_count_pos + 4;
                     for _ in 0..entry_count {
                         if offset_pos + 4 > data.len() {
                             break;
                         }
-                        let offset = u32::from_be_bytes([
-                            data[offset_pos],
-                            data[offset_pos + 1],
-                            data[offset_pos + 2],
-                            data[offset_pos + 3],
-                        ]);
+                        let offset = read_u32_be(data, offset_pos);
                         if (offset as usize) >= threshold {
                             let new_offset = (offset as i64 + size_diff) as u32;
                             data[offset_pos..offset_pos + 4]
@@ -1122,28 +1115,14 @@ fn update_offsets_recursive(
                 let version_flags_pos = pos + 8;
                 let entry_count_pos = version_flags_pos + 4;
                 if entry_count_pos + 4 <= data.len() {
-                    let entry_count = u32::from_be_bytes([
-                        data[entry_count_pos],
-                        data[entry_count_pos + 1],
-                        data[entry_count_pos + 2],
-                        data[entry_count_pos + 3],
-                    ]);
+                    let entry_count = read_u32_be(data, entry_count_pos);
 
                     let mut offset_pos = entry_count_pos + 4;
                     for _ in 0..entry_count {
                         if offset_pos + 8 > data.len() {
                             break;
                         }
-                        let offset = u64::from_be_bytes([
-                            data[offset_pos],
-                            data[offset_pos + 1],
-                            data[offset_pos + 2],
-                            data[offset_pos + 3],
-                            data[offset_pos + 4],
-                            data[offset_pos + 5],
-                            data[offset_pos + 6],
-                            data[offset_pos + 7],
-                        ]);
+                        let offset = read_u64_be(data, offset_pos);
                         if (offset as usize) >= threshold {
                             let new_offset = (offset as i64 + size_diff) as u64;
                             data[offset_pos..offset_pos + 8]
@@ -1196,7 +1175,7 @@ pub fn is_mp4_file(file_path: &Path) -> bool {
     if bytes_read < 12 {
         return false;
     }
-    let size = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    let size = read_u32_be(&buf, 0) as usize;
     if &buf[4..8] != b"ftyp" || size < 12 {
         return false;
     }
@@ -1270,35 +1249,70 @@ fn read_moov_content(file_path: &Path) -> Option<Vec<u8>> {
     None
 }
 
-/// Detect the audio codec in an MP4 file by inspecting the stsd box.
-/// Navigates moov → trak → mdia → minf → stbl → stsd to find the codec.
-pub fn detect_mp4_audio_codec(file_path: &Path) -> Option<Mp4AudioCodec> {
-    let moov = read_moov_content(file_path)?;
-
-    // Search through all trak boxes for an audio track
-    let mut trak_search_pos = 0;
-
-    while trak_search_pos < moov.len() {
-        let (trak_pos, trak_header) =
-            find_box_in_container(&moov, trak_search_pos, moov.len() - trak_search_pos, TRAK)?;
-        let trak_start = trak_pos + trak_header.header_size as usize;
-        let trak_size = trak_header.content_size() as usize;
-
-        if let Some(codec) = detect_codec_in_trak(&moov, trak_start, trak_size) {
-            return Some(codec);
-        }
-
-        // size == 0 means "extends to EOF"; advancing by 0 would loop forever.
-        if trak_header.size == 0 {
-            break;
-        }
-        trak_search_pos = trak_pos + trak_header.size as usize;
+/// Iterate the trak boxes inside a container region of `data`, yielding
+/// `(trak_start, trak_size)` content ranges. Shared by codec detection,
+/// track counting, and the AAC sample-table builder, which all walked
+/// traks with the same loop.
+pub(crate) fn traks(data: &[u8], start: usize, size: usize) -> TrakIter<'_> {
+    TrakIter {
+        data,
+        pos: start,
+        end: start.saturating_add(size).min(data.len()),
     }
-
-    None
 }
 
-fn detect_codec_in_trak(data: &[u8], trak_start: usize, trak_size: usize) -> Option<Mp4AudioCodec> {
+pub(crate) struct TrakIter<'a> {
+    data: &'a [u8],
+    pos: usize,
+    end: usize,
+}
+
+impl Iterator for TrakIter<'_> {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos >= self.end {
+            return None;
+        }
+        let (trak_pos, trak_header) =
+            find_box_in_container(self.data, self.pos, self.end - self.pos, TRAK)?;
+        let item = (
+            trak_pos + trak_header.header_size as usize,
+            trak_header.content_size() as usize,
+        );
+        // size == 0 means "extends to EOF" — nothing can follow, and
+        // advancing by 0 would loop forever on a malformed file.
+        self.pos = if trak_header.size == 0 {
+            self.end
+        } else {
+            trak_pos + trak_header.size as usize
+        };
+        Some(item)
+    }
+}
+
+/// stbl location and codec identifier for one trak, from
+/// [`find_trak_sample_info`].
+//
+// The stbl/stsd fields are only consumed by the `aac` module's
+// sample-table builder; without that feature only `entry_type` is read.
+#[cfg_attr(not(feature = "aac"), allow(dead_code))]
+pub(crate) struct TrakSampleInfo {
+    pub(crate) stbl_start: usize,
+    pub(crate) stbl_size: usize,
+    pub(crate) stsd_pos: usize,
+    /// First stsd sample entry's box type (e.g. `mp4a`, `alac`, `avc1`).
+    pub(crate) entry_type: u32,
+}
+
+/// Navigate trak → mdia → minf → stbl → stsd and read the first sample
+/// entry's box type (the codec identifier). Shared by MP4 codec detection
+/// and the AAC sample-table builder.
+pub(crate) fn find_trak_sample_info(
+    data: &[u8],
+    trak_start: usize,
+    trak_size: usize,
+) -> Option<TrakSampleInfo> {
     let (mdia_pos, mdia_header) = find_box_in_container(data, trak_start, trak_size, MDIA)?;
     let mdia_start = mdia_pos + mdia_header.header_size as usize;
     let mdia_size = mdia_header.content_size() as usize;
@@ -1321,15 +1335,25 @@ fn detect_codec_in_trak(data: &[u8], trak_start: usize, trak_size: usize) -> Opt
         return None;
     }
 
-    // Read the first sample entry's box type (the codec identifier)
-    let entry_type = u32::from_be_bytes([
-        data[entries_start + 4],
-        data[entries_start + 5],
-        data[entries_start + 6],
-        data[entries_start + 7],
-    ]);
+    Some(TrakSampleInfo {
+        stbl_start,
+        stbl_size,
+        stsd_pos,
+        entry_type: read_u32_be(data, entries_start + 4),
+    })
+}
 
-    match entry_type {
+/// Detect the audio codec in an MP4 file by inspecting the stsd box.
+/// Navigates moov → trak → mdia → minf → stbl → stsd to find the codec.
+pub fn detect_mp4_audio_codec(file_path: &Path) -> Option<Mp4AudioCodec> {
+    let moov = read_moov_content(file_path)?;
+    traks(&moov, 0, moov.len())
+        .find_map(|(trak_start, trak_size)| detect_codec_in_trak(&moov, trak_start, trak_size))
+}
+
+fn detect_codec_in_trak(data: &[u8], trak_start: usize, trak_size: usize) -> Option<Mp4AudioCodec> {
+    let info = find_trak_sample_info(data, trak_start, trak_size)?;
+    match info.entry_type {
         MP4A => Some(Mp4AudioCodec::Aac),
         ALAC => Some(Mp4AudioCodec::Alac),
         _ => Some(Mp4AudioCodec::Unknown),
@@ -1355,32 +1379,11 @@ pub fn count_audio_tracks(file_path: &Path) -> usize {
         Some(m) => m,
         None => return 0,
     };
-
-    let mut count = 0;
-    let mut search_pos = 0;
-
-    while search_pos < moov.len() {
-        let (trak_pos, trak_header) =
-            match find_box_in_container(&moov, search_pos, moov.len() - search_pos, TRAK) {
-                Some(x) => x,
-                None => break,
-            };
-
-        // Check if this trak has an audio codec (mp4a or alac)
-        let trak_start = trak_pos + trak_header.header_size as usize;
-        let trak_size = trak_header.content_size() as usize;
-        if detect_codec_in_trak(&moov, trak_start, trak_size).is_some() {
-            count += 1;
-        }
-
-        // size == 0 means "extends to EOF"; advancing by 0 would loop forever.
-        if trak_header.size == 0 {
-            break;
-        }
-        search_pos = trak_pos + trak_header.size as usize;
-    }
-
-    count
+    traks(&moov, 0, moov.len())
+        .filter(|&(trak_start, trak_size)| {
+            detect_codec_in_trak(&moov, trak_start, trak_size).is_some()
+        })
+        .count()
 }
 
 #[cfg(test)]

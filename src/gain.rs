@@ -4,7 +4,7 @@ use crate::ape::{
     TAG_MP3GAIN_UNDO,
 };
 use crate::error::{Error, Result};
-use crate::frame::{apply_gain_to_channel_data, apply_gain_to_data, GainMode};
+use crate::frame::{apply_gain_to_data, GainMode};
 
 use std::fs;
 use std::path::Path;
@@ -223,10 +223,10 @@ pub(crate) fn apply_undo_to_data(data: &mut [u8], left: i32, right: i32, wrap: b
         } else {
             GainMode::Saturating
         };
-        apply_gain_to_data(data, -left, mode)
+        apply_gain_to_data(data, -left, mode, None)
     } else {
-        let left_frames = apply_gain_to_channel_data(data, 0, -left);
-        let right_frames = apply_gain_to_channel_data(data, 1, -right);
+        let left_frames = apply_gain_to_data(data, -left, GainMode::Saturating, Some(0));
+        let right_frames = apply_gain_to_data(data, -right, GainMode::Saturating, Some(1));
         left_frames.max(right_frames)
     }
 }
@@ -310,7 +310,7 @@ fn apply_gain_simple_to_path(
 ) -> Result<usize> {
     let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
 
-    let modified_frames = apply_gain_to_data(&mut data, gain_steps, mode);
+    let modified_frames = apply_gain_to_data(&mut data, gain_steps, mode, None);
 
     fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
 
@@ -348,7 +348,7 @@ fn apply_gain_with_undo_impl_to_path(
         tag.set_minmax(analysis.min_gain(), analysis.max_gain());
     }
 
-    let frames = apply_gain_to_data(&mut data, gain_steps, mode);
+    let frames = apply_gain_to_data(&mut data, gain_steps, mode, None);
 
     let new_data = replace_ape_tag(&data, &tag);
     fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
@@ -369,7 +369,12 @@ fn apply_gain_channel_impl(
         return Err(Error::ChannelGainOnMono);
     }
 
-    let modified_frames = apply_gain_to_channel_data(&mut data, channel.index(), gain_steps);
+    let modified_frames = apply_gain_to_data(
+        &mut data,
+        gain_steps,
+        GainMode::Saturating,
+        Some(channel.index()),
+    );
 
     fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
 
@@ -404,7 +409,12 @@ fn apply_gain_channel_with_undo(
         tag.set_minmax(analysis.min_gain(), analysis.max_gain());
     }
 
-    let frames = apply_gain_to_channel_data(&mut data, channel.index(), gain_steps);
+    let frames = apply_gain_to_data(
+        &mut data,
+        gain_steps,
+        GainMode::Saturating,
+        Some(channel.index()),
+    );
 
     let new_data = replace_ape_tag(&data, &tag);
     fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;

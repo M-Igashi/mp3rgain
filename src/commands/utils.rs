@@ -1,7 +1,128 @@
+use anyhow::Result;
 use colored::*;
+use rayon::prelude::*;
+use std::io::{self, Write as _};
+use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::json_output::{FileStatus, JsonFileResult, JsonSummary};
+use crate::commands::threading::effective_threads;
+use crate::json_output::{FileStatus, JsonFileResult, JsonOutput, JsonSummary};
+use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
+use crate::util::get_filename;
+
+/// Run `per_file` over every file — in parallel when `-j` allows it — with
+/// progress reporting and ordered stdout flushing. `per_file` returns the
+/// optional JSON record plus the text to print for that file; records are
+/// collected in input order and counted into (successful, failed).
+///
+/// This is the shared fan-out driver for the per-file commands (apply,
+/// channel apply, undo, delete tags, check tags, max amplitude), which all
+/// repeated the progress-bar / par_iter / ordered-flush / counter loop.
+pub fn for_each_file<F>(
+    files: &[PathBuf],
+    opts: &Options,
+    per_file: F,
+) -> Result<(Vec<JsonFileResult>, usize, usize)>
+where
+    F: Fn(&Path) -> Result<(Option<JsonFileResult>, String)> + Sync,
+{
+    let pb = create_progress_bar(files.len(), opts);
+    let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
+    let mut successful = 0;
+    let mut failed = 0;
+
+    let parallel = effective_threads(opts) > 1 && files.len() > 1;
+
+    if parallel {
+        let pb_ref = pb.as_ref();
+        let collected: Vec<(Option<JsonFileResult>, String)> = files
+            .par_iter()
+            .map(|file| -> Result<(Option<JsonFileResult>, String)> {
+                let r = per_file(file)?;
+                if let Some(pb) = pb_ref {
+                    pb.set_message(get_filename(file).to_string());
+                    pb.inc(1);
+                }
+                Ok(r)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        for (_, text) in &collected {
+            if !text.is_empty() {
+                handle.write_all(text.as_bytes())?;
+            }
+        }
+        drop(handle);
+
+        for (result, _) in collected {
+            if let Some(result) = result {
+                update_counters(&result, &mut successful, &mut failed);
+                json_results.push(result);
+            }
+        }
+    } else {
+        for file in files {
+            progress_set_message(&pb, get_filename(file));
+
+            let (result, text) = per_file(file)?;
+            if !text.is_empty() {
+                print!("{}", text);
+            }
+            if let Some(result) = result {
+                update_counters(&result, &mut successful, &mut failed);
+                json_results.push(result);
+            }
+
+            progress_inc(&pb);
+        }
+    }
+
+    progress_finish(pb);
+    Ok((json_results, successful, failed))
+}
+
+/// Shared command epilogue: JSON output (with per-run summary) in JSON mode,
+/// otherwise the dry-run notice.
+pub fn finish_with_summary(
+    total_files: usize,
+    json_results: Vec<JsonFileResult>,
+    successful: usize,
+    failed: usize,
+    opts: &Options,
+) -> Result<()> {
+    if opts.output_format == OutputFormat::Json {
+        let output = JsonOutput {
+            files: Some(json_results),
+            album: None,
+            summary: Some(create_json_summary(
+                total_files,
+                successful,
+                failed,
+                opts.dry_run,
+            )),
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        print_dry_run_notice(opts);
+    }
+    Ok(())
+}
+
+/// Epilogue for read-only commands (check tags, max amplitude): JSON output
+/// without a summary block, nothing otherwise.
+pub fn finish_without_summary(json_results: Vec<JsonFileResult>, opts: &Options) -> Result<()> {
+    if opts.output_format == OutputFormat::Json {
+        let output = JsonOutput {
+            files: Some(json_results),
+            album: None,
+            summary: None,
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+    Ok(())
+}
 
 pub fn update_counters(result: &JsonFileResult, successful: &mut usize, failed: &mut usize) {
     match result.status {

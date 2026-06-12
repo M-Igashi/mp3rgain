@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::*;
-use mp3rgain::apply::{apply_with_options, ApplyOptions, ClippingDetection};
-use mp3rgain::{analyze, mp4meta, steps_to_db, Channel, MAX_GAIN};
+use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions, ClippingDetection};
+use mp3rgain::{analyze, mp4meta, steps_to_db, Channel};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -32,10 +32,26 @@ fn process_apply_into(
     }
 
     // Dry run: don't touch the file. Headroom-based clipping prevention
-    // still needs to be reflected in the "would apply N steps" line.
+    // still needs to be reflected in the "would apply N steps" line, so
+    // drive the same clipping check through predict_apply.
+    //
+    // Without -k the steps are never capped, and the clipping warning is
+    // only emitted/recorded when neither -c (ignore) nor -q (quiet) is set.
+    // In that case the prediction feeds nothing the caller can observe, so
+    // skip it — a `--dry-run -c`/`-q` sweep then avoids a full read per file.
     if opts.dry_run {
         let (actual_steps, warning_msg) =
-            dry_run_clipping_summary(file, steps, opts, is_aac, dry_run_prefix, filename);
+            if !opts.prevent_clipping && (opts.ignore_clipping || opts.quiet) {
+                (steps, None)
+            } else {
+                let mut apply_opts = ApplyOptions::new(steps);
+                apply_opts.prevent_clipping = opts.prevent_clipping;
+                apply_opts.wrap = opts.wrap_gain;
+                let report = predict_apply(file, &apply_opts)?;
+                let warning =
+                    emit_clipping_warning_headroom(steps, &report, opts, dry_run_prefix, filename);
+                (report.actual_steps, warning)
+            };
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             writeln!(
                 out,
@@ -114,95 +130,8 @@ fn process_apply_into(
     }
 }
 
-/// Recompute the headroom-based clipping cap purely for the dry-run
-/// branch. Mirrors [`mp3rgain::apply::apply_with_options`]'s check.
-fn dry_run_clipping_summary(
-    file: &Path,
-    steps: i32,
-    opts: &Options,
-    is_aac: bool,
-    dry_run_prefix: &str,
-    filename: &str,
-) -> (i32, Option<String>) {
-    if steps <= 0 || opts.wrap_gain {
-        return (steps, None);
-    }
-
-    // Without -k the steps are never capped, and the clipping warning is only
-    // emitted/recorded when neither -c (ignore) nor -q (quiet) is set. In that
-    // case the analysis below feeds nothing the caller can observe, so skip it
-    // — a `--dry-run -c`/`-q` sweep then avoids a full read per file.
-    if !opts.prevent_clipping && (opts.ignore_clipping || opts.quiet) {
-        return (steps, None);
-    }
-
-    let headroom = if is_aac {
-        #[cfg(feature = "aac")]
-        {
-            mp3rgain::aac::analyze_aac_gains(file)
-                .ok()
-                .map(|a| MAX_GAIN.saturating_sub(a.max_gain()) as i32)
-        }
-        #[cfg(not(feature = "aac"))]
-        {
-            let _ = file;
-            None
-        }
-    } else {
-        analyze(file).ok().map(|i| i.headroom_steps())
-    };
-
-    let Some(headroom_steps) = headroom else {
-        return (steps, None);
-    };
-    if steps <= headroom_steps {
-        return (steps, None);
-    }
-    if opts.prevent_clipping {
-        let actual = headroom_steps;
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
-            eprintln!(
-                "  {} {}{} - gain reduced from {} to {} steps to prevent clipping",
-                "!".yellow(),
-                dry_run_prefix,
-                filename,
-                steps,
-                actual
-            );
-        }
-        return (
-            actual,
-            Some(format!(
-                "gain reduced from {} to {} steps to prevent clipping",
-                steps, actual
-            )),
-        );
-    }
-    if !opts.ignore_clipping && !opts.quiet {
-        if opts.output_format == OutputFormat::Text {
-            eprintln!(
-                "  {} {}{} - clipping warning: requested {} steps but only {} headroom",
-                "!".yellow(),
-                dry_run_prefix,
-                filename,
-                steps,
-                headroom_steps
-            );
-            eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
-        }
-        return (
-            steps,
-            Some(format!(
-                "clipping warning: requested {} steps but only {} headroom",
-                steps, headroom_steps
-            )),
-        );
-    }
-    (steps, None)
-}
-
-/// Render the user-visible clipping warning after a real apply, using the
-/// headroom diagnostic from [`ApplyReport`].
+/// Render the user-visible clipping warning after a real or predicted
+/// apply, using the headroom diagnostic from [`ApplyReport`].
 fn emit_clipping_warning_headroom(
     requested_steps: i32,
     report: &mp3rgain::ApplyReport,

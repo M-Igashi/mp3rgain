@@ -1,9 +1,9 @@
 use anyhow::Result;
 use colored::*;
 use indicatif::ProgressBar;
-use mp3rgain::apply::{apply_with_options, ApplyOptions, ClippingDetection};
+use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions, ClippingDetection};
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult};
-use mp3rgain::{apply_gain_to_peak, mp4meta, steps_to_db, AacAlbumInfo};
+use mp3rgain::{mp4meta, steps_to_db, AacAlbumInfo};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -131,11 +131,17 @@ fn apply_replaygain_with_album_into(
     let is_aac = result.file_type() == AudioFileType::Aac;
 
     // Dry run: don't actually modify. Clipping prevention still needs to
-    // be reflected in the "would apply N steps" message, so mirror the
-    // ReplayGain-peak cap here without touching the file.
+    // be reflected in the "would apply N steps" message, so drive the same
+    // ReplayGain-peak cap through predict_apply without touching the file.
     if opts.dry_run {
-        let (actual_steps, warning_msg) =
-            dry_run_clipping_summary(steps, result, opts, dry_run_prefix, filename);
+        let mut apply_opts = ApplyOptions::new(steps);
+        apply_opts.track_result = Some(result.clone());
+        apply_opts.prevent_clipping = opts.prevent_clipping;
+        apply_opts.wrap = opts.wrap_gain;
+        let report = predict_apply(file, &apply_opts)?;
+        let warning_msg =
+            emit_clipping_warning_peak(steps, result, &report, opts, dry_run_prefix, filename);
+        let actual_steps = report.actual_steps;
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             writeln!(
                 out,
@@ -231,78 +237,8 @@ fn apply_replaygain_with_album_into(
     }
 }
 
-/// Recompute the ReplayGain-peak clipping cap purely for the dry-run
-/// branch (no file writes). Mirrors [`mp3rgain::apply::apply_with_options`]
-/// for the same inputs so the displayed "would apply N steps" matches what
-/// a real apply would do.
-fn dry_run_clipping_summary(
-    steps: i32,
-    result: &ReplayGainResult,
-    opts: &Options,
-    dry_run_prefix: &str,
-    filename: &str,
-) -> (i32, Option<String>) {
-    if steps <= 0 || opts.wrap_gain {
-        return (steps, None);
-    }
-    let new_peak = apply_gain_to_peak(result.peak(), steps_to_db(steps));
-    if new_peak <= 1.0 {
-        return (steps, None);
-    }
-    if opts.prevent_clipping {
-        let max_safe_db = mp3rgain::peak_to_headroom_db(result.peak()).unwrap_or(0.0);
-        // Floor (not round) and allow negative results, matching the real
-        // apply path in `mp3rgain::apply::check_clipping`: round() could push
-        // the cap above true headroom, and clamping to 0 would leave an
-        // already-clipping source (peak > 1.0) still clipping in the preview
-        // while the real apply attenuates it (#173).
-        let actual = (max_safe_db / mp3rgain::GAIN_STEP_DB).floor() as i32;
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
-            eprintln!(
-                "  {} {}{} - gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
-                "!".yellow(),
-                dry_run_prefix,
-                filename,
-                steps,
-                actual,
-                result.peak()
-            );
-        }
-        return (
-            actual,
-            Some(format!(
-                "gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
-                steps,
-                actual,
-                result.peak()
-            )),
-        );
-    }
-    if !opts.ignore_clipping && !opts.quiet {
-        if opts.output_format == OutputFormat::Text {
-            eprintln!(
-                "  {} {}{} - clipping warning: peak would be {:.2} (>{:.2})",
-                "!".yellow(),
-                dry_run_prefix,
-                filename,
-                new_peak,
-                1.0
-            );
-            eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
-        }
-        return (
-            steps,
-            Some(format!(
-                "clipping warning: peak would be {:.2} (>1.00)",
-                new_peak
-            )),
-        );
-    }
-    (steps, None)
-}
-
-/// Render the user-visible clipping warning after a real apply, using the
-/// ReplayGain-peak diagnostic from [`ApplyReport`].
+/// Render the user-visible clipping warning after a real or predicted
+/// apply, using the ReplayGain-peak diagnostic from [`ApplyReport`].
 fn emit_clipping_warning_peak(
     requested_steps: i32,
     result: &ReplayGainResult,
