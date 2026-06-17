@@ -216,6 +216,7 @@ Tests are run automatically in CI on every pull request. See the latest workflow
 
 | Date | mp3gain Version | mp3rgain Version | Result |
 |------|-----------------|------------------|--------|
+| 2026-06 | 1.6.2 | 2.8.0 | All tests passing (MP3 + AAC), verified in CI on every PR |
 | 2026-02 | 1.6.2 | 2.0.0 | All tests passed (MP3 + AAC) |
 | 2026-01 | 1.6.2 | 1.4.0 | All tests passed |
 | 2026-01 | 1.6.2 | 1.3.0 | All tests passed |

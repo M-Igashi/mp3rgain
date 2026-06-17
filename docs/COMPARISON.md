@@ -37,7 +37,7 @@ All options from the original mp3gain are fully implemented in mp3rgain:
 | Option | Description | mp3rgain | aacgain | mp3gain |
 |--------|-------------|----------|---------|---------|
 | `-g <i>` | Apply gain of i steps | Yes | Yes | Yes |
-| `-d <n>` | Apply gain of n dB | Yes | Yes | Yes |
+| `-d <n>` | Modify suggested dB gain by n | Yes | Yes | Yes |
 | `-r` | Apply track gain (ReplayGain) | Yes | Yes | Yes |
 | `-a` | Apply album gain (ReplayGain) | Yes | Yes | Yes |
 | `-u` | Undo gain changes | Yes | Yes | Yes |

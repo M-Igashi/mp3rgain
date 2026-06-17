@@ -1,7 +1,7 @@
 # mp3rgain
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.85%2B-blue.svg)](https://www.rust-lang.org)
 [![crates.io](https://img.shields.io/crates/v/mp3rgain.svg)](https://crates.io/crates/mp3rgain)
 [![GitHub Downloads](https://img.shields.io/github/downloads/M-Igashi/mp3rgain/total?label=downloads&color=brightgreen)](https://m-igashi.github.io/mp3rgain/)
 [![mp3gain compatible](https://img.shields.io/badge/mp3gain-compatible-brightgreen.svg)](docs/compatibility-report.md)
@@ -113,10 +113,11 @@ A native GUI application (`mp3rgui`) is available for users who prefer a graphic
 | `-r` | Apply Track gain (ReplayGain) |
 | `-a` | Apply Album gain (ReplayGain) |
 | `-g <i>` | Apply gain of i steps (1 step = 1.5 dB) |
-| `-d <n>` | Modify target dB level (use with analysis) |
+| `-d <n>` | Modify suggested dB gain by n (mp3gain-compatible; applied with `-r` / `-a`) |
 | `-u` | Undo gain changes |
 | `-k` | Prevent clipping |
 | `-R` | Process directories recursively |
+| `--skip-errors` | Keep album analysis (`-a`) going past unreadable files |
 | `-n` | Dry-run mode |
 | `-j <n>` / `--threads <n>` | Worker threads for analysis (default: auto, 0=auto, 1=serial) |
 | `-o [fmt]` | Output format: `text`, `json`, `tsv` (default: tsv if no argument) |
@@ -155,7 +156,7 @@ Official multi-arch images (`linux/amd64`, `linux/arm64`) are published to GHCR:
 ```
 ghcr.io/m-igashi/mp3rgain:latest
 ghcr.io/m-igashi/mp3rgain:v2          # latest 2.x
-ghcr.io/m-igashi/mp3rgain:v2.3.0      # exact version
+ghcr.io/m-igashi/mp3rgain:v2.8.0      # exact version
 ```
 
 The image is built `FROM scratch` with a fully static (musl) binary — no

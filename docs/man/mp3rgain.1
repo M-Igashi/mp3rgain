@@ -1,7 +1,7 @@
 .\" mp3rgain - Lossless MP3 volume adjustment
 .\" Copyright (c) 2025 M-Igashi
 .\" Licensed under MIT License
-.TH MP3RGAIN 1 "February 2026" "mp3rgain 2.0.0" "User Commands"
+.TH MP3RGAIN 1 "June 2026" "mp3rgain 2.8.0" "User Commands"
 .SH NAME
 mp3rgain \- lossless MP3/AAC volume adjustment (modern mp3gain replacement)
 .SH SYNOPSIS
@@ -32,13 +32,13 @@ steps. Each step equals 1.5 dB (fixed by MP3 specification).
 Positive values increase volume, negative values decrease it.
 .TP
 .BI \-d " n"
-Apply gain of
+Modify the suggested gain by
 .I n
-dB (rounded to nearest step). Can also be used with
+dB. Applied together with
 .B \-r
 or
 .B \-a
-to modify the target dB level relative to 89 dB reference.
+to shift the target relative to the 89 dB reference level.
 .TP
 .BI \-l " channel gain"
 Apply gain to a specific channel only.
@@ -67,6 +67,12 @@ All files are treated as an album and normalized together.
 .B \-e
 Skip album analysis even when processing multiple files.
 Apply track gain only.
+.TP
+.B \-\-skip\-errors
+Continue album analysis
+.RB ( \-a )
+past files that fail to read instead of aborting. Failed files are
+reported and excluded from the album gain calculation.
 .TP
 .BI \-i " n"
 Specify which audio track to process in multi-track files (default: 0).
@@ -129,6 +135,13 @@ Quiet mode. Suppress most output.
 .TP
 .B \-R
 Process directories recursively. Finds all MP3, M4A, AAC, and MP4 files.
+.TP
+\fB\-j\fR \fIn\fR, \fB\-\-threads\fR \fIn\fR
+Number of worker threads for ReplayGain analysis. Default is the number of
+available CPUs; 0 also means auto, and 1 forces the legacy serial path.
+See also the
+.B MP3RGAIN_THREADS
+environment variable.
 .TP
 .BR \-n ", " \-\-dry\-run
 Dry-run mode. Show what would be done without making changes.
@@ -214,6 +227,14 @@ Full support for reading, analyzing, and modifying gain.
 .TP
 .B AAC/M4A/MP4
 Full lossless bitstream gain adjustment and undo. HE-AAC/SBR supported (base layer).
+.SH ENVIRONMENT
+.TP
+.B MP3RGAIN_THREADS
+Number of worker threads for ReplayGain analysis, equivalent to
+.BR \-j .
+The explicit
+.B \-j
+flag takes precedence. A value of 0 means auto (number of available CPUs).
 .SH FILES
 Gain changes and undo information are stored in APEv2 tags appended to MP3 files:
 .TP

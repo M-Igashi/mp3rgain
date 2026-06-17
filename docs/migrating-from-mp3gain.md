@@ -39,7 +39,7 @@ relying on this in scripts.
 
 ## Command and flag equivalence
 
-The flag list comes from `mp3rgain --help` (v2.4.0). All classic mp3gain
+The flag list comes from `mp3rgain --help` (v2.8.0). All classic mp3gain
 flags are accepted with the same semantics; mp3rgain adds a few extensions.
 
 ### Identical behaviour
@@ -50,7 +50,7 @@ flags are accepted with the same semantics; mp3rgain adds a few extensions.
 | `-a` | Apply album gain (ReplayGain) | |
 | `-e` | Skip album analysis even with multiple files | |
 | `-g <i>` | Apply gain of `i` steps (1 step = 1.5 dB) | Bit-identical output (see compatibility report) |
-| `-d <n>` | Apply gain of `n` dB (rounded to nearest step) | mp3gain-compatible since v1.2.1 |
+| `-d <n>` | Modify suggested gain by `n` dB (applied with `-r` / `-a`) | mp3gain-compatible since v1.2.1 |
 | `-m <i>` | Modify suggested gain by `i` steps | |
 | `-u` | Undo gain changes (reads APEv2 `mp3gain_undo`) | Reads tags written by either tool |
 | `-x` | Print max amplitude only | |
@@ -78,6 +78,7 @@ are worth knowing:
 | `-o text` / `-o json` / `-o tsv` | Explicit output format selection |
 | `-s i` | Use ID3v2 ReplayGain tags instead of APEv2 (partial) |
 | `-j <n>` / `--threads <n>` | Worker threads for ReplayGain analysis (default: auto). `MP3RGAIN_THREADS` env var also honored. `-j 1` reproduces mp3gain's serial behavior. See [docs/perf-parallel.md](perf-parallel.md). |
+| `--skip-errors` | Keep album analysis (`-a`) going past unreadable files; failed files are reported and excluded from the album gain |
 
 For the full list run `mp3rgain --help`.
 

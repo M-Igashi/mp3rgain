@@ -283,7 +283,7 @@ Cron entry (host crontab) — runs at 03:00 daily during Plex maintenance:
 
 Pin to a major tag (`:v2`) for stability — patch / minor releases land
 automatically, breaking changes do not. Pin to an exact version
-(`:v2.3.0`) for fully reproducible runs. `--user $(id -u):$(id -g)`
+(`:v2.8.0`) for fully reproducible runs. `--user $(id -u):$(id -g)`
 keeps written files under your own UID instead of root.
 
 Because the image is `ENTRYPOINT`-only, every `mp3rgain` flag works

@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current Status: v2.6.3 (Production Ready)
+## Current Status: v2.8.0 (Production Ready)
 
 **Positioning:** mp3rgain is the only actively maintained CLI that performs lossless `global_gain` rewrite on AAC/M4A files (aacgain has been abandoned since ~2009; foobar2000's "Apply ReplayGain to file content" offers a comparable scalefactor-based AAC rewrite but is Windows GUI only with no undo). For MP3 it's a modern drop-in replacement for mp3gain; for AAC on the command line it has no equivalent.
 
@@ -146,17 +146,20 @@ All core functionality complete:
 - [x] Auto-tune via `std::thread::available_parallelism`; `-j 1` reproduces the legacy serial path
 - [x] CLI structure refactor (`processors/` per-file work, `commands/` dispatchers)
 
-### v2.5.0 - Robustness
+### v2.5.0 - Performance & Lean Library Build
 
-- [x] `--skip-errors` keeps album analysis going past unreadable files (#145)
-- [x] Default-features gate for the binary so library-only consumers stay lean
+- [x] Faster parallel pipelines: skip duplicate analyze passes; AAC apply and the `-t` pipeline avoid redundant file I/O (#135)
+- [x] Fix temp-file collisions when multiple workers apply gain in the same directory
+- [x] Default-features gate for the binary so library-only consumers no longer compile `clap`
 
-### v2.6.x - Bug Fixes (Issues #147, #149)
+### v2.6.x - Robustness, Decoder Upgrade & Bug Fixes
 
+- [x] v2.6.0: `--skip-errors` keeps album analysis (`-a`) going past unreadable files (#145)
+- [x] v2.6.1: upgrade Symphonia 0.6.0-alpha.2 → 0.6.0 stable (SIMD decode, redesigned audio primitives) (#146)
 - [x] v2.6.2: apply the `-d` dB modifier during `-a` / `-r` gain application (#147 / #148)
 - [x] v2.6.3: fix GUI corrupting M4A files when applying gain — the dispatcher now routes MP4 files to the AAC path instead of the MP3 sync-word scanner (#149 / #150)
 
-### v2.7.0 (in progress) - Apply Pipeline Refactor & GUI Feature Parity (Issue #153, closes #152)
+### v2.7.0 - Apply Pipeline Refactor & GUI Feature Parity (Issue #153, closes #152)
 
 - [x] `mp3rgain::apply::apply_with_options` — unified pipeline shared by CLI and GUI (Step 1-2, PR #154)
 - [x] GUI worker threads + mpsc progress channel + Cancel button (Step 3, closes #152, PR #154)
@@ -167,6 +170,33 @@ All core functionality complete:
   - Apply Manual Gain, Apply Channel Gain
 - [x] `mp3rgain::apply::predict_apply` — dry-run companion to `apply_with_options`
 - [x] Channel gain routed through the unified pipeline; CLI `processors/utils::write_id3v2_undo_after_apply` removed
+
+### v2.7.1 - GUI Parallelization & Table UX
+
+- [x] Parallelize GUI Track Analysis and Apply Gain via a worker pool (#158, #165, #169)
+- [x] Treat each folder as a separate album in Album Analysis (#159, #166)
+- [x] Refresh table values after Apply Gain without a rescan (#160, #164)
+- [x] Floor the prevent-clipping cap so it never overshoots headroom (#162, #163)
+- [x] Sortable table columns, selection-scoped actions, reveal in file manager (#161, #167, #168, #170)
+
+### v2.7.2 - GUI AAC & Refresh Fixes
+
+- [x] AAC Find Max Amplitude and negative prevent-clipping cap (#173 / #174)
+- [x] Refresh cached peak after Apply Gain so sequential applies keep preventing clipping (#172 / #175)
+- [x] Refresh row values after Undo (#171 / #176)
+
+### v2.7.3 - Packaging
+
+- [x] Move the Nix flake to the repo root and drop hash maintenance (#177 / #178, co-authored by @alinnow)
+
+### v2.8.0 - Latent-Bug Fixes & Performance
+
+- [x] Lossless undo for channel-specific (`-l`) and wrap-mode (`-w`) gain (10d04a6)
+- [x] Harden MP4/AAC parsing against malformed/truncated files — validate box sizes and `stsz`/`stsc`/`stco`/`co64`; zero-size `trak` no longer stalls the scan (9471354, #195)
+- [x] Default command analyzes each file once instead of twice (~2x faster) (7d90443)
+- [x] APE tag reads touch only the file tail; AAC applies walk the bitstream once; MP4 codec detection reads only the `moov` box (#192, #193)
+- [x] MP3 apply/undo on a single in-memory buffer — one read and one write per file (10d04a6)
+- [x] GUI: parallel Find Max Amplitude / Undo / Delete Tags and a virtualized file table for large libraries (#194)
 
 ## Upcoming Goals
 
