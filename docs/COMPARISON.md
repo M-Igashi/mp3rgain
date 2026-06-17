@@ -11,7 +11,7 @@ This document provides a detailed comparison between mp3rgain and the original a
 | **Language** | Rust | C | C |
 | **Last Update** | Active (2026) | 2022 | 2018 |
 | **License** | MIT | LGPL | LGPL |
-| **Version** | 2.0.0 | 1.8.2 | 1.6.2 |
+| **Version** | 2.8.0 | 1.8.2 | 1.6.2 |
 | **Repository** | [M-Igashi/mp3rgain](https://github.com/M-Igashi/mp3rgain) | [dgilman/aacgain](https://github.com/dgilman/aacgain) | SourceForge |
 
 ## Feature Comparison
