@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#000000"/>
+  <rect x="16" y="16" width="480" height="480" fill="none" stroke="#333333" stroke-width="2"/>
+  <!-- gain reference line -->
+  <rect x="30" y="255" width="452" height="3" fill="#ffffff"/>
+  <!-- waveform -->
+  <rect x="42" y="228" width="12" height="56" rx="6" fill="#ffffff"/>
+  <rect x="68" y="209" width="12" height="94" rx="6" fill="#ffffff"/>
+  <rect x="94" y="185" width="12" height="142" rx="6" fill="#ffffff"/>
+  <rect x="120" y="160" width="12" height="192" rx="6" fill="#ffffff"/>
+  <rect x="146" y="132" width="12" height="248" rx="6" fill="#ffffff"/>
+  <rect x="172" y="171" width="12" height="170" rx="6" fill="#ffffff"/>
+  <rect x="198" y="113" width="12" height="286" rx="6" fill="#ffffff"/>
+  <rect x="224" y="147" width="12" height="218" rx="6" fill="#ffffff"/>
+  <rect x="250" y="101" width="12" height="310" rx="6" fill="#ffffff"/>
+  <rect x="276" y="151" width="12" height="210" rx="6" fill="#ffffff"/>
+  <rect x="302" y="116" width="12" height="280" rx="6" fill="#ffffff"/>
+  <rect x="328" y="175" width="12" height="162" rx="6" fill="#ffffff"/>
+  <rect x="354" y="135" width="12" height="242" rx="6" fill="#ffffff"/>
+  <rect x="380" y="163" width="12" height="186" rx="6" fill="#ffffff"/>
+  <rect x="406" y="188" width="12" height="136" rx="6" fill="#ffffff"/>
+  <rect x="432" y="213" width="12" height="86" rx="6" fill="#ffffff"/>
+  <rect x="458" y="230" width="12" height="52" rx="6" fill="#ffffff"/>
+</svg>
