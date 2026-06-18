@@ -1199,10 +1199,12 @@ fn open_in_file_manager(path: &Path) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        // /select, must be a single argument followed by the path. CreateProcess
-        // re-parses the command line so quoting is handled by Command.
+        use std::os::windows::process::CommandExt;
+        // raw_arg, not arg: explorer needs `/select,"path"` quoted exactly;
+        // arg() quotes the whole token for spaced paths → opens Documents.
+        let win_path = path.to_string_lossy().replace('/', "\\");
         std::process::Command::new("explorer.exe")
-            .arg(format!("/select,{}", path.display()))
+            .raw_arg(format!("/select,\"{}\"", win_path))
             .spawn()
             .map(|_| ())
             .map_err(|e| e.to_string())

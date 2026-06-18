@@ -156,7 +156,10 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                     row.set_selected(is_selected);
 
                         row.col(|ui| {
-                            let resp = ui.selectable_label(is_selected, &file.filename);
+                            let path_text = file.path.to_string_lossy();
+                            let resp = ui
+                                .selectable_label(is_selected, path_text.as_ref())
+                                .on_hover_text(path_text.as_ref());
                             if resp.clicked() {
                                 let mode = ui.input(|i| {
                                     let toggle = i.modifiers.ctrl || i.modifiers.command;
