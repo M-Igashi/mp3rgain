@@ -81,18 +81,10 @@ pub struct FileEntry {
 
 /// State for the "Apply Manual Gain" modal. `open` toggles visibility;
 /// `steps` is preserved across closes so the next open shows the same value.
+#[derive(Default)]
 pub struct ManualGainModal {
     pub open: bool,
     pub steps: i32,
-}
-
-impl Default for ManualGainModal {
-    fn default() -> Self {
-        Self {
-            open: false,
-            steps: 0,
-        }
-    }
 }
 
 /// State for the "Apply Channel Gain" modal (`-l`).
