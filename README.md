@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/branding/mp3rgain-banner.png" alt="mp3rgain — lossless MP3/AAC volume normalization" width="800">
+</p>
+
 # mp3rgain
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -82,6 +86,10 @@ See **[docs/migrating-from-mp3gain.md](docs/migrating-from-mp3gain.md)** for the
 ## GUI Application
 
 A native GUI application (`mp3rgui`) is available for users who prefer a graphical interface.
+
+<p align="center">
+  <img src="docs/branding/mp3rgui-screenshot-compact.png" alt="mp3rgui showing track and album ReplayGain analysis for a batch of files" width="820">
+</p>
 
 **Features:**
 
