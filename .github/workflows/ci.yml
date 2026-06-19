@@ -192,6 +192,9 @@ jobs:
           ffmpeg -y -f lavfi -i "sine=frequency=440:duration=1" -ac 1 -ar 44100 -b:a 64k -f mp3 tests/fixtures/test_mono.mp3
           ffmpeg -y -f lavfi -i "sine=frequency=440:duration=1" -ac 2 -ar 44100 -b:a 128k -joint_stereo 1 -f mp3 tests/fixtures/test_joint_stereo.mp3
           ffmpeg -y -f lavfi -i "sine=frequency=440:duration=1" -ac 2 -ar 44100 -q:a 2 -f mp3 tests/fixtures/test_vbr.mp3
+          # Deterministic pink noise (the ReplayGain reference signal) gives the
+          # analysis cross-check a broadband, music-like target, not just tones.
+          ffmpeg -y -f lavfi -i "anoisesrc=color=pink:seed=42:duration=3:amplitude=0.5" -ac 2 -ar 44100 -b:a 128k -f mp3 tests/fixtures/test_pink.mp3
 
       - name: Build mp3rgain
         run: cargo build --release

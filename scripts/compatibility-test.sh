@@ -22,6 +22,8 @@ MP3RGAIN_BIN="${MP3RGAIN_BIN:-}"
 TEST_DIR="${TEST_DIR:-tests/fixtures}"
 TEMP_DIR=$(mktemp -d)
 VERBOSE="${VERBOSE:-0}"
+# Max allowed difference in the recommended ReplayGain track dB change.
+DB_TOLERANCE="${DB_TOLERANCE:-0.1}"
 RESULTS_FILE="${TEMP_DIR}/results.json"
 
 # Colors for output
@@ -221,6 +223,62 @@ test_channel_gain() {
     run_test "right channel -2" "$mp3_file" -l 1 -2
 }
 
+# Extract "<MP3 gain steps>\t<dB gain>" from the first data row of the
+# tab-delimited (-o) analysis output. Both tools share the same column layout:
+#   File  MP3 gain  dB gain  Max Amplitude  Max global_gain  Min global_gain
+analysis_row() {
+    awk -F'\t' 'NR==2 {print $2 "\t" $3; exit}'
+}
+
+# Compare the ReplayGain *analysis* — the recommended gain produced by the
+# loudness algorithm itself, not the byte output of applying an explicit -g.
+# This is the part the equal-loudness/RMS/percentile code actually computes.
+test_replaygain_analysis() {
+    local mp3_file="$1"
+    local basename
+    basename=$(basename "$mp3_file" .mp3)
+    local copy_g="${TEMP_DIR}/an_g_${basename}.mp3"
+    local copy_r="${TEMP_DIR}/an_r_${basename}.mp3"
+    cp "$mp3_file" "$copy_g"
+    cp "$mp3_file" "$copy_r"
+
+    local g_row r_row
+    if ! g_row=$("$MP3GAIN_BIN" -s s -o "$copy_g" 2>/dev/null | analysis_row); then
+        log "  ${YELLOW}SKIP${NC}: mp3gain analysis failed on $basename"
+        SKIP_COUNT=$((SKIP_COUNT + 1))
+        return 0
+    fi
+    if ! r_row=$("$MP3RGAIN_BIN" -o tsv "$copy_r" 2>/dev/null | analysis_row); then
+        log "  ${RED}FAIL${NC}: mp3rgain analysis failed on $basename"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        return 1
+    fi
+
+    local g_steps g_db r_steps r_db step_diff
+    g_steps=$(printf '%s' "$g_row" | cut -f1)
+    g_db=$(printf '%s' "$g_row" | cut -f2)
+    r_steps=$(printf '%s' "$r_row" | cut -f1)
+    r_db=$(printf '%s' "$r_row" | cut -f2)
+    step_diff=$(( g_steps > r_steps ? g_steps - r_steps : r_steps - g_steps ))
+
+    # dB within tolerance AND the quantized step within one 1.5 dB increment.
+    if awk -v a="$g_db" -v b="$r_db" -v t="$DB_TOLERANCE" \
+        'BEGIN { d = a - b; if (d < 0) d = -d; exit (d <= t) ? 0 : 1 }' \
+        && [ "$step_diff" -le 1 ]; then
+        local exact=""
+        [ "$g_steps" = "$r_steps" ] && exact=" (exact step match)"
+        log "  ${GREEN}PASS${NC}: analysis $basename — mp3gain ${g_db} dB / ${g_steps} steps vs mp3rgain ${r_db} dB / ${r_steps} steps${exact}"
+        PASS_COUNT=$((PASS_COUNT + 1))
+        return 0
+    else
+        log "  ${RED}FAIL${NC}: analysis $basename — recommended gain diverged"
+        log "    mp3gain : ${g_db} dB / ${g_steps} steps"
+        log "    mp3rgain: ${r_db} dB / ${r_steps} steps  [tolerance ${DB_TOLERANCE} dB, max 1 step]"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        return 1
+    fi
+}
+
 # Main test execution
 main() {
     log "=========================================="
@@ -271,6 +329,15 @@ main() {
         test_gain_steps "$mp3"
         test_clipping_prevention "$mp3"
         test_channel_gain "$mp3"
+    done
+
+    # Cross-check the ReplayGain analysis (recommended gain) against mp3gain.
+    # The tests above verify gain *application* is byte-identical; this verifies
+    # the loudness *calculation* agrees with the reference implementation.
+    log ""
+    log "Comparing ReplayGain analysis (recommended gain) against mp3gain..."
+    for mp3 in "${mp3_files[@]}"; do
+        test_replaygain_analysis "$mp3"
     done
 
     # Summary
