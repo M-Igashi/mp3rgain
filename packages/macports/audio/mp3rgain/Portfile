@@ -9,6 +9,7 @@ github.tarball_from archive
 revision            0
 
 categories          audio
+platforms           {darwin >= 17}
 installs_libs       no
 license             MIT
 maintainers         {@M-Igashi users.noreply.github.com:M-Igashi} \
