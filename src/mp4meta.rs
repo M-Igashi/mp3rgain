@@ -178,12 +178,12 @@ impl ReplayGainTags {
     }
 
     pub fn set_track(&mut self, gain_db: f64, peak: f64) {
-        self.track_gain = Some(format!("{:+.2} dB", gain_db));
+        self.track_gain = Some(format!("{:+.6} dB", gain_db));
         self.track_peak = Some(format!("{:.6}", peak));
     }
 
     pub fn set_album(&mut self, gain_db: f64, peak: f64) {
-        self.album_gain = Some(format!("{:+.2} dB", gain_db));
+        self.album_gain = Some(format!("{:+.6} dB", gain_db));
         self.album_peak = Some(format!("{:.6}", peak));
     }
 
@@ -1416,9 +1416,9 @@ mod tests {
         tags.set_track(3.5, 0.98765);
         tags.set_album(2.0, 0.99999);
 
-        assert_eq!(tags.track_gain(), Some("+3.50 dB"));
+        assert_eq!(tags.track_gain(), Some("+3.500000 dB"));
         assert_eq!(tags.track_peak(), Some("0.987650"));
-        assert_eq!(tags.album_gain(), Some("+2.00 dB"));
+        assert_eq!(tags.album_gain(), Some("+2.000000 dB"));
         assert_eq!(tags.album_peak(), Some("0.999990"));
 
         let freeform_tags = tags.to_freeform_tags();

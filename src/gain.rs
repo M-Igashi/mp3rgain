@@ -4,7 +4,7 @@ use crate::ape::{
     TAG_MP3GAIN_UNDO,
 };
 use crate::error::{Error, Result};
-use crate::frame::{apply_gain_to_data, GainMode, SaturationStats};
+use crate::frame::{apply_gain_to_data, scan_gain_range, GainMode, SaturationStats};
 
 use std::fs;
 use std::path::Path;
@@ -341,7 +341,6 @@ fn apply_gain_with_undo_impl_to_path(
     mode: GainMode,
 ) -> Result<SaturationStats> {
     let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
-    let analysis = analyze_data(&data)?;
 
     let mut tag = read_ape_tag(&data).unwrap_or_default();
 
@@ -356,11 +355,13 @@ fn apply_gain_with_undo_impl_to_path(
         wrap,
     );
 
-    if tag.get(TAG_MP3GAIN_MINMAX).is_none() {
-        tag.set_minmax(analysis.min_gain(), analysis.max_gain());
-    }
-
     let stats = apply_gain_to_data(&mut data, gain_steps, mode, None);
+
+    // MP3GAIN_MINMAX records the *post-apply* global_gain range (mp3gain
+    // convention). Re-scan the modified buffer and overwrite any prior value;
+    // this also validates that the input was a real MP3 (NoMp3Frames on empty).
+    let (min, max) = scan_gain_range(&data)?;
+    tag.set_minmax(min, max);
 
     let new_data = replace_ape_tag(&data, &tag);
     fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
@@ -417,16 +418,18 @@ fn apply_gain_channel_with_undo(
 
     tag.set_undo_gain(new_left, new_right, false);
 
-    if tag.get(TAG_MP3GAIN_MINMAX).is_none() {
-        tag.set_minmax(analysis.min_gain(), analysis.max_gain());
-    }
-
     let stats = apply_gain_to_data(
         &mut data,
         gain_steps,
         GainMode::Saturating,
         Some(channel.index()),
     );
+
+    // MP3GAIN_MINMAX records the *post-apply* global_gain range (mp3gain
+    // convention); re-scan the modified buffer and overwrite any prior value.
+    if let Ok((min, max)) = scan_gain_range(&data) {
+        tag.set_minmax(min, max);
+    }
 
     let new_data = replace_ape_tag(&data, &tag);
     fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;

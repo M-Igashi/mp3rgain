@@ -35,8 +35,7 @@ use crate::{ape, id3v2, mp4meta};
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// AAC analysis cached between the clipping check and the apply step so a
-/// single apply never walks the bitstream twice (issue #188). Mirrors the
-/// MP3 `mp3_analysis` cache from #135.
+/// single apply never walks the bitstream twice (issue #188).
 #[cfg(feature = "aac")]
 type AacAnalysisCache = Option<aac::AacAnalysis>;
 #[cfg(not(feature = "aac"))]
@@ -191,19 +190,13 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
 
     // 1) Clipping check + cap.
     //
-    // Both branches cache their analysis so the apply step below can
-    // reuse it instead of a second file scan: the MP3 `analyze(file)`
-    // result feeds the ID3v2 undo write (issue #135), the AAC bitstream
-    // analysis feeds the gain application itself (issue #188).
-    let mut mp3_analysis: Option<crate::Mp3Analysis> = None;
+    // The AAC bitstream analysis is cached so the apply step below can reuse
+    // it instead of a second scan (issue #188). MINMAX / ReplayGain are now
+    // recorded from a *post-apply* scan (issue #210), so no pre-apply MP3
+    // analysis needs to be threaded through here.
     let mut aac_analysis: AacAnalysisCache = None;
-    let (actual_steps, clipping_prevented, clipping_detected) = check_clipping(
-        file_path,
-        opts,
-        is_aac,
-        &mut mp3_analysis,
-        &mut aac_analysis,
-    )?;
+    let (actual_steps, clipping_prevented, clipping_detected) =
+        check_clipping(file_path, opts, is_aac, &mut aac_analysis)?;
 
     // 2) Apply gain to bytes. MP3 reports global_gain saturation (issue
     // #207); AAC clamps in its own path and isn't tallied here.
@@ -211,7 +204,7 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
     let modified = if is_aac {
         apply_aac_bytes(file_path, actual_steps, opts, aac_analysis)?
     } else if opts.use_id3v2 {
-        saturation = apply_mp3_id3v2_bytes(file_path, actual_steps, opts, &mut mp3_analysis)?;
+        saturation = apply_mp3_id3v2_bytes(file_path, actual_steps, opts)?;
         saturation.frames
     } else {
         saturation = apply_mp3_ape_bytes(file_path, actual_steps, opts)?;
@@ -222,36 +215,73 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
     //
     // AAC writes to mp4 freeform metadata; MP3 writes ID3v2 TXXX frames in
     // `-s i` mode, otherwise APEv2 `REPLAYGAIN_*` items (the default,
-    // mp3gain-compatible mode — issue #204). All three carry the same
-    // analysis values; only the container differs.
+    // mp3gain-compatible mode — issue #204). Only the container differs.
+    //
+    // mp3gain stores the *post-apply residual* — the gain a player should
+    // still apply on top of the gain already baked into global_gain — at
+    // 6-decimal precision, not the pre-apply analysis value (issue #210).
+    // Absent global_gain saturation, applying N steps shifts loudness by
+    // exactly N*1.5 dB, so the residual is arithmetic; under saturation (or
+    // `-w` wrap) the shift is not uniform, so re-analyze the modified file
+    // for the true post-apply values. AAC clamps internally and is always
+    // treated arithmetically (mp3gain has no AAC, so it is interop-neutral).
     if opts.write_replaygain_tags {
         if let Some(track) = opts.track_result.as_ref() {
+            let needs_reanalysis = !is_aac
+                && (opts.wrap || saturation.saturated_low > 0 || saturation.saturated_high > 0);
+
+            let arithmetic = || {
+                let db = steps_to_db(actual_steps);
+                (
+                    track.gain_db() - db,
+                    apply_gain_to_peak(track.peak(), db),
+                    db,
+                )
+            };
+            let (track_gain_db, track_peak, applied_db) = if needs_reanalysis {
+                match crate::replaygain::analyze_track(file_path) {
+                    Ok(post) => (
+                        post.gain_db(),
+                        post.peak(),
+                        track.gain_db() - post.gain_db(),
+                    ),
+                    Err(_) => arithmetic(),
+                }
+            } else {
+                arithmetic()
+            };
+
+            // Album residual: the same loudness shift applies to the album
+            // gain/peak (the album value is uniform across the set).
+            let album_residual = opts.album_info.map(|a| {
+                (
+                    a.album_gain_db - applied_db,
+                    apply_gain_to_peak(a.album_peak, applied_db),
+                )
+            });
+
             if is_aac {
                 let mut tags = mp4meta::ReplayGainTags::default();
-                tags.set_track(track.gain_db(), track.peak());
-                if let Some(album) = opts.album_info {
-                    tags.set_album(album.album_gain_db, album.album_peak);
+                tags.set_track(track_gain_db, track_peak);
+                if let Some((album_gain, album_peak)) = album_residual {
+                    tags.set_album(album_gain, album_peak);
                 }
                 mp4meta::write_replaygain_tags(file_path, &tags)?;
             } else if opts.use_id3v2 {
                 let rg = id3v2::Id3v2ReplayGain {
-                    track_gain: Some(format!("{:+.2} dB", track.gain_db())),
-                    track_peak: Some(format!("{:.6}", track.peak())),
-                    album_gain: opts
-                        .album_info
-                        .map(|a| format!("{:+.2} dB", a.album_gain_db)),
-                    album_peak: opts.album_info.map(|a| format!("{:.6}", a.album_peak)),
+                    track_gain: Some(format!("{:+.6} dB", track_gain_db)),
+                    track_peak: Some(format!("{:.6}", track_peak)),
+                    album_gain: album_residual.map(|(g, _)| format!("{:+.6} dB", g)),
+                    album_peak: album_residual.map(|(_, p)| format!("{:.6}", p)),
                     ..Default::default()
                 };
                 id3v2::write_id3v2_replaygain(file_path, &rg)?;
             } else {
                 let rg = ape::ApeReplayGain {
-                    track_gain: Some(format!("{:+.2} dB", track.gain_db())),
-                    track_peak: Some(format!("{:.6}", track.peak())),
-                    album_gain: opts
-                        .album_info
-                        .map(|a| format!("{:+.2} dB", a.album_gain_db)),
-                    album_peak: opts.album_info.map(|a| format!("{:.6}", a.album_peak)),
+                    track_gain: Some(format!("{:+.6} dB", track_gain_db)),
+                    track_peak: Some(format!("{:.6}", track_peak)),
+                    album_gain: album_residual.map(|(g, _)| format!("{:+.6} dB", g)),
+                    album_peak: album_residual.map(|(_, p)| format!("{:.6}", p)),
                 };
                 ape::write_ape_replaygain(file_path, &rg)?;
             }
@@ -282,15 +312,9 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
 /// would do.
 pub fn predict_apply(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
     let is_aac = mp4meta::is_aac_file(file_path);
-    let mut mp3_analysis: Option<crate::Mp3Analysis> = None;
     let mut aac_analysis: AacAnalysisCache = None;
-    let (actual_steps, clipping_prevented, clipping_detected) = check_clipping(
-        file_path,
-        opts,
-        is_aac,
-        &mut mp3_analysis,
-        &mut aac_analysis,
-    )?;
+    let (actual_steps, clipping_prevented, clipping_detected) =
+        check_clipping(file_path, opts, is_aac, &mut aac_analysis)?;
     Ok(ApplyReport {
         modified: 0,
         actual_steps,
@@ -305,7 +329,6 @@ fn check_clipping(
     file_path: &Path,
     opts: &ApplyOptions,
     is_aac: bool,
-    mp3_analysis: &mut Option<crate::Mp3Analysis>,
     aac_analysis: &mut AacAnalysisCache,
 ) -> Result<(i32, bool, Option<ClippingDetection>)> {
     let steps = opts.steps;
@@ -371,10 +394,7 @@ fn check_clipping(
             None
         }
     } else {
-        let info = crate::analyze(file_path).ok();
-        let headroom = info.as_ref().map(|i| i.headroom_steps());
-        *mp3_analysis = info;
-        headroom
+        crate::analyze(file_path).ok().map(|i| i.headroom_steps())
     };
 
     if let Some(h) = headroom {
@@ -438,14 +458,7 @@ fn apply_mp3_id3v2_bytes(
     file_path: &Path,
     steps: i32,
     opts: &ApplyOptions,
-    mp3_analysis: &mut Option<crate::Mp3Analysis>,
 ) -> Result<SaturationStats> {
-    // Need pre-apply analysis if undo will be written. Reuse the cached
-    // one from the clipping-check pass when available (issue #135).
-    if opts.write_undo && mp3_analysis.is_none() {
-        *mp3_analysis = crate::analyze(file_path).ok();
-    }
-
     // APE undo is never written in `-s i` mode; the undo goes into a
     // TXXX:MP3GAIN_UNDO frame instead, written below.
     let stats = with_temp_file(file_path, opts.use_temp_file, |r, w| {
@@ -462,13 +475,7 @@ fn apply_mp3_id3v2_bytes(
             Some(Channel::Right) => (0, steps),
             None => (steps, steps),
         };
-        write_id3v2_undo_after_apply(
-            file_path,
-            delta_left,
-            delta_right,
-            opts.wrap,
-            mp3_analysis.as_ref(),
-        )?;
+        write_id3v2_undo_after_apply(file_path, delta_left, delta_right, opts.wrap)?;
     }
     Ok(stats)
 }
@@ -529,27 +536,22 @@ fn write_id3v2_undo_after_apply(
     delta_left: i32,
     delta_right: i32,
     wrap: bool,
-    analysis: Option<&crate::Mp3Analysis>,
 ) -> Result<()> {
     let existing_rg = id3v2::read_id3v2_replaygain(file).unwrap_or_default();
     let (existing_left, existing_right) = ape::parse_undo_values(existing_rg.undo.as_deref());
 
-    let owned;
-    let (min, max) = match analysis {
-        Some(a) => (a.min_gain(), a.max_gain()),
-        None => {
-            owned = crate::analyze(file)?;
-            (owned.min_gain(), owned.max_gain())
-        }
-    };
+    // MP3GAIN_MINMAX is the *post-apply* global_gain range (mp3gain
+    // convention); `file` is the already-modified file at this point, so a
+    // fresh scan reflects the applied gain.
+    let post = crate::analyze(file)?;
 
     id3v2::write_id3v2_undo(
         file,
         existing_left + delta_left,
         existing_right + delta_right,
         wrap,
-        min,
-        max,
+        post.min_gain(),
+        post.max_gain(),
     )
 }
 
@@ -577,7 +579,7 @@ mod tests {
     fn prevent_clipping_caps_at_floor_not_round() {
         let opts = opts_with_track(5, 0.9, true);
         let (steps, prevented, _) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+            check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
         assert!(prevented);
         assert_eq!(steps, 0);
         let new_peak = 0.9 * 10.0_f64.powf(steps_to_db(steps) / 20.0);
@@ -591,7 +593,7 @@ mod tests {
         for &peak in &[0.55_f64, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.99] {
             let opts = opts_with_track(20, peak, true);
             let (steps, prevented, _) =
-                check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+                check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
             assert!(prevented, "peak {peak} should trigger prevention");
             let new_peak = peak * 10.0_f64.powf(steps_to_db(steps) / 20.0);
             assert!(
@@ -607,7 +609,7 @@ mod tests {
     fn prevent_clipping_passthrough_when_safe() {
         let opts = opts_with_track(3, 0.5, true);
         let (steps, prevented, _) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+            check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
         assert!(!prevented);
         assert_eq!(steps, 3);
     }
@@ -623,7 +625,7 @@ mod tests {
         // = -2 steps (= -3 dB). Resulting peak = 1.2 * 10^(-3/20) = 0.85.
         let opts = opts_with_track(1, 1.2, true);
         let (steps, prevented, _) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+            check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
         assert!(prevented);
         assert!(steps < 0, "expected negative steps, got {steps}");
         let new_peak = 1.2 * 10.0_f64.powf(steps_to_db(steps) / 20.0);
@@ -640,7 +642,7 @@ mod tests {
     fn prevent_clipping_caps_zero_step_clipping_track() {
         let opts = opts_with_track(0, 1.2, true);
         let (steps, prevented, _) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+            check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
         assert!(prevented);
         assert!(steps < 0, "expected attenuation, got {steps}");
         let new_peak = 1.2 * 10.0_f64.powf(steps_to_db(steps) / 20.0);
@@ -653,7 +655,7 @@ mod tests {
     fn zero_step_non_clipping_track_is_noop() {
         let opts = opts_with_track(0, 0.8, true);
         let (steps, prevented, detected) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+            check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
         assert_eq!(steps, 0);
         assert!(!prevented);
         assert!(detected.is_none());
@@ -667,7 +669,7 @@ mod tests {
         for &peak in &[1.001_f64, 1.05, 1.1, 1.2, 1.5, 2.0] {
             let opts = opts_with_track(5, peak, true);
             let (steps, prevented, _) =
-                check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+                check_clipping(Path::new("unused"), &opts, false, &mut None).unwrap();
             assert!(prevented, "peak {peak} should trigger prevention");
             let new_peak = peak * 10.0_f64.powf(steps_to_db(steps) / 20.0);
             assert!(
