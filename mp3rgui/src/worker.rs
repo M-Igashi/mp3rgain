@@ -185,7 +185,7 @@ pub struct DeleteTagsJob {
 /// User-facing apply toggles, captured at the moment the worker is
 /// spawned. Worker combines these with the per-job data to build the
 /// final `ApplyOptions`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct ApplyOptionsUi {
     pub prevent_clipping: bool,
     pub wrap: bool,

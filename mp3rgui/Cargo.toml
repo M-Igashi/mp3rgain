@@ -8,11 +8,12 @@ license = "MIT"
 repository = "https://github.com/M-Igashi/mp3rgain"
 
 [dependencies]
-eframe = "0.31"
+eframe = { version = "0.31", features = ["persistence"] }
 egui = "0.31"
 egui_extras = { version = "0.31", features = ["all_loaders"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 mp3rgain = { path = ".." }
+serde = { version = "1", features = ["derive"] }
 
 # Linux: use GTK3 backend to avoid ashpd/xdg-portal compilation issues
 [target.'cfg(target_os = "linux")'.dependencies]

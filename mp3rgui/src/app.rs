@@ -141,7 +141,33 @@ enum WorkerKind {
     CheckTags,
     MaxAmplitude,
     DeleteTags,
+    /// Read-only stored-tag scan triggered automatically when files are
+    /// imported. Unlike `CheckTags`, it also fills the Volume / Gain columns
+    /// from any existing ReplayGain tags so already-analyzed files show their
+    /// values without re-scanning (issue #203).
+    ImportScan,
 }
+
+/// Settings persisted across launches (issue #202). Window geometry and egui
+/// memory (e.g. table column widths) are persisted by eframe automatically;
+/// this only carries the app-specific toggles.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedSettings {
+    apply_options: ApplyOptionsUi,
+    target_volume: f64,
+}
+
+impl Default for PersistedSettings {
+    fn default() -> Self {
+        Self {
+            apply_options: ApplyOptionsUi::default(),
+            target_volume: 89.0,
+        }
+    }
+}
+
+/// Storage key for [`PersistedSettings`].
+const SETTINGS_KEY: &str = "mp3rgui_settings";
 
 pub struct Mp3rgainApp {
     pub files: Vec<FileEntry>,
@@ -198,18 +224,29 @@ pub struct Mp3rgainApp {
     display_order_cache: Vec<usize>,
     /// Set whenever the sort key or any row data changes.
     display_order_dirty: bool,
+
+    /// File indices added since the last import scan, awaiting an automatic
+    /// stored-tag read (issue #203). Drained by `start_import_scan` on the
+    /// next idle frame.
+    pending_import_scan: Vec<usize>,
 }
 
 impl Mp3rgainApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Restore the user's checkboxes / target from the previous session
+        // (issue #202). Window geometry + column widths are handled by eframe.
+        let settings: PersistedSettings = cc
+            .storage
+            .and_then(|s| eframe::get_value(s, SETTINGS_KEY))
+            .unwrap_or_default();
         Self {
             files: Vec::new(),
-            target_volume: 89.0,
+            target_volume: settings.target_volume,
             selected_indices: Vec::new(),
             total_progress: 0.0,
             is_processing: false,
             status_message: String::new(),
-            apply_options: ApplyOptionsUi::default(),
+            apply_options: settings.apply_options,
             confirm_delete_tags: false,
             manual_gain_modal: ManualGainModal::default(),
             channel_gain_modal: ChannelGainModal::default(),
@@ -218,11 +255,12 @@ impl Mp3rgainApp {
             worker_kind: None,
             started_files: 0,
             total_files_in_job: 0,
-            last_target_volume: 89.0,
+            last_target_volume: settings.target_volume,
             sort_column: None,
             sort_descending: false,
             display_order_cache: Vec::new(),
             display_order_dirty: true,
+            pending_import_scan: Vec::new(),
         }
     }
 
@@ -334,6 +372,7 @@ impl Mp3rgainApp {
         if self.is_processing {
             return;
         }
+        let first_new = self.files.len();
         let mut added = 0;
         let mut skipped = 0;
 
@@ -358,6 +397,9 @@ impl Mp3rgainApp {
 
         if added > 0 {
             self.display_order_dirty = true;
+            // Queue the new rows for an automatic existing-tag read (issue
+            // #203). The scan starts on the next idle frame.
+            self.pending_import_scan.extend(first_new..self.files.len());
         }
         if skipped > 0 {
             self.status_message =
@@ -391,6 +433,8 @@ impl Mp3rgainApp {
             }
         }
         self.selected_indices.clear();
+        // Removing rows shifts indices, so any queued import scan is stale.
+        self.pending_import_scan.clear();
         self.display_order_dirty = true;
     }
 
@@ -401,6 +445,7 @@ impl Mp3rgainApp {
         self.files.clear();
         self.selected_indices.clear();
         self.selection_anchor = None;
+        self.pending_import_scan.clear();
         self.display_order_dirty = true;
     }
 
@@ -710,6 +755,37 @@ impl Mp3rgainApp {
         );
     }
 
+    /// Read existing ReplayGain tags from files queued by `add_files` and fill
+    /// the Volume / Gain columns from them, so already-analyzed files show
+    /// their values on import without a full re-scan (issue #203). Reuses the
+    /// read-only stored-tag worker; only runs while idle so it never collides
+    /// with another job.
+    fn start_import_scan(&mut self, ctx: &egui::Context) {
+        if self.is_processing || self.pending_import_scan.is_empty() {
+            return;
+        }
+        let indices = std::mem::take(&mut self.pending_import_scan);
+        let jobs: Vec<CheckTagsJob> = indices
+            .into_iter()
+            .filter_map(|idx| {
+                self.files.get(idx).map(|f| CheckTagsJob {
+                    idx,
+                    path: f.path.clone(),
+                })
+            })
+            .collect();
+        if jobs.is_empty() {
+            return;
+        }
+        let count = jobs.len();
+        let use_id3v2 = self.apply_options.use_id3v2;
+        self.begin_worker(
+            WorkerKind::ImportScan,
+            count,
+            worker::spawn_check_stored_tags(ctx.clone(), jobs, use_id3v2),
+        );
+    }
+
     /// `-g`: apply a fixed step count to the selected files (or all when no
     /// selection). Bypasses ReplayGain — `track_result` / `album_info` are
     /// left None so `apply_with_options` uses the headroom-based clipping
@@ -881,6 +957,7 @@ impl Mp3rgainApp {
             WorkerKind::CheckTags => "Checking stored tags...".to_string(),
             WorkerKind::MaxAmplitude => "Finding max amplitude...".to_string(),
             WorkerKind::DeleteTags => "Deleting stored tags...".to_string(),
+            WorkerKind::ImportScan => "Reading existing ReplayGain values...".to_string(),
         };
         self.started_files = 0;
         self.total_files_in_job = total;
@@ -934,7 +1011,8 @@ impl Mp3rgainApp {
                         }
                         // Tag scan is read-only; don't disturb the
                         // user-visible status (e.g. Analyzed) for the row.
-                        Some(WorkerKind::CheckTags) => {}
+                        // The import scan fills values in its own handler.
+                        Some(WorkerKind::CheckTags) | Some(WorkerKind::ImportScan) => {}
                         Some(WorkerKind::MaxAmplitude) => {
                             file.status = FileStatus::Analyzing;
                         }
@@ -1039,7 +1117,12 @@ impl Mp3rgainApp {
                 }
             }
             WorkerEvent::StoredTagsRead { idx, view } => {
+                let target = self.target_volume;
+                let is_import = self.worker_kind == Some(WorkerKind::ImportScan);
                 if let Some(file) = self.files.get_mut(idx) {
+                    if is_import {
+                        Self::populate_from_stored_tags(file, &view, target);
+                    }
                     file.stored_tags = Some(view);
                 }
             }
@@ -1101,6 +1184,43 @@ impl Mp3rgainApp {
         file.track_clip = would_clip(result.peak(), gain);
     }
 
+    /// Fill a freshly-imported row's Volume / Gain columns from any existing
+    /// ReplayGain tags read off the file (issue #203). The stored
+    /// `REPLAYGAIN_*_GAIN` values are relative to the 89 dB reference, the
+    /// same convention `populate_track_analysis` uses, so the displayed gain
+    /// re-targets to the current Target. Only touches rows still Pending so a
+    /// real analysis is never overwritten. Leaves `track_result` None — the
+    /// tags carry no full analysis — so applying gain afterwards falls back to
+    /// the headroom-based clipping check, exactly like manual gain.
+    fn populate_from_stored_tags(file: &mut FileEntry, view: &StoredTagsView, target_volume: f64) {
+        if file.status != FileStatus::Pending {
+            return;
+        }
+        let mut found = false;
+        if let Some(track_gain_db) = view.track_gain.as_deref().and_then(parse_db) {
+            file.volume = Some(REPLAYGAIN_REFERENCE_DB - track_gain_db);
+            let gain = target_volume - REPLAYGAIN_REFERENCE_DB + track_gain_db;
+            file.track_gain = Some(gain);
+            if let Some(peak) = view.track_peak.as_deref().and_then(parse_linear) {
+                file.clipping = peak >= 1.0;
+                file.track_clip = would_clip(peak, gain);
+            }
+            found = true;
+        }
+        if let Some(album_gain_db) = view.album_gain.as_deref().and_then(parse_db) {
+            file.album_volume = Some(REPLAYGAIN_REFERENCE_DB - album_gain_db);
+            let album_gain = target_volume - REPLAYGAIN_REFERENCE_DB + album_gain_db;
+            file.album_gain = Some(album_gain);
+            if let Some(peak) = view.album_peak.as_deref().and_then(parse_linear) {
+                file.album_clip = would_clip(peak, album_gain);
+            }
+            found = true;
+        }
+        if found {
+            file.status = FileStatus::Analyzed;
+        }
+    }
+
     /// Shift the row's cached display values by the dB that was actually
     /// applied (or, for undo, the negative of what was rolled back).
     /// Lets the user see the post-apply / post-undo state without
@@ -1136,6 +1256,17 @@ impl Mp3rgainApp {
             file.track_result = Some(track.with_peak(new_peak));
         }
     }
+}
+
+/// Parse a stored ReplayGain gain string such as `"+3.50 dB"` into dB.
+/// Tolerant of the optional `dB` suffix and surrounding whitespace.
+fn parse_db(s: &str) -> Option<f64> {
+    s.trim().trim_end_matches("dB").trim().parse::<f64>().ok()
+}
+
+/// Parse a stored linear peak string such as `"0.988553"`.
+fn parse_linear(s: &str) -> Option<f64> {
+    s.trim().parse::<f64>().ok()
 }
 
 /// Compare two `Option<f64>` values, putting `None` always at the bottom
@@ -1215,10 +1346,23 @@ fn open_in_file_manager(path: &Path) -> Result<(), String> {
 impl eframe::App for Mp3rgainApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.pump_worker_events();
+        // Kick off an automatic stored-tag read for freshly imported files
+        // once any prior worker has finished (issue #203).
+        self.start_import_scan(ctx);
         // Run after the user's toolbar input is already in self.target_volume
         // (which is mutated by the DragValue in toolbar.rs from the previous
         // frame), and before this frame's render reads track_gain.
         self.recompute_targets_if_changed();
         crate::ui::render(self, ctx);
+    }
+
+    /// Persist the user's settings (issue #202). Called by eframe on the
+    /// auto-save timer and on shutdown.
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        let settings = PersistedSettings {
+            apply_options: self.apply_options,
+            target_volume: self.target_volume,
+        };
+        eframe::set_value(storage, SETTINGS_KEY, &settings);
     }
 }
