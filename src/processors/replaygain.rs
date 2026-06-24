@@ -3,7 +3,7 @@ use colored::*;
 use indicatif::ProgressBar;
 use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions, ClippingDetection};
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult};
-use mp3rgain::{mp4meta, steps_to_db, AacAlbumInfo};
+use mp3rgain::{apply_gain_to_peak, mp4meta, steps_to_db, AacAlbumInfo};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -375,10 +375,20 @@ fn apply_replaygain_aac_with_album_into(
         }
     }
 
+    // Post-apply residual (issue #210), mirroring the MP3 path in
+    // apply_with_options. AAC clamps internally with no saturation tally, so
+    // the loudness shift is the arithmetic applied gain.
+    let applied_db = steps_to_db(actual_steps);
     let mut tags = mp4meta::ReplayGainTags::default();
-    tags.set_track(result.gain_db(), result.peak());
+    tags.set_track(
+        result.gain_db() - applied_db,
+        apply_gain_to_peak(result.peak(), applied_db),
+    );
     if let Some(album) = album_info {
-        tags.set_album(album.album_gain_db, album.album_peak);
+        tags.set_album(
+            album.album_gain_db - applied_db,
+            apply_gain_to_peak(album.album_peak, applied_db),
+        );
     }
 
     match mp4meta::write_replaygain_tags(file, &tags) {

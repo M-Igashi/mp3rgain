@@ -618,29 +618,43 @@ fn test_apply_track_gain_writes_ape_replaygain_tags() {
 #[test]
 fn test_apply_album_gain_writes_ape_album_replaygain_tags() {
     use mp3rgain::apply::{apply_with_options, AacAlbumInfo, ApplyOptions};
-    use mp3rgain::{replaygain, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK};
+    use mp3rgain::{
+        apply_gain_to_peak, replaygain, steps_to_db, TAG_REPLAYGAIN_ALBUM_GAIN,
+        TAG_REPLAYGAIN_ALBUM_PEAK,
+    };
 
     let path = copy_test_file("test_mono.mp3");
     let result = replaygain::analyze_track_with_index(&path, None).unwrap();
 
-    let mut opts = ApplyOptions::new(result.gain_steps());
-    opts.track_result = Some(result);
-    opts.album_info = Some(AacAlbumInfo {
+    let steps = result.gain_steps();
+    let album = AacAlbumInfo {
         album_gain_db: 1.5,
         album_peak: 0.5,
-    });
+    };
+    let mut opts = ApplyOptions::new(steps);
+    opts.track_result = Some(result);
+    opts.album_info = Some(album);
     opts.write_replaygain_tags = true;
-    apply_with_options(&path, &opts).unwrap();
+    let report = apply_with_options(&path, &opts).unwrap();
 
+    // mp3gain writes the post-apply *residual* album values at 6-decimal
+    // precision (issue #210): the album gain/peak shifted by the gain baked
+    // into this track. The fixture applies a modest gain with no global_gain
+    // saturation, so the shift is the arithmetic applied gain.
+    assert_eq!(report.saturated_low + report.saturated_high, 0);
+    let applied_db = steps_to_db(steps);
     let tag = read_ape_tag_from_file(&path).unwrap().expect("APE tag");
     assert_eq!(
-        tag.get(TAG_REPLAYGAIN_ALBUM_GAIN),
-        Some("+1.50 dB"),
+        tag.get(TAG_REPLAYGAIN_ALBUM_GAIN).map(str::to_string),
+        Some(format!("{:+.6} dB", album.album_gain_db - applied_db)),
         "REPLAYGAIN_ALBUM_GAIN missing or malformed"
     );
     assert_eq!(
-        tag.get(TAG_REPLAYGAIN_ALBUM_PEAK),
-        Some("0.500000"),
+        tag.get(TAG_REPLAYGAIN_ALBUM_PEAK).map(str::to_string),
+        Some(format!(
+            "{:.6}",
+            apply_gain_to_peak(album.album_peak, applied_db)
+        )),
         "REPLAYGAIN_ALBUM_PEAK missing or malformed"
     );
 
