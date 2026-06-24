@@ -447,8 +447,11 @@ fn test_whole_file_apply_preserves_asymmetric_undo_values() {
         .unwrap();
     GainOptions::new(-1).undo(true).apply(&path).unwrap();
 
+    // MP3GAIN_UNDO stores the *undo* delta (mp3gain convention, issue #210):
+    // applying -3 then -1 to the left and -1 to the right yields undo deltas
+    // +4 / +1 (the gain to re-add to restore the original).
     let tag = read_ape_tag_from_file(&path).unwrap().unwrap();
-    assert_eq!(tag.get(TAG_MP3GAIN_UNDO), Some("-004,-001,N"));
+    assert_eq!(tag.get(TAG_MP3GAIN_UNDO), Some("+004,+001,N"));
 
     undo_gain(&path).unwrap();
     assert_eq!(fs::read(&path).unwrap(), original);

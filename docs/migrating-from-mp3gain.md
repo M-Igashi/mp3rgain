@@ -22,14 +22,16 @@ mp3rgain -r -k -d 0 -s s -o file.mp3
 ```
 
 The CLI surface, the TSV output format, and the APEv2 undo tag are all
-mp3gain-compatible.
+mp3gain-compatible. You can mix the two tools on the same file — gain written
+by mp3gain can be undone by mp3rgain and vice versa.
 
-> **Note on cross-tool undo:** each tool reliably undoes *its own* changes, but
-> undoing an mp3gain-written file with `mp3rgain -u` (or vice versa) is currently
-> broken because the two tools store the `mp3gain_undo` value with opposite signs
-> — see [Behaviour differences](#behaviour-differences) and
-> [#210](https://github.com/M-Igashi/mp3rgain/issues/210). Undo the file with the
-> same tool that applied the gain.
+> **Upgrading from mp3rgain ≤ 2.8.x?** Releases up to 2.8.x stored the
+> `mp3gain_undo` value with the *opposite* sign from mp3gain. That is fixed in
+> this version ([#210](https://github.com/M-Igashi/mp3rgain/issues/210)), so a
+> file gain-adjusted by an **older mp3rgain** must be undone by that older
+> version (or re-analyzed) — undoing it with this version would double the gain.
+> Files written by mp3gain, or by this version onward, undo correctly with
+> either tool.
 
 ## Drop-in alias
 
@@ -58,7 +60,7 @@ flags are accepted with the same semantics; mp3rgain adds a few extensions.
 | `-g <i>` | Apply gain of `i` steps (1 step = 1.5 dB) | Bit-identical output (see compatibility report) |
 | `-d <n>` | Modify suggested gain by `n` dB (applied with `-r` / `-a`) | mp3gain-compatible since v1.2.1 |
 | `-m <i>` | Modify suggested gain by `i` steps | |
-| `-u` | Undo gain changes (reads APEv2 `mp3gain_undo`) | Reliably undoes mp3rgain's own files; cross-tool undo is currently broken ([#210](https://github.com/M-Igashi/mp3rgain/issues/210)) |
+| `-u` | Undo gain changes (reads APEv2 `mp3gain_undo`) | Reads tags written by either tool ([#210](https://github.com/M-Igashi/mp3rgain/issues/210)); see the note on upgrading from mp3rgain ≤ 2.8.x |
 | `-x` | Print max amplitude only | |
 | `-k` | Prevent clipping (auto-limit gain) | |
 | `-c` | Ignore clipping warnings | |
@@ -115,7 +117,7 @@ For new integrations, prefer `-o json`, which is structured and stable.
 
 | Tag location | mp3gain | mp3rgain | Interop |
 |--------------|---------|----------|---------|
-| APEv2 `mp3gain_undo` (MP3) | Written | Written | ⚠️ Opposite sign convention — each tool undoes its own files, but cross-tool undo is currently broken ([#210](https://github.com/M-Igashi/mp3rgain/issues/210)) |
+| APEv2 `mp3gain_undo` (MP3) | Written | Written | Bidirectional — either tool can undo the other's changes ([#210](https://github.com/M-Igashi/mp3rgain/issues/210); files written by mp3rgain ≤ 2.8.x used the opposite sign) |
 | APEv2 `mp3gain_minmax` (MP3) | Written | Written | Same |
 | APEv2 ReplayGain (`mp3gain_album_*`, `replaygain_*`) | Written | Written | Same |
 | ID3v2 TXXX/RVA2 ReplayGain | Not written | Written with `-s i` | Standard ReplayGain readers (foobar2000, mpd, etc.) recognise it |
@@ -130,7 +132,7 @@ These are the only behaviour differences worth knowing about:
 
 | Area | Difference | Impact |
 |------|------------|--------|
-| Cross-tool undo | `mp3gain` stores the *undo* delta in `mp3gain_undo`; `mp3rgain` stores the *applied* delta (opposite sign) | Each tool undoes its own files correctly. Running `mp3rgain -u` on an `mp3gain`-written file (or vice versa) **doubles** the gain instead of undoing it. Tracked in [#210](https://github.com/M-Igashi/mp3rgain/issues/210); undo with the same tool that applied the gain |
+| Undo of files from mp3rgain ≤ 2.8.x | Those releases stored `mp3gain_undo` with the opposite sign; fixed in this version ([#210](https://github.com/M-Igashi/mp3rgain/issues/210)) | Undo a file gain-adjusted by an older mp3rgain with that **older** version (or re-analyze). Undoing it with this version would double the gain. mp3gain-written files and files from this version onward are unaffected |
 | Undo cleanup | mp3gain leaves empty APEv2 tags after `-u`; mp3rgain removes them | Audio data is identical; only the tag block differs |
 | ReplayGain analysis | mp3gain uses LAME; mp3rgain uses Symphonia + native Rust | Track/album gain values may differ by <0.1 dB. The *applied* gain is bit-identical for any given step value |
 | Format coverage | mp3gain handles MP3 only | mp3rgain also handles AAC/M4A/.mp4 (lossless `global_gain` rewrite, the same idea aacgain used) |

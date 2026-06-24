@@ -228,6 +228,11 @@ pub fn apply_gain_db(file_path: &Path, gain_db: f64) -> Result<usize> {
 ///
 /// Equal deltas take the whole-file path (honoring `wrap`); unequal deltas
 /// are undone per channel (channel gain is always saturating).
+///
+/// `left`/`right` are the stored `MP3GAIN_UNDO` deltas in mp3gain's
+/// convention — the gain to *re-add* to restore the original — so they are
+/// applied directly (issue #210). This is what makes cross-tool undo work:
+/// mp3gain stores `-N` after applying `+N`, and we apply that `-N` as-is.
 pub(crate) fn apply_undo_to_data(data: &mut [u8], left: i32, right: i32, wrap: bool) -> usize {
     if left == right {
         let mode = if wrap {
@@ -235,10 +240,10 @@ pub(crate) fn apply_undo_to_data(data: &mut [u8], left: i32, right: i32, wrap: b
         } else {
             GainMode::Saturating
         };
-        apply_gain_to_data(data, -left, mode, None).frames
+        apply_gain_to_data(data, left, mode, None).frames
     } else {
-        let left_frames = apply_gain_to_data(data, -left, GainMode::Saturating, Some(0)).frames;
-        let right_frames = apply_gain_to_data(data, -right, GainMode::Saturating, Some(1)).frames;
+        let left_frames = apply_gain_to_data(data, left, GainMode::Saturating, Some(0)).frames;
+        let right_frames = apply_gain_to_data(data, right, GainMode::Saturating, Some(1)).frames;
         left_frames.max(right_frames)
     }
 }
@@ -347,11 +352,15 @@ fn apply_gain_with_undo_impl_to_path(
     // Accumulate into BOTH channel slots independently: a prior `-l`
     // channel apply may have left them asymmetric, and collapsing them
     // into a single value corrupts the right channel's undo history.
+    //
+    // MP3GAIN_UNDO stores the *undo* delta (mp3gain convention, issue #210):
+    // the value to re-add to restore the original. Applying `+gain_steps`
+    // makes the stored undo `-gain_steps`, so it accumulates by subtraction.
     let (existing_left, existing_right) = parse_undo_values(tag.get(TAG_MP3GAIN_UNDO));
     let wrap = mode == GainMode::Wrapping;
     tag.set_undo_gain(
-        existing_left + gain_steps,
-        existing_right + gain_steps,
+        existing_left - gain_steps,
+        existing_right - gain_steps,
         wrap,
     );
 
@@ -411,9 +420,10 @@ fn apply_gain_channel_with_undo(
 
     let (existing_left, existing_right) = parse_undo_values(tag.get(TAG_MP3GAIN_UNDO));
 
+    // Undo delta accumulates by subtraction (mp3gain convention, issue #210).
     let (new_left, new_right) = match channel {
-        Channel::Left => (existing_left + gain_steps, existing_right),
-        Channel::Right => (existing_left, existing_right + gain_steps),
+        Channel::Left => (existing_left - gain_steps, existing_right),
+        Channel::Right => (existing_left, existing_right - gain_steps),
     };
 
     tag.set_undo_gain(new_left, new_right, false);
