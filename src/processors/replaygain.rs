@@ -74,7 +74,17 @@ fn process_track_gain_into(
                 )?;
             }
 
-            if modified_steps == 0 {
+            // A net 0-step adjustment still has work to do when (issue #206):
+            //   - ReplayGain analysis tags would be written (AAC always; MP3
+            //     in `-s i` mode), so an already-on-target track gets its
+            //     REPLAYGAIN_* tags (re)written rather than skipped, and/or
+            //   - `-k` must attenuate a track that is already at the
+            //     reference loudness yet already clips (peak > 1.0).
+            // Only the common already-normalized, non-clipping, no-tags case
+            // keeps the cheap "no adjustment needed" skip.
+            let writes_rg_tags = result.file_type() == AudioFileType::Aac || opts.use_id3v2;
+            let clip_prevention_applies = opts.prevent_clipping && result.peak() > 1.0;
+            if modified_steps == 0 && !writes_rg_tags && !clip_prevention_applies {
                 if opts.output_format == OutputFormat::Text && !opts.quiet {
                     writeln!(out, "  {} {} (no adjustment needed)", ".".cyan(), filename)?;
                 }

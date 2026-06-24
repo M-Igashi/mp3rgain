@@ -4,7 +4,7 @@ use crate::ape::{
     TAG_MP3GAIN_UNDO,
 };
 use crate::error::{Error, Result};
-use crate::frame::{apply_gain_to_data, GainMode};
+use crate::frame::{apply_gain_to_data, GainMode, SaturationStats};
 
 use std::fs;
 use std::path::Path;
@@ -158,13 +158,25 @@ impl GainOptions {
     /// directly to the temp file without an intermediate full-file copy of the
     /// original (issue #135).
     pub fn apply_to_path(&self, read_from: &Path, write_to: &Path) -> Result<usize> {
+        Ok(self.apply_to_path_with_stats(read_from, write_to)?.frames)
+    }
+
+    /// [`apply_to_path`] variant that also reports global_gain saturation
+    /// (issue #207). The unified apply pipeline uses this to surface a
+    /// "values clamped at 0/255" warning; the public API keeps the bare
+    /// frame count.
+    pub(crate) fn apply_to_path_with_stats(
+        &self,
+        read_from: &Path,
+        write_to: &Path,
+    ) -> Result<SaturationStats> {
         let same_path = read_from == write_to;
 
         if self.steps == 0 {
             if !same_path {
                 fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
             }
-            return Ok(0);
+            return Ok(SaturationStats::default());
         }
 
         if let Some(channel) = self.channel {
@@ -223,10 +235,10 @@ pub(crate) fn apply_undo_to_data(data: &mut [u8], left: i32, right: i32, wrap: b
         } else {
             GainMode::Saturating
         };
-        apply_gain_to_data(data, -left, mode, None)
+        apply_gain_to_data(data, -left, mode, None).frames
     } else {
-        let left_frames = apply_gain_to_data(data, -left, GainMode::Saturating, Some(0));
-        let right_frames = apply_gain_to_data(data, -right, GainMode::Saturating, Some(1));
+        let left_frames = apply_gain_to_data(data, -left, GainMode::Saturating, Some(0)).frames;
+        let right_frames = apply_gain_to_data(data, -right, GainMode::Saturating, Some(1)).frames;
         left_frames.max(right_frames)
     }
 }
@@ -307,14 +319,14 @@ fn apply_gain_simple_to_path(
     write_to: &Path,
     gain_steps: i32,
     mode: GainMode,
-) -> Result<usize> {
+) -> Result<SaturationStats> {
     let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
 
-    let modified_frames = apply_gain_to_data(&mut data, gain_steps, mode, None);
+    let stats = apply_gain_to_data(&mut data, gain_steps, mode, None);
 
     fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
 
-    Ok(modified_frames)
+    Ok(stats)
 }
 
 /// Apply gain with APEv2 undo tag support (unified for both saturating and wrapping).
@@ -327,7 +339,7 @@ fn apply_gain_with_undo_impl_to_path(
     write_to: &Path,
     gain_steps: i32,
     mode: GainMode,
-) -> Result<usize> {
+) -> Result<SaturationStats> {
     let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
     let analysis = analyze_data(&data)?;
 
@@ -348,12 +360,12 @@ fn apply_gain_with_undo_impl_to_path(
         tag.set_minmax(analysis.min_gain(), analysis.max_gain());
     }
 
-    let frames = apply_gain_to_data(&mut data, gain_steps, mode, None);
+    let stats = apply_gain_to_data(&mut data, gain_steps, mode, None);
 
     let new_data = replace_ape_tag(&data, &tag);
     fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
 
-    Ok(frames)
+    Ok(stats)
 }
 
 /// Apply gain to a specific channel (no undo)
@@ -362,14 +374,14 @@ fn apply_gain_channel_impl(
     write_to: &Path,
     channel: Channel,
     gain_steps: i32,
-) -> Result<usize> {
+) -> Result<SaturationStats> {
     let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
     let analysis = analyze_data(&data)?;
     if analysis.channel_mode() == ChannelMode::Mono {
         return Err(Error::ChannelGainOnMono);
     }
 
-    let modified_frames = apply_gain_to_data(
+    let stats = apply_gain_to_data(
         &mut data,
         gain_steps,
         GainMode::Saturating,
@@ -378,7 +390,7 @@ fn apply_gain_channel_impl(
 
     fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
 
-    Ok(modified_frames)
+    Ok(stats)
 }
 
 /// Apply channel-specific gain and store undo information in APEv2 tag
@@ -387,7 +399,7 @@ fn apply_gain_channel_with_undo(
     write_to: &Path,
     channel: Channel,
     gain_steps: i32,
-) -> Result<usize> {
+) -> Result<SaturationStats> {
     let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
     let analysis = analyze_data(&data)?;
     if analysis.channel_mode() == ChannelMode::Mono {
@@ -409,7 +421,7 @@ fn apply_gain_channel_with_undo(
         tag.set_minmax(analysis.min_gain(), analysis.max_gain());
     }
 
-    let frames = apply_gain_to_data(
+    let stats = apply_gain_to_data(
         &mut data,
         gain_steps,
         GainMode::Saturating,
@@ -419,7 +431,7 @@ fn apply_gain_channel_with_undo(
     let new_data = replace_ape_tag(&data, &tag);
     fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
 
-    Ok(frames)
+    Ok(stats)
 }
 
 #[cfg(test)]
