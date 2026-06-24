@@ -82,8 +82,10 @@ fn process_apply_into(
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {
-            let warning_msg =
+            let clip_warn =
                 emit_clipping_warning_headroom(steps, &report, opts, dry_run_prefix, filename);
+            let sat_warn = emit_saturation_warning(&report, opts, filename);
+            let warning_msg = combine_warnings(clip_warn, sat_warn);
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 if is_aac {
@@ -178,6 +180,41 @@ fn emit_clipping_warning_headroom(
     ))
 }
 
+/// Warn when a saturating manual-gain apply clamped global_gain values at
+/// the [0, 255] boundary (issue #207). Saturation is lossy — the clamped
+/// frames can no longer be byte-restored by undo, so the lossless guarantee
+/// silently doesn't hold there. ReplayGain adjustments never get near this
+/// range, so the warning only fires for extreme manual `-g` / `-l` values.
+fn emit_saturation_warning(
+    report: &mp3rgain::ApplyReport,
+    opts: &Options,
+    filename: &str,
+) -> Option<String> {
+    let (low, high) = (report.saturated_low, report.saturated_high);
+    if low == 0 && high == 0 {
+        return None;
+    }
+    let detail = match (low, high) {
+        (l, 0) => format!("{l} gain value(s) clamped at 0 (silence)"),
+        (0, h) => format!("{h} gain value(s) clamped at 255 (distortion)"),
+        (l, h) => format!("{l} gain value(s) clamped at 0 (silence), {h} at 255 (distortion)"),
+    };
+    let msg = format!("{detail} - saturated gain is not losslessly reversible");
+    if opts.output_format == OutputFormat::Text && !opts.quiet {
+        eprintln!("  {} {} - {}", "!".yellow(), filename, msg);
+    }
+    Some(msg)
+}
+
+/// Join optional clipping and saturation warnings into the single
+/// [`JsonFileResult::warning`] field.
+fn combine_warnings(clip: Option<String>, saturation: Option<String>) -> Option<String> {
+    match (clip, saturation) {
+        (Some(a), Some(b)) => Some(format!("{a}; {b}")),
+        (a, b) => a.or(b),
+    }
+}
+
 pub fn process_apply_channel(
     file: &Path,
     channel: Channel,
@@ -243,6 +280,8 @@ fn process_apply_channel_into(
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {
+            let warning_msg = emit_saturation_warning(&report, opts, filename);
+
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 writeln!(
                     out,
@@ -260,6 +299,7 @@ fn process_apply_channel_into(
                 frames: Some(report.modified),
                 gain_applied_steps: Some(steps),
                 gain_applied_db: Some(steps_to_db(steps)),
+                warning: warning_msg,
                 ..Default::default()
             })
         }

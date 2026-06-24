@@ -380,6 +380,35 @@ pub(crate) enum GainMode {
     Wrapping,
 }
 
+/// Outcome of an [`apply_gain_to_data`] pass.
+///
+/// `frames` is the number of frames touched (the value the function used
+/// to return bare). `saturated_low` / `saturated_high` count global_gain
+/// values that clamped at 0 (silence) / 255 (distortion) under saturating
+/// mode, where the requested adjustment couldn't be fully applied and the
+/// original value is lost — i.e. the apply is no longer losslessly
+/// reversible at those locations (issue #207). Wrapping mode never
+/// saturates, so both counts stay 0.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct SaturationStats {
+    pub frames: usize,
+    pub saturated_low: usize,
+    pub saturated_high: usize,
+}
+
+impl SaturationStats {
+    /// Record one saturating adjustment of `current` by `steps`, using the
+    /// same `[-255, 255]` step clamp as [`adjust_gain_value`].
+    fn tally(&mut self, current: u8, steps: i32) {
+        let target = current as i32 + steps.clamp(-255, 255);
+        if target > 255 {
+            self.saturated_high += 1;
+        } else if target < 0 {
+            self.saturated_low += 1;
+        }
+    }
+}
+
 /// Apply the gain adjustment to a single gain location.
 ///
 /// `steps` is normalized first (clamp for saturating, modulo for wrapping)
@@ -407,10 +436,10 @@ pub(crate) fn apply_gain_to_data(
     gain_steps: i32,
     mode: GainMode,
     channel_index: Option<usize>,
-) -> usize {
+) -> SaturationStats {
     let audio_end = find_audio_end(data);
     let mut pos = skip_id3v2(data);
-    let mut modified_frames = 0;
+    let mut stats = SaturationStats::default();
     let mut locations = [GainLocation {
         byte_offset: 0,
         bit_offset: 0,
@@ -424,6 +453,9 @@ pub(crate) fn apply_gain_to_data(
                 for loc in &locations[..len] {
                     let current_gain = read_gain_at(data, loc);
                     let new_gain = adjust_gain_value(current_gain, gain_steps, mode);
+                    if mode == GainMode::Saturating {
+                        stats.tally(current_gain, gain_steps);
+                    }
                     write_gain_at(data, loc, new_gain);
                 }
             }
@@ -436,17 +468,18 @@ pub(crate) fn apply_gain_to_data(
                         let current_gain = read_gain_at(data, loc);
                         let new_gain =
                             adjust_gain_value(current_gain, gain_steps, GainMode::Saturating);
+                        stats.tally(current_gain, gain_steps);
                         write_gain_at(data, loc, new_gain);
                     }
                 }
             }
         }
 
-        modified_frames += 1;
+        stats.frames += 1;
         pos = next_pos;
     }
 
-    modified_frames
+    stats
 }
 
 /// Scan gain range (min/max global_gain) across all frames in file data.
@@ -513,6 +546,19 @@ mod tests {
         write_gain_at(&mut data, &loc_unaligned, 0x99);
         assert_eq!(data[1], 0xC9);
         assert_eq!(data[2], 0x9F);
+    }
+
+    #[test]
+    fn test_saturation_tally() {
+        let mut s = SaturationStats::default();
+        s.tally(200, 100); // 300 -> clamps high
+        s.tally(250, 50); //  300 -> clamps high
+        s.tally(10, -50); //  -40 -> clamps low
+        s.tally(100, 10); //  110 -> in range
+        s.tally(255, 0); //   255 -> exactly at ceiling, not over
+        s.tally(0, 0); //     0   -> exactly at floor, not under
+        assert_eq!(s.saturated_high, 2);
+        assert_eq!(s.saturated_low, 1);
     }
 
     #[test]

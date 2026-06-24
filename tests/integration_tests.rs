@@ -198,6 +198,53 @@ fn test_apply_gain_saturates_at_min() {
     cleanup(&path);
 }
 
+/// Issue #207: a saturating apply that clamps global_gain values at the
+/// 0/255 boundary must surface a saturation count so the CLI can warn that
+/// the change is no longer losslessly reversible.
+#[test]
+fn test_apply_reports_saturation() {
+    use mp3rgain::{apply_with_options, ApplyOptions};
+
+    // test_joint_stereo.mp3 spans global_gain 110..210, so a large positive
+    // gain pushes every frame past 255 and a large negative gain drops the
+    // quietest frames below 0.
+    let path = copy_test_file("test_joint_stereo.mp3");
+    let mut opts = ApplyOptions::new(200);
+    opts.write_undo = false;
+    let report = apply_with_options(&path, &opts).unwrap();
+    assert!(
+        report.saturated_high > 0,
+        "expected ceiling saturation, got {report:?}"
+    );
+    assert_eq!(report.saturated_low, 0);
+    cleanup(&path);
+
+    let path = copy_test_file("test_joint_stereo.mp3");
+    let mut opts = ApplyOptions::new(-200);
+    opts.write_undo = false;
+    let report = apply_with_options(&path, &opts).unwrap();
+    assert!(
+        report.saturated_low > 0,
+        "expected floor saturation, got {report:?}"
+    );
+    assert_eq!(report.saturated_high, 0);
+    cleanup(&path);
+}
+
+/// A modest in-range adjustment must report no saturation.
+#[test]
+fn test_apply_no_saturation_when_in_range() {
+    use mp3rgain::{apply_with_options, ApplyOptions};
+
+    let path = copy_test_file("test_joint_stereo.mp3");
+    let mut opts = ApplyOptions::new(1);
+    opts.write_undo = false;
+    let report = apply_with_options(&path, &opts).unwrap();
+    assert_eq!(report.saturated_low, 0);
+    assert_eq!(report.saturated_high, 0);
+    cleanup(&path);
+}
+
 // =============================================================================
 // Undo Tests
 // =============================================================================

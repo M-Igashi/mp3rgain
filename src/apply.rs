@@ -21,6 +21,7 @@ use std::time::SystemTime;
 #[cfg(feature = "aac")]
 use crate::aac;
 use crate::error::{Error, Result};
+use crate::frame::SaturationStats;
 use crate::gain::{
     apply_gain_to_peak, peak_to_headroom_db, steps_to_db, Channel, GainOptions, GAIN_STEP_DB,
     MAX_GAIN,
@@ -144,6 +145,15 @@ pub struct ApplyReport {
     /// `prevent_clipping` is off. `None` if no check ran (steps<=0 or
     /// wrap mode).
     pub clipping_detected: Option<ClippingDetection>,
+
+    /// MP3 global_gain values that clamped at 0 (silence) during a
+    /// saturating apply, where the requested gain couldn't be fully
+    /// applied (issue #207). Always 0 for wrap mode and for [`predict_apply`].
+    pub saturated_low: usize,
+
+    /// MP3 global_gain values that clamped at 255 (distortion) during a
+    /// saturating apply (issue #207).
+    pub saturated_high: usize,
 }
 
 /// Per-strategy clipping signal.
@@ -194,13 +204,17 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
         &mut aac_analysis,
     )?;
 
-    // 2) Apply gain to bytes.
+    // 2) Apply gain to bytes. MP3 reports global_gain saturation (issue
+    // #207); AAC clamps in its own path and isn't tallied here.
+    let mut saturation = SaturationStats::default();
     let modified = if is_aac {
         apply_aac_bytes(file_path, actual_steps, opts, aac_analysis)?
     } else if opts.use_id3v2 {
-        apply_mp3_id3v2_bytes(file_path, actual_steps, opts, &mut mp3_analysis)?
+        saturation = apply_mp3_id3v2_bytes(file_path, actual_steps, opts, &mut mp3_analysis)?;
+        saturation.frames
     } else {
-        apply_mp3_ape_bytes(file_path, actual_steps, opts)?
+        saturation = apply_mp3_ape_bytes(file_path, actual_steps, opts)?;
+        saturation.frames
     };
 
     // 3) ReplayGain tag write.
@@ -242,6 +256,8 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
         actual_steps,
         clipping_prevented,
         clipping_detected,
+        saturated_low: saturation.saturated_low,
+        saturated_high: saturation.saturated_high,
     })
 }
 
@@ -268,6 +284,8 @@ pub fn predict_apply(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyRepor
         actual_steps,
         clipping_prevented,
         clipping_detected,
+        saturated_low: 0,
+        saturated_high: 0,
     })
 }
 
@@ -279,11 +297,17 @@ fn check_clipping(
     aac_analysis: &mut AacAnalysisCache,
 ) -> Result<(i32, bool, Option<ClippingDetection>)> {
     let steps = opts.steps;
-    if steps <= 0 || opts.wrap {
+    if opts.wrap {
         return Ok((steps, false, None));
     }
 
     // ReplayGain-peak branch.
+    //
+    // Runs for any step count, including `steps <= 0` (issue #206): a
+    // track already at the reference loudness nets 0 gain steps, but if it
+    // already clips (peak > 1.0) `-k` must still attenuate it below
+    // unity. The headroom branch below keeps its `steps <= 0` early-out —
+    // there, only positive gain can introduce clipping.
     if let Some(track) = opts.track_result.as_ref() {
         let new_peak = apply_gain_to_peak(track.peak(), steps_to_db(steps));
         if new_peak > 1.0 {
@@ -311,7 +335,13 @@ fn check_clipping(
         return Ok((steps, false, None));
     }
 
-    // Headroom-based branch (no ReplayGain analysis available).
+    // Headroom-based branch (no ReplayGain analysis available). Lowering
+    // or holding gain (steps <= 0) can never push the peak up, so there is
+    // nothing to check.
+    if steps <= 0 {
+        return Ok((steps, false, None));
+    }
+
     let headroom = if is_aac {
         #[cfg(feature = "aac")]
         {
@@ -376,7 +406,11 @@ fn apply_aac_bytes(
     })
 }
 
-fn apply_mp3_ape_bytes(file_path: &Path, steps: i32, opts: &ApplyOptions) -> Result<usize> {
+fn apply_mp3_ape_bytes(
+    file_path: &Path,
+    steps: i32,
+    opts: &ApplyOptions,
+) -> Result<SaturationStats> {
     with_temp_file(file_path, opts.use_temp_file, |r, w| {
         let mut gain = GainOptions::new(steps)
             .wrap(opts.wrap)
@@ -384,7 +418,7 @@ fn apply_mp3_ape_bytes(file_path: &Path, steps: i32, opts: &ApplyOptions) -> Res
         if let Some(ch) = opts.channel {
             gain = gain.channel(ch);
         }
-        gain.apply_to_path(r, w)
+        gain.apply_to_path_with_stats(r, w)
     })
 }
 
@@ -393,7 +427,7 @@ fn apply_mp3_id3v2_bytes(
     steps: i32,
     opts: &ApplyOptions,
     mp3_analysis: &mut Option<crate::Mp3Analysis>,
-) -> Result<usize> {
+) -> Result<SaturationStats> {
     // Need pre-apply analysis if undo will be written. Reuse the cached
     // one from the clipping-check pass when available (issue #135).
     if opts.write_undo && mp3_analysis.is_none() {
@@ -402,12 +436,12 @@ fn apply_mp3_id3v2_bytes(
 
     // APE undo is never written in `-s i` mode; the undo goes into a
     // TXXX:MP3GAIN_UNDO frame instead, written below.
-    let modified = with_temp_file(file_path, opts.use_temp_file, |r, w| {
+    let stats = with_temp_file(file_path, opts.use_temp_file, |r, w| {
         let mut gain = GainOptions::new(steps).wrap(opts.wrap).undo(false);
         if let Some(ch) = opts.channel {
             gain = gain.channel(ch);
         }
-        gain.apply_to_path(r, w)
+        gain.apply_to_path_with_stats(r, w)
     })?;
 
     if opts.write_undo {
@@ -424,7 +458,7 @@ fn apply_mp3_id3v2_bytes(
             mp3_analysis.as_ref(),
         )?;
     }
-    Ok(modified)
+    Ok(stats)
 }
 
 /// Build a unique `.mp3rgain_temp_*` sibling path for `file`. Shared by the
@@ -441,9 +475,9 @@ pub(crate) fn temp_sibling_path(file: &Path, ext: &str) -> std::path::PathBuf {
     ))
 }
 
-fn with_temp_file<F>(file: &Path, use_temp: bool, operation: F) -> Result<usize>
+fn with_temp_file<T, F>(file: &Path, use_temp: bool, operation: F) -> Result<T>
 where
-    F: FnOnce(&Path, &Path) -> Result<usize>,
+    F: FnOnce(&Path, &Path) -> Result<T>,
 {
     if !use_temp {
         return operation(file, file);
@@ -452,9 +486,9 @@ where
     let temp_path = temp_sibling_path(file, "mp3");
 
     match operation(file, &temp_path) {
-        Ok(frames) => {
+        Ok(value) => {
             std::fs::rename(&temp_path, file).map_err(|e| Error::io_write(file, e))?;
-            Ok(frames)
+            Ok(value)
         }
         Err(e) => {
             let _ = std::fs::remove_file(&temp_path);
@@ -585,6 +619,32 @@ mod tests {
             new_peak <= 1.0,
             "capped output still clips ({new_peak}) at steps={steps}"
         );
+    }
+
+    /// Issue #206: a track already at the reference loudness nets 0 gain
+    /// steps. If it already clips (peak > 1.0), `-k` must still attenuate it
+    /// — the old `steps <= 0` early-out skipped the peak check entirely.
+    #[test]
+    fn prevent_clipping_caps_zero_step_clipping_track() {
+        let opts = opts_with_track(0, 1.2, true);
+        let (steps, prevented, _) =
+            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+        assert!(prevented);
+        assert!(steps < 0, "expected attenuation, got {steps}");
+        let new_peak = 1.2 * 10.0_f64.powf(steps_to_db(steps) / 20.0);
+        assert!(new_peak <= 1.0, "capped output still clips ({new_peak})");
+    }
+
+    /// Issue #206: a 0-step track that does not clip must pass through
+    /// unchanged with no clipping signal.
+    #[test]
+    fn zero_step_non_clipping_track_is_noop() {
+        let opts = opts_with_track(0, 0.8, true);
+        let (steps, prevented, detected) =
+            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+        assert_eq!(steps, 0);
+        assert!(!prevented);
+        assert!(detected.is_none());
     }
 
     /// Sweep clipping peaks (> 1.0). Cap must always produce a non-clipping
