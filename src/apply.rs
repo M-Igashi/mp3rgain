@@ -91,9 +91,9 @@ pub struct ApplyOptions {
     pub write_undo: bool,
 
     /// Write ReplayGain metadata tags. Requires [`Self::track_result`] to
-    /// be set. AAC writes to mp4 freeform metadata; MP3 only writes when
-    /// [`Self::use_id3v2`] is also on (there is no APE-based ReplayGain
-    /// tag in this codebase).
+    /// be set. AAC writes to mp4 freeform metadata; MP3 writes ID3v2 TXXX
+    /// frames when [`Self::use_id3v2`] is on, otherwise APEv2 `REPLAYGAIN_*`
+    /// items (issue #204).
     pub write_replaygain_tags: bool,
 
     /// `-s i`: MP3 only — use ID3v2 TXXX frames for undo and ReplayGain
@@ -173,7 +173,8 @@ pub enum ClippingDetection {
 /// 2. Gain application — MP3 APE / MP3 ID3v2 / AAC, with optional temp
 ///    file + atomic rename.
 /// 3. ID3v2 undo tag write (MP3 + [`ApplyOptions::use_id3v2`]).
-/// 4. ReplayGain tag write (AAC, or MP3 + [`ApplyOptions::use_id3v2`]).
+/// 4. ReplayGain tag write (AAC mp4 metadata, MP3 ID3v2 TXXX with
+///    [`ApplyOptions::use_id3v2`], or MP3 APEv2 by default — issue #204).
 /// 5. Mtime restoration when [`ApplyOptions::preserve_timestamp`] is on.
 pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
     let is_aac = mp4meta::is_aac_file(file_path);
@@ -219,9 +220,10 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
 
     // 3) ReplayGain tag write.
     //
-    // AAC writes always (caller gates with `write_replaygain_tags`).
-    // MP3 only writes when also using ID3v2 — there is no APE-based RG
-    // path in this codebase.
+    // AAC writes to mp4 freeform metadata; MP3 writes ID3v2 TXXX frames in
+    // `-s i` mode, otherwise APEv2 `REPLAYGAIN_*` items (the default,
+    // mp3gain-compatible mode — issue #204). All three carry the same
+    // analysis values; only the container differs.
     if opts.write_replaygain_tags {
         if let Some(track) = opts.track_result.as_ref() {
             if is_aac {
@@ -242,6 +244,16 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
                     ..Default::default()
                 };
                 id3v2::write_id3v2_replaygain(file_path, &rg)?;
+            } else {
+                let rg = ape::ApeReplayGain {
+                    track_gain: Some(format!("{:+.2} dB", track.gain_db())),
+                    track_peak: Some(format!("{:.6}", track.peak())),
+                    album_gain: opts
+                        .album_info
+                        .map(|a| format!("{:+.2} dB", a.album_gain_db)),
+                    album_peak: opts.album_info.map(|a| format!("{:.6}", a.album_peak)),
+                };
+                ape::write_ape_replaygain(file_path, &rg)?;
             }
         }
     }
