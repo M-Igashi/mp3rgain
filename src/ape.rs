@@ -357,6 +357,46 @@ pub fn write_ape_tag(file_path: &Path, tag: &ApeTag) -> Result<()> {
     Ok(())
 }
 
+/// ReplayGain analysis values written into an APEv2 tag (issue #204).
+///
+/// The mp3gain-compatible default mode records these alongside the
+/// `MP3GAIN_UNDO` / `MP3GAIN_MINMAX` items the apply step already writes,
+/// so APEv2 files carry the same `REPLAYGAIN_*` metadata as `mp3gain` and
+/// as mp3rgain's ID3v2 (`-s i`) and AAC paths.
+#[derive(Debug, Clone, Default)]
+pub struct ApeReplayGain {
+    pub track_gain: Option<String>,
+    pub track_peak: Option<String>,
+    pub album_gain: Option<String>,
+    pub album_peak: Option<String>,
+}
+
+/// Add (or replace) the `REPLAYGAIN_*` items in `file_path`'s APEv2 tag.
+///
+/// Existing items written by the gain-apply step (`MP3GAIN_UNDO`,
+/// `MP3GAIN_MINMAX`) are preserved — only the four ReplayGain keys present
+/// in `rg` are set.
+pub fn write_ape_replaygain(file_path: &Path, rg: &ApeReplayGain) -> Result<()> {
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    let mut tag = read_ape_tag(&data).unwrap_or_default();
+
+    let fields: [(&str, &Option<String>); 4] = [
+        (TAG_REPLAYGAIN_TRACK_GAIN, &rg.track_gain),
+        (TAG_REPLAYGAIN_TRACK_PEAK, &rg.track_peak),
+        (TAG_REPLAYGAIN_ALBUM_GAIN, &rg.album_gain),
+        (TAG_REPLAYGAIN_ALBUM_PEAK, &rg.album_peak),
+    ];
+    for (key, value) in fields {
+        if let Some(v) = value {
+            tag.set(key, v);
+        }
+    }
+
+    let new_data = replace_ape_tag(&data, &tag);
+    fs::write(file_path, &new_data).map_err(|e| Error::io_write(file_path, e))?;
+    Ok(())
+}
+
 /// Delete APEv2 tag from file
 pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
@@ -463,5 +503,32 @@ mod tests {
 
         let tiny = write_temp("tiny.mp3", &[0u8; 10]);
         assert_eq!(read_ape_tag_from_file(&tiny).unwrap(), None);
+    }
+
+    /// Issue #204: write_ape_replaygain must add the REPLAYGAIN_* items while
+    /// preserving the MP3GAIN_UNDO/MINMAX items the apply step already wrote.
+    #[test]
+    fn write_ape_replaygain_preserves_existing_items() {
+        let mut tag = ApeTag::new();
+        tag.set_undo_gain(2, 2, false);
+        tag.set_minmax(100, 200);
+        let data = replace_ape_tag(&vec![0u8; 20_000], &tag);
+        let path = write_temp("rg_preserve.mp3", &data);
+
+        let rg = ApeReplayGain {
+            track_gain: Some("+1.50 dB".to_string()),
+            track_peak: Some("0.250000".to_string()),
+            album_gain: None,
+            album_peak: None,
+        };
+        write_ape_replaygain(&path, &rg).unwrap();
+
+        let out = read_ape_tag_from_file(&path).unwrap().unwrap();
+        assert_eq!(out.get(TAG_MP3GAIN_UNDO), Some("+002,+002,N"));
+        assert_eq!(out.get(TAG_MP3GAIN_MINMAX), Some("100,200"));
+        assert_eq!(out.get(TAG_REPLAYGAIN_TRACK_GAIN), Some("+1.50 dB"));
+        assert_eq!(out.get(TAG_REPLAYGAIN_TRACK_PEAK), Some("0.250000"));
+        // Album fields were None, so they must not be written.
+        assert_eq!(out.get(TAG_REPLAYGAIN_ALBUM_GAIN), None);
     }
 }

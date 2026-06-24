@@ -82,7 +82,11 @@ fn process_track_gain_into(
             //     reference loudness yet already clips (peak > 1.0).
             // Only the common already-normalized, non-clipping, no-tags case
             // keeps the cheap "no adjustment needed" skip.
-            let writes_rg_tags = result.file_type() == AudioFileType::Aac || opts.use_id3v2;
+            // RG analysis tags are written for AAC always, and for MP3 in any
+            // mode that keeps tags (APE default or `-s i` ID3v2) — only `-s s`
+            // skips them (issue #204).
+            let writes_rg_tags = result.file_type() == AudioFileType::Aac
+                || opts.stored_tag_mode != StoredTagMode::Skip;
             let clip_prevention_applies = opts.prevent_clipping && result.peak() > 1.0;
             if modified_steps == 0 && !writes_rg_tags && !clip_prevention_applies {
                 if opts.output_format == OutputFormat::Text && !opts.quiet {
@@ -199,9 +203,10 @@ fn apply_replaygain_with_album_into(
     apply_opts.wrap = opts.wrap_gain;
     apply_opts.preserve_timestamp = opts.preserve_timestamp;
     apply_opts.use_temp_file = opts.use_temp_file;
-    // RG path writes undo unless -s s.
+    // RG path writes undo and ReplayGain tags unless -s s. Default APE,
+    // `-s i` ID3v2, and AAC all write the REPLAYGAIN_* tags (issue #204).
     apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
-    apply_opts.write_replaygain_tags = opts.use_id3v2;
+    apply_opts.write_replaygain_tags = opts.stored_tag_mode != StoredTagMode::Skip;
     apply_opts.use_id3v2 = opts.use_id3v2;
 
     match apply_with_options(file, &apply_opts) {

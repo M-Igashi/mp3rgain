@@ -571,3 +571,78 @@ fn test_file_not_modified_on_zero_gain() {
 
     cleanup(&path);
 }
+
+// =============================================================================
+// APEv2 ReplayGain tag writing (issue #204)
+// =============================================================================
+
+/// Issue #204: applying track gain in the default APEv2 mode must write the
+/// REPLAYGAIN_TRACK_* analysis tags alongside MP3GAIN_UNDO/MINMAX, matching
+/// the original mp3gain. Previously only the MP3GAIN_* tags were written.
+#[test]
+fn test_apply_track_gain_writes_ape_replaygain_tags() {
+    use mp3rgain::apply::{apply_with_options, ApplyOptions};
+    use mp3rgain::{
+        replaygain, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_TRACK_GAIN,
+        TAG_REPLAYGAIN_TRACK_PEAK,
+    };
+
+    let path = copy_test_file("test_mono.mp3");
+    let result = replaygain::analyze_track_with_index(&path, None).unwrap();
+
+    let mut opts = ApplyOptions::new(result.gain_steps());
+    opts.track_result = Some(result);
+    opts.write_replaygain_tags = true; // default APEv2 path (use_id3v2 = false)
+    apply_with_options(&path, &opts).unwrap();
+
+    let tag = read_ape_tag_from_file(&path).unwrap().expect("APE tag");
+    assert!(
+        tag.get(TAG_REPLAYGAIN_TRACK_GAIN).is_some(),
+        "REPLAYGAIN_TRACK_GAIN missing from APEv2 tag"
+    );
+    assert!(
+        tag.get(TAG_REPLAYGAIN_TRACK_PEAK).is_some(),
+        "REPLAYGAIN_TRACK_PEAK missing from APEv2 tag"
+    );
+    // The mp3gain-compatible apply tags must still be present.
+    assert!(tag.get(TAG_MP3GAIN_UNDO).is_some(), "MP3GAIN_UNDO missing");
+    assert!(
+        tag.get(TAG_MP3GAIN_MINMAX).is_some(),
+        "MP3GAIN_MINMAX missing"
+    );
+
+    cleanup(&path);
+}
+
+/// Album info must additionally populate the REPLAYGAIN_ALBUM_* APEv2 items.
+#[test]
+fn test_apply_album_gain_writes_ape_album_replaygain_tags() {
+    use mp3rgain::apply::{apply_with_options, AacAlbumInfo, ApplyOptions};
+    use mp3rgain::{replaygain, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK};
+
+    let path = copy_test_file("test_mono.mp3");
+    let result = replaygain::analyze_track_with_index(&path, None).unwrap();
+
+    let mut opts = ApplyOptions::new(result.gain_steps());
+    opts.track_result = Some(result);
+    opts.album_info = Some(AacAlbumInfo {
+        album_gain_db: 1.5,
+        album_peak: 0.5,
+    });
+    opts.write_replaygain_tags = true;
+    apply_with_options(&path, &opts).unwrap();
+
+    let tag = read_ape_tag_from_file(&path).unwrap().expect("APE tag");
+    assert_eq!(
+        tag.get(TAG_REPLAYGAIN_ALBUM_GAIN),
+        Some("+1.50 dB"),
+        "REPLAYGAIN_ALBUM_GAIN missing or malformed"
+    );
+    assert_eq!(
+        tag.get(TAG_REPLAYGAIN_ALBUM_PEAK),
+        Some("0.500000"),
+        "REPLAYGAIN_ALBUM_PEAK missing or malformed"
+    );
+
+    cleanup(&path);
+}
