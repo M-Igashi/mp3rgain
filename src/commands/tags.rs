@@ -1,9 +1,9 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::{
-    id3v2, mp4meta, read_ape_tag_from_file, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
-    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK,
+    id3v2, mp4meta, read_ape_tag_from_file, TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX,
+    TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
+    TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -18,6 +18,7 @@ use crate::util::get_filename;
 struct CheckTagInfo<'a> {
     undo: Option<&'a str>,
     minmax: Option<&'a str>,
+    album_minmax: Option<&'a str>,
     track_gain: Option<&'a str>,
     track_peak: Option<&'a str>,
     album_gain: Option<&'a str>,
@@ -31,6 +32,7 @@ impl CheckTagInfo<'_> {
     fn has_any(&self) -> bool {
         self.undo.is_some()
             || self.minmax.is_some()
+            || self.album_minmax.is_some()
             || self.track_gain.is_some()
             || self.track_peak.is_some()
             || self.album_gain.is_some()
@@ -53,6 +55,9 @@ impl CheckTagInfo<'_> {
                 if let Some(v) = self.minmax {
                     writeln!(out, "  {:<25}{}", format!("{}:", self.minmax_label), v).ok();
                 }
+                if let Some(v) = self.album_minmax {
+                    writeln!(out, "  {:<25}{}", "MP3GAIN_ALBUM_MINMAX:", v).ok();
+                }
                 if let Some(v) = self.track_gain {
                     writeln!(out, "  REPLAYGAIN_TRACK_GAIN: {}", v).ok();
                 }
@@ -74,14 +79,15 @@ impl CheckTagInfo<'_> {
             OutputFormat::Tsv => {
                 writeln!(
                     out,
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     filename,
                     self.undo.unwrap_or("-"),
                     self.minmax.unwrap_or("-"),
                     self.track_gain.unwrap_or("-"),
                     self.track_peak.unwrap_or("-"),
                     self.album_gain.unwrap_or("-"),
-                    self.album_peak.unwrap_or("-")
+                    self.album_peak.unwrap_or("-"),
+                    self.album_minmax.unwrap_or("-")
                 )
                 .ok();
                 None
@@ -217,6 +223,7 @@ fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, S
         let info = CheckTagInfo {
             undo: undo_tags.undo(),
             minmax: undo_tags.minmax(),
+            album_minmax: None,
             track_gain: rg_tags.track_gain(),
             track_peak: rg_tags.track_peak(),
             album_gain: rg_tags.album_gain(),
@@ -233,6 +240,7 @@ fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, S
                 let info = CheckTagInfo {
                     undo: rg.undo.as_deref(),
                     minmax: rg.minmax.as_deref(),
+                    album_minmax: None,
                     track_gain: rg.track_gain.as_deref(),
                     track_peak: rg.track_peak.as_deref(),
                     album_gain: rg.album_gain.as_deref(),
@@ -267,6 +275,7 @@ fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, S
                 let info = CheckTagInfo {
                     undo: tag.get(TAG_MP3GAIN_UNDO),
                     minmax: tag.get(TAG_MP3GAIN_MINMAX),
+                    album_minmax: tag.get(TAG_MP3GAIN_ALBUM_MINMAX),
                     track_gain: tag.get(TAG_REPLAYGAIN_TRACK_GAIN),
                     track_peak: tag.get(TAG_REPLAYGAIN_TRACK_PEAK),
                     album_gain: tag.get(TAG_REPLAYGAIN_ALBUM_GAIN),
@@ -282,6 +291,7 @@ fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, S
                 let info = CheckTagInfo {
                     undo: None,
                     minmax: None,
+                    album_minmax: None,
                     track_gain: None,
                     track_peak: None,
                     album_gain: None,

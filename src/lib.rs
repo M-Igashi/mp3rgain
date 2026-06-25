@@ -78,9 +78,10 @@ pub use analysis::{
     Mp3Analysis, MpegVersion,
 };
 pub use ape::{
-    delete_ape_tag, read_ape_tag, read_ape_tag_from_file, write_ape_tag, ApeItem, ApeTag,
-    TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN,
-    TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
+    delete_ape_tag, read_ape_tag, read_ape_tag_from_file, write_ape_album_minmax, write_ape_tag,
+    ApeItem, ApeTag, TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
+    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN,
+    TAG_REPLAYGAIN_TRACK_PEAK,
 };
 pub use apply::{
     apply_with_options, predict_apply, AacAlbumInfo, ApplyOptions, ApplyReport, ClippingDetection,

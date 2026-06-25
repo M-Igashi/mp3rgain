@@ -397,6 +397,19 @@ pub fn write_ape_replaygain(file_path: &Path, rg: &ApeReplayGain) -> Result<()> 
     Ok(())
 }
 
+/// Add (or replace) the `MP3GAIN_ALBUM_MINMAX` item in `file_path`'s APEv2
+/// tag, preserving all other items. mp3gain writes this album-wide
+/// post-apply `global_gain` range (`min,max`) in album (`-a`) mode (issue
+/// #210); the same value is stored on every file in the album.
+pub fn write_ape_album_minmax(file_path: &Path, min: u8, max: u8) -> Result<()> {
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    let mut tag = read_ape_tag(&data).unwrap_or_default();
+    tag.set(TAG_MP3GAIN_ALBUM_MINMAX, &format!("{},{}", min, max));
+    let new_data = replace_ape_tag(&data, &tag);
+    fs::write(file_path, &new_data).map_err(|e| Error::io_write(file_path, e))?;
+    Ok(())
+}
+
 /// Delete APEv2 tag from file
 pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
@@ -530,5 +543,24 @@ mod tests {
         assert_eq!(out.get(TAG_REPLAYGAIN_TRACK_PEAK), Some("0.250000"));
         // Album fields were None, so they must not be written.
         assert_eq!(out.get(TAG_REPLAYGAIN_ALBUM_GAIN), None);
+    }
+
+    /// Issue #210: write_ape_album_minmax adds MP3GAIN_ALBUM_MINMAX as `min,max`
+    /// while preserving the items the apply step already wrote.
+    #[test]
+    fn write_ape_album_minmax_sets_and_preserves() {
+        let mut tag = ApeTag::new();
+        tag.set_undo_gain(-15, -15, false);
+        tag.set_minmax(131, 225);
+        let data = replace_ape_tag(&vec![0u8; 20_000], &tag);
+        let path = write_temp("album_minmax.mp3", &data);
+
+        write_ape_album_minmax(&path, 126, 225).unwrap();
+
+        let out = read_ape_tag_from_file(&path).unwrap().unwrap();
+        assert_eq!(out.get(TAG_MP3GAIN_ALBUM_MINMAX), Some("126,225"));
+        // Pre-existing per-file items are untouched.
+        assert_eq!(out.get(TAG_MP3GAIN_UNDO), Some("-015,-015,N"));
+        assert_eq!(out.get(TAG_MP3GAIN_MINMAX), Some("131,225"));
     }
 }
