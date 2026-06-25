@@ -545,10 +545,13 @@ fn write_id3v2_undo_after_apply(
     // fresh scan reflects the applied gain.
     let post = crate::analyze(file)?;
 
+    // MP3GAIN_UNDO stores the *undo* delta (mp3gain convention, issue #210):
+    // applying `+delta` makes the stored undo `-delta`, accumulating by
+    // subtraction onto any prior undo value.
     id3v2::write_id3v2_undo(
         file,
-        existing_left + delta_left,
-        existing_right + delta_right,
+        existing_left - delta_left,
+        existing_right - delta_right,
         wrap,
         post.min_gain(),
         post.max_gain(),

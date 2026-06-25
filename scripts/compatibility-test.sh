@@ -187,9 +187,73 @@ test_gain_steps() {
 # (used with ReplayGain), while mp3rgain's -d directly applies dB gain.
 # This is a documented difference, not a compatibility issue.
 
-# Note: Undo test removed because mp3gain and mp3rgain handle APE tags
-# differently after undo (mp3gain keeps empty tags, mp3rgain removes them).
-# The core undo functionality works correctly - only tag cleanup differs.
+# Extract "<Max global_gain>,<Min global_gain>" from the analysis output.
+# These two columns fully capture a file's lossless-gain state, so they are
+# the right thing to compare for an undo round-trip — unaffected by the
+# container/tag-block byte differences between the two tools' file rewrites.
+gg_range() {
+    awk -F'\t' 'NR==2 {print $5 "," $6; exit}'
+}
+
+# Cross-tool undo: the MP3GAIN_UNDO sign convention must match mp3gain so that
+# `-u` reverses the *other* tool's gain (issue #210). A wrong sign re-applies
+# the gain (doubling it) instead of cancelling it, which shows up as a
+# global_gain range that does not return to the original.
+run_cross_undo() {
+    local test_name="$1"
+    local mp3_file="$2"
+    local apply_bin="$3"
+    local undo_bin="$4"
+    local gain="$5"
+
+    local basename
+    basename=$(basename "$mp3_file")
+    local orig="${TEMP_DIR}/xu_orig_${basename}"
+    local work="${TEMP_DIR}/xu_work_${basename}"
+    cp "$mp3_file" "$orig"
+    cp "$mp3_file" "$work"
+
+    if ! "$apply_bin" -g "$gain" "$work" > /dev/null 2>&1; then
+        log "  ${YELLOW}SKIP${NC}: $test_name (apply failed)"
+        SKIP_COUNT=$((SKIP_COUNT + 1))
+        return 0
+    fi
+    if ! "$undo_bin" -u "$work" > /dev/null 2>&1; then
+        log "  ${RED}FAIL${NC}: $test_name (undo failed)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        return 1
+    fi
+
+    local gg_orig gg_work
+    gg_orig=$("$MP3RGAIN_BIN" -o tsv "$orig" 2>/dev/null | gg_range)
+    gg_work=$("$MP3RGAIN_BIN" -o tsv "$work" 2>/dev/null | gg_range)
+    if [ -n "$gg_orig" ] && [ "$gg_orig" = "$gg_work" ]; then
+        log "  ${GREEN}PASS${NC}: $test_name"
+        PASS_COUNT=$((PASS_COUNT + 1))
+        return 0
+    else
+        log "  ${RED}FAIL${NC}: $test_name - global_gain not restored"
+        log "    original: $gg_orig"
+        log "    restored: $gg_work"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        return 1
+    fi
+}
+
+test_cross_tool_undo() {
+    local mp3_file="$1"
+    local basename
+    basename=$(basename "$mp3_file" .mp3)
+
+    log ""
+    log "Testing cross-tool undo on: $basename"
+
+    # A small attenuation is losslessly reversible on every fixture (no
+    # global_gain saturation at the 0/255 boundary), so a clean restore
+    # isolates the undo-sign convention from saturation effects.
+    run_cross_undo "mp3gain applies, mp3rgain undoes" "$mp3_file" "$MP3GAIN_BIN" "$MP3RGAIN_BIN" -3
+    run_cross_undo "mp3rgain applies, mp3gain undoes" "$mp3_file" "$MP3RGAIN_BIN" "$MP3GAIN_BIN" -3
+}
 
 # Test clipping prevention
 test_clipping_prevention() {
@@ -329,6 +393,7 @@ main() {
         test_gain_steps "$mp3"
         test_clipping_prevention "$mp3"
         test_channel_gain "$mp3"
+        test_cross_tool_undo "$mp3"
     done
 
     # Cross-check the ReplayGain analysis (recommended gain) against mp3gain.
