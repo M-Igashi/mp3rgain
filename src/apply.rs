@@ -558,6 +558,36 @@ fn write_id3v2_undo_after_apply(
     )
 }
 
+/// Aggregate the post-apply `global_gain` range across an album's MP3 files
+/// and write `MP3GAIN_ALBUM_MINMAX` (`min,max`) to each, matching mp3gain's
+/// album (`-a`) mode (issue #210).
+///
+/// The album-wide range is only known once every file has had its gain
+/// applied, so callers invoke this *after* the per-file apply pass. Shared by
+/// the CLI (`cmd_album_gain`) and the GUI apply worker so both frontends stay
+/// in parity (the GUI path was missing it in 2.9.0).
+///
+/// AAC members are skipped — the MP3 analyzer rejects them and mp3gain has no
+/// AAC. Best-effort: a failed scan or tag write on one file is ignored so a
+/// metadata hiccup never fails the album operation. Intended for the default
+/// APEv2 path; skip the call when writing ID3v2 (`-s i`) or when stored-tag
+/// writing is disabled.
+pub fn write_album_minmax(files: &[&Path]) {
+    let mut album_min = u8::MAX;
+    let mut album_max = u8::MIN;
+    let mut mp3_files: Vec<&Path> = Vec::new();
+    for &file in files {
+        if let Ok(analysis) = crate::analyze(file) {
+            album_min = album_min.min(analysis.min_gain());
+            album_max = album_max.max(analysis.max_gain());
+            mp3_files.push(file);
+        }
+    }
+    for file in mp3_files {
+        let _ = ape::write_ape_album_minmax(file, album_min, album_max);
+    }
+}
+
 #[cfg(test)]
 #[cfg(feature = "replaygain")]
 mod tests {

@@ -9,7 +9,8 @@
 //! `ctx.request_repaint()` so egui actually redraws.
 
 use mp3rgain::apply::{
-    apply_with_options, predict_apply, read_mtime, restore_timestamp, ApplyOptions,
+    apply_with_options, predict_apply, read_mtime, restore_timestamp, write_album_minmax,
+    ApplyOptions,
 };
 use mp3rgain::replaygain::{self, ReplayGainResult};
 use mp3rgain::{
@@ -17,6 +18,7 @@ use mp3rgain::{
     TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
     TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -428,6 +430,20 @@ pub fn spawn_apply(
         let applied = AtomicUsize::new(0);
         let errors = AtomicUsize::new(0);
 
+        // Album-gain applies carry `album_info` on every job. Capture their
+        // MP3 paths now (before `jobs` is consumed) so we can write the
+        // album-wide MP3GAIN_ALBUM_MINMAX after all files are applied — the
+        // same mp3gain-parity step the CLI does (issue #210). APEv2 only and
+        // not in dry-run.
+        let album_minmax_paths: Vec<PathBuf> = if !ui_opts.dry_run && !ui_opts.use_id3v2 {
+            jobs.iter()
+                .filter(|j| j.album_info.is_some())
+                .map(|j| j.path.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         {
             let tx = tx.clone();
             let ctx = ctx.clone();
@@ -489,6 +505,22 @@ pub fn spawn_apply(
         if cancel_w.load(Ordering::Relaxed) {
             send(&tx, &ctx, WorkerEvent::Cancelled);
             return;
+        }
+
+        // Album-wide MP3GAIN_ALBUM_MINMAX, written once the whole album has
+        // been applied (mp3gain parity, issue #210). No-op for track/manual
+        // gain (empty list) and for the dry-run / ID3v2 paths. The GUI treats
+        // each folder as its own album (issue #159), so aggregate and stamp
+        // the range per parent directory rather than across the whole batch.
+        if !album_minmax_paths.is_empty() {
+            let mut by_folder: BTreeMap<PathBuf, Vec<&Path>> = BTreeMap::new();
+            for p in &album_minmax_paths {
+                let parent = p.parent().map(Path::to_path_buf).unwrap_or_default();
+                by_folder.entry(parent).or_default().push(p.as_path());
+            }
+            for group in by_folder.values() {
+                write_album_minmax(group);
+            }
         }
 
         let applied = applied.load(Ordering::Relaxed);

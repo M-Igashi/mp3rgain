@@ -174,28 +174,6 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     Ok(())
 }
 
-/// Aggregate the post-apply `global_gain` range across the album's MP3 files
-/// and stamp `MP3GAIN_ALBUM_MINMAX` (`min,max`) onto each, matching mp3gain's
-/// `-a` mode (issue #210). AAC files are skipped — the MP3 analyzer rejects
-/// them and mp3gain has no AAC. Tag-write failures are swallowed: this is
-/// metadata parity, not something that should fail the gain operation.
-fn write_album_minmax(files: &[PathBuf], indices: &[usize]) {
-    let mut album_min = u8::MAX;
-    let mut album_max = u8::MIN;
-    let mut mp3_files: Vec<&Path> = Vec::new();
-    for &idx in indices {
-        let file = files[idx].as_path();
-        if let Ok(analysis) = mp3rgain::analyze(file) {
-            album_min = album_min.min(analysis.min_gain());
-            album_max = album_max.max(analysis.max_gain());
-            mp3_files.push(file);
-        }
-    }
-    for file in mp3_files {
-        let _ = mp3rgain::write_ape_album_minmax(file, album_min, album_max);
-    }
-}
-
 pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     require_replaygain_feature();
 
@@ -506,7 +484,11 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             // whole album is done). APEv2 only — mp3gain has no AAC, and `-s i`
             // uses ID3v2; best-effort, so a tag hiccup never fails the album.
             if !opts.dry_run && opts.stored_tag_mode != StoredTagMode::Skip && !opts.use_id3v2 {
-                write_album_minmax(files, &successful_indices);
+                let album_files: Vec<&Path> = successful_indices
+                    .iter()
+                    .map(|&i| files[i].as_path())
+                    .collect();
+                mp3rgain::write_album_minmax(&album_files);
             }
 
             if opts.output_format == OutputFormat::Json {

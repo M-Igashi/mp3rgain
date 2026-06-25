@@ -84,7 +84,8 @@ pub use ape::{
     TAG_REPLAYGAIN_TRACK_PEAK,
 };
 pub use apply::{
-    apply_with_options, predict_apply, AacAlbumInfo, ApplyOptions, ApplyReport, ClippingDetection,
+    apply_with_options, predict_apply, write_album_minmax, AacAlbumInfo, ApplyOptions, ApplyReport,
+    ClippingDetection,
 };
 pub use error::{Error, Result};
 pub use gain::{
