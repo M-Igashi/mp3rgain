@@ -265,7 +265,7 @@ jobs:
           echo "gui_windows_arm64_sha256=$(cat "dist/mp3rgui-${TAG}-windows-arm64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v2
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v2
         with:
           files: |
             dist/mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz
@@ -393,7 +393,7 @@ jobs:
       - name: Upload to release
         env:
           ARCH: ${{ matrix.arch }}
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v2
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v2
         with:
           files: |
             ../mp3rgain_${{ needs.release.outputs.version }}-1_${{ matrix.arch }}.deb
@@ -456,7 +456,7 @@ jobs:
       - name: Upload to release
         env:
           ARCH: ${{ matrix.arch }}
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v2
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v2
         with:
           files: |
             ../mp3rgui_${{ needs.release.outputs.version }}-1_${{ matrix.arch }}.deb
