@@ -1975,4 +1975,139 @@ mod tests {
             loudness
         );
     }
+
+    // =========================================================================
+    // Issue #201: cross-check the ReplayGain *analysis* against the reference C
+    // `gain_analysis.c` by feeding both the identical PCM. The decoder
+    // (symphonia) is deliberately kept out of the loop, so any difference here
+    // is the analysis and nothing else — isolating it from the ~0.05 dB
+    // decoder-vs-decoder gap seen end-to-end against mp3gain.
+    // =========================================================================
+
+    #[cfg(feature = "replaygain")]
+    const GOLDEN_PCM_SAMPLE_RATE: u32 = 44_100;
+
+    /// 80 full 50 ms windows (44100 * 0.05 = 2205 samples each). An exact
+    /// multiple of the window leaves no trailing partial window — the reference
+    /// gain_analysis.c only counts a window when it fills, while mp3rgain's
+    /// final `finish_window()` would flush a partial one. Matching the window
+    /// boundary removes that as a variable.
+    #[cfg(feature = "replaygain")]
+    const GOLDEN_PCM_FRAMES: usize = 2205 * 80;
+
+    /// Deterministic stereo PCM (normalized to [-1, 1]) used by both the
+    /// reference C harness in `tests/reference/` and the test below.
+    ///
+    /// Broadband white noise (flat spectrum exercises every filter tap — the
+    /// same kind of broadband content that surfaced the 0.05 dB gap on pink
+    /// noise) with a per-window amplitude staircase so the windows land in
+    /// well-separated histogram bins (no near-ties at the 95th percentile).
+    ///
+    /// Deliberately uses no transcendentals: a fixed-seed integer LCG, integer
+    /// rounding, and division by a power of two (exact in f64). The result is
+    /// therefore bit-identical on every platform, so the golden value captured
+    /// on one machine is valid for the CI runner too.
+    #[cfg(feature = "replaygain")]
+    fn golden_pcm() -> (Vec<f64>, Vec<f64>) {
+        let win = (GOLDEN_PCM_SAMPLE_RATE as usize * 50) / 1000; // 2205 @ 44.1k
+        let n = GOLDEN_PCM_FRAMES;
+        let mut left = Vec::with_capacity(n);
+        let mut right = Vec::with_capacity(n);
+        let mut ls: u64 = 0x1234_5678_9abc_def0;
+        let mut rs: u64 = 0x0fed_cba9_8765_4321;
+        // 64-bit LCG (Knuth MMIX constants) mapped to [-1, 1) — no rand dep.
+        let lcg = |s: &mut u64| -> f64 {
+            *s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((*s >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+        };
+        for i in 0..n {
+            // Amplitude is constant within each 50 ms window and steps through
+            // eight levels, so windows occupy distinct, well-populated bins.
+            let amp = 0.10 + 0.035 * ((i / win) % 8) as f64; // 0.100 .. 0.345
+            let l = (lcg(&mut ls) * amp * 30000.0).round() as i32;
+            let r = (lcg(&mut rs) * amp * 30000.0).round() as i32;
+            left.push(l as f64 / SAMPLE_SCALE_16BIT);
+            right.push(r as f64 / SAMPLE_SCALE_16BIT);
+        }
+        (left, right)
+    }
+
+    /// One-time helper: dump `golden_pcm()` to a binary file the reference C
+    /// harness reads. Header is `[u32 sample_rate][u32 frames]` (LE) followed by
+    /// `frames` f64 left samples then `frames` f64 right samples. Run with:
+    ///   `cargo test --lib dump_golden_pcm -- --ignored --nocapture`
+    /// then see `tests/reference/README.md` to produce the golden value.
+    #[cfg(feature = "replaygain")]
+    #[test]
+    #[ignore = "one-time: regenerates the PCM dump for the reference C harness (#201)"]
+    fn dump_golden_pcm() {
+        let path =
+            std::env::var("RG_PCM_DUMP").unwrap_or_else(|_| "/tmp/rg_golden_pcm.bin".to_string());
+        let (left, right) = golden_pcm();
+        let mut buf = Vec::with_capacity(8 + left.len() * 16);
+        buf.extend_from_slice(&GOLDEN_PCM_SAMPLE_RATE.to_le_bytes());
+        buf.extend_from_slice(&(left.len() as u32).to_le_bytes());
+        // Write the exact values the filter sees: normalized × 16-bit scale.
+        // The reference harness feeds these straight into AnalyzeSamples, so
+        // both implementations filter identical numbers.
+        for &x in &left {
+            buf.extend_from_slice(&(x * SAMPLE_SCALE_16BIT).to_le_bytes());
+        }
+        for &x in &right {
+            buf.extend_from_slice(&(x * SAMPLE_SCALE_16BIT).to_le_bytes());
+        }
+        std::fs::write(&path, &buf).expect("write PCM dump");
+        eprintln!(
+            "wrote {} frames ({} bytes) to {}",
+            left.len(),
+            buf.len(),
+            path
+        );
+    }
+
+    /// #201: the isolated unit test dgilman asked for. Feed `golden_pcm()`
+    /// through mp3rgain's exact production analysis path (per-channel
+    /// equal-loudness filter → windowed RMS → 95th-percentile histogram → gain)
+    /// and assert it matches `GetTitleGain()` from the reference C
+    /// `gain_analysis.c` to floating-point precision.
+    ///
+    /// `GOLDEN_GAIN_DB` was captured by running the reference harness in
+    /// `tests/reference/` on the exact bytes `golden_pcm()` emits — same
+    /// lineage mp3gain uses (Glen Sawyer's gain_analysis.c), compiled with
+    /// `Float_t = double` to match mp3gain's original precision and mp3rgain's
+    /// f64. See `tests/reference/README.md` to reproduce.
+    #[cfg(feature = "replaygain")]
+    #[test]
+    fn analysis_matches_reference_c_to_float_precision() {
+        // GetTitleGain() from tests/reference/ on golden_pcm() (44100 Hz, stereo),
+        // captured with `./tests/reference/run.sh`. mp3rgain reproduces this to
+        // the last ULP (Δ ≈ 4e-17 dB) — the analysis is bit-faithful to the
+        // reference, so the ~0.05 dB end-to-end gap vs mp3gain is decoder-side.
+        const GOLDEN_GAIN_DB: f64 = -1.460000000000008;
+
+        let (left, right) = golden_pcm();
+        let sr = GOLDEN_PCM_SAMPLE_RATE;
+        let mut filter_l = EqualLoudnessFilter::new(sr).unwrap();
+        let mut filter_r = EqualLoudnessFilter::new(sr).unwrap();
+        let mut analyzer = ReplayGainAnalyzer::new(sr);
+
+        // Identical to process_audio_buffer's F32 path: normalized samples are
+        // scaled to 16-bit range before filtering, then squared per window.
+        for (&l, &r) in left.iter().zip(right.iter()) {
+            let lf = filter_l.process(l * SAMPLE_SCALE_16BIT);
+            let rf = filter_r.process(r * SAMPLE_SCALE_16BIT);
+            analyzer.add_sample(lf, rf);
+        }
+        analyzer.finish_window(); // no-op: GOLDEN_PCM_FRAMES is a window multiple
+        let gain = PINK_REF - analyzer.get_loudness();
+
+        let delta = (gain - GOLDEN_GAIN_DB).abs();
+        assert!(
+            delta < 1e-6,
+            "ReplayGain analysis diverged from reference gain_analysis.c: \
+             mp3rgain {gain:.12} dB vs reference {GOLDEN_GAIN_DB:.12} dB (Δ {delta:.3e} dB)"
+        );
+    }
 }
