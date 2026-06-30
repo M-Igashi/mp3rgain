@@ -872,14 +872,18 @@ impl ReplayGainAnalyzer {
         // Original: (lsum + rsum) / totsamp * 0.5
         let mean_square = (self.lsum + self.rsum) / self.totsamp as f64 * 0.5;
 
-        // Convert to histogram index
+        // Convert to histogram index.
         // Original: STEPS_per_dB * 10.0 * log10(mean_square + 1e-37)
+        // The reference gain_analysis.c clamps out-of-range indices into the
+        // histogram (`if (ival < 0) ival = 0; if (ival >= len) ival = len-1`)
+        // so EVERY window is counted. Clamping (not dropping) matters because
+        // the 95th-percentile threshold is `ceil(0.05 * total_windows)`:
+        // silent windows (very negative `val`) must still be counted, or the
+        // total shrinks and sparse material (e.g. acapellas) reads too loud
+        // (issue #217).
         let val = STEPS_PER_DB * 10.0 * (mean_square + 1e-37).log10();
-        let idx = (val as i32 + HISTOGRAM_OFFSET) as usize;
-
-        if idx < HISTOGRAM_SIZE {
-            self.histogram.data[idx] += 1;
-        }
+        let idx = (val as i32 + HISTOGRAM_OFFSET).clamp(0, HISTOGRAM_SIZE as i32 - 1) as usize;
+        self.histogram.data[idx] += 1;
 
         // Reset for next window
         self.lsum = 0.0;
@@ -1998,10 +2002,15 @@ mod tests {
     /// Deterministic stereo PCM (normalized to [-1, 1]) used by both the
     /// reference C harness in `tests/reference/` and the test below.
     ///
-    /// Broadband white noise (flat spectrum exercises every filter tap — the
-    /// same kind of broadband content that surfaced the 0.05 dB gap on pink
-    /// noise) with a per-window amplitude staircase so the windows land in
-    /// well-separated histogram bins (no near-ties at the 95th percentile).
+    /// Layout (80 windows of 50 ms): the first 50 are **silent**, the last 30
+    /// are broadband white noise on a distinct-amplitude staircase. The silent
+    /// windows are the #217 regression: they must be counted in the
+    /// 95th-percentile denominator (clamped to bin 0), not dropped — dropping
+    /// them shrinks the total and the staircase makes the resulting percentile
+    /// land on a different (louder) bin, so this signal fails without the
+    /// `finish_window` clamp. White noise (flat spectrum) also exercises every
+    /// filter tap, and the staircase keeps the loud windows on well-separated
+    /// bins (no near-ties at the percentile).
     ///
     /// Deliberately uses no transcendentals: a fixed-seed integer LCG, integer
     /// rounding, and division by a power of two (exact in f64). The result is
@@ -2023,9 +2032,13 @@ mod tests {
             ((*s >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
         };
         for i in 0..n {
-            // Amplitude is constant within each 50 ms window and steps through
-            // eight levels, so windows occupy distinct, well-populated bins.
-            let amp = 0.10 + 0.035 * ((i / win) % 8) as f64; // 0.100 .. 0.345
+            let w = i / win;
+            // First 50 windows silent; last 30 a distinct-amplitude staircase.
+            let amp = if w < 50 {
+                0.0
+            } else {
+                0.06 + 0.01 * (w - 50) as f64
+            };
             let l = (lcg(&mut ls) * amp * 30000.0).round() as i32;
             let r = (lcg(&mut rs) * amp * 30000.0).round() as i32;
             left.push(l as f64 / SAMPLE_SCALE_16BIT);
@@ -2067,11 +2080,16 @@ mod tests {
         );
     }
 
-    /// #201: the isolated unit test dgilman asked for. Feed `golden_pcm()`
-    /// through mp3rgain's exact production analysis path (per-channel
-    /// equal-loudness filter → windowed RMS → 95th-percentile histogram → gain)
-    /// and assert it matches `GetTitleGain()` from the reference C
-    /// `gain_analysis.c` to floating-point precision.
+    /// #201 / #217: the isolated unit test. Feed `golden_pcm()` through
+    /// mp3rgain's exact production analysis path (per-channel equal-loudness
+    /// filter → windowed RMS → 95th-percentile histogram → gain) and assert it
+    /// matches `GetTitleGain()` from the reference C `gain_analysis.c` to
+    /// floating-point precision.
+    ///
+    /// `golden_pcm()` is half silence, which makes this double as the #217
+    /// regression test: silent windows must be counted (clamped to bin 0), not
+    /// dropped. Without the `finish_window` clamp, mp3rgain reads −1.50 dB here
+    /// vs the reference −0.83 dB; with it, they agree to the last ULP.
     ///
     /// `GOLDEN_GAIN_DB` was captured by running the reference harness in
     /// `tests/reference/` on the exact bytes `golden_pcm()` emits — same
@@ -2083,9 +2101,9 @@ mod tests {
     fn analysis_matches_reference_c_to_float_precision() {
         // GetTitleGain() from tests/reference/ on golden_pcm() (44100 Hz, stereo),
         // captured with `./tests/reference/run.sh`. mp3rgain reproduces this to
-        // the last ULP (Δ ≈ 4e-17 dB) — the analysis is bit-faithful to the
-        // reference, so the ~0.05 dB end-to-end gap vs mp3gain is decoder-side.
-        const GOLDEN_GAIN_DB: f64 = -1.460000000000008;
+        // the last ULP (Δ < 1e-15 dB) — the analysis is bit-faithful, including
+        // the silent-window histogram clamp (#217).
+        const GOLDEN_GAIN_DB: f64 = -0.83000000000001251;
 
         let (left, right) = golden_pcm();
         let sr = GOLDEN_PCM_SAMPLE_RATE;

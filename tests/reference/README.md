@@ -42,8 +42,14 @@ The Rust test `analysis_matches_reference_c_to_float_precision`
 production analysis path and asserts it matches the printed value.
 
 Result: mp3rgain reproduces the reference `GetTitleGain()` to the last ULP
-(Δ ≈ 4e-17 dB), i.e. the analysis is bit-faithful and the ~0.05 dB end-to-end
-gap is entirely decoder-side.
+(Δ < 1e-15 dB) — the analysis is bit-faithful.
+
+`golden_pcm()` is half silence on purpose, so this also guards #217: the
+reference clamps out-of-range histogram indices into bin 0 (counting every
+window), whereas mp3rgain originally dropped silent windows, shrinking the
+95th-percentile denominator and reading sparse material (acapellas) too loud.
+The cross-check caught that — without the `finish_window` clamp mp3rgain reads
+−1.50 dB here vs the reference −0.83 dB.
 
 The PCM is integer-deterministic (fixed-seed LCG, no transcendentals), so the
 golden value is platform-independent.
