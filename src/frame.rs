@@ -308,10 +308,19 @@ pub(crate) fn is_xing_frame(data: &[u8], frame_offset: usize, header: &FrameHead
 /// Returns `(frame_pos, header, next_pos)`, or `None` when no further
 /// frame exists before `audio_end`. Shared by the frame iterator and the
 /// gain-apply walks so the scan/validate/skip-Xing logic exists once.
+///
+/// `reference` is the `(version, sample_rate)` of the first accepted frame,
+/// or `None` for the first call. Frames whose MPEG version or sample rate
+/// differ from the reference are skipped, matching mp3gain's `frameSearch`,
+/// which only accepts frames consistent with the first one. Without this,
+/// a stray valid-looking header inside trailing tags/garbage (a different
+/// sample rate) would be counted as a frame and inflate `MP3GAIN_MINMAX`
+/// (issue #214).
 fn next_frame(
     data: &[u8],
     mut pos: usize,
     audio_end: usize,
+    reference: Option<(MpegVersion, u32)>,
 ) -> Option<(usize, FrameHeader, usize)> {
     while pos + 4 <= audio_end {
         let header = match parse_header(&data[pos..]) {
@@ -343,6 +352,16 @@ fn next_frame(
             continue;
         }
 
+        // Skip frames inconsistent with the first accepted frame (mp3gain's
+        // frameSearch requires a matching MPEG version + sample rate). VBR
+        // varies only the bitrate, so real audio always matches.
+        if let Some((ver, sr)) = reference {
+            if header.version != ver || header.sample_rate != sr {
+                pos += 1;
+                continue;
+            }
+        }
+
         return Some((pos, header, next_pos));
     }
 
@@ -357,12 +376,14 @@ where
     let audio_end = find_audio_end(data);
     let mut pos = skip_id3v2(data);
     let mut frame_count = 0;
+    let mut reference = None;
     let mut locations = [GainLocation {
         byte_offset: 0,
         bit_offset: 0,
     }; MAX_GAIN_LOCATIONS];
 
-    while let Some((frame_pos, header, next_pos)) = next_frame(data, pos, audio_end) {
+    while let Some((frame_pos, header, next_pos)) = next_frame(data, pos, audio_end, reference) {
+        reference.get_or_insert((header.version, header.sample_rate));
         let len = calculate_gain_locations(frame_pos, &header, &mut locations);
         callback(frame_pos, &header, &locations[..len]);
 
@@ -440,12 +461,14 @@ pub(crate) fn apply_gain_to_data(
     let audio_end = find_audio_end(data);
     let mut pos = skip_id3v2(data);
     let mut stats = SaturationStats::default();
+    let mut reference = None;
     let mut locations = [GainLocation {
         byte_offset: 0,
         bit_offset: 0,
     }; MAX_GAIN_LOCATIONS];
 
-    while let Some((frame_pos, header, next_pos)) = next_frame(data, pos, audio_end) {
+    while let Some((frame_pos, header, next_pos)) = next_frame(data, pos, audio_end, reference) {
+        reference.get_or_insert((header.version, header.sample_rate));
         let len = calculate_gain_locations(frame_pos, &header, &mut locations);
 
         match channel_index {
@@ -597,5 +620,58 @@ mod tests {
         data[38] = 0x00;
         data[39] = 0x00;
         assert!(!is_xing_frame(&data, 0, &header));
+    }
+
+    /// Build a complete MPEG1 Layer III stereo frame (128 kbps, no CRC) at the
+    /// given sample-rate index, with `gg` written into every global_gain slot.
+    fn make_frame(sr_idx: u8, gg: u8) -> Vec<u8> {
+        let sample_rate = SAMPLE_RATE_TABLE[0][sr_idx as usize] as usize;
+        let frame_size = (1152 * 128 * 125) / sample_rate;
+        let mut frame = vec![0u8; frame_size];
+        frame[0] = 0xFF;
+        frame[1] = 0xFB; // MPEG1, Layer III, no CRC
+        frame[2] = (9 << 4) | (sr_idx << 2); // bitrate idx 9 = 128 kbps, no padding
+        frame[3] = 0x00; // stereo
+
+        let header = parse_header(&frame).unwrap();
+        let mut locs = [GainLocation {
+            byte_offset: 0,
+            bit_offset: 0,
+        }; MAX_GAIN_LOCATIONS];
+        let n = calculate_gain_locations(0, &header, &mut locs);
+        for loc in &locs[..n] {
+            write_gain_at(&mut frame, loc, gg);
+        }
+        frame
+    }
+
+    /// Issue #214: a frame whose sample rate differs from the first frame must
+    /// be excluded from the global_gain range, matching mp3gain's frameSearch.
+    /// A stray valid-looking header inside trailing tags/garbage (a different
+    /// sample rate) otherwise inflates the recorded MP3GAIN_MINMAX max.
+    #[test]
+    fn test_scan_gain_range_skips_mismatched_sample_rate() {
+        // 44100 Hz stream (gg=150) with one 48000 Hz frame (gg=243) embedded.
+        let mut data = Vec::new();
+        for _ in 0..3 {
+            data.extend_from_slice(&make_frame(0, 150));
+        }
+        data.extend_from_slice(&make_frame(1, 243)); // 48000 Hz, high gain
+        for _ in 0..2 {
+            data.extend_from_slice(&make_frame(0, 150));
+        }
+        assert_eq!(scan_gain_range(&data).unwrap(), (150, 150));
+
+        // Control: the same high-gain frame at the stream's own sample rate is
+        // real audio and must be counted.
+        let mut ok = Vec::new();
+        for _ in 0..3 {
+            ok.extend_from_slice(&make_frame(0, 150));
+        }
+        ok.extend_from_slice(&make_frame(0, 243));
+        for _ in 0..2 {
+            ok.extend_from_slice(&make_frame(0, 150));
+        }
+        assert_eq!(scan_gain_range(&ok).unwrap(), (150, 243));
     }
 }
