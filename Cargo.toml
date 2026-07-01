@@ -1,6 +1,6 @@
 [package]
 name = "mp3rgain"
-version = "2.9.2"
+version = "2.9.3"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Jesse Pinkman <M-Igashi@users.noreply.github.com>"]
