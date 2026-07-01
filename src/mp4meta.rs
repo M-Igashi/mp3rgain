@@ -885,31 +885,36 @@ fn find_ilst_location(
     ))
 }
 
-/// Check if a box at the given position is a ReplayGain freeform tag
-fn is_replaygain_freeform(data: &[u8], pos: usize, header: &BoxHeader) -> bool {
+/// Check if a box at the given position is an iTunes freeform tag whose name
+/// matches `name_matches`.
+fn is_freeform_matching(
+    data: &[u8],
+    pos: usize,
+    header: &BoxHeader,
+    name_matches: impl Fn(&str) -> bool,
+) -> bool {
     if header.box_type != FREEFORM {
         return false;
     }
     let inner_data = &data[pos + header.header_size as usize..pos + header.size as usize];
-    parse_freeform_tag(inner_data).is_some_and(|tag| {
-        tag.namespace() == ITUNES_NAMESPACE
-            && (tag.name().eq_ignore_ascii_case(RG_TRACK_GAIN)
-                || tag.name().eq_ignore_ascii_case(RG_TRACK_PEAK)
-                || tag.name().eq_ignore_ascii_case(RG_ALBUM_GAIN)
-                || tag.name().eq_ignore_ascii_case(RG_ALBUM_PEAK))
+    parse_freeform_tag(inner_data)
+        .is_some_and(|tag| tag.namespace() == ITUNES_NAMESPACE && name_matches(tag.name()))
+}
+
+/// Check if a box at the given position is a ReplayGain freeform tag
+fn is_replaygain_freeform(data: &[u8], pos: usize, header: &BoxHeader) -> bool {
+    is_freeform_matching(data, pos, header, |name| {
+        name.eq_ignore_ascii_case(RG_TRACK_GAIN)
+            || name.eq_ignore_ascii_case(RG_TRACK_PEAK)
+            || name.eq_ignore_ascii_case(RG_ALBUM_GAIN)
+            || name.eq_ignore_ascii_case(RG_ALBUM_PEAK)
     })
 }
 
 /// Check if a box at the given position is an undo freeform tag
 fn is_undo_freeform(data: &[u8], pos: usize, header: &BoxHeader) -> bool {
-    if header.box_type != FREEFORM {
-        return false;
-    }
-    let inner_data = &data[pos + header.header_size as usize..pos + header.size as usize];
-    parse_freeform_tag(inner_data).is_some_and(|tag| {
-        tag.namespace() == ITUNES_NAMESPACE
-            && (tag.name().eq_ignore_ascii_case(UNDO_TAG)
-                || tag.name().eq_ignore_ascii_case(MINMAX_TAG))
+    is_freeform_matching(data, pos, header, |name| {
+        name.eq_ignore_ascii_case(UNDO_TAG) || name.eq_ignore_ascii_case(MINMAX_TAG)
     })
 }
 
