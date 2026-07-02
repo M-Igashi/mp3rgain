@@ -11,13 +11,23 @@ use crate::json_output::{FileStatus, JsonFileResult};
 use crate::progress::update_analysis_progress;
 use crate::util::get_filename;
 
+/// Scan the file's global_gain range for an info row. MP3-only: AAC files
+/// fail the frame scan and get the (255, 0) placeholder mp3gain also prints.
+pub fn scan_gain_range_for_row(file: &Path) -> (u8, u8) {
+    analyze(file)
+        .map(|info| (info.max_gain(), info.min_gain()))
+        .unwrap_or((255, 0))
+}
+
 /// Format one mp3gain-compatible per-file row from a ReplayGain analysis
 /// result. Shared by the per-file path below and the single-pass album flow
-/// in `cmd_info`.
+/// in `cmd_info`, which pre-computes `gain_range` in parallel instead of
+/// re-scanning each file inside its sequential emit loop.
 pub fn format_rg_row(
     file: &Path,
     opts: &Options,
     rg_result: &ReplayGainResult,
+    gain_range: (u8, u8),
 ) -> Result<(JsonFileResult, String)> {
     let mut out = String::new();
     let filename = get_filename(file);
@@ -25,9 +35,7 @@ pub fn format_rg_row(
     // Reuse the ReplayGain peak instead of re-decoding the audio
     // via find_max_amplitude (issue #135).
     let max_amp = rg_result.peak();
-    let (max_gain, min_gain) = analyze(file)
-        .map(|info| (info.max_gain(), info.min_gain()))
-        .unwrap_or((255, 0));
+    let (max_gain, min_gain) = gain_range;
 
     // Calculate gain with modifier (mp3gain compatible: -d modifies suggested gain)
     let gain_db = rg_result.gain_db() + opts.gain_modifier_db;
@@ -115,7 +123,8 @@ fn process_info_into(
 
         match rg_result {
             Ok(rg_result) => {
-                let (result, text) = format_rg_row(file, opts, &rg_result)?;
+                let (result, text) =
+                    format_rg_row(file, opts, &rg_result, scan_gain_range_for_row(file))?;
                 out.push_str(&text);
                 return Ok(result);
             }

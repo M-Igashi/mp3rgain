@@ -208,25 +208,34 @@ impl<'a> BitReader<'a> {
         if bits_to_read == 0 {
             return Ok(0);
         }
-        if self.bits_remaining() < bits_to_read {
-            return Err(Error::AacParse {
-                message: "unexpected end of bitstream".into(),
-            });
-        }
-
-        let bytes_needed = (self.bit_pos as usize + bits_to_read).div_ceil(8);
-        let mut window = 0u64;
-        for byte in &self.data[self.byte_pos..self.byte_pos + bytes_needed] {
-            window = (window << 8) | u64::from(*byte);
-        }
-
-        let window_bits = bytes_needed * 8;
-        let shift = window_bits - self.bit_pos as usize - bits_to_read;
         let mask = if n == 32 {
             u64::from(u32::MAX)
         } else {
             (1u64 << bits_to_read) - 1
         };
+
+        // Fast path: a single 8-byte load covers any request (bit_pos <= 7
+        // plus n <= 32 needs at most 39 bits). This is the innermost loop of
+        // Huffman decoding, so avoiding the byte-by-byte window build matters.
+        if let Some(window_bytes) = self.data.get(self.byte_pos..self.byte_pos + 8) {
+            let window = u64::from_be_bytes(window_bytes.try_into().unwrap());
+            let shift = 64 - self.bit_pos as usize - bits_to_read;
+            return Ok(((window >> shift) & mask) as u32);
+        }
+
+        // Tail fallback: fewer than 8 bytes remain
+        if self.bits_remaining() < bits_to_read {
+            return Err(Error::AacParse {
+                message: "unexpected end of bitstream".into(),
+            });
+        }
+        let bytes_needed = (self.bit_pos as usize + bits_to_read).div_ceil(8);
+        let mut window = 0u64;
+        for byte in &self.data[self.byte_pos..self.byte_pos + bytes_needed] {
+            window = (window << 8) | u64::from(*byte);
+        }
+        let window_bits = bytes_needed * 8;
+        let shift = window_bits - self.bit_pos as usize - bits_to_read;
         Ok(((window >> shift) & mask) as u32)
     }
 
@@ -992,10 +1001,8 @@ fn parse_tns_data(reader: &mut BitReader, info: &IcsInfo) -> Result<()> {
                 if order > 0 {
                     let _direction = reader.read_bits(1)?;
                     let coef_compress = reader.read_bits(1)?;
-                    let coef_bits = (coef_res + 3 - coef_compress) as u8;
-                    for _ in 0..order {
-                        reader.read_bits(coef_bits)?;
-                    }
+                    let coef_bits = (coef_res + 3 - coef_compress) as usize;
+                    reader.skip_bits(order * coef_bits)?;
                 }
             }
         }
@@ -1100,12 +1107,8 @@ fn parse_cpe(reader: &mut BitReader, sample_rate: u32) -> Result<Vec<AacGainLoca
         let info = parse_ics_info(reader)?;
         let ms_mask_present = reader.read_bits(2)?;
         if ms_mask_present == 1 {
-            // Read ms_used bits
-            for _g in 0..info.window_groups {
-                for _sfb in 0..info.max_sfb {
-                    reader.read_bits(1)?;
-                }
-            }
+            // Skip ms_used bits (one per group/sfb pair, values unused)
+            reader.skip_bits(info.window_groups * info.max_sfb)?;
         }
         Some(info)
     } else {
@@ -1416,7 +1419,12 @@ pub(crate) fn apply_aac_gain_with_undo_to_path_with_analysis(
 ///
 /// Returns the number of modified gain locations.
 pub fn undo_aac_gain(file_path: &Path) -> Result<usize> {
-    let undo_tags = mp4meta::read_undo_tags(file_path)?;
+    // Single read/write pass: read once, undo the gain and strip the undo
+    // tags in memory, then write atomically (previously 4 full reads and
+    // 2 full writes per undo).
+    let mut data = std::fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+
+    let undo_tags = mp4meta::read_undo_tags_from_data(&data);
     let undo_str = undo_tags.undo().ok_or(Error::NoUndoTag)?;
 
     let undo_gain = crate::ape::parse_undo_values(Some(undo_str)).0;
@@ -1425,16 +1433,12 @@ pub fn undo_aac_gain(file_path: &Path) -> Result<usize> {
         return Ok(0);
     }
 
-    // Apply inverse gain
-    let analysis = analyze_aac_gains(file_path)?;
-    let mut data = std::fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-
+    // Apply inverse gain and remove undo tags
+    let analysis = analyze_aac_gains_from_data(&data)?;
     let modified = apply_aac_gain_to_data(&mut data, &analysis, -undo_gain);
 
-    std::fs::write(file_path, &data).map_err(|e| Error::io_write(file_path, e))?;
-
-    // Remove undo tags
-    mp4meta::delete_undo_tags(file_path)?;
+    let final_data = mp4meta::update_mp4_undo_metadata(&data, &mp4meta::UndoTags::default())?;
+    mp4meta::atomic_write(file_path, &final_data)?;
 
     Ok(modified)
 }
