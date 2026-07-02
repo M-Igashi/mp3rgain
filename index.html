@@ -73,6 +73,23 @@
   </div>
 
   <div class="section">
+    <h2>Platform Share (All-Time, GitHub Releases)</h2>
+    <p style="color:var(--muted);font-size:0.875rem;margin-bottom:1rem">
+      Share of downloads by platform summed across every release. Excludes <code>.sha256</code> checksum fetches.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1.5rem">
+      <div>
+        <h3 style="font-size:0.875rem;color:var(--muted);text-align:center;margin-bottom:0.5rem">CLI (mp3rgain)</h3>
+        <canvas id="chart-platform-share-cli"></canvas>
+      </div>
+      <div>
+        <h3 style="font-size:0.875rem;color:var(--muted);text-align:center;margin-bottom:0.5rem">GUI (mp3rgui)</h3>
+        <canvas id="chart-platform-share-gui"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
     <h2>crates.io Downloads Over Versions</h2>
     <canvas id="chart-crates"></canvas>
   </div>
@@ -280,6 +297,59 @@ async function main() {
       options: CHART_DEFAULTS
     });
   }
+
+  // Platform share (all-time): sum download_count across ALL releases,
+  // split by CLI vs GUI, rendered as one pie per package.
+  const PLATFORM_ORDER = ['Linux x64', 'Linux ARM64', 'macOS', 'Windows x64', 'Windows ARM64'];
+  const PLATFORM_COLORS = {
+    'Linux x64': COLORS.blue,
+    'Linux ARM64': COLORS.green,
+    'macOS': COLORS.gray,
+    'Windows x64': COLORS.orange,
+    'Windows ARM64': COLORS.purple,
+  };
+  const allTimeByPlatform = kind => {
+    const totals = {};
+    for (const r of ghReleases) {
+      for (const a of r.assets) {
+        if (!isReal(a.name) || classifyAsset(a.name) !== kind) continue;
+        const p = platformLabel(a.name);
+        totals[p] = (totals[p] || 0) + a.download_count;
+      }
+    }
+    return totals;
+  };
+  const renderPlatformPie = (canvasId, kind) => {
+    const totals = allTimeByPlatform(kind);
+    const labels = PLATFORM_ORDER.filter(p => totals[p] > 0);
+    const values = labels.map(p => totals[p]);
+    const total = values.reduce((s, v) => s + v, 0);
+    new Chart(document.getElementById(canvasId), {
+      type: 'pie',
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          backgroundColor: labels.map(p => PLATFORM_COLORS[p]),
+          borderColor: '#161b22',
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#8b949e' } },
+          tooltip: { callbacks: { label: ctx => {
+            const pct = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : '0';
+            return `${ctx.label}: ${num(ctx.parsed)} (${pct}%)`;
+          } } }
+        }
+      }
+    });
+  };
+  renderPlatformPie('chart-platform-share-cli', 'cli');
+  renderPlatformPie('chart-platform-share-gui', 'gui');
 
   // crates.io versions chart
   const cratesVersions = latest.crates_io.versions.slice(0, 15).reverse();
