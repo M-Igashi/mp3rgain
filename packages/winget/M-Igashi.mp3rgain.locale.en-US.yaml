@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
 
 PackageIdentifier: M-Igashi.mp3rgain
-PackageVersion: 2.9.2
+PackageVersion: 2.9.3
 PackageLocale: en-US
 Publisher: M-Igashi
 PublisherUrl: https://github.com/M-Igashi
@@ -30,6 +30,6 @@ Tags:
   - replaygain
   - rust
   - volume
-ReleaseNotesUrl: https://github.com/M-Igashi/mp3rgain/releases/tag/v2.9.2
+ReleaseNotesUrl: https://github.com/M-Igashi/mp3rgain/releases/tag/v2.9.3
 ManifestType: defaultLocale
 ManifestVersion: 1.12.0
