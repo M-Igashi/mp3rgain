@@ -236,17 +236,18 @@ fn process_apply_channel_into(
     let filename = get_filename(file);
     let channel_name = channel.name();
 
-    // Warn if file is Joint Stereo (mp3gain only supports Stereo for -l)
-    if let Ok(info) = analyze(file) {
-        if info.channel_mode() == mp3rgain::ChannelMode::JointStereo
-            && opts.output_format == OutputFormat::Text
-            && !opts.quiet
-        {
-            eprintln!(
-                "  {} {} - Joint Stereo file: channel-specific gain may not work as expected",
-                "!".yellow(),
-                filename
-            );
+    // Warn if file is Joint Stereo (mp3gain only supports Stereo for -l).
+    // Check the output mode first: analyze() reads the whole file, which is
+    // wasted when the warning would not be printed anyway.
+    if opts.output_format == OutputFormat::Text && !opts.quiet {
+        if let Ok(info) = analyze(file) {
+            if info.channel_mode() == mp3rgain::ChannelMode::JointStereo {
+                eprintln!(
+                    "  {} {} - Joint Stereo file: channel-specific gain may not work as expected",
+                    "!".yellow(),
+                    filename
+                );
+            }
         }
     }
 

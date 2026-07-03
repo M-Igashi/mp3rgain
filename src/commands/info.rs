@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::threading::effective_threads;
 use crate::json_output::{JsonFileResult, JsonOutput};
-use crate::processors::info::{format_rg_row, process_info};
+use crate::processors::info::{format_rg_row, process_info, scan_gain_range_for_row};
 use crate::progress::{
     create_album_progress_pb_in, create_analysis_progress_bar, create_file_count_pb_in,
     progress_finish,
@@ -90,6 +90,17 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
         }
     }
 
+    // Scan gain ranges in parallel before emitting: the frame scan re-reads
+    // each file, which the sequential emit loop below would serialize.
+    let gain_ranges: Vec<(u8, u8)> = files
+        .par_iter()
+        .enumerate()
+        .map(|(i, file)| match rows[i] {
+            Some(Row::Analyzed(_)) => scan_gain_range_for_row(file),
+            _ => (255, 0),
+        })
+        .collect();
+
     // Emit rows in input order and collect the album-level gain bounds.
     let mut any_ok = false;
     let mut album_max_gain: Option<u8> = None;
@@ -100,7 +111,7 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
         for (i, file) in files.iter().enumerate() {
             match &rows[i] {
                 Some(Row::Analyzed(rg)) => {
-                    let (result, text) = format_rg_row(file, opts, rg)?;
+                    let (result, text) = format_rg_row(file, opts, rg, gain_ranges[i])?;
                     if !text.is_empty() {
                         handle.write_all(text.as_bytes())?;
                     }
