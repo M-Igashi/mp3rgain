@@ -44,6 +44,21 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
                          The Status column shows the steps that would be applied. \
                          CLI -n.",
                     );
+
+                ui.separator();
+
+                ui.checkbox(&mut app.single_album, "Single album")
+                    .on_hover_text(
+                        "Treat all loaded files as one album for Album Analysis / \
+                         Apply Album Gain, ignoring subfolders (e.g. multi-disc sets). \
+                         Off = each folder is its own album.",
+                    );
+
+                ui.checkbox(&mut app.show_filename_only, "Filename only")
+                    .on_hover_text(
+                        "Show only the file name in the Path/File column instead of \
+                         the full path. The full path is still shown on hover.",
+                    );
             });
         });
     });

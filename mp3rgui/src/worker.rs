@@ -421,6 +421,10 @@ pub fn spawn_apply(
     jobs: Vec<ApplyJob>,
     action_label: &'static str,
     ui_opts: ApplyOptionsUi,
+    // When true (album-gain apply with issue #224 enabled), the album-wide
+    // MINMAX range is stamped across the whole batch instead of per folder.
+    // Ignored by track/manual/channel gain, whose jobs carry no album_info.
+    single_album: bool,
 ) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -509,17 +513,23 @@ pub fn spawn_apply(
 
         // Album-wide MP3GAIN_ALBUM_MINMAX, written once the whole album has
         // been applied (mp3gain parity, issue #210). No-op for track/manual
-        // gain (empty list) and for the dry-run / ID3v2 paths. The GUI treats
-        // each folder as its own album (issue #159), so aggregate and stamp
-        // the range per parent directory rather than across the whole batch.
+        // gain (empty list) and for the dry-run / ID3v2 paths. By default the
+        // GUI treats each folder as its own album (issue #159), so the range
+        // is stamped per parent directory; in single-album mode (issue #224)
+        // it spans the whole batch to match the one shared album gain.
         if !album_minmax_paths.is_empty() {
-            let mut by_folder: BTreeMap<PathBuf, Vec<&Path>> = BTreeMap::new();
-            for p in &album_minmax_paths {
-                let parent = p.parent().map(Path::to_path_buf).unwrap_or_default();
-                by_folder.entry(parent).or_default().push(p.as_path());
-            }
-            for group in by_folder.values() {
-                write_album_minmax(group);
+            if single_album {
+                let all: Vec<&Path> = album_minmax_paths.iter().map(PathBuf::as_path).collect();
+                write_album_minmax(&all);
+            } else {
+                let mut by_folder: BTreeMap<PathBuf, Vec<&Path>> = BTreeMap::new();
+                for p in &album_minmax_paths {
+                    let parent = p.parent().map(Path::to_path_buf).unwrap_or_default();
+                    by_folder.entry(parent).or_default().push(p.as_path());
+                }
+                for group in by_folder.values() {
+                    write_album_minmax(group);
+                }
             }
         }
 
