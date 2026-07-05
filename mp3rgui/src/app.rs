@@ -155,6 +155,12 @@ enum WorkerKind {
 struct PersistedSettings {
     apply_options: ApplyOptionsUi,
     target_volume: f64,
+    // `serde(default)` so settings saved by older builds (which lack these
+    // keys) still deserialize instead of falling back to full defaults.
+    #[serde(default)]
+    show_filename_only: bool,
+    #[serde(default)]
+    single_album: bool,
 }
 
 impl Default for PersistedSettings {
@@ -162,6 +168,8 @@ impl Default for PersistedSettings {
         Self {
             apply_options: ApplyOptionsUi::default(),
             target_volume: 89.0,
+            show_filename_only: false,
+            single_album: false,
         }
     }
 }
@@ -229,6 +237,16 @@ pub struct Mp3rgainApp {
     /// stored-tag read (issue #203). Drained by `start_import_scan` on the
     /// next idle frame.
     pending_import_scan: Vec<usize>,
+
+    /// When true, the Path/File column shows only the file name; the full
+    /// path stays available on hover (issue #223). Off = full path, the
+    /// pre-existing behavior.
+    pub show_filename_only: bool,
+
+    /// When true, Album Analysis / Apply Album Gain treat every loaded file
+    /// as a single album regardless of directory (issue #224). Off = each
+    /// folder is its own album, the default (issue #159).
+    pub single_album: bool,
 }
 
 impl Mp3rgainApp {
@@ -261,6 +279,8 @@ impl Mp3rgainApp {
             display_order_cache: Vec::new(),
             display_order_dirty: true,
             pending_import_scan: Vec::new(),
+            show_filename_only: settings.show_filename_only,
+            single_album: settings.single_album,
         }
     }
 
@@ -593,22 +613,36 @@ impl Mp3rgainApp {
             }
         }
 
-        let mut groups: std::collections::BTreeMap<PathBuf, Vec<(usize, PathBuf)>> =
-            std::collections::BTreeMap::new();
-        for &idx in &targets {
-            if let Some(f) = self.files.get(idx) {
-                let parent = f
-                    .path
-                    .parent()
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(PathBuf::new);
-                groups
-                    .entry(parent)
-                    .or_default()
-                    .push((idx, f.path.clone()));
+        let group_jobs: Vec<Vec<(usize, PathBuf)>> = if self.single_album {
+            // Issue #224: treat every target as one album regardless of
+            // directory, so multi-disc sets in subfolders share one album
+            // gain. A single group produces one album_info for the batch.
+            let jobs: Vec<(usize, PathBuf)> = targets
+                .iter()
+                .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f.path.clone())))
+                .collect();
+            if jobs.is_empty() {
+                Vec::new()
+            } else {
+                vec![jobs]
             }
-        }
-        let group_jobs: Vec<Vec<(usize, PathBuf)>> = groups.into_values().collect();
+        } else {
+            // Issue #159: group by parent directory so each folder is its
+            // own album.
+            let mut groups: std::collections::BTreeMap<PathBuf, Vec<(usize, PathBuf)>> =
+                std::collections::BTreeMap::new();
+            for &idx in &targets {
+                if let Some(f) = self.files.get(idx) {
+                    let parent = f
+                        .path
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(PathBuf::new);
+                    groups.entry(parent).or_default().push((idx, f.path.clone()));
+                }
+            }
+            groups.into_values().collect()
+        };
         let total: usize = group_jobs.iter().map(|g| g.len()).sum();
 
         self.begin_worker(
@@ -654,7 +688,7 @@ impl Mp3rgainApp {
         self.begin_worker(
             WorkerKind::TrackApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "track gain", ui_opts),
+            worker::spawn_apply(ctx.clone(), jobs, "track gain", ui_opts, false),
         );
     }
 
@@ -821,7 +855,7 @@ impl Mp3rgainApp {
         self.begin_worker(
             WorkerKind::TrackApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "manual gain", ui_opts),
+            worker::spawn_apply(ctx.clone(), jobs, "manual gain", ui_opts, false),
         );
     }
 
@@ -860,7 +894,7 @@ impl Mp3rgainApp {
         self.begin_worker(
             WorkerKind::TrackApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "channel gain", ui_opts),
+            worker::spawn_apply(ctx.clone(), jobs, "channel gain", ui_opts, false),
         );
     }
 
@@ -933,10 +967,11 @@ impl Mp3rgainApp {
         }
         let count = jobs.len();
         let ui_opts = self.apply_options;
+        let single_album = self.single_album;
         self.begin_worker(
             WorkerKind::AlbumApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "album gain", ui_opts),
+            worker::spawn_apply(ctx.clone(), jobs, "album gain", ui_opts, single_album),
         );
     }
 
@@ -1362,6 +1397,8 @@ impl eframe::App for Mp3rgainApp {
         let settings = PersistedSettings {
             apply_options: self.apply_options,
             target_volume: self.target_volume,
+            show_filename_only: self.show_filename_only,
+            single_album: self.single_album,
         };
         eframe::set_value(storage, SETTINGS_KEY, &settings);
     }

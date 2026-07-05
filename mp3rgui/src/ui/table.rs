@@ -157,8 +157,15 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
 
                         row.col(|ui| {
                             let path_text = file.path.to_string_lossy();
+                            // Issue #223: optionally show just the file name;
+                            // the full path stays on hover either way.
+                            let label_text: &str = if app.show_filename_only {
+                                file.filename.as_str()
+                            } else {
+                                path_text.as_ref()
+                            };
                             let resp = ui
-                                .selectable_label(is_selected, path_text.as_ref())
+                                .selectable_label(is_selected, label_text)
                                 .on_hover_text(path_text.as_ref());
                             if resp.clicked() {
                                 let mode = ui.input(|i| {
