@@ -638,7 +638,10 @@ impl Mp3rgainApp {
                         .parent()
                         .map(|p| p.to_path_buf())
                         .unwrap_or_else(PathBuf::new);
-                    groups.entry(parent).or_default().push((idx, f.path.clone()));
+                    groups
+                        .entry(parent)
+                        .or_default()
+                        .push((idx, f.path.clone()));
                 }
             }
             groups.into_values().collect()
