@@ -355,8 +355,7 @@ pub(crate) fn replace_ape_tag(data: &[u8], tag: &ApeTag) -> Vec<u8> {
 pub fn write_ape_tag(file_path: &Path, tag: &ApeTag) -> Result<()> {
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
     let new_data = replace_ape_tag(&data, tag);
-    fs::write(file_path, &new_data).map_err(|e| Error::io_write(file_path, e))?;
-    Ok(())
+    crate::apply::atomic_write(file_path, &new_data)
 }
 
 /// ReplayGain analysis values written into an APEv2 tag (issue #204).
@@ -395,8 +394,7 @@ pub fn write_ape_replaygain(file_path: &Path, rg: &ApeReplayGain) -> Result<()> 
     }
 
     let new_data = replace_ape_tag(&data, &tag);
-    fs::write(file_path, &new_data).map_err(|e| Error::io_write(file_path, e))?;
-    Ok(())
+    crate::apply::atomic_write(file_path, &new_data)
 }
 
 /// Add (or replace) the `MP3GAIN_ALBUM_MINMAX` item in `file_path`'s APEv2
@@ -408,8 +406,7 @@ pub fn write_ape_album_minmax(file_path: &Path, min: u8, max: u8) -> Result<()> 
     let mut tag = read_ape_tag(&data).unwrap_or_default();
     tag.set(TAG_MP3GAIN_ALBUM_MINMAX, &format!("{},{}", min, max));
     let new_data = replace_ape_tag(&data, &tag);
-    fs::write(file_path, &new_data).map_err(|e| Error::io_write(file_path, e))?;
-    Ok(())
+    crate::apply::atomic_write(file_path, &new_data)
 }
 
 /// Delete APEv2 tag from file
@@ -418,9 +415,7 @@ pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
 
     let audio_data = remove_ape_tag(&data);
 
-    fs::write(file_path, &audio_data).map_err(|e| Error::io_write(file_path, e))?;
-
-    Ok(())
+    crate::apply::atomic_write(file_path, &audio_data)
 }
 
 /// Format MP3GAIN_UNDO tag value: `+LLL,+RRR,W|N`.

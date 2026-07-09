@@ -82,7 +82,9 @@ pub struct ApplyOptions {
     /// `-p`: restore the file's mtime after writing.
     pub preserve_timestamp: bool,
 
-    /// `-t`: write through a sibling temp file and rename atomically.
+    /// `-t`: historically opted into temp-file writes. All file rewrites now
+    /// go through a sibling temp file + atomic rename unconditionally
+    /// (issue #227), so the flag is accepted but has no effect.
     pub use_temp_file: bool,
 
     /// Record an undo tag (APE for MP3, MP4 freeform for AAC, ID3v2 TXXX
@@ -175,8 +177,8 @@ pub enum ClippingDetection {
 /// Does, in order:
 /// 1. Optional clipping check (headroom-based for `-g`/`-l`, peak-based
 ///    when [`ApplyOptions::track_result`] is set).
-/// 2. Gain application — MP3 APE / MP3 ID3v2 / AAC, with optional temp
-///    file + atomic rename.
+/// 2. Gain application — MP3 APE / MP3 ID3v2 / AAC, via temp file +
+///    atomic rename.
 /// 3. ID3v2 undo tag write (MP3 + [`ApplyOptions::use_id3v2`]).
 /// 4. ReplayGain tag write (AAC mp4 metadata, MP3 ID3v2 TXXX with
 ///    [`ApplyOptions::use_id3v2`], or MP3 APEv2 by default — issue #204).
@@ -427,7 +429,7 @@ fn apply_aac_bytes(
     opts: &ApplyOptions,
     analysis: AacAnalysisCache,
 ) -> Result<usize> {
-    with_temp_file(file_path, opts.use_temp_file, |r, w| {
+    with_temp_file(file_path, |r, w| {
         if opts.write_undo {
             aac::apply_aac_gain_with_undo_to_path_with_analysis(r, w, steps, analysis)
         } else {
@@ -454,7 +456,7 @@ fn apply_mp3_ape_bytes(
     steps: i32,
     opts: &ApplyOptions,
 ) -> Result<SaturationStats> {
-    with_temp_file(file_path, opts.use_temp_file, |r, w| {
+    with_temp_file(file_path, |r, w| {
         let mut gain = GainOptions::new(steps)
             .wrap(opts.wrap)
             .undo(opts.write_undo);
@@ -471,24 +473,26 @@ fn apply_mp3_id3v2_bytes(
     opts: &ApplyOptions,
 ) -> Result<SaturationStats> {
     // APE undo is never written in `-s i` mode; the undo goes into a
-    // TXXX:MP3GAIN_UNDO frame instead, written below.
-    let stats = with_temp_file(file_path, opts.use_temp_file, |r, w| {
+    // TXXX:MP3GAIN_UNDO frame instead. The frame is written onto the temp
+    // file before the rename so gain + undo tag land in one visible write —
+    // a failed tag write leaves the original untouched (issue #227).
+    with_temp_file(file_path, |r, w| {
         let mut gain = GainOptions::new(steps).wrap(opts.wrap).undo(false);
         if let Some(ch) = opts.channel {
             gain = gain.channel(ch);
         }
-        gain.apply_to_path_with_stats(r, w)
-    })?;
+        let stats = gain.apply_to_path_with_stats(r, w)?;
 
-    if opts.write_undo {
-        let (delta_left, delta_right) = match opts.channel {
-            Some(Channel::Left) => (steps, 0),
-            Some(Channel::Right) => (0, steps),
-            None => (steps, steps),
-        };
-        write_id3v2_undo_after_apply(file_path, delta_left, delta_right, opts.wrap)?;
-    }
-    Ok(stats)
+        if opts.write_undo {
+            let (delta_left, delta_right) = match opts.channel {
+                Some(Channel::Left) => (steps, 0),
+                Some(Channel::Right) => (0, steps),
+                None => (steps, steps),
+            };
+            write_id3v2_undo_after_apply(w, delta_left, delta_right, opts.wrap)?;
+        }
+        Ok(stats)
+    })
 }
 
 /// Build a unique `.mp3rgain_temp_*` sibling path for `file`. Shared by the
@@ -505,26 +509,52 @@ pub(crate) fn temp_sibling_path(file: &Path, ext: &str) -> std::path::PathBuf {
     ))
 }
 
-fn with_temp_file<T, F>(file: &Path, use_temp: bool, operation: F) -> Result<T>
+/// Copy `original`'s permissions onto `temp`, fsync it, and rename it over
+/// `original` (issue #227).
+pub(crate) fn persist_temp(original: &Path, temp: &Path) -> Result<()> {
+    let finish = || -> std::io::Result<()> {
+        // fsync needs a writable handle on Windows, and must happen before
+        // the permission copy in case the original mode is read-only.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(temp)?
+            .sync_all()?;
+        if let Ok(meta) = std::fs::metadata(original) {
+            std::fs::set_permissions(temp, meta.permissions())?;
+        }
+        std::fs::rename(temp, original)
+    };
+    finish().map_err(|e| Error::io_write(original, e))
+}
+
+/// Atomically replace `path`'s contents: write a sibling temp file, copy
+/// permissions, fsync, rename. A failure leaves the original untouched
+/// (issue #227).
+pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("tmp");
+    let temp = temp_sibling_path(path, ext);
+    let result = std::fs::write(&temp, data)
+        .map_err(|e| Error::io_write(path, e))
+        .and_then(|_| persist_temp(path, &temp));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
+}
+
+fn with_temp_file<T, F>(file: &Path, operation: F) -> Result<T>
 where
     F: FnOnce(&Path, &Path) -> Result<T>,
 {
-    if !use_temp {
-        return operation(file, file);
-    }
-
     let temp_path = temp_sibling_path(file, "mp3");
-
-    match operation(file, &temp_path) {
-        Ok(value) => {
-            std::fs::rename(&temp_path, file).map_err(|e| Error::io_write(file, e))?;
-            Ok(value)
-        }
-        Err(e) => {
-            let _ = std::fs::remove_file(&temp_path);
-            Err(e)
-        }
+    let result = operation(file, &temp_path).and_then(|value| {
+        persist_temp(file, &temp_path)?;
+        Ok(value)
+    });
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
     }
+    result
 }
 
 /// Restore a previously-captured modified-time on `file`.

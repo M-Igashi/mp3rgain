@@ -264,7 +264,7 @@ pub fn undo_gain(file_path: &Path) -> Result<usize> {
     tag.remove(TAG_MP3GAIN_MINMAX);
 
     let new_data = replace_ape_tag(&data, &tag);
-    fs::write(file_path, &new_data).map_err(|e| Error::io_write(file_path, e))?;
+    crate::apply::atomic_write(file_path, &new_data)?;
 
     Ok(frames)
 }
