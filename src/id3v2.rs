@@ -79,7 +79,7 @@ fn is_frame_encodable(frame: &id3::Frame) -> bool {
         .is_ok()
 }
 
-fn write_tag(path: &Path, tag: &id3::Tag) -> Result<()> {
+fn write_tag_direct(path: &Path, tag: &id3::Tag) -> Result<()> {
     let mut sanitized = tag.clone();
     sanitized.frames_vec_mut().retain(is_frame_encodable);
     sanitized
@@ -87,6 +87,20 @@ fn write_tag(path: &Path, tag: &id3::Tag) -> Result<()> {
         .map_err(|e| Error::Id3v2Error {
             message: e.to_string(),
         })
+}
+
+/// Rewrite the tag atomically: copy the file to a sibling temp, write the tag
+/// there, then fsync + rename over the original (issue #227).
+fn write_tag(path: &Path, tag: &id3::Tag) -> Result<()> {
+    let temp = crate::apply::temp_sibling_path(path, "mp3");
+    let result = std::fs::copy(path, &temp)
+        .map_err(|e| Error::io_write(path, e))
+        .and_then(|_| write_tag_direct(&temp, tag))
+        .and_then(|_| crate::apply::persist_temp(path, &temp));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
 }
 
 fn get_txxx(tag: &id3::Tag, description: &str) -> Option<String> {
@@ -207,15 +221,24 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
 
     let mut data = std::fs::read(path).map_err(|e| Error::io_read(path, e))?;
     let frames = apply_undo_to_data(&mut data, left, right, parse_undo_wrap(undo_str));
-    std::fs::write(path, &data).map_err(|e| Error::io_write(path, e))?;
 
-    // Remove undo and minmax tags
-    let mut tag = read_tag(path)?;
-    remove_txxx_ci(&mut tag, TAG_MP3GAIN_UNDO);
-    remove_txxx_ci(&mut tag, TAG_MP3GAIN_MINMAX);
-    write_tag(path, &tag)?;
-
-    Ok(frames)
+    // Revert the audio and strip the undo/minmax frames in one visible write
+    // (temp + rename) so a failed tag rewrite can't leave the delta applied
+    // with the undo tag still present (issue #227).
+    let temp = crate::apply::temp_sibling_path(path, "mp3");
+    let result = std::fs::write(&temp, &data)
+        .map_err(|e| Error::io_write(path, e))
+        .and_then(|_| {
+            let mut tag = read_tag(&temp)?;
+            remove_txxx_ci(&mut tag, TAG_MP3GAIN_UNDO);
+            remove_txxx_ci(&mut tag, TAG_MP3GAIN_MINMAX);
+            write_tag_direct(&temp, &tag)
+        })
+        .and_then(|_| crate::apply::persist_temp(path, &temp));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result.map(|_| frames)
 }
 
 #[cfg(test)]

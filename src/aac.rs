@@ -1409,7 +1409,7 @@ pub(crate) fn apply_aac_gain_with_undo_to_path_with_analysis(
     );
 
     let final_data = mp4meta::update_mp4_undo_metadata(&data, &undo_tags)?;
-    mp4meta::atomic_write(write_to, &final_data)?;
+    crate::apply::atomic_write(write_to, &final_data)?;
 
     Ok(modified)
 }
@@ -1441,7 +1441,7 @@ pub fn undo_aac_gain(file_path: &Path) -> Result<usize> {
     let modified = apply_aac_gain_to_data(&mut data, &analysis, -undo_gain);
 
     let final_data = mp4meta::update_mp4_undo_metadata(&data, &mp4meta::UndoTags::default())?;
-    mp4meta::atomic_write(file_path, &final_data)?;
+    crate::apply::atomic_write(file_path, &final_data)?;
 
     Ok(modified)
 }

@@ -596,7 +596,7 @@ fn undo_tags_from_freeform(freeform_tags: &[FreeformTag]) -> UndoTags {
 pub fn write_undo_tags(file_path: &Path, tags: &UndoTags) -> Result<()> {
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
     let new_data = update_mp4_undo_metadata(&data, tags)?;
-    atomic_write(file_path, &new_data)
+    crate::apply::atomic_write(file_path, &new_data)
 }
 
 /// Delete undo tags from MP4/M4A file
@@ -609,25 +609,7 @@ pub fn delete_undo_tags(file_path: &Path) -> Result<()> {
 pub fn write_replaygain_tags(file_path: &Path, tags: &ReplayGainTags) -> Result<()> {
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
     let new_data = update_mp4_metadata(&data, tags)?;
-    atomic_write(file_path, &new_data)
-}
-
-/// Atomic write: write to a temp file then rename over the original.
-/// Falls back to direct write if rename fails (e.g., cross-filesystem).
-pub(crate) fn atomic_write(file_path: &Path, data: &[u8]) -> Result<()> {
-    let temp_path = crate::apply::temp_sibling_path(file_path, "m4a");
-
-    if let Err(e) = fs::write(&temp_path, data) {
-        let _ = fs::remove_file(&temp_path);
-        return Err(Error::io_write(&temp_path, e));
-    }
-
-    if let Err(_rename_err) = fs::rename(&temp_path, file_path) {
-        let _ = fs::remove_file(&temp_path);
-        fs::write(file_path, data).map_err(|e| Error::io_write(file_path, e))?;
-    }
-
-    Ok(())
+    crate::apply::atomic_write(file_path, &new_data)
 }
 
 /// Update MP4 metadata with new ReplayGain tags

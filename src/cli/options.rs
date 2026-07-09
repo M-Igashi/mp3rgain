@@ -47,7 +47,7 @@ pub struct Options {
     pub dry_run: bool,               // -n or --dry-run
     pub output_format: OutputFormat, // -o <format>
     pub wrap_gain: bool,             // -w: wrap gain values
-    pub use_temp_file: bool,         // -t: use temp file for writing
+    pub use_temp_file: bool,         // -t: accepted for compatibility (writes are always atomic)
     pub assume_mpeg2: bool,          // -f: assume MPEG 2 Layer III
     pub skip_errors: bool,           // --skip-errors: skip files that fail to analyze
 

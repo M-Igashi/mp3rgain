@@ -43,7 +43,7 @@ pub fn print_usage() {
     println!("    -c          Ignore clipping warnings");
     println!("    -k          Prevent clipping (automatically limit gain)");
     println!("    -w          Wrap gain values (instead of clamping)");
-    println!("    -t          Use temp file for writing (safer, required for some ops)");
+    println!("    -t          Use temp file for writing (always on; kept for compatibility)");
     println!("    -f          Assume MPEG 2 Layer III (compatibility, no effect)");
     println!("    -q          Quiet mode (less output)");
     println!("    -R          Process directories recursively");
