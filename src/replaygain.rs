@@ -746,16 +746,11 @@ impl EqualLoudnessFilter {
 /// Steps per dB for histogram resolution (matches original mp3gain)
 const STEPS_PER_DB: f64 = 100.0;
 
-/// Maximum histogram size
-/// For 16-bit samples: mean_square ranges from ~0 to ~1B (32768²)
-/// 10*log10(1B) ≈ 90 dB, so we need coverage from about 0 to 100 dB
-/// Size = 100 dB * 100 steps/dB = 10000, plus margin = 12000
+/// Maximum histogram size (matches the reference gain_analysis.c A[] array)
+/// Bin 0 = 0 dB; indices below 0 clamp to bin 0 like the reference, so
+/// near-silent content reads 0 dB rather than a negative loudness (issue #236)
+/// For 16-bit samples: mean_square peaks around 10*log10(32768²) ≈ 90 dB
 const HISTOGRAM_SIZE: usize = 12000;
-
-/// Histogram offset to map dB values to array indices
-/// For 16-bit samples, typical values are 40-90 dB (10*log10 of mean_square)
-/// Offset of 2000 allows coverage from -20 dB to +100 dB
-const HISTOGRAM_OFFSET: i32 = 2000;
 
 /// RMS percentile for loudness calculation (95th percentile)
 const RMS_PERCENTILE: f64 = 0.95;
@@ -797,7 +792,7 @@ impl LoudnessHistogram {
         for i in (0..HISTOGRAM_SIZE).rev() {
             count += self.data[i] as u64;
             if count >= threshold {
-                return (i as i32 - HISTOGRAM_OFFSET) as f64 / STEPS_PER_DB;
+                return i as f64 / STEPS_PER_DB;
             }
         }
 
@@ -880,9 +875,11 @@ impl ReplayGainAnalyzer {
         // the 95th-percentile threshold is `ceil(0.05 * total_windows)`:
         // silent windows (very negative `val`) must still be counted, or the
         // total shrinks and sparse material (e.g. acapellas) reads too loud
-        // (issue #217).
+        // (issue #217). Bin 0 = 0 dB, exactly like the reference: windows
+        // below 0 dB mean-square clamp to bin 0 rather than mapping to
+        // negative loudness (issue #236).
         let val = STEPS_PER_DB * 10.0 * (mean_square + 1e-37).log10();
-        let idx = (val as i32 + HISTOGRAM_OFFSET).clamp(0, HISTOGRAM_SIZE as i32 - 1) as usize;
+        let idx = (val as i32).clamp(0, HISTOGRAM_SIZE as i32 - 1) as usize;
         self.histogram.data[idx] += 1;
 
         // Reset for next window
@@ -1977,6 +1974,69 @@ mod tests {
             loudness > 50.0 && loudness < 80.0,
             "Loudness {} should be between 50 and 80 dB for a 0.1 amplitude 1kHz sine",
             loudness
+        );
+    }
+
+    /// Issue #236: a fully silent file must read 0 dB loudness (all windows
+    /// clamp into bin 0, which the reference gain_analysis.c defines as 0 dB),
+    /// giving a suggested gain of exactly PINK_REF = +64.82 dB — matching
+    /// mp3gain, not the previous −20 dB / +84.82 dB.
+    #[cfg(feature = "replaygain")]
+    #[test]
+    fn silent_file_matches_reference_zero_db() {
+        let sample_rate = 44100u32;
+        let mut filter = EqualLoudnessFilter::new(sample_rate).unwrap();
+        let mut analyzer = ReplayGainAnalyzer::new(sample_rate);
+
+        // 20 full 50ms windows of digital silence
+        for _ in 0..sample_rate {
+            let filtered = filter.process(0.0);
+            analyzer.add_mono_sample(filtered);
+        }
+
+        let loudness = analyzer.get_loudness();
+        assert_eq!(loudness, 0.0, "silent file loudness must clamp to 0 dB");
+        assert!(
+            (PINK_REF - loudness - 64.82).abs() < 1e-12,
+            "silent file gain must be +64.82 dB (mp3gain reference)"
+        );
+    }
+
+    /// Issue #236: when ≥95% of windows are silent, the 95th percentile falls
+    /// in bin 0 and the reference reports 0 dB — not a negative loudness.
+    #[cfg(feature = "replaygain")]
+    #[test]
+    fn near_silent_file_matches_reference_zero_db() {
+        let sample_rate = 44100u32;
+        let window = (sample_rate as usize * 50) / 1000;
+        let mut filter = EqualLoudnessFilter::new(sample_rate).unwrap();
+        let mut analyzer = ReplayGainAnalyzer::new(sample_rate);
+
+        // 100 windows: 96 silent, 4 loud (1kHz sine at half scale).
+        // threshold = ceil(0.05 * 100) = 5 > 4 loud windows, so the
+        // percentile lands in bin 0 → 0 dB, exactly like gain_analysis.c.
+        let frequency = 1000.0;
+        let amplitude = 0.5 * SAMPLE_SCALE_16BIT;
+        for i in 0..(window * 100) {
+            let sample = if i < window * 96 {
+                0.0
+            } else {
+                let t = i as f64 / sample_rate as f64;
+                amplitude * (2.0 * std::f64::consts::PI * frequency * t).sin()
+            };
+            let filtered = filter.process(sample);
+            analyzer.add_mono_sample(filtered);
+        }
+
+        let loudness = analyzer.get_loudness();
+        assert_eq!(
+            loudness, 0.0,
+            "96%-silent file loudness must clamp to 0 dB, got {}",
+            loudness
+        );
+        assert!(
+            (PINK_REF - loudness - 64.82).abs() < 1e-12,
+            "96%-silent file gain must be +64.82 dB (mp3gain reference)"
         );
     }
 
