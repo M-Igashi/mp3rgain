@@ -153,6 +153,12 @@ pub struct ApplyReport {
     /// MP3 global_gain values that clamped at 255 (distortion) during a
     /// saturating apply (issue #207).
     pub saturated_high: usize,
+
+    /// Post-apply (max, min) global_gain range across the modified MP3
+    /// frames, recorded during the apply pass so callers don't need to
+    /// re-read the file (issue #231). `None` for AAC, channel-specific
+    /// applies, dry runs, and zero-frame applies.
+    pub gain_range: Option<(u8, u8)>,
 }
 
 /// Per-strategy clipping signal.
@@ -293,6 +299,9 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
         restore_timestamp(file_path, mtime);
     }
 
+    let gain_range = (!is_aac && opts.channel.is_none() && saturation.frames > 0)
+        .then_some((saturation.max_gain, saturation.min_gain));
+
     Ok(ApplyReport {
         modified,
         actual_steps,
@@ -300,6 +309,7 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
         clipping_detected,
         saturated_low: saturation.saturated_low,
         saturated_high: saturation.saturated_high,
+        gain_range,
     })
 }
 
@@ -322,6 +332,7 @@ pub fn predict_apply(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyRepor
         clipping_detected,
         saturated_low: 0,
         saturated_high: 0,
+        gain_range: None,
     })
 }
 

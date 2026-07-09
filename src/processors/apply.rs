@@ -113,6 +113,8 @@ fn process_apply_into(
                 frames: Some(report.modified),
                 gain_applied_steps: Some(report.actual_steps),
                 gain_applied_db: Some(steps_to_db(report.actual_steps)),
+                max_gain: report.gain_range.map(|(max, _)| max),
+                min_gain: report.gain_range.map(|(_, min)| min),
                 warning: warning_msg,
                 ..Default::default()
             })
