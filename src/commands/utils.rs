@@ -107,7 +107,16 @@ pub fn finish_with_summary(
     } else {
         print_dry_run_notice(opts);
     }
+    exit_if_failed(failed);
     Ok(())
+}
+
+/// Exit non-zero when any per-file operation failed, so scripts can detect
+/// partial failures (issue #228).
+pub fn exit_if_failed(failed: usize) {
+    if failed > 0 {
+        std::process::exit(1);
+    }
 }
 
 /// Epilogue for read-only commands (check tags, max amplitude): JSON output
