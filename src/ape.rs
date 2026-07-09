@@ -124,6 +124,21 @@ impl ApeTag {
         let value = format!("{},{}", min, max);
         self.set(TAG_MP3GAIN_MINMAX, &value);
     }
+
+    /// Set the `REPLAYGAIN_*` items present in `rg` (issue #232).
+    pub(crate) fn set_replaygain(&mut self, rg: &ApeReplayGain) {
+        let fields: [(&str, &Option<String>); 4] = [
+            (TAG_REPLAYGAIN_TRACK_GAIN, &rg.track_gain),
+            (TAG_REPLAYGAIN_TRACK_PEAK, &rg.track_peak),
+            (TAG_REPLAYGAIN_ALBUM_GAIN, &rg.album_gain),
+            (TAG_REPLAYGAIN_ALBUM_PEAK, &rg.album_peak),
+        ];
+        for (key, value) in fields {
+            if let Some(v) = value {
+                self.set(key, v);
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for ApeTag {
@@ -380,19 +395,7 @@ pub struct ApeReplayGain {
 pub fn write_ape_replaygain(file_path: &Path, rg: &ApeReplayGain) -> Result<()> {
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
     let mut tag = read_ape_tag(&data).unwrap_or_default();
-
-    let fields: [(&str, &Option<String>); 4] = [
-        (TAG_REPLAYGAIN_TRACK_GAIN, &rg.track_gain),
-        (TAG_REPLAYGAIN_TRACK_PEAK, &rg.track_peak),
-        (TAG_REPLAYGAIN_ALBUM_GAIN, &rg.album_gain),
-        (TAG_REPLAYGAIN_ALBUM_PEAK, &rg.album_peak),
-    ];
-    for (key, value) in fields {
-        if let Some(v) = value {
-            tag.set(key, v);
-        }
-    }
-
+    tag.set_replaygain(rg);
     let new_data = replace_ape_tag(&data, &tag);
     crate::apply::atomic_write(file_path, &new_data)
 }

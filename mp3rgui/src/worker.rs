@@ -448,14 +448,21 @@ pub fn spawn_apply(
         } else {
             Vec::new()
         };
+        // Post-apply (max, min) global_gain range per album file, taken from
+        // the apply reports so the MINMAX step below doesn't re-analyze every
+        // file (issue #232).
+        let gain_ranges: Mutex<BTreeMap<PathBuf, (u8, u8)>> = Mutex::new(BTreeMap::new());
 
         {
             let tx = tx.clone();
             let ctx = ctx.clone();
             let (applied, errors) = (&applied, &errors);
+            let gain_ranges = &gain_ranges;
             run_job_pool(jobs, &cancel_w, move |job: ApplyJob| {
                 send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
+                let album_member =
+                    !ui_opts.dry_run && !ui_opts.use_id3v2 && job.album_info.is_some();
                 let opts = build_apply_options(
                     job.steps,
                     job.track_result,
@@ -470,6 +477,11 @@ pub fn spawn_apply(
                 };
                 match result {
                     Ok(report) => {
+                        if album_member {
+                            if let Some(range) = report.gain_range {
+                                gain_ranges.lock().unwrap().insert(job.path.clone(), range);
+                            }
+                        }
                         applied.fetch_add(1, Ordering::Relaxed);
                         if ui_opts.dry_run {
                             send(
@@ -519,14 +531,22 @@ pub fn spawn_apply(
         // is stamped per parent directory; in single-album mode (issue #224)
         // it spans the whole batch to match the one shared album gain.
         if !album_minmax_paths.is_empty() {
+            type MinmaxEntry<'a> = (&'a Path, Option<(u8, u8)>);
+            let gain_ranges = gain_ranges.into_inner().unwrap();
             if single_album {
-                let all: Vec<&Path> = album_minmax_paths.iter().map(PathBuf::as_path).collect();
+                let all: Vec<MinmaxEntry> = album_minmax_paths
+                    .iter()
+                    .map(|p| (p.as_path(), gain_ranges.get(p).copied()))
+                    .collect();
                 write_album_minmax(&all);
             } else {
-                let mut by_folder: BTreeMap<PathBuf, Vec<&Path>> = BTreeMap::new();
+                let mut by_folder: BTreeMap<PathBuf, Vec<MinmaxEntry>> = BTreeMap::new();
                 for p in &album_minmax_paths {
                     let parent = p.parent().map(Path::to_path_buf).unwrap_or_default();
-                    by_folder.entry(parent).or_default().push(p.as_path());
+                    by_folder
+                        .entry(parent)
+                        .or_default()
+                        .push((p.as_path(), gain_ranges.get(p).copied()));
                 }
                 for group in by_folder.values() {
                     write_album_minmax(group);

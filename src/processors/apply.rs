@@ -99,6 +99,11 @@ fn process_apply_into(
     apply_opts.use_temp_file = opts.use_temp_file;
     apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
     apply_opts.use_id3v2 = opts.use_id3v2;
+    // Same reasoning as the dry-run branch above: without -k the steps are
+    // never capped, and under -c/-q the clipping warning is never emitted, so
+    // the headroom analyze inside check_clipping feeds nothing observable
+    // (issue #232).
+    apply_opts.skip_clipping_check = !opts.prevent_clipping && (opts.ignore_clipping || opts.quiet);
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {
@@ -300,6 +305,10 @@ fn process_apply_channel_into(
     apply_opts.use_temp_file = opts.use_temp_file;
     apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
     apply_opts.use_id3v2 = opts.use_id3v2;
+    // The channel path never surfaces ApplyReport::clipping_detected and -l
+    // has no clipping prevention, so the headroom analyze inside
+    // check_clipping is pure waste (issue #232).
+    apply_opts.skip_clipping_check = true;
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {

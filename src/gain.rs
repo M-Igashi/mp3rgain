@@ -1,7 +1,7 @@
 use crate::analysis::{analyze_data, ChannelMode};
 use crate::ape::{
-    parse_undo_values, parse_undo_wrap, read_ape_tag, replace_ape_tag, TAG_MP3GAIN_MINMAX,
-    TAG_MP3GAIN_UNDO,
+    parse_undo_values, parse_undo_wrap, read_ape_tag, replace_ape_tag, ApeReplayGain,
+    TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
 };
 use crate::error::{Error, Result};
 use crate::frame::{apply_gain_to_data, scan_gain_range, GainMode, SaturationStats};
@@ -100,6 +100,7 @@ pub struct GainOptions {
     wrap: bool,
     undo: bool,
     channel: Option<Channel>,
+    replaygain: Option<ApeReplayGain>,
 }
 
 impl GainOptions {
@@ -112,6 +113,7 @@ impl GainOptions {
             wrap: false,
             undo: false,
             channel: None,
+            replaygain: None,
         }
     }
 
@@ -140,6 +142,14 @@ impl GainOptions {
     /// Returns an error if the file is mono.
     pub fn channel(mut self, channel: Channel) -> Self {
         self.channel = Some(channel);
+        self
+    }
+
+    /// Fold `REPLAYGAIN_*` items into the same APEv2 tag write as the gain
+    /// apply, avoiding a second full-file rewrite (issue #232). Ignored for
+    /// channel-specific applies.
+    pub(crate) fn replaygain(mut self, rg: ApeReplayGain) -> Self {
+        self.replaygain = Some(rg);
         self
     }
 
@@ -173,7 +183,15 @@ impl GainOptions {
         let same_path = read_from == write_to;
 
         if self.steps == 0 {
-            if !same_path {
+            // No undo/minmax on a zero-step apply (nothing to undo), but the
+            // ReplayGain items still need to be recorded when requested.
+            if let Some(rg) = &self.replaygain {
+                let data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
+                let mut tag = read_ape_tag(&data).unwrap_or_default();
+                tag.set_replaygain(rg);
+                let new_data = replace_ape_tag(&data, &tag);
+                fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
+            } else if !same_path {
                 fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
             }
             return Ok(SaturationStats::default());
@@ -192,9 +210,21 @@ impl GainOptions {
                 GainMode::Saturating
             };
             if self.undo {
-                apply_gain_with_undo_impl_to_path(read_from, write_to, self.steps, mode)
+                apply_gain_with_undo_impl_to_path(
+                    read_from,
+                    write_to,
+                    self.steps,
+                    mode,
+                    self.replaygain.as_ref(),
+                )
             } else {
-                apply_gain_simple_to_path(read_from, write_to, self.steps, mode)
+                apply_gain_simple_to_path(
+                    read_from,
+                    write_to,
+                    self.steps,
+                    mode,
+                    self.replaygain.as_ref(),
+                )
             }
         }
     }
@@ -321,12 +351,20 @@ fn apply_gain_simple_to_path(
     write_to: &Path,
     gain_steps: i32,
     mode: GainMode,
+    replaygain: Option<&ApeReplayGain>,
 ) -> Result<SaturationStats> {
     let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
 
     let stats = apply_gain_to_data(&mut data, gain_steps, mode, None);
 
-    fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
+    if let Some(rg) = replaygain {
+        let mut tag = read_ape_tag(&data).unwrap_or_default();
+        tag.set_replaygain(rg);
+        let new_data = replace_ape_tag(&data, &tag);
+        fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
+    } else {
+        fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
+    }
 
     Ok(stats)
 }
@@ -341,6 +379,7 @@ fn apply_gain_with_undo_impl_to_path(
     write_to: &Path,
     gain_steps: i32,
     mode: GainMode,
+    replaygain: Option<&ApeReplayGain>,
 ) -> Result<SaturationStats> {
     let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
 
@@ -366,10 +405,17 @@ fn apply_gain_with_undo_impl_to_path(
     let stats = apply_gain_to_data(&mut data, gain_steps, mode, None);
 
     // MP3GAIN_MINMAX records the *post-apply* global_gain range (mp3gain
-    // convention). Re-scan the modified buffer and overwrite any prior value;
-    // this also validates that the input was a real MP3 (NoMp3Frames on empty).
-    let (min, max) = scan_gain_range(&data)?;
-    tag.set_minmax(min, max);
+    // convention). A full apply touches every gain location, so the stats
+    // already carry the exact range — no re-scan needed (issue #232). The
+    // zero-frame check keeps the old NoMp3Frames validation for non-MP3 input.
+    if stats.frames == 0 {
+        return Err(Error::NoMp3Frames);
+    }
+    tag.set_minmax(stats.min_gain, stats.max_gain);
+
+    if let Some(rg) = replaygain {
+        tag.set_replaygain(rg);
+    }
 
     let new_data = replace_ape_tag(&data, &tag);
     fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;

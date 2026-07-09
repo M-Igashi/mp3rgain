@@ -104,6 +104,7 @@ fn process_track_gain_into(
             }
 
             apply_replaygain_with_album_into(file, modified_steps, &result, opts, None, out)
+                .map(|(r, _)| r)
         }
         Err(e) => {
             if opts.output_format == OutputFormat::Text && !opts.quiet {
@@ -120,16 +121,23 @@ fn process_track_gain_into(
     }
 }
 
+/// Per-file result, buffered text output, and the post-apply `(max, min)`
+/// global_gain range from [`mp3rgain::ApplyReport::gain_range`] so album mode
+/// can build `MP3GAIN_ALBUM_MINMAX` without re-analyzing every file
+/// (issue #232).
+pub type ApplyWithAlbumOutcome = (JsonFileResult, String, Option<(u8, u8)>);
+
 pub fn process_apply_replaygain_with_album(
     file: &Path,
     steps: i32,
     result: &ReplayGainResult,
     opts: &Options,
     album_info: Option<&AacAlbumInfo>,
-) -> Result<(JsonFileResult, String)> {
+) -> Result<ApplyWithAlbumOutcome> {
     let mut out = String::new();
-    let r = apply_replaygain_with_album_into(file, steps, result, opts, album_info, &mut out)?;
-    Ok((r, out))
+    let (r, range) =
+        apply_replaygain_with_album_into(file, steps, result, opts, album_info, &mut out)?;
+    Ok((r, out, range))
 }
 
 fn apply_replaygain_with_album_into(
@@ -139,7 +147,7 @@ fn apply_replaygain_with_album_into(
     opts: &Options,
     album_info: Option<&AacAlbumInfo>,
     out: &mut String,
-) -> Result<JsonFileResult> {
+) -> Result<(JsonFileResult, Option<(u8, u8)>)> {
     let filename = get_filename(file);
     let dry_run_prefix = opts.dry_run_prefix();
     let is_aac = result.file_type() == AudioFileType::Aac;
@@ -166,17 +174,20 @@ fn apply_replaygain_with_album_into(
                 actual_steps,
             )?;
         }
-        return Ok(JsonFileResult {
-            file: file.display().to_string(),
-            status: Some(FileStatus::DryRun),
-            loudness_db: Some(result.loudness_db()),
-            peak: Some(result.peak()),
-            gain_applied_steps: Some(actual_steps),
-            gain_applied_db: Some(steps_to_db(actual_steps)),
-            warning: warning_msg,
-            dry_run: Some(true),
-            ..Default::default()
-        });
+        return Ok((
+            JsonFileResult {
+                file: file.display().to_string(),
+                status: Some(FileStatus::DryRun),
+                loudness_db: Some(result.loudness_db()),
+                peak: Some(result.peak()),
+                gain_applied_steps: Some(actual_steps),
+                gain_applied_db: Some(steps_to_db(actual_steps)),
+                warning: warning_msg,
+                dry_run: Some(true),
+                ..Default::default()
+            },
+            None,
+        ));
     }
 
     // AAC keeps a fail-soft tag-writing path: bitstream gain failures
@@ -192,7 +203,8 @@ fn apply_replaygain_with_album_into(
             album_info,
             dry_run_prefix,
             out,
-        );
+        )
+        .map(|r| (r, None));
     }
 
     // MP3 path: hand the whole pipeline to apply_with_options.
@@ -225,29 +237,35 @@ fn apply_replaygain_with_album_into(
                 )?;
             }
 
-            Ok(JsonFileResult {
-                file: file.display().to_string(),
-                status: Some(FileStatus::Success),
-                frames: Some(report.modified),
-                loudness_db: Some(result.loudness_db()),
-                peak: Some(result.peak()),
-                gain_applied_steps: Some(report.actual_steps),
-                gain_applied_db: Some(steps_to_db(report.actual_steps)),
-                warning: warning_msg,
-                ..Default::default()
-            })
+            Ok((
+                JsonFileResult {
+                    file: file.display().to_string(),
+                    status: Some(FileStatus::Success),
+                    frames: Some(report.modified),
+                    loudness_db: Some(result.loudness_db()),
+                    peak: Some(result.peak()),
+                    gain_applied_steps: Some(report.actual_steps),
+                    gain_applied_db: Some(steps_to_db(report.actual_steps)),
+                    warning: warning_msg,
+                    ..Default::default()
+                },
+                report.gain_range,
+            ))
         }
         Err(e) => {
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 eprintln!("  {} {} - {}", "x".red(), filename, e);
             }
 
-            Ok(JsonFileResult {
-                file: file.display().to_string(),
-                status: Some(FileStatus::Error),
-                error: Some(e.to_string()),
-                ..Default::default()
-            })
+            Ok((
+                JsonFileResult {
+                    file: file.display().to_string(),
+                    status: Some(FileStatus::Error),
+                    error: Some(e.to_string()),
+                    ..Default::default()
+                },
+                None,
+            ))
         }
     }
 }
