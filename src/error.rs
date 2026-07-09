@@ -91,6 +91,9 @@ pub enum Error {
     #[error("All {count} file(s) failed to analyze")]
     AllFilesFailed { count: usize },
 
+    #[error("Operation cancelled")]
+    Cancelled,
+
     // ID3v2
     #[error("ID3v2 tag error: {message}")]
     Id3v2Error { message: String },
