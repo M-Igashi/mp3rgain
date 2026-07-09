@@ -185,20 +185,17 @@ impl GainOptions {
             } else {
                 apply_gain_channel_impl(read_from, write_to, channel, self.steps)
             }
-        } else if self.undo {
-            let mode = if self.wrap {
-                GainMode::Wrapping
-            } else {
-                GainMode::Saturating
-            };
-            apply_gain_with_undo_impl_to_path(read_from, write_to, self.steps, mode)
         } else {
             let mode = if self.wrap {
                 GainMode::Wrapping
             } else {
                 GainMode::Saturating
             };
-            apply_gain_simple_to_path(read_from, write_to, self.steps, mode)
+            if self.undo {
+                apply_gain_with_undo_impl_to_path(read_from, write_to, self.steps, mode)
+            } else {
+                apply_gain_simple_to_path(read_from, write_to, self.steps, mode)
+            }
         }
     }
 }
@@ -359,8 +356,8 @@ fn apply_gain_with_undo_impl_to_path(
     let (existing_left, existing_right) = parse_undo_values(tag.get(TAG_MP3GAIN_UNDO));
     let wrap = mode == GainMode::Wrapping;
     tag.set_undo_gain(
-        existing_left - gain_steps,
-        existing_right - gain_steps,
+        existing_left.saturating_sub(gain_steps),
+        existing_right.saturating_sub(gain_steps),
         wrap,
     );
 

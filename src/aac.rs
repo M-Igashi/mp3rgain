@@ -493,21 +493,19 @@ fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
     let mut entries = Vec::with_capacity(sample_count);
     let mut sample_idx = 0usize;
 
+    // stsc entries have monotonically increasing first_chunk, so walk the
+    // table once with a moving index instead of rescanning it per chunk.
+    let mut stsc_idx = 0usize;
+
     for (chunk_idx, &chunk_offset) in chunk_offsets.iter().enumerate() {
         let chunk_num = chunk_idx + 1; // 1-based
 
-        // Find how many samples in this chunk
-        let samples_in_chunk = {
-            let mut spc = stsc_entries[0].samples_per_chunk;
-            for entry in &stsc_entries {
-                if entry.first_chunk as usize <= chunk_num {
-                    spc = entry.samples_per_chunk;
-                } else {
-                    break;
-                }
-            }
-            spc as usize
-        };
+        while stsc_idx + 1 < stsc_entries.len()
+            && stsc_entries[stsc_idx + 1].first_chunk as usize <= chunk_num
+        {
+            stsc_idx += 1;
+        }
+        let samples_in_chunk = stsc_entries[stsc_idx].samples_per_chunk as usize;
 
         let mut offset_in_chunk = 0u64;
         for _ in 0..samples_in_chunk {
@@ -604,7 +602,8 @@ fn parse_audio_config(data: &[u8], stsd_pos: usize) -> Result<u32> {
     }
     let mp4a_size = read_u32_be(data, entries_start) as usize;
     let mp4a_start = entries_start;
-    let mp4a_end = mp4a_start + mp4a_size;
+    // Clamp: a truncated/malformed file can declare a size past EOF.
+    let mp4a_end = (mp4a_start + mp4a_size).min(data.len());
 
     // sample_rate is at byte 32 within mp4a box:
     //   size(4) + type(4) + reserved(6) + data_ref_index(2) + version(2) +
@@ -634,7 +633,9 @@ fn parse_esds_sample_rate(data: &[u8], start: usize, end: usize) -> Option<u32> 
     // Find esds box
     let (esds_pos, esds_h) = mp4meta::find_box_in_container(data, start, end - start, ESDS)?;
     let esds_content = esds_pos + esds_h.header_size as usize + 4; // skip version/flags
-    let esds_end = esds_pos + esds_h.size as usize;
+                                                                   // Clamp the declared box size to the buffer so a truncated esds cannot
+                                                                   // index past EOF in find_audio_specific_config.
+    let esds_end = (esds_pos + esds_h.size as usize).min(data.len());
 
     let asc_data = find_audio_specific_config(data, esds_content, esds_end)?;
 
@@ -1388,7 +1389,9 @@ pub(crate) fn apply_aac_gain_with_undo_to_path_with_analysis(
 
     let existing_undo = mp4meta::read_undo_tags_from_data(&data);
     let existing_gain = crate::ape::parse_undo_values(existing_undo.undo()).0;
-    let new_undo_gain = existing_gain + gain_steps;
+    // Saturate: the existing value comes from an untrusted tag and could be
+    // crafted to overflow i32.
+    let new_undo_gain = existing_gain.saturating_add(gain_steps);
 
     let modified = apply_aac_gain_to_data(&mut data, &analysis, gain_steps);
 

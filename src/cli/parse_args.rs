@@ -217,11 +217,11 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                 "w" => opts.wrap_gain = true,
                 "t" => opts.use_temp_file = true,
                 "f" => opts.assume_mpeg2 = true,
-                "v" | "-version" => {
+                "v" => {
                     print_version();
                     std::process::exit(0);
                 }
-                "h" | "-help" => {
+                "h" => {
                     print_usage();
                     std::process::exit(0);
                 }
@@ -286,7 +286,11 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                     eprintln!("{}: unknown option: -{}", "warning".yellow().bold(), flag);
                 }
             }
-        } else if !arg.starts_with("--") {
+        } else if arg.starts_with("--") {
+            // Silently dropping an unknown long option is dangerous
+            // (a typo like --dryrun would modify files), so reject it.
+            anyhow::bail!("unknown option: {}", arg);
+        } else {
             // It's a file
             opts.files.push(PathBuf::from(arg));
         }
@@ -309,6 +313,9 @@ pub fn expand_files_recursive(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     }
 
     result.sort();
+    // Overlapping roots (e.g. `-R music music/album`) yield duplicates,
+    // which would apply gain twice to the same file.
+    result.dedup();
     Ok(result)
 }
 

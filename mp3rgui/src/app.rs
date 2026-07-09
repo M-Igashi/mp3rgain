@@ -4,6 +4,7 @@ use crate::worker::{
 };
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{db_to_linear, db_to_steps, would_clip, AacAlbumInfo, Channel};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::TryRecvError;
 
@@ -396,9 +397,13 @@ impl Mp3rgainApp {
         let mut added = 0;
         let mut skipped = 0;
 
+        // Set lookup instead of scanning `files` per added path, which is
+        // O(n²) when dropping a large folder.
+        let mut known: HashSet<PathBuf> = self.files.iter().map(|f| f.path.clone()).collect();
+
         for path in paths {
             if mp3rgain::is_supported_audio_path(&path) && path.is_file() {
-                if self.is_duplicate(&path) {
+                if !known.insert(path.clone()) {
                     skipped += 1;
                     continue;
                 }
@@ -429,10 +434,6 @@ impl Mp3rgainApp {
         }
     }
 
-    fn is_duplicate(&self, path: &Path) -> bool {
-        self.files.iter().any(|f| f.path == path)
-    }
-
     pub fn add_folder(&mut self, folder: PathBuf, recursive: bool) {
         if self.is_processing {
             return;
@@ -453,7 +454,9 @@ impl Mp3rgainApp {
             }
         }
         self.selected_indices.clear();
-        // Removing rows shifts indices, so any queued import scan is stale.
+        // Removing rows shifts indices, so the anchor and any queued import
+        // scan are stale.
+        self.selection_anchor = None;
         self.pending_import_scan.clear();
         self.display_order_dirty = true;
     }
