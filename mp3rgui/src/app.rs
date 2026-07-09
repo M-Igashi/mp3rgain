@@ -78,6 +78,10 @@ pub struct FileEntry {
     /// Pre-existing ReplayGain / undo tags read from the file, populated by
     /// the "Check Stored Tags" action. `None` = not scanned yet.
     pub stored_tags: Option<StoredTagsView>,
+    /// Peaks parsed from stored ReplayGain tags on import (issue #233).
+    /// Fallback for clip recomputation when `track_result` is None.
+    pub stored_track_peak: Option<f64>,
+    pub stored_album_peak: Option<f64>,
 }
 
 /// State for the "Apply Manual Gain" modal. `open` toggles visibility;
@@ -380,12 +384,14 @@ impl Mp3rgainApp {
             if let Some(g) = file.album_gain {
                 file.album_gain = Some(g + delta);
             }
-            if let Some(track) = file.track_result.as_ref() {
-                let peak = track.peak();
+            let analyzed_peak = file.track_result.as_ref().map(|t| t.peak());
+            if let Some(peak) = analyzed_peak.or(file.stored_track_peak) {
                 file.track_clip = file
                     .track_gain
                     .map(|g| would_clip(peak, g))
                     .unwrap_or(false);
+            }
+            if let Some(peak) = analyzed_peak.or(file.stored_album_peak) {
                 file.album_clip = file
                     .album_gain
                     .map(|g| would_clip(peak, g))
@@ -1202,6 +1208,8 @@ impl Mp3rgainApp {
                     file.track_gain = None;
                     file.track_clip = false;
                     file.track_result = None;
+                    file.stored_track_peak = None;
+                    file.stored_album_peak = None;
                     file.status = FileStatus::Analyzed;
                 }
             }
@@ -1262,6 +1270,7 @@ impl Mp3rgainApp {
             if let Some(peak) = view.track_peak.as_deref().and_then(parse_linear) {
                 file.clipping = peak >= 1.0;
                 file.track_clip = would_clip(peak, gain);
+                file.stored_track_peak = Some(peak);
             }
             found = true;
         }
@@ -1271,6 +1280,7 @@ impl Mp3rgainApp {
             file.album_gain = Some(album_gain);
             if let Some(peak) = view.album_peak.as_deref().and_then(parse_linear) {
                 file.album_clip = would_clip(peak, album_gain);
+                file.stored_album_peak = Some(peak);
             }
             found = true;
         }
@@ -1312,6 +1322,23 @@ impl Mp3rgainApp {
                 .map(|g| would_clip(new_peak, g))
                 .unwrap_or(false);
             file.track_result = Some(track.with_peak(new_peak));
+        } else {
+            let scale = db_to_linear(db_applied);
+            if let Some(new_peak) = file.stored_track_peak.map(|p| p * scale) {
+                file.stored_track_peak = Some(new_peak);
+                file.clipping = new_peak >= 1.0;
+                file.track_clip = file
+                    .track_gain
+                    .map(|g| would_clip(new_peak, g))
+                    .unwrap_or(false);
+            }
+            if let Some(new_peak) = file.stored_album_peak.map(|p| p * scale) {
+                file.stored_album_peak = Some(new_peak);
+                file.album_clip = file
+                    .album_gain
+                    .map(|g| would_clip(new_peak, g))
+                    .unwrap_or(false);
+            }
         }
     }
 }
