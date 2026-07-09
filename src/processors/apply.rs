@@ -47,10 +47,30 @@ fn process_apply_into(
                 let mut apply_opts = ApplyOptions::new(steps);
                 apply_opts.prevent_clipping = opts.prevent_clipping;
                 apply_opts.wrap = opts.wrap_gain;
-                let report = predict_apply(file, &apply_opts)?;
-                let warning =
-                    emit_clipping_warning_headroom(steps, &report, opts, dry_run_prefix, filename);
-                (report.actual_steps, warning)
+                match predict_apply(file, &apply_opts) {
+                    Ok(report) => {
+                        let warning = emit_clipping_warning_headroom(
+                            steps,
+                            &report,
+                            opts,
+                            dry_run_prefix,
+                            filename,
+                        );
+                        (report.actual_steps, warning)
+                    }
+                    Err(e) => {
+                        if opts.output_format == OutputFormat::Text && !opts.quiet {
+                            eprintln!("  {} {} - {}", "x".red(), filename, e);
+                        }
+                        return Ok(JsonFileResult {
+                            file: file.display().to_string(),
+                            status: Some(FileStatus::Error),
+                            error: Some(e.to_string()),
+                            dry_run: Some(true),
+                            ..Default::default()
+                        });
+                    }
+                }
             };
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             writeln!(
