@@ -10,12 +10,9 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::threading::effective_threads;
-use crate::json_output::{JsonFileResult, JsonOutput};
+use crate::commands::utils::{finish_without_summary, for_each_file_with_analysis_bar};
 use crate::processors::info::{format_rg_row, process_info, scan_gain_range_for_row};
-use crate::progress::{
-    create_album_progress_pb_in, create_analysis_progress_bar, create_file_count_pb_in,
-    progress_finish,
-};
+use crate::progress::create_album_progress_pb_in;
 use crate::util::get_filename;
 
 pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
@@ -244,77 +241,10 @@ fn analyze_set(
 
 /// Basic per-file info (JSON output or builds without the replaygain feature).
 fn cmd_info_basic(files: &[PathBuf], opts: &Options) -> Result<()> {
-    let threads = effective_threads(opts);
-    let parallel = threads > 1 && files.len() > 1;
+    let (json_results, _, _) =
+        for_each_file_with_analysis_bar(files, opts, |file, analysis_pb| {
+            process_info(file, opts, analysis_pb).map(|(r, t)| (Some(r), t))
+        })?;
 
-    let mp = MultiProgress::new();
-    let file_pb = create_file_count_pb_in(&mp, files.len(), opts);
-
-    let json_results: Vec<JsonFileResult> = if parallel {
-        // Skip per-file byte progress bars in parallel mode: they would
-        // interleave across concurrent files. The file-count bar still runs.
-        let file_pb_ref = file_pb.as_ref();
-        let collected: Vec<(JsonFileResult, String)> = files
-            .par_iter()
-            .map(|file| -> Result<(JsonFileResult, String)> {
-                let r = process_info(file, opts, None)?;
-                if let Some(pb) = file_pb_ref {
-                    pb.set_message(get_filename(file).to_string());
-                    pb.inc(1);
-                }
-                Ok(r)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        // Emit captured stdout in input order so TSV/Text output stays
-        // deterministic regardless of completion order.
-        let stdout = io::stdout();
-        let mut handle = stdout.lock();
-        for (_, text) in &collected {
-            if !text.is_empty() {
-                handle.write_all(text.as_bytes())?;
-            }
-        }
-        drop(handle);
-
-        collected.into_iter().map(|(r, _)| r).collect()
-    } else {
-        let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
-        for file in files {
-            let filename = get_filename(file);
-            if let Some(ref pb) = file_pb {
-                pb.set_message(filename.to_string());
-            }
-
-            let analysis_pb = create_analysis_progress_bar(&mp, file, opts);
-            let (result, text) = process_info(file, opts, analysis_pb.as_ref())?;
-            progress_finish(analysis_pb);
-
-            if !text.is_empty() {
-                print!("{}", text);
-            }
-
-            json_results.push(result);
-
-            if let Some(ref pb) = file_pb {
-                pb.inc(1);
-            }
-        }
-        json_results
-    };
-
-    if let Some(pb) = file_pb {
-        pb.finish_and_clear();
-    }
-
-    if opts.output_format == OutputFormat::Json {
-        let output = JsonOutput {
-            files: Some(json_results),
-            album: None,
-            summary: None,
-        };
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    }
-
-    Ok(())
+    finish_without_summary(json_results, opts)
 }

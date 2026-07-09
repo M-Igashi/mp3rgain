@@ -1,5 +1,6 @@
 use anyhow::Result;
 use colored::*;
+use indicatif::{MultiProgress, ProgressBar};
 use rayon::prelude::*;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
@@ -7,7 +8,10 @@ use std::path::{Path, PathBuf};
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::threading::effective_threads;
 use crate::json_output::{FileStatus, JsonFileResult, JsonOutput, JsonSummary};
-use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
+use crate::progress::{
+    create_analysis_progress_bar, create_file_count_pb_in, create_progress_bar, progress_finish,
+    progress_inc, progress_set_message,
+};
 use crate::util::get_filename;
 
 /// Run `per_file` over every file — in parallel when `-j` allows it — with
@@ -26,7 +30,39 @@ pub fn for_each_file<F>(
 where
     F: Fn(&Path) -> Result<(Option<JsonFileResult>, String)> + Sync,
 {
-    let pb = create_progress_bar(files.len(), opts);
+    for_each_file_impl(files, opts, false, |file, _| per_file(file))
+}
+
+/// [`for_each_file`] variant for the analysis-heavy commands (track gain,
+/// basic info): the serial path additionally shows a per-file byte-level
+/// analysis bar, passed to `per_file`. Parallel runs skip it (concurrent
+/// byte bars would interleave); only the file-count bar runs there.
+pub fn for_each_file_with_analysis_bar<F>(
+    files: &[PathBuf],
+    opts: &Options,
+    per_file: F,
+) -> Result<(Vec<JsonFileResult>, usize, usize)>
+where
+    F: Fn(&Path, Option<&ProgressBar>) -> Result<(Option<JsonFileResult>, String)> + Sync,
+{
+    for_each_file_impl(files, opts, true, per_file)
+}
+
+fn for_each_file_impl<F>(
+    files: &[PathBuf],
+    opts: &Options,
+    analysis_bars: bool,
+    per_file: F,
+) -> Result<(Vec<JsonFileResult>, usize, usize)>
+where
+    F: Fn(&Path, Option<&ProgressBar>) -> Result<(Option<JsonFileResult>, String)> + Sync,
+{
+    let mp = MultiProgress::new();
+    let pb = if analysis_bars {
+        create_file_count_pb_in(&mp, files.len(), opts)
+    } else {
+        create_progress_bar(files.len(), opts)
+    };
     let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
     let mut successful = 0;
     let mut failed = 0;
@@ -38,7 +74,7 @@ where
         let collected: Vec<(Option<JsonFileResult>, String)> = files
             .par_iter()
             .map(|file| -> Result<(Option<JsonFileResult>, String)> {
-                let r = per_file(file)?;
+                let r = per_file(file, None)?;
                 if let Some(pb) = pb_ref {
                     pb.set_message(get_filename(file).to_string());
                     pb.inc(1);
@@ -66,7 +102,14 @@ where
         for file in files {
             progress_set_message(&pb, get_filename(file));
 
-            let (result, text) = per_file(file)?;
+            let analysis_pb = if analysis_bars {
+                create_analysis_progress_bar(&mp, file, opts)
+            } else {
+                None
+            };
+            let (result, text) = per_file(file, analysis_pb.as_ref())?;
+            progress_finish(analysis_pb);
+
             if !text.is_empty() {
                 print!("{}", text);
             }

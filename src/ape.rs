@@ -418,7 +418,21 @@ pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
     crate::apply::atomic_write(file_path, &audio_data)
 }
 
-/// Format MP3GAIN_UNDO tag value: `+LLL,+RRR,W|N`.
+/// Format an undo tag value: `+LLL,+RRR,W|N`.
+///
+/// CAUTION — the sign convention of the numeric fields differs by container,
+/// and both are load-bearing on-disk formats (do NOT unify them):
+///
+/// - **MP3** (APEv2 / ID3v2 `MP3GAIN_UNDO`): stores the *undo delta* — the
+///   negative of the cumulative applied gain, i.e. the value to re-apply
+///   as-is to restore the original (mp3gain convention, issue #210).
+///   Apply accumulates by *subtracting* the applied steps; undo applies the
+///   stored value directly. See `gain.rs`.
+/// - **AAC** (MP4 freeform undo tag): stores the cumulative *applied* gain;
+///   undo *negates* the stored value before applying. See `aac.rs`.
+///
+/// Changing either convention would corrupt round-trips on files tagged by
+/// older versions or by mp3gain itself.
 pub fn format_undo_value(left_gain: i32, right_gain: i32, wrap: bool) -> String {
     let wrap_flag = if wrap { "W" } else { "N" };
     format!("{:+04},{:+04},{}", left_gain, right_gain, wrap_flag)
@@ -431,7 +445,11 @@ pub fn parse_undo_wrap(undo_str: Option<&str>) -> bool {
         .is_some_and(|s| s.trim().eq_ignore_ascii_case("W"))
 }
 
-/// Parse MP3GAIN_UNDO tag value into (left_gain, right_gain)
+/// Parse an undo tag value into (left_gain, right_gain).
+///
+/// The meaning of the returned values depends on the container the tag came
+/// from — MP3 stores the undo delta, AAC stores the applied gain. See the
+/// sign-convention note on [`format_undo_value`].
 pub fn parse_undo_values(undo_str: Option<&str>) -> (i32, i32) {
     match undo_str {
         Some(v) => {

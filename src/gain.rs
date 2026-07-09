@@ -353,6 +353,8 @@ fn apply_gain_with_undo_impl_to_path(
     // MP3GAIN_UNDO stores the *undo* delta (mp3gain convention, issue #210):
     // the value to re-add to restore the original. Applying `+gain_steps`
     // makes the stored undo `-gain_steps`, so it accumulates by subtraction.
+    // NOTE: AAC uses the opposite sign (stores the applied gain) — see the
+    // convention note on `crate::ape::format_undo_value`.
     let (existing_left, existing_right) = parse_undo_values(tag.get(TAG_MP3GAIN_UNDO));
     let wrap = mode == GainMode::Wrapping;
     tag.set_undo_gain(
