@@ -309,11 +309,13 @@ fn remove_ape_tag(data: &[u8]) -> Vec<u8> {
     let has_header = (flags & APE_FLAG_HEADER_PRESENT) != 0;
     let header_size = if has_header { 32 } else { 0 };
 
-    let audio_end = if footer_start + 32 >= tag_size + header_size {
-        footer_start + 32 - tag_size - header_size
-    } else {
-        0
-    };
+    // A corrupt tag_size larger than the data before the footer would make
+    // audio_end underflow past the start of the file; treat it as "no valid
+    // tag" (mirroring read_ape_tag) instead of discarding the audio stream.
+    if footer_start + 32 < tag_size + header_size {
+        return data.to_vec();
+    }
+    let audio_end = footer_start + 32 - tag_size - header_size;
 
     let id3v1_start = footer_start + 32;
     let has_id3v1 = data.len() > id3v1_start + 3 && &data[id3v1_start..id3v1_start + 3] == b"TAG";

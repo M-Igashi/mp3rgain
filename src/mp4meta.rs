@@ -650,7 +650,7 @@ fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl Fn(&[u8]) -> Vec<u8>) -> R
 
     let moov_content_start = moov_pos + moov_header.header_size as usize;
     let moov_content_size = moov_header.content_size() as usize;
-    let moov_end = moov_pos + moov_header.size as usize;
+    let moov_end = box_end(data, moov_pos, moov_header.size as usize, "moov")?;
 
     // Try to find existing ilst or create new metadata structure
     let (new_ilst, ilst_info) =
@@ -668,14 +668,21 @@ fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl Fn(&[u8]) -> Vec<u8>) -> R
         } => {
             let new_ilst_is_empty = new_ilst.len() <= 8; // header-only = no tags
 
+            let ilst_end = box_end(data, ilst_pos, ilst_size, "ilst")?;
+
             if new_ilst_is_empty {
                 // Determine what to remove: ilst, or meta, or udta
                 let meta_size = read_box_size(data, meta_pos);
                 let udta_size = read_box_size(data, udta_pos);
+                let meta_end = box_end(data, meta_pos, meta_size, "meta")?;
+                let udta_end = box_end(data, udta_pos, udta_size, "udta")?;
 
                 // meta content = version/flags(4) + hdlr + ilst; if removing ilst
                 // leaves only hdlr, the meta is effectively empty for our purposes.
-                let meta_content_without_ilst = meta_size - ilst_size;
+                let meta_content_without_ilst =
+                    meta_size.checked_sub(ilst_size).ok_or(Error::AacParse {
+                        message: "ilst box larger than enclosing meta".into(),
+                    })?;
                 let hdlr_size = create_hdlr_box().len();
                 let meta_only_has_hdlr_and_ilst = meta_content_without_ilst == 8 + 4 + hdlr_size; // header + ver/flags + hdlr
 
@@ -684,21 +691,21 @@ fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl Fn(&[u8]) -> Vec<u8>) -> R
                     // Remove entire udta
                     let size_diff = -(udta_size as i64);
                     result.extend_from_slice(&data[..udta_pos]);
-                    result.extend_from_slice(&data[udta_pos + udta_size..]);
+                    result.extend_from_slice(&data[udta_end..]);
                     update_box_size(&mut result, moov_pos, size_diff);
                 } else if meta_only_has_hdlr_and_ilst {
                     // meta contains only hdlr+ilst but udta has other boxes too
                     // Remove entire meta
                     let size_diff = -(meta_size as i64);
                     result.extend_from_slice(&data[..meta_pos]);
-                    result.extend_from_slice(&data[meta_pos + meta_size..]);
+                    result.extend_from_slice(&data[meta_end..]);
                     update_box_size(&mut result, moov_pos, size_diff);
                     update_box_size(&mut result, udta_pos, size_diff);
                 } else {
                     // meta has other boxes besides hdlr+ilst; just remove ilst
                     let size_diff = -(ilst_size as i64);
                     result.extend_from_slice(&data[..ilst_pos]);
-                    result.extend_from_slice(&data[ilst_pos + ilst_size..]);
+                    result.extend_from_slice(&data[ilst_end..]);
                     update_box_size(&mut result, moov_pos, size_diff);
                     update_box_size(&mut result, udta_pos, size_diff);
                     update_box_size(&mut result, meta_pos, size_diff);
@@ -711,7 +718,7 @@ fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl Fn(&[u8]) -> Vec<u8>) -> R
 
                 result.extend_from_slice(&data[..ilst_pos]);
                 result.extend_from_slice(&new_ilst);
-                result.extend_from_slice(&data[ilst_pos + old_ilst_size..]);
+                result.extend_from_slice(&data[ilst_end..]);
 
                 update_box_size(&mut result, moov_pos, size_diff);
                 update_box_size(&mut result, udta_pos, size_diff);
@@ -724,7 +731,7 @@ fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl Fn(&[u8]) -> Vec<u8>) -> R
             udta_pos,
         } => {
             // meta exists but has no ilst — append ilst at end of existing meta
-            let meta_end = meta_pos + meta_size;
+            let meta_end = box_end(data, meta_pos, meta_size, "meta")?;
             let size_diff = new_ilst.len() as i64;
 
             result.extend_from_slice(&data[..meta_end]);
@@ -743,7 +750,7 @@ fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl Fn(&[u8]) -> Vec<u8>) -> R
             let meta_box = create_meta_box(&new_ilst);
             let size_diff = meta_box.len() as i64;
 
-            let udta_end = udta_pos + udta_size;
+            let udta_end = box_end(data, udta_pos, udta_size, "udta")?;
 
             // Write data before udta end
             result.extend_from_slice(&data[..udta_end]);
@@ -1028,6 +1035,17 @@ fn read_box_size(data: &[u8], box_pos: usize) -> usize {
     read_u32_be(data, box_pos) as usize
 }
 
+/// Validate that a box declared at `pos` with `size` fits within `data`,
+/// returning its end offset. Declared sizes come from the file and a
+/// malformed/truncated MP4 can overrun the buffer.
+fn box_end(data: &[u8], pos: usize, size: usize, what: &str) -> Result<usize> {
+    pos.checked_add(size)
+        .filter(|&end| end <= data.len())
+        .ok_or_else(|| Error::AacParse {
+            message: format!("{what} box size exceeds file size"),
+        })
+}
+
 fn update_box_size(data: &mut [u8], box_pos: usize, size_diff: i64) {
     if box_pos + 4 > data.len() {
         return;
@@ -1060,7 +1078,7 @@ fn update_chunk_offsets(
         None => return Ok(()),
     };
 
-    let moov_end = moov_pos + moov_header.size as usize;
+    let moov_end = (moov_pos + moov_header.size as usize).min(data.len());
 
     // Recursively find and update stco/co64 boxes within moov
     update_offsets_recursive(data, moov_pos + 8, moov_end, size_diff, original_moov_end)?;
@@ -1091,6 +1109,9 @@ fn update_offsets_recursive(
         if size == 0 || pos + size as usize > end {
             break;
         }
+        // Never walk entries past the declaring box: a corrupt entry_count
+        // would otherwise rewrite bytes of the following boxes as offsets.
+        let this_box_end = pos + size as usize;
 
         match box_type {
             STCO => {
@@ -1102,7 +1123,7 @@ fn update_offsets_recursive(
 
                     let mut offset_pos = entry_count_pos + 4;
                     for _ in 0..entry_count {
-                        if offset_pos + 4 > data.len() {
+                        if offset_pos + 4 > this_box_end {
                             break;
                         }
                         let offset = read_u32_be(data, offset_pos);
@@ -1124,7 +1145,7 @@ fn update_offsets_recursive(
 
                     let mut offset_pos = entry_count_pos + 4;
                     for _ in 0..entry_count {
-                        if offset_pos + 8 > data.len() {
+                        if offset_pos + 8 > this_box_end {
                             break;
                         }
                         let offset = read_u64_be(data, offset_pos);

@@ -343,7 +343,7 @@ fn apply_replaygain_aac_with_album_into(
     // AAC tag writing is fail-soft, so we drive it ourselves below.
     apply_opts.write_replaygain_tags = false;
 
-    let mut actual_steps = requested_steps;
+    let mut actual_steps = 0;
     let mut warning_msg: Option<String> = None;
     let mut gain_modified: usize = 0;
 
@@ -364,6 +364,9 @@ fn apply_replaygain_aac_with_album_into(
             );
         }
         Err(e) => {
+            // No gain was baked into the bitstream, so actual_steps stays 0
+            // — otherwise the residual tags written below would claim a
+            // loudness shift that never happened.
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 eprintln!(
                     "  {} {} - bitstream gain failed: {} (tags still written)",
