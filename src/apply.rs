@@ -502,10 +502,15 @@ pub(crate) fn temp_sibling_path(file: &Path, ext: &str) -> std::path::PathBuf {
 /// `original` (issue #227).
 pub(crate) fn persist_temp(original: &Path, temp: &Path) -> Result<()> {
     let finish = || -> std::io::Result<()> {
+        // fsync needs a writable handle on Windows, and must happen before
+        // the permission copy in case the original mode is read-only.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(temp)?
+            .sync_all()?;
         if let Ok(meta) = std::fs::metadata(original) {
             std::fs::set_permissions(temp, meta.permissions())?;
         }
-        std::fs::File::open(temp)?.sync_all()?;
         std::fs::rename(temp, original)
     };
     finish().map_err(|e| Error::io_write(original, e))
