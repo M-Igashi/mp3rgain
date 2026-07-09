@@ -239,6 +239,11 @@ pub struct Mp3rgainApp {
     /// next idle frame.
     pending_import_scan: Vec<usize>,
 
+    /// Paths dropped (or otherwise added) while a worker was running. They
+    /// would previously be silently discarded (issue #235); instead they are
+    /// queued here and added when the worker finishes.
+    pending_drops: Vec<PathBuf>,
+
     /// When true, the Path/File column shows only the file name; the full
     /// path stays available on hover (issue #223). Off = full path, the
     /// pre-existing behavior.
@@ -280,6 +285,7 @@ impl Mp3rgainApp {
             display_order_cache: Vec::new(),
             display_order_dirty: true,
             pending_import_scan: Vec::new(),
+            pending_drops: Vec::new(),
             show_filename_only: settings.show_filename_only,
             single_album: settings.single_album,
         }
@@ -391,6 +397,13 @@ impl Mp3rgainApp {
 
     pub fn add_files(&mut self, paths: Vec<PathBuf>) {
         if self.is_processing {
+            if !paths.is_empty() {
+                self.pending_drops.extend(paths);
+                self.status_message = format!(
+                    "{} file(s) queued, will be added when processing finishes",
+                    self.pending_drops.len()
+                );
+            }
             return;
         }
         let first_new = self.files.len();
@@ -1034,6 +1047,10 @@ impl Mp3rgainApp {
             self.worker = None;
             self.worker_kind = None;
             self.is_processing = false;
+            if !self.pending_drops.is_empty() {
+                let paths = std::mem::take(&mut self.pending_drops);
+                self.add_files(paths);
+            }
         }
     }
 
