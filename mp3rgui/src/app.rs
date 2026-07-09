@@ -238,6 +238,11 @@ pub struct Mp3rgainApp {
     /// Set whenever the sort key or any row data changes.
     display_order_dirty: bool,
 
+    /// Reusable set mirror of `selected_indices`, refreshed by
+    /// `rebuild_selection_set` at the start of each table frame. Kept on the
+    /// app so its allocation is reused instead of rebuilt per frame.
+    pub selection_set: HashSet<usize>,
+
     /// File indices added since the last import scan, awaiting an automatic
     /// stored-tag read (issue #203). Drained by `start_import_scan` on the
     /// next idle frame.
@@ -288,6 +293,7 @@ impl Mp3rgainApp {
             sort_descending: false,
             display_order_cache: Vec::new(),
             display_order_dirty: true,
+            selection_set: HashSet::new(),
             pending_import_scan: Vec::new(),
             pending_drops: Vec::new(),
             show_filename_only: settings.show_filename_only,
@@ -315,15 +321,30 @@ impl Mp3rgainApp {
         self.display_order_dirty = true;
     }
 
-    /// Indices into `self.files` in current display (sort) order, served
-    /// from the cache. The returned Vec is a clone so the table can iterate
-    /// it while mutably borrowing `self` for click handling.
-    pub fn display_order(&mut self) -> Vec<usize> {
+    /// Recompute the cached display order if stale. Call before
+    /// [`Self::display_order`] each frame; split from the getter so the
+    /// table can borrow the cache without cloning it per frame.
+    pub fn ensure_display_order(&mut self) {
         if self.display_order_dirty {
             self.display_order_cache = self.compute_display_order();
             self.display_order_dirty = false;
         }
-        self.display_order_cache.clone()
+    }
+
+    /// Indices into `self.files` in current display (sort) order, served
+    /// from the cache. [`Self::ensure_display_order`] must run first.
+    pub fn display_order(&self) -> &[usize] {
+        &self.display_order_cache
+    }
+
+    /// Refresh `selection_set` from `selected_indices`, reusing its
+    /// allocation. Called once per table frame; row rendering then does set
+    /// lookups instead of `Vec::contains` (issue #190) without rebuilding a
+    /// fresh `HashSet` every frame.
+    pub fn rebuild_selection_set(&mut self) {
+        self.selection_set.clear();
+        self.selection_set
+            .extend(self.selected_indices.iter().copied());
     }
 
     /// Sort `0..files.len()` by the active column. String columns

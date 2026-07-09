@@ -68,13 +68,22 @@ fn sort_header(
 }
 
 pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
-    let display_order = app.display_order();
+    app.ensure_display_order();
+    // Set lookup instead of `Vec::contains` per row, which made selection
+    // O(rows × selected) per frame; the set allocation is reused across
+    // frames instead of rebuilt (issue #190).
+    app.rebuild_selection_set();
+    // Defer click handling: the row closure borrows `app.files`, so it
+    // can't also mutate `app.selected_indices` during the iteration.
+    // Capture the requested action and apply it after the table.
+    let mut pending_click: Option<(usize, ClickMode)> = None;
+    let mut pending_reveal: Option<std::path::PathBuf> = None;
     // Horizontal scrolling only — vertical scrolling is the table's own,
     // so `body.rows` can virtualize off-screen rows (issue #190). An outer
     // vertical scroll area would hand the table unbounded height and force
     // every row to be laid out each frame.
     egui::ScrollArea::horizontal().show(ui, |ui| {
-        egui_extras::TableBuilder::new(ui)
+        let table = egui_extras::TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -131,21 +140,16 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                 header.col(|ui| {
                     sort_header(ui, app, "Status", SortColumn::Status, "");
                 });
-            })
-            .body(|body| {
-                // Defer click handling: the row closure borrows `app.files`,
-                // so it can't also mutate `app.selected_indices` during the
-                // iteration. Capture the requested action and apply it after
-                // the loop.
-                let mut pending_click: Option<(usize, ClickMode)> = None;
-                let mut pending_reveal: Option<std::path::PathBuf> = None;
-                // Set lookup instead of `Vec::contains` per row, which made
-                // selection O(rows × selected) per frame (issue #190).
-                let selected: std::collections::HashSet<usize> =
-                    app.selected_indices.iter().copied().collect();
-                // `rows` (vs per-row `body.row`) lays out only the rows
-                // inside the viewport; fixed 18.0 height makes it a drop-in.
-                body.rows(18.0, display_order.len(), |mut row| {
+            });
+        // Borrowed after the header (which needs `app` mutably for sort
+        // clicks); the body only reads `app`, so the cache and set can be
+        // borrowed instead of cloned per frame.
+        let display_order = app.display_order();
+        let selected = &app.selection_set;
+        table.body(|body| {
+            // `rows` (vs per-row `body.row`) lays out only the rows
+            // inside the viewport; fixed 18.0 height makes it a drop-in.
+            body.rows(18.0, display_order.len(), |mut row| {
                     let Some(&idx) = display_order.get(row.index()) else {
                         return;
                     };
@@ -240,13 +244,13 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                         row.col(|ui| {
                             ui.label(file.status.label());
                         });
-                });
-                if let Some((idx, mode)) = pending_click {
-                    app.click_row(idx, mode);
-                }
-                if let Some(path) = pending_reveal {
-                    app.reveal_in_file_manager(&path);
-                }
             });
+        });
     });
+    if let Some((idx, mode)) = pending_click {
+        app.click_row(idx, mode);
+    }
+    if let Some(path) = pending_reveal {
+        app.reveal_in_file_manager(&path);
+    }
 }

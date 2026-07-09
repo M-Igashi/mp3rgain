@@ -534,13 +534,6 @@ pub fn spawn_apply(
             }
         }
 
-        let applied = applied.load(Ordering::Relaxed);
-        let errors = errors.load(Ordering::Relaxed);
-        let suffix = if errors > 0 {
-            format!(", {} error(s)", errors)
-        } else {
-            String::new()
-        };
         let verb = if ui_opts.dry_run {
             "Dry-ran"
         } else {
@@ -550,7 +543,11 @@ pub fn spawn_apply(
             &tx,
             &ctx,
             WorkerEvent::Done {
-                message: format!("{} {} on {} file(s){}", verb, action_label, applied, suffix),
+                message: format_result_message(
+                    &format!("{} {} on", verb, action_label),
+                    applied.load(Ordering::Relaxed),
+                    errors.load(Ordering::Relaxed),
+                ),
             },
         );
     });
@@ -733,20 +730,14 @@ pub fn spawn_delete_tags(
             return;
         }
 
-        let errors = errors.load(Ordering::Relaxed);
-        let suffix = if errors > 0 {
-            format!(", {} error(s)", errors)
-        } else {
-            String::new()
-        };
         send(
             &tx,
             &ctx,
             WorkerEvent::Done {
-                message: format!(
-                    "Deleted stored tags from {} file(s){}",
+                message: format_result_message(
+                    "Deleted stored tags from",
                     deleted.load(Ordering::Relaxed),
-                    suffix
+                    errors.load(Ordering::Relaxed),
                 ),
             },
         );
@@ -811,20 +802,14 @@ pub fn spawn_find_max_amplitude(ctx: egui::Context, files: Vec<(usize, PathBuf)>
             return;
         }
 
-        let errors = errors.load(Ordering::Relaxed);
-        let suffix = if errors > 0 {
-            format!(", {} error(s)", errors)
-        } else {
-            String::new()
-        };
         send(
             &tx,
             &ctx,
             WorkerEvent::Done {
-                message: format!(
-                    "Max amplitude scanned on {} file(s){}",
+                message: format_result_message(
+                    "Max amplitude scanned on",
                     found.load(Ordering::Relaxed),
-                    suffix
+                    errors.load(Ordering::Relaxed),
                 ),
             },
         );
@@ -993,6 +978,9 @@ fn send(tx: &Sender<WorkerEvent>, ctx: &egui::Context, event: WorkerEvent) {
     ctx.request_repaint();
 }
 
+/// Build the final status message: `"<action> <count> file(s)"` plus a
+/// `", N error(s)"` suffix when any job failed. `action` carries any
+/// worker-specific phrasing (e.g. "Applied Track Gain on").
 fn format_result_message(action: &str, count: usize, errors: usize) -> String {
     if errors > 0 {
         format!("{} {} file(s), {} error(s)", action, count, errors)

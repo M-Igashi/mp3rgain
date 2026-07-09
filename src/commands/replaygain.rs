@@ -11,13 +11,14 @@ use std::path::{Path, PathBuf};
 use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::commands::threading::effective_threads;
 use crate::commands::utils::{
-    create_json_summary, exit_if_failed, print_dry_run_notice, update_counters,
+    create_json_summary, exit_if_failed, finish_with_summary, for_each_file_with_analysis_bar,
+    print_dry_run_notice, update_counters,
 };
 use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
 use crate::processors::replaygain::{process_apply_replaygain_with_album, process_track_gain};
 use crate::progress::{
-    create_album_progress_pb_in, create_analysis_progress_bar, create_file_count_pb_in,
-    create_progress_bar, progress_finish, progress_inc, progress_set_message,
+    create_album_progress_pb_in, create_progress_bar, progress_finish, progress_inc,
+    progress_set_message,
 };
 use crate::util::get_filename;
 
@@ -87,94 +88,12 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         println!();
     }
 
-    let threads = effective_threads(opts);
-    let parallel = threads > 1 && files.len() > 1;
+    let (json_results, successful, failed) =
+        for_each_file_with_analysis_bar(files, opts, |file, analysis_pb| {
+            process_track_gain(file, opts, analysis_pb).map(|(r, t)| (Some(r), t))
+        })?;
 
-    let mp = MultiProgress::new();
-    let file_pb = create_file_count_pb_in(&mp, files.len(), opts);
-
-    let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
-    let mut successful = 0;
-    let mut failed = 0;
-
-    if parallel {
-        let file_pb_ref = file_pb.as_ref();
-        let collected: Vec<(JsonFileResult, String)> = files
-            .par_iter()
-            .map(|file| -> Result<(JsonFileResult, String)> {
-                let r = process_track_gain(file, opts, None)?;
-                if let Some(pb) = file_pb_ref {
-                    pb.set_message(get_filename(file).to_string());
-                    pb.inc(1);
-                }
-                Ok(r)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        let stdout = io::stdout();
-        let mut handle = stdout.lock();
-        for (_, text) in &collected {
-            if !text.is_empty() {
-                handle.write_all(text.as_bytes())?;
-            }
-        }
-        drop(handle);
-
-        for (result, _) in collected {
-            update_counters(&result, &mut successful, &mut failed);
-            if opts.output_format == OutputFormat::Json {
-                json_results.push(result);
-            }
-        }
-    } else {
-        for file in files {
-            let filename = get_filename(file);
-            if let Some(ref pb) = file_pb {
-                pb.set_message(filename.to_string());
-            }
-
-            let analysis_pb = create_analysis_progress_bar(&mp, file, opts);
-            let (result, text) = process_track_gain(file, opts, analysis_pb.as_ref())?;
-            progress_finish(analysis_pb);
-
-            if !text.is_empty() {
-                print!("{}", text);
-            }
-
-            update_counters(&result, &mut successful, &mut failed);
-
-            if opts.output_format == OutputFormat::Json {
-                json_results.push(result);
-            }
-
-            if let Some(ref pb) = file_pb {
-                pb.inc(1);
-            }
-        }
-    }
-
-    if let Some(pb) = file_pb {
-        pb.finish_and_clear();
-    }
-
-    if opts.output_format == OutputFormat::Json {
-        let output = JsonOutput {
-            files: Some(json_results),
-            album: None,
-            summary: Some(create_json_summary(
-                files.len(),
-                successful,
-                failed,
-                opts.dry_run,
-            )),
-        };
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        print_dry_run_notice(opts);
-    }
-
-    exit_if_failed(failed);
-    Ok(())
+    finish_with_summary(files.len(), json_results, successful, failed, opts)
 }
 
 pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {

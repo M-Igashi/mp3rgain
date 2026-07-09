@@ -19,73 +19,92 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     render_channel_gain_modal(app, ctx);
 }
 
+/// Shared scaffolding for the small centered modals: fixed window chrome,
+/// Cancel button, open-flag handling, and the commit button (label and
+/// optional fill differ per modal). `body` renders the modal contents and
+/// returns whether commit is enabled. Returns true when the commit button
+/// was clicked, with the open flag already cleared, so the caller just runs
+/// its action.
+fn modal(
+    ctx: &egui::Context,
+    title: &str,
+    open_flag: &mut bool,
+    commit_label: &str,
+    commit_fill: Option<egui::Color32>,
+    body: impl FnOnce(&mut egui::Ui) -> bool,
+) -> bool {
+    if !*open_flag {
+        return false;
+    }
+    let mut open = true;
+    let mut close_via_cancel = false;
+    let mut close_via_commit = false;
+    egui::Window::new(title)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .open(&mut open)
+        .show(ctx, |ui| {
+            let can_commit = body(ui);
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    close_via_cancel = true;
+                }
+                let mut button = egui::Button::new(commit_label);
+                if let Some(fill) = commit_fill {
+                    button = button.fill(fill);
+                }
+                if ui.add_enabled(can_commit, button).clicked() {
+                    close_via_commit = true;
+                }
+            });
+        });
+    if !open || close_via_cancel || close_via_commit {
+        *open_flag = false;
+    }
+    close_via_commit
+}
+
 /// Modal for the `-l`-equivalent "Apply Channel Gain" action. MP3 only
 /// (the apply pipeline rejects AAC files with `Error::ChannelGainOnAac`).
 fn render_channel_gain_modal(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     if !app.channel_gain_modal.open {
         return;
     }
-    let count = if app.selected_indices.is_empty() {
-        app.files.len()
-    } else {
-        app.selected_indices.len()
-    };
-    let mut open = true;
-    let mut close_via_cancel = false;
-    let mut close_via_apply = false;
-    egui::Window::new("Apply channel gain")
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .open(&mut open)
-        .show(ctx, |ui| {
+    let count = app.target_indices().len();
+    let modal_state = &mut app.channel_gain_modal;
+    let committed = modal(
+        ctx,
+        "Apply channel gain",
+        &mut modal_state.open,
+        "Apply",
+        None,
+        |ui| {
             ui.label(format!("Target: {} file(s) (MP3 only)", count));
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.label("Channel:");
-                ui.selectable_value(
-                    &mut app.channel_gain_modal.channel,
-                    mp3rgain::Channel::Left,
-                    "Left",
-                );
-                ui.selectable_value(
-                    &mut app.channel_gain_modal.channel,
-                    mp3rgain::Channel::Right,
-                    "Right",
-                );
+                ui.selectable_value(&mut modal_state.channel, mp3rgain::Channel::Left, "Left");
+                ui.selectable_value(&mut modal_state.channel, mp3rgain::Channel::Right, "Right");
             });
             ui.horizontal(|ui| {
                 ui.label("Steps:");
                 ui.add(
-                    egui::DragValue::new(&mut app.channel_gain_modal.steps)
+                    egui::DragValue::new(&mut modal_state.steps)
                         .range(-64..=64)
                         .speed(1),
                 );
-                let db = mp3rgain::steps_to_db(app.channel_gain_modal.steps);
+                let db = mp3rgain::steps_to_db(modal_state.steps);
                 ui.label(format!("= {:+.2} dB", db));
             });
             ui.label("Stereo / Dual Channel MP3s only. Joint-Stereo files will warn.");
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
-                    close_via_cancel = true;
-                }
-                let can_apply = app.channel_gain_modal.steps != 0;
-                if ui
-                    .add_enabled(can_apply, egui::Button::new("Apply"))
-                    .clicked()
-                {
-                    close_via_apply = true;
-                }
-            });
-        });
-    if !open || close_via_cancel {
-        app.channel_gain_modal.open = false;
-    }
-    if close_via_apply {
+            modal_state.steps != 0
+        },
+    );
+    if committed {
         let channel = app.channel_gain_modal.channel;
         let steps = app.channel_gain_modal.steps;
-        app.channel_gain_modal.open = false;
         app.start_apply_channel_gain(ctx, channel, steps);
     }
 }
@@ -95,53 +114,33 @@ fn render_manual_gain_modal(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     if !app.manual_gain_modal.open {
         return;
     }
-    let count = if app.selected_indices.is_empty() {
-        app.files.len()
-    } else {
-        app.selected_indices.len()
-    };
-    let mut open = true;
-    let mut close_via_cancel = false;
-    let mut close_via_apply = false;
-    egui::Window::new("Apply manual gain")
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .open(&mut open)
-        .show(ctx, |ui| {
+    let count = app.target_indices().len();
+    let modal_state = &mut app.manual_gain_modal;
+    let committed = modal(
+        ctx,
+        "Apply manual gain",
+        &mut modal_state.open,
+        "Apply",
+        None,
+        |ui| {
             ui.label(format!("Target: {} file(s)", count));
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.label("Steps:");
                 ui.add(
-                    egui::DragValue::new(&mut app.manual_gain_modal.steps)
+                    egui::DragValue::new(&mut modal_state.steps)
                         .range(-64..=64)
                         .speed(1),
                 );
-                let db = mp3rgain::steps_to_db(app.manual_gain_modal.steps);
+                let db = mp3rgain::steps_to_db(modal_state.steps);
                 ui.label(format!("= {:+.2} dB", db));
             });
             ui.label("1 step = 1.5 dB. Negative values lower the volume.");
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
-                    close_via_cancel = true;
-                }
-                let can_apply = app.manual_gain_modal.steps != 0;
-                if ui
-                    .add_enabled(can_apply, egui::Button::new("Apply"))
-                    .clicked()
-                {
-                    close_via_apply = true;
-                }
-            });
-        });
-    if !open || close_via_cancel {
-        app.manual_gain_modal.open = false;
-    }
-    if close_via_apply {
+            modal_state.steps != 0
+        },
+    );
+    if committed {
         let steps = app.manual_gain_modal.steps;
-        app.manual_gain_modal.open = false;
         app.start_apply_manual_gain(ctx, steps);
     }
 }
@@ -152,38 +151,22 @@ fn render_delete_confirm(app: &mut Mp3rgainApp, ctx: &egui::Context) {
         return;
     }
     let count = app.target_indices().len();
-    let mut open = true;
-    let mut close_via_cancel = false;
-    let mut close_via_confirm = false;
-    egui::Window::new("Delete stored tags")
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .open(&mut open)
-        .show(ctx, |ui| {
+    let committed = modal(
+        ctx,
+        "Delete stored tags",
+        &mut app.confirm_delete_tags,
+        "Delete",
+        Some(egui::Color32::DARK_RED),
+        |ui| {
             ui.label(format!(
                 "Delete stored ReplayGain / undo tags from {} file(s)?",
                 count
             ));
             ui.label("This cannot be undone.");
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
-                    close_via_cancel = true;
-                }
-                if ui
-                    .add(egui::Button::new("Delete").fill(egui::Color32::DARK_RED))
-                    .clicked()
-                {
-                    close_via_confirm = true;
-                }
-            });
-        });
-    if !open || close_via_cancel {
-        app.confirm_delete_tags = false;
-    }
-    if close_via_confirm {
-        app.confirm_delete_tags = false;
+            true
+        },
+    );
+    if committed {
         app.start_delete_tags(ctx);
     }
 }

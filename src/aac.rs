@@ -1389,6 +1389,10 @@ pub(crate) fn apply_aac_gain_with_undo_to_path_with_analysis(
 
     let existing_undo = mp4meta::read_undo_tags_from_data(&data);
     let existing_gain = crate::ape::parse_undo_values(existing_undo.undo()).0;
+    // AAC convention: the undo tag stores the cumulative *applied* gain, so
+    // it accumulates by *addition* and `undo_aac_gain` negates it. This is
+    // the opposite sign of the MP3 MP3GAIN_UNDO delta — see the note on
+    // `crate::ape::format_undo_value`.
     // Saturate: the existing value comes from an untrusted tag and could be
     // crafted to overflow i32.
     let new_undo_gain = existing_gain.saturating_add(gain_steps);
@@ -1430,6 +1434,9 @@ pub fn undo_aac_gain(file_path: &Path) -> Result<usize> {
     let undo_tags = mp4meta::read_undo_tags_from_data(&data);
     let undo_str = undo_tags.undo().ok_or(Error::NoUndoTag)?;
 
+    // AAC convention: the tag stores the cumulative *applied* gain, so undo
+    // applies `-undo_gain` below. MP3 stores the already-negated delta and
+    // applies it as-is — see the note on `crate::ape::format_undo_value`.
     let undo_gain = crate::ape::parse_undo_values(Some(undo_str)).0;
 
     if undo_gain == 0 {
