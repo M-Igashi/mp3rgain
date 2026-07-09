@@ -410,11 +410,27 @@ pub(crate) enum GainMode {
 /// original value is lost — i.e. the apply is no longer losslessly
 /// reversible at those locations (issue #207). Wrapping mode never
 /// saturates, so both counts stay 0.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SaturationStats {
     pub frames: usize,
     pub saturated_low: usize,
     pub saturated_high: usize,
+    /// Post-apply minimum global_gain across the touched locations.
+    pub min_gain: u8,
+    /// Post-apply maximum global_gain across the touched locations.
+    pub max_gain: u8,
+}
+
+impl Default for SaturationStats {
+    fn default() -> Self {
+        Self {
+            frames: 0,
+            saturated_low: 0,
+            saturated_high: 0,
+            min_gain: 255,
+            max_gain: 0,
+        }
+    }
 }
 
 impl SaturationStats {
@@ -479,6 +495,8 @@ pub(crate) fn apply_gain_to_data(
                     if mode == GainMode::Saturating {
                         stats.tally(current_gain, gain_steps);
                     }
+                    stats.min_gain = stats.min_gain.min(new_gain);
+                    stats.max_gain = stats.max_gain.max(new_gain);
                     write_gain_at(data, loc, new_gain);
                 }
             }
@@ -492,6 +510,8 @@ pub(crate) fn apply_gain_to_data(
                         let new_gain =
                             adjust_gain_value(current_gain, gain_steps, GainMode::Saturating);
                         stats.tally(current_gain, gain_steps);
+                        stats.min_gain = stats.min_gain.min(new_gain);
+                        stats.max_gain = stats.max_gain.max(new_gain);
                         write_gain_at(data, loc, new_gain);
                     }
                 }

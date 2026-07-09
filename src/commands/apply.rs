@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::*;
-use mp3rgain::{analyze, steps_to_db, Channel};
+use mp3rgain::{steps_to_db, Channel};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
@@ -28,6 +28,10 @@ pub fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
     let db_value = steps_to_db(steps);
     let dry_run_prefix = opts.dry_run_prefix();
 
+    if opts.output_format == OutputFormat::Tsv {
+        println!("File\tMP3 gain\tdB gain\tMax Amplitude\tMax global_gain\tMin global_gain");
+    }
+
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         println!(
             "{}{} {} {} step(s) ({:+.1} dB) to {} file(s)",
@@ -51,18 +55,17 @@ pub fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
     let (json_results, successful, failed) = for_each_file(files, opts, |file| {
         let (result, mut text) = process_apply(file, steps, opts)?;
         if opts.output_format == OutputFormat::Tsv {
-            if let Ok(info) = analyze(file) {
-                writeln!(
-                    text,
-                    "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
-                    get_filename(file),
-                    steps,
-                    db_value,
-                    1.0,
-                    info.max_gain(),
-                    info.min_gain()
-                )?;
-            }
+            // Max Amplitude is unknown without a full decode; emit "-"
+            // instead of fabricating a value (issue #231).
+            writeln!(
+                text,
+                "{}\t{}\t{:.6}\t-\t{}\t{}",
+                get_filename(file),
+                steps,
+                db_value,
+                result.max_gain.unwrap_or(255),
+                result.min_gain.unwrap_or(0)
+            )?;
         }
         Ok((Some(result), text))
     })?;
