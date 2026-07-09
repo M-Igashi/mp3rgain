@@ -140,30 +140,40 @@ pub fn read_id3v2_replaygain(path: &Path) -> Result<Id3v2ReplayGain> {
     })
 }
 
-/// Write ReplayGain and undo data to ID3v2 TXXX frames (preserves existing ID3v2 data)
-pub fn write_id3v2_replaygain(path: &Path, rg: &Id3v2ReplayGain) -> Result<()> {
-    let mut tag = read_tag(path)?;
-
+fn add_rg_frames(tag: &mut id3::Tag, rg: &Id3v2ReplayGain) {
     let fields: &[(&str, &Option<String>)] = &[
+        (TAG_MP3GAIN_UNDO, &rg.undo),
+        (TAG_MP3GAIN_MINMAX, &rg.minmax),
         (TAG_REPLAYGAIN_TRACK_GAIN, &rg.track_gain),
         (TAG_REPLAYGAIN_TRACK_PEAK, &rg.track_peak),
         (TAG_REPLAYGAIN_ALBUM_GAIN, &rg.album_gain),
         (TAG_REPLAYGAIN_ALBUM_PEAK, &rg.album_peak),
-        (TAG_MP3GAIN_UNDO, &rg.undo),
-        (TAG_MP3GAIN_MINMAX, &rg.minmax),
     ];
 
     for &(desc, value) in fields {
         if let Some(v) = value {
-            remove_txxx_ci(&mut tag, desc);
+            remove_txxx_ci(tag, desc);
             tag.add_frame(id3::frame::ExtendedText {
                 description: desc.to_string(),
                 value: v.clone(),
             });
         }
     }
+}
 
+/// Write ReplayGain and undo data to ID3v2 TXXX frames (preserves existing ID3v2 data)
+pub fn write_id3v2_replaygain(path: &Path, rg: &Id3v2ReplayGain) -> Result<()> {
+    let mut tag = read_tag(path)?;
+    add_rg_frames(&mut tag, rg);
     write_tag(path, &tag)
+}
+
+/// [`write_id3v2_replaygain`] without the temp+rename dance, for callers that
+/// are already writing onto a not-yet-visible temp file (issue #232).
+pub(crate) fn write_id3v2_replaygain_direct(path: &Path, rg: &Id3v2ReplayGain) -> Result<()> {
+    let mut tag = read_tag(path)?;
+    add_rg_frames(&mut tag, rg);
+    write_tag_direct(path, &tag)
 }
 
 /// Delete all ReplayGain and undo TXXX frames from ID3v2 tag

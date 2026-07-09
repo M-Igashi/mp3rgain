@@ -386,41 +386,48 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
             let mut successful = 0;
             let mut failed = 0;
+            // Post-apply (max, min) global_gain range per file, taken from the
+            // apply pass so the album MINMAX step below doesn't re-analyze
+            // every file (issue #232).
+            let mut range_by_idx: Vec<Option<(u8, u8)>> = vec![None; files.len()];
 
             if parallel {
                 let pb_ref = pb.as_ref();
                 // Process only successfully-analyzed files in parallel.
-                let collected: Vec<(usize, JsonFileResult, String)> = successful_indices
+                type Collected = (usize, JsonFileResult, String, Option<(u8, u8)>);
+                let collected: Vec<Collected> = successful_indices
                     .par_iter()
                     .enumerate()
-                    .map(
-                        |(track_idx, &file_idx)| -> Result<(usize, JsonFileResult, String)> {
-                            let file = &files[file_idx];
-                            let track_result = &album_result.tracks()[track_idx];
-                            let (result, text) = process_apply_replaygain_with_album(
-                                file,
-                                steps,
-                                track_result,
-                                opts,
-                                Some(&album_info),
-                            )?;
-                            if let Some(pb) = pb_ref {
-                                pb.set_message(get_filename(file).to_string());
-                                pb.inc(1);
-                            }
-                            Ok((file_idx, result, text))
-                        },
-                    )
+                    .map(|(track_idx, &file_idx)| -> Result<Collected> {
+                        let file = &files[file_idx];
+                        let track_result = &album_result.tracks()[track_idx];
+                        let (result, text, range) = process_apply_replaygain_with_album(
+                            file,
+                            steps,
+                            track_result,
+                            opts,
+                            Some(&album_info),
+                        )?;
+                        if let Some(pb) = pb_ref {
+                            pb.set_message(get_filename(file).to_string());
+                            pb.inc(1);
+                        }
+                        Ok((file_idx, result, text, range))
+                    })
                     .collect::<Result<Vec<_>>>()?;
 
                 let stdout = io::stdout();
                 let mut handle = stdout.lock();
-                for (_, _, text) in &collected {
+                for (_, _, text, _) in &collected {
                     if !text.is_empty() {
                         handle.write_all(text.as_bytes())?;
                     }
                 }
                 drop(handle);
+
+                for (file_idx, _, _, range) in &collected {
+                    range_by_idx[*file_idx] = *range;
+                }
 
                 // Re-assemble json_results in input file order, interleaving
                 // failures with successes so the JSON output stays aligned
@@ -428,7 +435,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 if opts.output_format == OutputFormat::Json {
                     let mut by_index: Vec<Option<JsonFileResult>> =
                         (0..files.len()).map(|_| None).collect();
-                    for (file_idx, result, _) in &collected {
+                    for (file_idx, result, _, _) in &collected {
                         by_index[*file_idx] = Some(result.clone());
                     }
                     for (i, slot) in by_index.iter_mut().enumerate() {
@@ -443,7 +450,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                         json_results.push(entry);
                     }
                 } else {
-                    for (_, result, _) in collected {
+                    for (_, result, _, _) in collected {
                         update_counters(&result, &mut successful, &mut failed);
                     }
                     failed += failure_count;
@@ -456,7 +463,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                     let result = match file_to_track[i] {
                         Some(track_idx) => {
                             let track_result = &album_result.tracks()[track_idx];
-                            let (result, text) = process_apply_replaygain_with_album(
+                            let (result, text, range) = process_apply_replaygain_with_album(
                                 file,
                                 steps,
                                 track_result,
@@ -466,6 +473,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                             if !text.is_empty() {
                                 print!("{}", text);
                             }
+                            range_by_idx[i] = range;
                             result
                         }
                         None => failure_json_result(file, failure_msgs[i].clone()),
@@ -488,9 +496,9 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             // whole album is done). APEv2 only — mp3gain has no AAC, and `-s i`
             // uses ID3v2; best-effort, so a tag hiccup never fails the album.
             if !opts.dry_run && opts.stored_tag_mode != StoredTagMode::Skip && !opts.use_id3v2 {
-                let album_files: Vec<&Path> = successful_indices
+                let album_files: Vec<(&Path, Option<(u8, u8)>)> = successful_indices
                     .iter()
-                    .map(|&i| files[i].as_path())
+                    .map(|&i| (files[i].as_path(), range_by_idx[i]))
                     .collect();
                 mp3rgain::write_album_minmax(&album_files);
             }
