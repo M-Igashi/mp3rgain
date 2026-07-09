@@ -23,7 +23,7 @@ pub fn print_usage() {
         "    -g <i>      Apply gain of i steps (each step = {} dB)",
         GAIN_STEP_DB
     );
-    println!("    -d <n>      Apply gain of n dB (rounded to nearest step)");
+    println!("    -d <n>      Modify suggested/target gain by n dB (rounded to nearest step)");
     println!("    -l <c> <g>  Apply gain to left (0) or right (1) channel only");
     println!("    -m <i>      Modify suggested gain by integer i");
     println!("    -r          Apply Track gain (ReplayGain analysis)");
@@ -61,7 +61,7 @@ pub fn print_usage() {
     println!("    mp3rgain song.mp3              Show file info");
     println!("    mp3rgain -g 2 song.mp3         Apply +2 steps (+3.0 dB)");
     println!("    mp3rgain -g -3 song.mp3        Apply -3 steps (-4.5 dB)");
-    println!("    mp3rgain -d 4.5 song.mp3       Apply +4.5 dB (rounds to +3 steps)");
+    println!("    mp3rgain -r -d 4.5 song.mp3    Apply track gain, target +4.5 dB louder");
     println!("    mp3rgain -r song.mp3           Analyze and apply track gain");
     println!("    mp3rgain -a *.mp3              Analyze and apply album gain");
     println!("    mp3rgain -r -m 2 *.mp3         Apply track gain + 2 steps");

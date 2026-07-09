@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::*;
 use indicatif::MultiProgress;
 use mp3rgain::replaygain::{self, AlbumAnalysisReport, ReplayGainResult};
-use mp3rgain::{db_to_steps, mp4meta, peak_to_pcm_sample};
+use mp3rgain::{mp4meta, peak_to_pcm_sample, steps_to_db};
 use rayon::prelude::*;
 use std::cell::Cell;
 use std::io::{self, Write};
@@ -137,8 +137,10 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
     if any_ok {
         if let Some(report) = summary_report {
-            let album_gain_db = report.album.album_gain_db() + opts.gain_modifier_db;
-            let album_gain_steps = db_to_steps(album_gain_db);
+            // Match the apply path (-a): album_gain_steps() + gain_modifier_steps()
+            let modifier_steps = opts.gain_modifier_steps();
+            let album_gain_steps = report.album.album_gain_steps() + modifier_steps;
+            let album_gain_db = report.album.album_gain_db() + steps_to_db(modifier_steps);
             let album_max_amp = peak_to_pcm_sample(report.album.album_peak());
 
             match opts.output_format {
