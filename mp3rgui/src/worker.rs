@@ -333,11 +333,12 @@ pub fn spawn_album_analysis(
                 }
             };
 
-            let result = replaygain::analyze_album_lenient_parallel_with_completion(
+            let result = replaygain::analyze_album_lenient_parallel_cancellable(
                 &path_refs,
                 None,
                 threads,
                 &on_complete,
+                Some(&cancel_w),
             );
 
             if cancel_w.load(Ordering::Relaxed) {
