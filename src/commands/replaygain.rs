@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::commands::threading::effective_threads;
-use crate::commands::utils::{create_json_summary, print_dry_run_notice, update_counters};
+use crate::commands::utils::{
+    create_json_summary, exit_if_failed, print_dry_run_notice, update_counters,
+};
 use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
 use crate::processors::replaygain::{process_apply_replaygain_with_album, process_track_gain};
 use crate::progress::{
@@ -171,6 +173,7 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         print_dry_run_notice(opts);
     }
 
+    exit_if_failed(failed);
     Ok(())
 }
 
@@ -375,6 +378,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 } else if !opts.quiet {
                     println!("  {} No adjustment needed", ".".cyan());
                 }
+                exit_if_failed(failure_count);
                 return Ok(());
             }
 
@@ -506,6 +510,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             } else {
                 print_dry_run_notice(opts);
             }
+            exit_if_failed(failed);
         }
         Err(e) => {
             if opts.output_format == OutputFormat::Json {
