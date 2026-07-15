@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use indicatif::MultiProgress;
-use mp3rgain::replaygain::{self, AlbumAnalysisReport, AlbumGainResult, REPLAYGAIN_REFERENCE_DB};
+use mp3rgain::replaygain::{self, AlbumAnalysisReport, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{steps_to_db, AacAlbumInfo};
 use rayon::prelude::*;
 use std::io::{self, Write};
@@ -44,16 +44,6 @@ fn require_replaygain_feature() {
         );
         eprintln!("  Install with: cargo install mp3rgain --features replaygain");
         std::process::exit(1);
-    }
-}
-
-/// Wrap a strict `AlbumGainResult` in the lenient report shape so the rest of
-/// `cmd_album_gain` can handle both paths uniformly.
-fn lift_strict(album: AlbumGainResult, file_count: usize) -> AlbumAnalysisReport {
-    AlbumAnalysisReport {
-        album,
-        failures: Vec::new(),
-        successful_indices: (0..file_count).collect(),
     }
 }
 
@@ -136,30 +126,18 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     let (on_progress, on_complete) = album_progress_callbacks(&analysis_pb, file_names);
 
     let album_analysis: mp3rgain::error::Result<AlbumAnalysisReport> =
-        match (parallel, opts.skip_errors) {
-            (false, false) => {
-                replaygain::analyze_album_with_progress(&file_refs, opts.track_index, &on_progress)
-                    .map(|album| lift_strict(album, files.len()))
-            }
-            (true, false) => replaygain::analyze_album_parallel_with_completion(
-                &file_refs,
-                opts.track_index,
+        replaygain::analyze_album_with_options(
+            &file_refs,
+            &replaygain::AlbumAnalysisOptions {
+                track_index: opts.track_index,
                 threads,
-                &on_complete,
-            )
-            .map(|album| lift_strict(album, files.len())),
-            (false, true) => replaygain::analyze_album_lenient_with_progress(
-                &file_refs,
-                opts.track_index,
-                &on_progress,
-            ),
-            (true, true) => replaygain::analyze_album_lenient_parallel_with_completion(
-                &file_refs,
-                opts.track_index,
-                threads,
-                &on_complete,
-            ),
-        };
+                skip_errors: opts.skip_errors,
+                // Serial drives the byte-level bar; parallel ticks per file.
+                on_progress: (!parallel).then_some(&on_progress as _),
+                on_complete: parallel.then_some(&on_complete as _),
+                cancel: None,
+            },
+        );
 
     if let Some(pb) = analysis_pb {
         pb.finish_and_clear();

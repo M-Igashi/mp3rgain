@@ -333,12 +333,15 @@ pub fn spawn_album_analysis(
                 }
             };
 
-            let result = replaygain::analyze_album_lenient_parallel_cancellable(
+            let result = replaygain::analyze_album_with_options(
                 &path_refs,
-                None,
-                threads,
-                &on_complete,
-                Some(&cancel_w),
+                &replaygain::AlbumAnalysisOptions {
+                    threads,
+                    skip_errors: true,
+                    on_complete: Some(&on_complete),
+                    cancel: Some(&cancel_w),
+                    ..Default::default()
+                },
             );
 
             if cancel_w.load(Ordering::Relaxed) {
