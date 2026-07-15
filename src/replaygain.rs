@@ -1235,73 +1235,86 @@ fn process_audio_buffer(
     }
 }
 
-/// Analyze multiple tracks for album gain
-#[cfg(feature = "replaygain")]
-pub fn analyze_album(files: &[&Path]) -> Result<AlbumGainResult> {
-    analyze_album_with_index(files, None)
+/// Byte-level progress callback: `(file_index, bytes_read, total_bytes)`.
+pub type AlbumProgressFn<'a> = &'a dyn Fn(usize, u64, u64);
+
+/// Per-file completion callback: `(file_index, path)`.
+pub type AlbumCompleteFn<'a> = &'a (dyn Fn(usize, &Path) + Sync);
+
+/// Options for [`analyze_album_with_options`] (issue #250).
+///
+/// `Default` is serial, strict analysis of the first audio track with no
+/// callbacks — the same behavior as [`analyze_album`].
+#[derive(Default)]
+pub struct AlbumAnalysisOptions<'a> {
+    /// Which audio track to analyze in multi-track containers (default: first).
+    pub track_index: Option<u32>,
+    /// Worker threads. `<= 1` (or a single file) analyzes serially; larger
+    /// values decode files concurrently on the rayon pool. The album
+    /// histogram fold is associative and results are folded in input order,
+    /// so the parallel result is numerically identical to the serial one.
+    pub threads: usize,
+    /// Lenient mode: files that fail to analyze are skipped instead of
+    /// aborting the album. Failures land in [`AlbumAnalysisReport::failures`];
+    /// it is only an error when every file fails.
+    pub skip_errors: bool,
+    /// Byte-level progress callback `(file_index, bytes_read, total_bytes)`,
+    /// called after each decoded packet (#106). Only driven on the serial
+    /// path; ignored when decoding in parallel (use [`Self::on_complete`]
+    /// for file-count progress instead).
+    pub on_progress: Option<AlbumProgressFn<'a>>,
+    /// Per-file completion callback `(file_index, path)`, invoked after each
+    /// file finishes (whether it succeeded or failed). On the parallel path
+    /// it is called from rayon worker threads, so it must be `Sync`.
+    pub on_complete: Option<AlbumCompleteFn<'a>>,
+    /// Cooperative cancellation, checked at file boundaries. Once set,
+    /// remaining files are not analyzed and [`Error::Cancelled`] is
+    /// returned. Files already being decoded run to completion.
+    pub cancel: Option<&'a AtomicBool>,
 }
 
-/// Analyze multiple tracks for album gain with optional track index selection
+/// Analyze multiple tracks for album gain (strict, serial, no callbacks).
+/// Convenience wrapper over [`analyze_album_with_options`].
+#[cfg(feature = "replaygain")]
+pub fn analyze_album(files: &[&Path]) -> Result<AlbumGainResult> {
+    Ok(analyze_album_with_options(files, &AlbumAnalysisOptions::default())?.album)
+}
+
+/// Analyze multiple tracks for album gain.
 ///
 /// This implements the same algorithm as the original mp3gain:
 /// - Accumulate all 50ms RMS window values from all tracks into a single histogram
 /// - Calculate album loudness from the combined histogram using 95th percentile
 /// - This properly weights each track by its duration (more windows = more influence)
-#[cfg(feature = "replaygain")]
-pub fn analyze_album_with_index(
-    files: &[&Path],
-    track_index: Option<u32>,
-) -> Result<AlbumGainResult> {
-    Ok(analyze_album_internal(files, track_index, None, false, None)?.album)
-}
-
-/// Analyze multiple tracks for album gain with progress reporting
 ///
-/// The callback receives `(file_index, bytes_read, total_bytes)` and is called
-/// after each decoded packet. `file_index` indicates which file is currently
-/// being analyzed (0-based).
-///
-/// Companion to [`analyze_track_with_progress`]; both stem from the
-/// progress-indication request in #106 (@Sappharad).
+/// Every knob (track selection, parallelism, lenient error handling,
+/// progress / completion callbacks, cancellation) is an
+/// [`AlbumAnalysisOptions`] field — see the field docs for semantics.
 #[cfg(feature = "replaygain")]
-pub fn analyze_album_with_progress(
+pub fn analyze_album_with_options(
     files: &[&Path],
-    track_index: Option<u32>,
-    on_progress: &dyn Fn(usize, u64, u64),
-) -> Result<AlbumGainResult> {
-    Ok(analyze_album_internal(files, track_index, Some(on_progress), false, None)?.album)
-}
-
-/// Lenient counterpart of [`analyze_album_with_index`]: files that fail to
-/// analyze are skipped instead of aborting the whole album. Returns an
-/// [`AlbumAnalysisReport`] describing both the album result and the skipped
-/// files. Errors only when every file fails (or argument validation fails).
-#[cfg(feature = "replaygain")]
-pub fn analyze_album_lenient_with_index(
-    files: &[&Path],
-    track_index: Option<u32>,
+    opts: &AlbumAnalysisOptions,
 ) -> Result<AlbumAnalysisReport> {
-    analyze_album_internal(files, track_index, None, true, None)
-}
-
-/// Lenient counterpart of [`analyze_album_with_progress`].
-#[cfg(feature = "replaygain")]
-pub fn analyze_album_lenient_with_progress(
-    files: &[&Path],
-    track_index: Option<u32>,
-    on_progress: &dyn Fn(usize, u64, u64),
-) -> Result<AlbumAnalysisReport> {
-    analyze_album_internal(files, track_index, Some(on_progress), true, None)
+    if opts.threads <= 1 || files.len() <= 1 {
+        analyze_album_serial(files, opts)
+    } else {
+        analyze_album_parallel_internal(files, opts)
+    }
 }
 
 #[cfg(feature = "replaygain")]
-fn analyze_album_internal(
+fn analyze_album_serial(
     files: &[&Path],
-    track_index: Option<u32>,
-    on_progress: Option<&dyn Fn(usize, u64, u64)>,
-    skip_errors: bool,
-    cancel: Option<&AtomicBool>,
+    opts: &AlbumAnalysisOptions,
 ) -> Result<AlbumAnalysisReport> {
+    let AlbumAnalysisOptions {
+        track_index,
+        on_progress,
+        on_complete,
+        skip_errors,
+        cancel,
+        ..
+    } = *opts;
     let mut track_results = Vec::with_capacity(files.len());
     let mut album_peak: f64 = 0.0;
     // Album histogram accumulates all track histograms (like B[] in original mp3gain)
@@ -1318,7 +1331,11 @@ fn analyze_album_internal(
             on_progress.map(|cb| Box::new(move |bytes, total| cb(i, bytes, total)) as _);
 
         // Analyze each track and get histogram
-        match analyze_track_internal(file, track_index, file_progress.as_deref()) {
+        let track = analyze_track_internal(file, track_index, file_progress.as_deref());
+        if let Some(cb) = on_complete {
+            cb(i, file);
+        }
+        match track {
             Ok(internal) => {
                 album_peak = album_peak.max(internal.result.peak);
                 album_histogram.accumulate(&internal.histogram);
@@ -1351,128 +1368,20 @@ fn analyze_album_internal(
     })
 }
 
-/// Analyze multiple tracks for album gain in parallel.
-///
-/// Tracks are decoded and filtered concurrently using a rayon thread pool
-/// (or the global pool when `threads <= 1`, in which case this falls back
-/// to the serial implementation). The album histogram fold is associative,
-/// and `track_results` is preserved in input order — the parallel result is
-/// numerically identical to the serial one.
 #[cfg(feature = "replaygain")]
-pub fn analyze_album_parallel(
+fn analyze_album_parallel_internal(
     files: &[&Path],
-    track_index: Option<u32>,
-    threads: usize,
-) -> Result<AlbumGainResult> {
-    if threads <= 1 || files.len() <= 1 {
-        return Ok(analyze_album_internal(files, track_index, None, false, None)?.album);
-    }
-    Ok(
-        analyze_album_parallel_internal::<fn(usize, &Path)>(files, track_index, None, false, None)?
-            .album,
-    )
-}
-
-/// Analyze multiple tracks for album gain in parallel, with a per-file
-/// completion callback.
-///
-/// `on_complete(idx, path)` is invoked from the rayon worker thread that
-/// finished decoding `files[idx]`. The callback may be called concurrently
-/// from multiple threads, so it must be `Sync`.
-#[cfg(feature = "replaygain")]
-pub fn analyze_album_parallel_with_completion<F>(
-    files: &[&Path],
-    track_index: Option<u32>,
-    threads: usize,
-    on_complete: &F,
-) -> Result<AlbumGainResult>
-where
-    F: Fn(usize, &Path) + Sync,
-{
-    if threads <= 1 || files.len() <= 1 {
-        // Serial fallback still drives the completion callback in input order.
-        let result = analyze_album_internal(files, track_index, None, false, None)?.album;
-        for (i, f) in files.iter().enumerate() {
-            on_complete(i, f);
-        }
-        return Ok(result);
-    }
-    Ok(analyze_album_parallel_internal(files, track_index, Some(on_complete), false, None)?.album)
-}
-
-/// Lenient counterpart of [`analyze_album_parallel`]: files that fail to
-/// analyze are skipped instead of aborting the whole album.
-#[cfg(feature = "replaygain")]
-pub fn analyze_album_lenient_parallel(
-    files: &[&Path],
-    track_index: Option<u32>,
-    threads: usize,
+    opts: &AlbumAnalysisOptions,
 ) -> Result<AlbumAnalysisReport> {
-    if threads <= 1 || files.len() <= 1 {
-        return analyze_album_internal(files, track_index, None, true, None);
-    }
-    analyze_album_parallel_internal::<fn(usize, &Path)>(files, track_index, None, true, None)
-}
-
-/// Lenient counterpart of [`analyze_album_parallel_with_completion`].
-#[cfg(feature = "replaygain")]
-pub fn analyze_album_lenient_parallel_with_completion<F>(
-    files: &[&Path],
-    track_index: Option<u32>,
-    threads: usize,
-    on_complete: &F,
-) -> Result<AlbumAnalysisReport>
-where
-    F: Fn(usize, &Path) + Sync,
-{
-    if threads <= 1 || files.len() <= 1 {
-        let report = analyze_album_internal(files, track_index, None, true, None)?;
-        for (i, f) in files.iter().enumerate() {
-            on_complete(i, f);
-        }
-        return Ok(report);
-    }
-    analyze_album_parallel_internal(files, track_index, Some(on_complete), true, None)
-}
-
-/// Cancel-aware variant of [`analyze_album_lenient_parallel_with_completion`].
-///
-/// `cancel` is checked at file boundaries: once set, remaining files are not
-/// analyzed and [`Error::Cancelled`] is returned. Files already being decoded
-/// run to completion.
-#[cfg(feature = "replaygain")]
-pub fn analyze_album_lenient_parallel_cancellable<F>(
-    files: &[&Path],
-    track_index: Option<u32>,
-    threads: usize,
-    on_complete: &F,
-    cancel: Option<&AtomicBool>,
-) -> Result<AlbumAnalysisReport>
-where
-    F: Fn(usize, &Path) + Sync,
-{
-    if threads <= 1 || files.len() <= 1 {
-        let report = analyze_album_internal(files, track_index, None, true, cancel)?;
-        for (i, f) in files.iter().enumerate() {
-            on_complete(i, f);
-        }
-        return Ok(report);
-    }
-    analyze_album_parallel_internal(files, track_index, Some(on_complete), true, cancel)
-}
-
-#[cfg(feature = "replaygain")]
-fn analyze_album_parallel_internal<F>(
-    files: &[&Path],
-    track_index: Option<u32>,
-    on_complete: Option<&F>,
-    skip_errors: bool,
-    cancel: Option<&AtomicBool>,
-) -> Result<AlbumAnalysisReport>
-where
-    F: Fn(usize, &Path) + Sync,
-{
     use rayon::prelude::*;
+
+    let AlbumAnalysisOptions {
+        track_index,
+        on_complete,
+        skip_errors,
+        cancel,
+        ..
+    } = *opts;
 
     let mut track_results = Vec::with_capacity(files.len());
     let mut album_peak: f64 = 0.0;
@@ -1597,118 +1506,10 @@ pub fn analyze_album(_files: &[&Path]) -> Result<AlbumGainResult> {
 }
 
 #[cfg(not(feature = "replaygain"))]
-pub fn analyze_album_with_index(
+pub fn analyze_album_with_options(
     _files: &[&Path],
-    _track_index: Option<u32>,
-) -> Result<AlbumGainResult> {
-    Err(Error::FeatureNotAvailable {
-        feature: "ReplayGain analysis",
-        feature_flag: "replaygain",
-    })
-}
-
-#[cfg(not(feature = "replaygain"))]
-pub fn analyze_album_with_progress(
-    _files: &[&Path],
-    _track_index: Option<u32>,
-    _on_progress: &dyn Fn(usize, u64, u64),
-) -> Result<AlbumGainResult> {
-    Err(Error::FeatureNotAvailable {
-        feature: "ReplayGain analysis",
-        feature_flag: "replaygain",
-    })
-}
-
-#[cfg(not(feature = "replaygain"))]
-pub fn analyze_album_parallel(
-    _files: &[&Path],
-    _track_index: Option<u32>,
-    _threads: usize,
-) -> Result<AlbumGainResult> {
-    Err(Error::FeatureNotAvailable {
-        feature: "ReplayGain analysis",
-        feature_flag: "replaygain",
-    })
-}
-
-#[cfg(not(feature = "replaygain"))]
-pub fn analyze_album_parallel_with_completion<F>(
-    _files: &[&Path],
-    _track_index: Option<u32>,
-    _threads: usize,
-    _on_complete: &F,
-) -> Result<AlbumGainResult>
-where
-    F: Fn(usize, &Path) + Sync,
-{
-    Err(Error::FeatureNotAvailable {
-        feature: "ReplayGain analysis",
-        feature_flag: "replaygain",
-    })
-}
-
-#[cfg(not(feature = "replaygain"))]
-pub fn analyze_album_lenient_with_index(
-    _files: &[&Path],
-    _track_index: Option<u32>,
+    _opts: &AlbumAnalysisOptions,
 ) -> Result<AlbumAnalysisReport> {
-    Err(Error::FeatureNotAvailable {
-        feature: "ReplayGain analysis",
-        feature_flag: "replaygain",
-    })
-}
-
-#[cfg(not(feature = "replaygain"))]
-pub fn analyze_album_lenient_with_progress(
-    _files: &[&Path],
-    _track_index: Option<u32>,
-    _on_progress: &dyn Fn(usize, u64, u64),
-) -> Result<AlbumAnalysisReport> {
-    Err(Error::FeatureNotAvailable {
-        feature: "ReplayGain analysis",
-        feature_flag: "replaygain",
-    })
-}
-
-#[cfg(not(feature = "replaygain"))]
-pub fn analyze_album_lenient_parallel(
-    _files: &[&Path],
-    _track_index: Option<u32>,
-    _threads: usize,
-) -> Result<AlbumAnalysisReport> {
-    Err(Error::FeatureNotAvailable {
-        feature: "ReplayGain analysis",
-        feature_flag: "replaygain",
-    })
-}
-
-#[cfg(not(feature = "replaygain"))]
-pub fn analyze_album_lenient_parallel_with_completion<F>(
-    _files: &[&Path],
-    _track_index: Option<u32>,
-    _threads: usize,
-    _on_complete: &F,
-) -> Result<AlbumAnalysisReport>
-where
-    F: Fn(usize, &Path) + Sync,
-{
-    Err(Error::FeatureNotAvailable {
-        feature: "ReplayGain analysis",
-        feature_flag: "replaygain",
-    })
-}
-
-#[cfg(not(feature = "replaygain"))]
-pub fn analyze_album_lenient_parallel_cancellable<F>(
-    _files: &[&Path],
-    _track_index: Option<u32>,
-    _threads: usize,
-    _on_complete: &F,
-    _cancel: Option<&AtomicBool>,
-) -> Result<AlbumAnalysisReport>
-where
-    F: Fn(usize, &Path) + Sync,
-{
     Err(Error::FeatureNotAvailable {
         feature: "ReplayGain analysis",
         feature_flag: "replaygain",
@@ -1980,14 +1781,18 @@ mod tests {
         let bad = std::path::PathBuf::from("tests/fixtures/this-file-does-not-exist.mp3");
         let files = vec![good.as_path(), bad.as_path()];
 
-        let strict = analyze_album_with_index(&files, None);
+        let strict = analyze_album(&files);
         assert!(
             strict.is_err(),
-            "strict variant must fail when any file is unreadable"
+            "strict mode must fail when any file is unreadable"
         );
 
+        let lenient = AlbumAnalysisOptions {
+            skip_errors: true,
+            ..Default::default()
+        };
         let report =
-            analyze_album_lenient_with_index(&files, None).expect("lenient must skip the bad file");
+            analyze_album_with_options(&files, &lenient).expect("lenient must skip the bad file");
         assert_eq!(report.album.tracks().len(), 1);
         assert_eq!(report.successful_indices, vec![0]);
         assert_eq!(report.failures.len(), 1);
@@ -2001,7 +1806,11 @@ mod tests {
         let bad2 = std::path::PathBuf::from("tests/fixtures/missing-2.mp3");
         let files = vec![bad1.as_path(), bad2.as_path()];
 
-        let result = analyze_album_lenient_with_index(&files, None);
+        let lenient = AlbumAnalysisOptions {
+            skip_errors: true,
+            ..Default::default()
+        };
+        let result = analyze_album_with_options(&files, &lenient);
         assert!(matches!(result, Err(Error::AllFilesFailed { count: 2 })));
     }
 

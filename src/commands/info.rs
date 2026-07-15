@@ -194,16 +194,18 @@ fn analyze_set(
     let file_names: Vec<&str> = set.iter().map(|&(_, p)| get_filename(p)).collect();
     let (on_progress, on_complete) = album_progress_callbacks(&pb, file_names);
 
-    let report = if parallel {
-        replaygain::analyze_album_lenient_parallel_with_completion(
-            &paths,
-            opts.track_index,
+    let report = replaygain::analyze_album_with_options(
+        &paths,
+        &replaygain::AlbumAnalysisOptions {
+            track_index: opts.track_index,
             threads,
-            &on_complete,
-        )
-    } else {
-        replaygain::analyze_album_lenient_with_progress(&paths, opts.track_index, &on_progress)
-    };
+            skip_errors: true,
+            // Serial drives the byte-level bar; parallel ticks per file.
+            on_progress: (!parallel).then_some(&on_progress as _),
+            on_complete: parallel.then_some(&on_complete as _),
+            cancel: None,
+        },
+    );
 
     if let Some(pb) = pb {
         pb.finish_and_clear();
