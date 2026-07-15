@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use crate::frame::{read_u32_le, APE_FLAG_HEADER_PRESENT, APE_PREAMBLE};
 
 use std::fs;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 /// APEv2 tag version
@@ -365,11 +365,87 @@ pub(crate) fn replace_ape_tag(data: &[u8], tag: &ApeTag) -> Vec<u8> {
     audio_data
 }
 
-/// Write APEv2 tag to file
+/// Rewrite only the trailing metadata of `file_path` in place: parse the
+/// existing APEv2 tag from the file tail, apply `mutate` to it, and write
+/// the new tag (plus any trailing ID3v1 block) back from the end of the
+/// audio stream. The audio bytes are never read or rewritten, so a tag-only
+/// update costs a few KB of I/O instead of a full-file copy (issue #252).
+///
+/// Crash-safety trade-off vs the temp+rename used for gain applies: a crash
+/// mid-write can corrupt or drop the trailing tag, but can never touch the
+/// audio stream — the write starts at `audio_end` and only extends or
+/// truncates from there. This matches how mp3gain has always updated tags.
+fn rewrite_ape_tail(file_path: &Path, mutate: impl FnOnce(&mut ApeTag)) -> Result<()> {
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(file_path)
+        .map_err(|e| Error::io_write(file_path, e))?;
+    let file_len = file
+        .metadata()
+        .map_err(|e| Error::io_read(file_path, e))?
+        .len() as usize;
+
+    // Probe the tail: an APE footer sits at EOF-32, or EOF-160 with a
+    // trailing ID3v1 block (same probe as read_ape_tag_from_file).
+    let probe = read_tail(&mut file, file_path, file_len, file_len.min(160))?;
+
+    // Defaults: no tag, no ID3v1 — the new tag is appended at EOF.
+    let mut audio_end = file_len;
+    let mut tag = ApeTag::new();
+    let mut id3v1: Vec<u8> = Vec::new();
+
+    if let Some(footer_in_probe) = find_ape_footer(&probe) {
+        let tag_size = read_u32_le(&probe[footer_in_probe + 12..]) as usize;
+        let flags = read_u32_le(&probe[footer_in_probe + 20..]);
+        let header_size = if (flags & APE_FLAG_HEADER_PRESENT) != 0 {
+            32
+        } else {
+            0
+        };
+        let footer_start = file_len - (probe.len() - footer_in_probe);
+        // A corrupt tag_size larger than what precedes the footer is treated
+        // as "no valid tag" (mirroring remove_ape_tag): keep the bytes as
+        // audio and fall through to the bare-ID3v1 handling below.
+        if footer_start + 32 >= tag_size + header_size {
+            audio_end = footer_start + 32 - tag_size - header_size;
+            // find_ape_footer only matches EOF-32 (no ID3v1) or EOF-160
+            // (ID3v1 after the footer).
+            if footer_in_probe + 160 == probe.len() {
+                id3v1 = probe[probe.len() - 128..].to_vec();
+            }
+            // Parse the existing items from the metadata region only.
+            let meta = read_tail(&mut file, file_path, file_len, file_len - audio_end)?;
+            tag = read_ape_tag(&meta).unwrap_or_default();
+        }
+    }
+    if audio_end == file_len
+        && file_len >= 128
+        && &probe[probe.len() - 128..probe.len() - 125] == b"TAG"
+    {
+        // No (valid) APE tag; keep the bare trailing ID3v1 block after the
+        // new tag, like replace_ape_tag does.
+        audio_end = file_len - 128;
+        id3v1 = probe[probe.len() - 128..].to_vec();
+    }
+
+    mutate(&mut tag);
+    let tag_bytes = serialize_ape_tag(&tag); // empty tag serializes to nothing
+
+    file.seek(SeekFrom::Start(audio_end as u64))
+        .map_err(|e| Error::io_write(file_path, e))?;
+    file.write_all(&tag_bytes)
+        .map_err(|e| Error::io_write(file_path, e))?;
+    file.write_all(&id3v1)
+        .map_err(|e| Error::io_write(file_path, e))?;
+    file.set_len((audio_end + tag_bytes.len() + id3v1.len()) as u64)
+        .map_err(|e| Error::io_write(file_path, e))?;
+    file.sync_all().map_err(|e| Error::io_write(file_path, e))
+}
+
+/// Write APEv2 tag to file, replacing any existing tag (tail-only rewrite).
 pub fn write_ape_tag(file_path: &Path, tag: &ApeTag) -> Result<()> {
-    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-    let new_data = replace_ape_tag(&data, tag);
-    crate::apply::atomic_write(file_path, &new_data)
+    rewrite_ape_tail(file_path, |t| *t = tag.clone())
 }
 
 /// ReplayGain analysis values written into an APEv2 tag (issue #204).
@@ -392,11 +468,7 @@ pub struct ApeReplayGain {
 /// `MP3GAIN_MINMAX`) are preserved — only the four ReplayGain keys present
 /// in `rg` are set.
 pub fn write_ape_replaygain(file_path: &Path, rg: &ApeReplayGain) -> Result<()> {
-    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-    let mut tag = read_ape_tag(&data).unwrap_or_default();
-    tag.set_replaygain(rg);
-    let new_data = replace_ape_tag(&data, &tag);
-    crate::apply::atomic_write(file_path, &new_data)
+    rewrite_ape_tail(file_path, |tag| tag.set_replaygain(rg))
 }
 
 /// Add (or replace) the `MP3GAIN_ALBUM_MINMAX` item in `file_path`'s APEv2
@@ -404,20 +476,15 @@ pub fn write_ape_replaygain(file_path: &Path, rg: &ApeReplayGain) -> Result<()> 
 /// post-apply `global_gain` range (`min,max`) in album (`-a`) mode (issue
 /// #210); the same value is stored on every file in the album.
 pub fn write_ape_album_minmax(file_path: &Path, min: u8, max: u8) -> Result<()> {
-    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-    let mut tag = read_ape_tag(&data).unwrap_or_default();
-    tag.set(TAG_MP3GAIN_ALBUM_MINMAX, &format_minmax(min, max));
-    let new_data = replace_ape_tag(&data, &tag);
-    crate::apply::atomic_write(file_path, &new_data)
+    rewrite_ape_tail(file_path, |tag| {
+        tag.set(TAG_MP3GAIN_ALBUM_MINMAX, &format_minmax(min, max))
+    })
 }
 
-/// Delete APEv2 tag from file
+/// Delete APEv2 tag from file (tail-only truncate; a trailing ID3v1 block
+/// is preserved)
 pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
-    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-
-    let audio_data = remove_ape_tag(&data);
-
-    crate::apply::atomic_write(file_path, &audio_data)
+    rewrite_ape_tail(file_path, |tag| tag.items.clear())
 }
 
 /// Format an undo tag value: `+LLL,+RRR,W|N`.
@@ -595,5 +662,101 @@ mod tests {
         // Pre-existing per-file items are untouched.
         assert_eq!(out.get(TAG_MP3GAIN_UNDO), Some("-015,-015,N"));
         assert_eq!(out.get(TAG_MP3GAIN_MINMAX), Some("131,225"));
+    }
+
+    /// Issue #252: the tail-only rewrite must produce byte-identical output
+    /// to the old full-buffer replace_ape_tag path — audio and trailing
+    /// ID3v1 preserved, tag swapped in place.
+    #[test]
+    fn tail_rewrite_matches_full_rewrite() {
+        let audio: Vec<u8> = (0..50_000u32).map(|i| (i % 251) as u8).collect();
+        let mut with_id3v1 = audio.clone();
+        with_id3v1.extend_from_slice(b"TAG");
+        with_id3v1.extend_from_slice(&[7u8; 125]);
+
+        let old = sample_tag("before");
+        let mut new = old.clone();
+        new.set(TAG_MP3GAIN_ALBUM_MINMAX, "126,225");
+
+        for (name, base) in [("plain", &audio), ("id3v1", &with_id3v1)] {
+            let data = replace_ape_tag(base, &old);
+            let path = write_temp(&format!("tail_eq_{}.mp3", name), &data);
+            write_ape_album_minmax(&path, 126, 225).unwrap();
+            assert_eq!(
+                fs::read(&path).unwrap(),
+                replace_ape_tag(&data, &new),
+                "tail rewrite must equal full rewrite ({})",
+                name
+            );
+        }
+    }
+
+    /// Writing to a file with a bare ID3v1 block (no APE tag) must insert
+    /// the new tag before the ID3v1, and to an untagged file append at EOF.
+    #[test]
+    fn tail_rewrite_untagged_files() {
+        let audio = vec![9u8; 10_000];
+
+        let path = write_temp("tail_untagged.mp3", &audio);
+        write_ape_album_minmax(&path, 100, 200).unwrap();
+        let out = fs::read(&path).unwrap();
+        assert_eq!(&out[..audio.len()], &audio[..]);
+        assert_eq!(
+            read_ape_tag_from_file(&path)
+                .unwrap()
+                .unwrap()
+                .get(TAG_MP3GAIN_ALBUM_MINMAX),
+            Some("100,200")
+        );
+
+        let mut with_id3v1 = audio.clone();
+        with_id3v1.extend_from_slice(b"TAG");
+        with_id3v1.extend_from_slice(&[3u8; 125]);
+        let path = write_temp("tail_bare_id3v1.mp3", &with_id3v1);
+        write_ape_album_minmax(&path, 100, 200).unwrap();
+        let out = fs::read(&path).unwrap();
+        assert_eq!(&out[..audio.len()], &audio[..]);
+        assert_eq!(&out[out.len() - 128..], &with_id3v1[audio.len()..]);
+        assert_eq!(
+            read_ape_tag_from_file(&path)
+                .unwrap()
+                .unwrap()
+                .get(TAG_MP3GAIN_ALBUM_MINMAX),
+            Some("100,200")
+        );
+    }
+
+    /// A tag larger than the 160-byte probe must be fully preserved by the
+    /// second, wider tail read; shrinking the tag must truncate the file.
+    #[test]
+    fn tail_rewrite_large_tag_and_shrink() {
+        let audio = vec![5u8; 30_000];
+        let big = sample_tag(&"x".repeat(4096));
+        let data = replace_ape_tag(&audio, &big);
+        let path = write_temp("tail_large.mp3", &data);
+
+        write_ape_album_minmax(&path, 126, 225).unwrap();
+        let out = read_ape_tag_from_file(&path).unwrap().unwrap();
+        assert_eq!(out.get("COMMENT").map(str::len), Some(4096));
+        assert_eq!(out.get(TAG_MP3GAIN_ALBUM_MINMAX), Some("126,225"));
+
+        // Replacing with a small tag shrinks the file back (set_len path).
+        write_ape_tag(&path, &sample_tag("small")).unwrap();
+        let shrunk = fs::read(&path).unwrap();
+        assert_eq!(shrunk, replace_ape_tag(&audio, &sample_tag("small")));
+    }
+
+    /// delete_ape_tag must strip the tag in place, keeping audio and ID3v1.
+    #[test]
+    fn tail_delete_keeps_audio_and_id3v1() {
+        let mut base = vec![1u8; 20_000];
+        base.extend_from_slice(b"TAG");
+        base.extend_from_slice(&[2u8; 125]);
+        let data = replace_ape_tag(&base, &sample_tag("gone"));
+        let path = write_temp("tail_delete.mp3", &data);
+
+        delete_ape_tag(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), base);
+        assert_eq!(read_ape_tag_from_file(&path).unwrap(), None);
     }
 }
