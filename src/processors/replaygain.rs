@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use indicatif::ProgressBar;
-use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions, ClippingDetection};
+use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions};
 use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult};
 use mp3rgain::{apply_gain_to_peak, mp4meta, steps_to_db, AacAlbumInfo};
 use std::fmt::Write as _;
@@ -12,7 +12,9 @@ use crate::json_output::{FileStatus, JsonFileResult};
 use crate::progress::update_analysis_progress;
 use crate::util::get_filename;
 
-use super::utils::{restore_timestamp, save_original_mtime, warn_aac_multi_track};
+use super::utils::{
+    emit_clipping_warning, restore_timestamp, save_original_mtime, warn_aac_multi_track,
+};
 
 pub fn process_track_gain(
     file: &Path,
@@ -111,12 +113,7 @@ fn process_track_gain_into(
                 eprintln!("  {} {} - {}", "x".red(), filename, e);
             }
 
-            Ok(JsonFileResult {
-                file: file.display().to_string(),
-                status: Some(FileStatus::Error),
-                error: Some(e.to_string()),
-                ..Default::default()
-            })
+            Ok(JsonFileResult::error(file, e))
         }
     }
 }
@@ -161,8 +158,14 @@ fn apply_replaygain_with_album_into(
         apply_opts.prevent_clipping = opts.prevent_clipping;
         apply_opts.wrap = opts.wrap_gain;
         let report = predict_apply(file, &apply_opts)?;
-        let warning_msg =
-            emit_clipping_warning_peak(steps, result, &report, opts, dry_run_prefix, filename);
+        let warning_msg = emit_clipping_warning(
+            steps,
+            &report,
+            opts,
+            dry_run_prefix,
+            filename,
+            Some(result.peak()),
+        );
         let actual_steps = report.actual_steps;
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             writeln!(
@@ -223,8 +226,14 @@ fn apply_replaygain_with_album_into(
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {
-            let warning_msg =
-                emit_clipping_warning_peak(steps, result, &report, opts, dry_run_prefix, filename);
+            let warning_msg = emit_clipping_warning(
+                steps,
+                &report,
+                opts,
+                dry_run_prefix,
+                filename,
+                Some(result.peak()),
+            );
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 writeln!(
@@ -257,69 +266,9 @@ fn apply_replaygain_with_album_into(
                 eprintln!("  {} {} - {}", "x".red(), filename, e);
             }
 
-            Ok((
-                JsonFileResult {
-                    file: file.display().to_string(),
-                    status: Some(FileStatus::Error),
-                    error: Some(e.to_string()),
-                    ..Default::default()
-                },
-                None,
-            ))
+            Ok((JsonFileResult::error(file, e), None))
         }
     }
-}
-
-/// Render the user-visible clipping warning after a real or predicted
-/// apply, using the ReplayGain-peak diagnostic from [`ApplyReport`].
-fn emit_clipping_warning_peak(
-    requested_steps: i32,
-    result: &ReplayGainResult,
-    report: &mp3rgain::ApplyReport,
-    opts: &Options,
-    dry_run_prefix: &str,
-    filename: &str,
-) -> Option<String> {
-    let Some(ClippingDetection::Peak(new_peak)) = report.clipping_detected else {
-        return None;
-    };
-    if report.clipping_prevented {
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
-            eprintln!(
-                "  {} {}{} - gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
-                "!".yellow(),
-                dry_run_prefix,
-                filename,
-                requested_steps,
-                report.actual_steps,
-                result.peak()
-            );
-        }
-        return Some(format!(
-            "gain reduced from {} to {} steps to prevent clipping (peak: {:.4})",
-            requested_steps,
-            report.actual_steps,
-            result.peak()
-        ));
-    }
-    if opts.ignore_clipping || opts.quiet {
-        return None;
-    }
-    if opts.output_format == OutputFormat::Text {
-        eprintln!(
-            "  {} {}{} - clipping warning: peak would be {:.2} (>{:.2})",
-            "!".yellow(),
-            dry_run_prefix,
-            filename,
-            new_peak,
-            1.0
-        );
-        eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
-    }
-    Some(format!(
-        "clipping warning: peak would be {:.2} (>1.00)",
-        new_peak
-    ))
 }
 
 /// Apply ReplayGain to AAC/M4A files with optional album info.
@@ -372,13 +321,13 @@ fn apply_replaygain_aac_with_album_into(
         Ok(report) => {
             actual_steps = report.actual_steps;
             gain_modified = report.modified;
-            warning_msg = emit_clipping_warning_peak(
+            warning_msg = emit_clipping_warning(
                 requested_steps,
-                result,
                 &report,
                 opts,
                 dry_run_prefix,
                 filename,
+                Some(result.peak()),
             );
         }
         Err(e) => {
@@ -463,12 +412,7 @@ fn apply_replaygain_aac_with_album_into(
                 eprintln!("  {} {} - {}", "x".red(), filename, e);
             }
 
-            Ok(JsonFileResult {
-                file: file.display().to_string(),
-                status: Some(FileStatus::Error),
-                error: Some(e.to_string()),
-                ..Default::default()
-            })
+            Ok(JsonFileResult::error(file, e))
         }
     }
 }

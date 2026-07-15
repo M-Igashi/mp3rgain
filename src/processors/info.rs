@@ -132,12 +132,7 @@ fn process_info_into(
             }
             Err(e) => {
                 eprintln!("{} - {}", filename.red(), e);
-                return Ok(JsonFileResult {
-                    file: file.display().to_string(),
-                    status: Some(FileStatus::Error),
-                    error: Some(e.to_string()),
-                    ..Default::default()
-                });
+                return Ok(JsonFileResult::error(file, e));
             }
         }
     }
@@ -261,12 +256,7 @@ fn process_info_into(
                 eprintln!("{} - {}", filename.red(), e);
             }
 
-            Ok(JsonFileResult {
-                file: file.display().to_string(),
-                status: Some(FileStatus::Error),
-                error: Some(e.to_string()),
-                ..Default::default()
-            })
+            Ok(JsonFileResult::error(file, e))
         }
     }
 }

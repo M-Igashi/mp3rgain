@@ -84,12 +84,7 @@ fn process_undo_into(file: &Path, opts: &Options, out: &mut String) -> Result<Js
                 eprintln!("  {} {} - {}", "x".red(), filename, e);
             }
 
-            Ok(JsonFileResult {
-                file: file.display().to_string(),
-                status: Some(FileStatus::Error),
-                error: Some(e.to_string()),
-                ..Default::default()
-            })
+            Ok(JsonFileResult::error(file, e))
         }
     }
 }

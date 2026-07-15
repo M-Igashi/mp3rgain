@@ -1399,10 +1399,12 @@ pub(crate) fn apply_aac_gain_with_undo_to_path_with_analysis(
 
     let modified = apply_aac_gain_to_data(&mut data, &analysis, gain_steps);
 
-    let minmax = existing_undo
-        .minmax()
-        .map(|s| s.to_string())
-        .or_else(|| Some(format!("{},{}", analysis.min_gain(), analysis.max_gain())));
+    let minmax = existing_undo.minmax().map(|s| s.to_string()).or_else(|| {
+        Some(crate::ape::format_minmax(
+            analysis.min_gain(),
+            analysis.max_gain(),
+        ))
+    });
     let undo_tags = mp4meta::UndoTags::new(
         Some(crate::ape::format_undo_value(
             new_undo_gain,

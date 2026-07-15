@@ -178,13 +178,13 @@ impl ReplayGainTags {
     }
 
     pub fn set_track(&mut self, gain_db: f64, peak: f64) {
-        self.track_gain = Some(format!("{:+.6} dB", gain_db));
-        self.track_peak = Some(format!("{:.6}", peak));
+        self.track_gain = Some(crate::ape::format_rg_gain(gain_db));
+        self.track_peak = Some(crate::ape::format_rg_peak(peak));
     }
 
     pub fn set_album(&mut self, gain_db: f64, peak: f64) {
-        self.album_gain = Some(format!("{:+.6} dB", gain_db));
-        self.album_peak = Some(format!("{:.6}", peak));
+        self.album_gain = Some(crate::ape::format_rg_gain(gain_db));
+        self.album_peak = Some(crate::ape::format_rg_peak(peak));
     }
 
     pub fn is_empty(&self) -> bool {

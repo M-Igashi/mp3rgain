@@ -4,7 +4,6 @@ use indicatif::MultiProgress;
 use mp3rgain::replaygain::{self, AlbumAnalysisReport, AlbumGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{steps_to_db, AacAlbumInfo};
 use rayon::prelude::*;
-use std::cell::Cell;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -17,8 +16,8 @@ use crate::commands::utils::{
 use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
 use crate::processors::replaygain::{process_apply_replaygain_with_album, process_track_gain};
 use crate::progress::{
-    create_album_progress_pb_in, create_progress_bar, progress_finish, progress_inc,
-    progress_set_message,
+    album_progress_callbacks, create_album_progress_pb_in, create_progress_bar, progress_finish,
+    progress_inc, progress_set_message,
 };
 use crate::util::get_filename;
 
@@ -134,34 +133,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         None
     };
     let file_names: Vec<&str> = files.iter().map(|f| get_filename(f)).collect();
-    let files_len = files.len();
-
-    let pb_for_progress = analysis_pb.clone();
-    // Track the most recent file_idx so we only allocate a new message
-    // string when the current file changes (otherwise the closure runs
-    // once per decoded packet — ~9k calls per minute of audio).
-    let last_message_idx: Cell<Option<usize>> = Cell::new(None);
-    let on_progress = move |file_idx: usize, bytes: u64, total: u64| {
-        if let Some(pb) = &pb_for_progress {
-            pb.set_length(total);
-            pb.set_position(bytes);
-            if last_message_idx.get() != Some(file_idx) {
-                pb.set_message(format!(
-                    "({}/{}) {}",
-                    file_idx + 1,
-                    files_len,
-                    file_names[file_idx]
-                ));
-                last_message_idx.set(Some(file_idx));
-            }
-        }
-    };
-    let pb_for_complete = analysis_pb.clone();
-    let on_complete = move |completed_idx: usize, _path: &Path| {
-        if let Some(pb) = &pb_for_complete {
-            pb.set_position((completed_idx + 1) as u64);
-        }
-    };
+    let (on_progress, on_complete) = album_progress_callbacks(&analysis_pb, file_names);
 
     let album_analysis: mp3rgain::error::Result<AlbumAnalysisReport> =
         match (parallel, opts.skip_errors) {

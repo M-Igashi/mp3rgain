@@ -4,7 +4,6 @@ use indicatif::MultiProgress;
 use mp3rgain::replaygain::{self, AlbumAnalysisReport, ReplayGainResult};
 use mp3rgain::{mp4meta, peak_to_pcm_sample, steps_to_db};
 use rayon::prelude::*;
-use std::cell::Cell;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -12,7 +11,7 @@ use crate::cli::options::{Options, OutputFormat};
 use crate::commands::threading::effective_threads;
 use crate::commands::utils::{finish_without_summary, for_each_file_with_analysis_bar};
 use crate::processors::info::{format_rg_row, process_info, scan_gain_range_for_row};
-use crate::progress::create_album_progress_pb_in;
+use crate::progress::{album_progress_callbacks, create_album_progress_pb_in};
 use crate::util::get_filename;
 
 pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
@@ -193,33 +192,7 @@ fn analyze_set(
         None
     };
     let file_names: Vec<&str> = set.iter().map(|&(_, p)| get_filename(p)).collect();
-    let total = paths.len();
-
-    let pb_for_progress = pb.clone();
-    // Only allocate a new message string when the current file changes —
-    // the callback runs once per decoded packet.
-    let last_message_idx: Cell<Option<usize>> = Cell::new(None);
-    let on_progress = move |file_idx: usize, bytes: u64, total_bytes: u64| {
-        if let Some(pb) = &pb_for_progress {
-            pb.set_length(total_bytes);
-            pb.set_position(bytes);
-            if last_message_idx.get() != Some(file_idx) {
-                pb.set_message(format!(
-                    "({}/{}) {}",
-                    file_idx + 1,
-                    total,
-                    file_names[file_idx]
-                ));
-                last_message_idx.set(Some(file_idx));
-            }
-        }
-    };
-    let pb_for_complete = pb.clone();
-    let on_complete = move |completed_idx: usize, _path: &Path| {
-        if let Some(pb) = &pb_for_complete {
-            pb.set_position((completed_idx + 1) as u64);
-        }
-    };
+    let (on_progress, on_complete) = album_progress_callbacks(&pb, file_names);
 
     let report = if parallel {
         replaygain::analyze_album_lenient_parallel_with_completion(

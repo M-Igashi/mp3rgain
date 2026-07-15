@@ -6,6 +6,7 @@
 //! once the Symphonia v0.6 decoder migration landed.
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use std::cell::Cell;
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat};
@@ -73,6 +74,48 @@ pub fn create_album_progress_pb_in(
     let pb = mp.add(ProgressBar::new(initial_len));
     pb.set_style(bar_style(template));
     pb
+}
+
+/// `on_progress` / `on_complete` closure pair driving an optional shared
+/// album-analysis progress bar (see [`create_album_progress_pb_in`]).
+///
+/// Serial analysis paths call `on_progress` with byte-level progress;
+/// parallel paths call `on_complete` with a completed-file count. A new
+/// message string is only allocated when the current file changes — the
+/// progress callback runs once per decoded packet (~9k calls per minute
+/// of audio).
+pub fn album_progress_callbacks<'a>(
+    pb: &Option<ProgressBar>,
+    file_names: Vec<&'a str>,
+) -> (
+    impl Fn(usize, u64, u64) + 'a,
+    impl Fn(usize, &Path) + Sync + 'a,
+) {
+    let total = file_names.len();
+    let pb_for_progress = pb.clone();
+    let last_message_idx: Cell<Option<usize>> = Cell::new(None);
+    let on_progress = move |file_idx: usize, bytes: u64, total_bytes: u64| {
+        if let Some(pb) = &pb_for_progress {
+            pb.set_length(total_bytes);
+            pb.set_position(bytes);
+            if last_message_idx.get() != Some(file_idx) {
+                pb.set_message(format!(
+                    "({}/{}) {}",
+                    file_idx + 1,
+                    total,
+                    file_names[file_idx]
+                ));
+                last_message_idx.set(Some(file_idx));
+            }
+        }
+    };
+    let pb_for_complete = pb.clone();
+    let on_complete = move |completed_idx: usize, _path: &Path| {
+        if let Some(pb) = &pb_for_complete {
+            pb.set_position((completed_idx + 1) as u64);
+        }
+    };
+    (on_progress, on_complete)
 }
 
 pub fn progress_set_message(pb: &Option<ProgressBar>, msg: &str) {

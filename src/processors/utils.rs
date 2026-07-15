@@ -1,4 +1,5 @@
 use colored::*;
+use mp3rgain::apply::ClippingDetection;
 use mp3rgain::mp4meta;
 use std::path::Path;
 use std::time::SystemTime;
@@ -13,6 +14,68 @@ pub fn save_original_mtime(file: &Path, opts: &Options) -> Option<SystemTime> {
     } else {
         None
     }
+}
+
+/// Render the user-visible clipping warning after a real or predicted apply.
+///
+/// Handles both diagnostics from [`mp3rgain::ApplyReport`]: headroom-based
+/// (`-g`) and ReplayGain-peak based (`-r`/`-a`, which pass the track's
+/// analysis peak as `track_peak` for the prevented-clipping detail).
+pub fn emit_clipping_warning(
+    requested_steps: i32,
+    report: &mp3rgain::ApplyReport,
+    opts: &Options,
+    dry_run_prefix: &str,
+    filename: &str,
+    track_peak: Option<f64>,
+) -> Option<String> {
+    let (prevented_detail, warn_msg) = match report.clipping_detected {
+        Some(ClippingDetection::Headroom(headroom_steps)) => (
+            String::new(),
+            format!(
+                "clipping warning: requested {} steps but only {} headroom",
+                requested_steps, headroom_steps
+            ),
+        ),
+        Some(ClippingDetection::Peak(new_peak)) => (
+            track_peak
+                .map(|p| format!(" (peak: {:.4})", p))
+                .unwrap_or_default(),
+            format!("clipping warning: peak would be {:.2} (>1.00)", new_peak),
+        ),
+        None => return None,
+    };
+
+    if report.clipping_prevented {
+        let msg = format!(
+            "gain reduced from {} to {} steps to prevent clipping{}",
+            requested_steps, report.actual_steps, prevented_detail
+        );
+        if opts.output_format == OutputFormat::Text && !opts.quiet {
+            eprintln!(
+                "  {} {}{} - {}",
+                "!".yellow(),
+                dry_run_prefix,
+                filename,
+                msg
+            );
+        }
+        return Some(msg);
+    }
+    if opts.ignore_clipping || opts.quiet {
+        return None;
+    }
+    if opts.output_format == OutputFormat::Text {
+        eprintln!(
+            "  {} {}{} - {}",
+            "!".yellow(),
+            dry_run_prefix,
+            filename,
+            warn_msg
+        );
+        eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
+    }
+    Some(warn_msg)
 }
 
 pub fn warn_aac_multi_track(file: &Path, filename: &str, opts: &Options, dry_run_prefix: &str) {

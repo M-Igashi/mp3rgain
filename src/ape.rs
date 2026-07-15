@@ -121,8 +121,7 @@ impl ApeTag {
 
     /// Set MP3GAIN_MINMAX value
     pub fn set_minmax(&mut self, min: u8, max: u8) {
-        let value = format!("{},{}", min, max);
-        self.set(TAG_MP3GAIN_MINMAX, &value);
+        self.set(TAG_MP3GAIN_MINMAX, &format_minmax(min, max));
     }
 
     /// Set the `REPLAYGAIN_*` items present in `rg` (issue #232).
@@ -407,7 +406,7 @@ pub fn write_ape_replaygain(file_path: &Path, rg: &ApeReplayGain) -> Result<()> 
 pub fn write_ape_album_minmax(file_path: &Path, min: u8, max: u8) -> Result<()> {
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
     let mut tag = read_ape_tag(&data).unwrap_or_default();
-    tag.set(TAG_MP3GAIN_ALBUM_MINMAX, &format!("{},{}", min, max));
+    tag.set(TAG_MP3GAIN_ALBUM_MINMAX, &format_minmax(min, max));
     let new_data = replace_ape_tag(&data, &tag);
     crate::apply::atomic_write(file_path, &new_data)
 }
@@ -439,6 +438,22 @@ pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
 pub fn format_undo_value(left_gain: i32, right_gain: i32, wrap: bool) -> String {
     let wrap_flag = if wrap { "W" } else { "N" };
     format!("{:+04},{:+04},{}", left_gain, right_gain, wrap_flag)
+}
+
+/// Format a `MP3GAIN_MINMAX` / `MP3GAIN_ALBUM_MINMAX` tag value (`min,max`).
+pub fn format_minmax(min: u8, max: u8) -> String {
+    format!("{},{}", min, max)
+}
+
+/// Format a `REPLAYGAIN_*_GAIN` tag value, 6-decimal precision per mp3gain
+/// convention (issue #210).
+pub(crate) fn format_rg_gain(gain_db: f64) -> String {
+    format!("{:+.6} dB", gain_db)
+}
+
+/// Format a `REPLAYGAIN_*_PEAK` tag value.
+pub(crate) fn format_rg_peak(peak: f64) -> String {
+    format!("{:.6}", peak)
 }
 
 /// Parse the wrap flag (third field, `W`/`N`) of an MP3GAIN_UNDO tag value.

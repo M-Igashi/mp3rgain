@@ -196,23 +196,14 @@ pub fn write_id3v2_undo(
     min: u8,
     max: u8,
 ) -> Result<()> {
-    let mut tag = read_tag(path)?;
-
-    let undo_value = crate::ape::format_undo_value(left_gain, right_gain, wrap);
-    let minmax_value = format!("{},{}", min, max);
-
-    remove_txxx_ci(&mut tag, TAG_MP3GAIN_UNDO);
-    tag.add_frame(id3::frame::ExtendedText {
-        description: TAG_MP3GAIN_UNDO.to_string(),
-        value: undo_value,
-    });
-    remove_txxx_ci(&mut tag, TAG_MP3GAIN_MINMAX);
-    tag.add_frame(id3::frame::ExtendedText {
-        description: TAG_MP3GAIN_MINMAX.to_string(),
-        value: minmax_value,
-    });
-
-    write_tag(path, &tag)
+    write_id3v2_replaygain(
+        path,
+        &Id3v2ReplayGain {
+            undo: Some(crate::ape::format_undo_value(left_gain, right_gain, wrap)),
+            minmax: Some(crate::ape::format_minmax(min, max)),
+            ..Default::default()
+        },
+    )
 }
 
 /// Undo gain changes based on ID3v2 undo tag information

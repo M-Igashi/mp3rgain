@@ -126,6 +126,22 @@ where
     Ok((json_results, successful, failed))
 }
 
+/// Shared `steps == 0` early return for the apply commands: empty JSON
+/// output with a zero summary, or a "nothing to do" notice.
+pub fn report_zero_steps(files: &[PathBuf], opts: &Options) -> Result<()> {
+    if opts.output_format == OutputFormat::Json {
+        let output = JsonOutput {
+            files: Some(vec![]),
+            album: None,
+            summary: Some(create_json_summary(files.len(), 0, 0, opts.dry_run)),
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if !opts.quiet {
+        println!("{}: gain is 0, nothing to do", "info".cyan());
+    }
+    Ok(())
+}
+
 /// Shared command epilogue: JSON output (with per-run summary) in JSON mode,
 /// otherwise the dry-run notice.
 pub fn finish_with_summary(

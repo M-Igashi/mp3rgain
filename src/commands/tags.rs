@@ -181,15 +181,7 @@ fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, S
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 eprintln!("  {} {} - {}", "x".red(), filename, e);
             }
-            Ok((
-                JsonFileResult {
-                    file: file.display().to_string(),
-                    status: Some(FileStatus::Error),
-                    error: Some(e.to_string()),
-                    ..Default::default()
-                },
-                out,
-            ))
+            Ok((JsonFileResult::error(file, e), out))
         }
     }
 }
@@ -208,6 +200,22 @@ pub fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
         for_each_file(files, opts, |file| Ok(process_check_tags(file, opts)))?;
 
     finish_without_summary(json_results, opts)
+}
+
+/// Shared error arm for the tag-read branches of `process_check_tags`:
+/// stderr line in text/TSV mode, error record in JSON mode.
+fn tag_read_error(
+    file: &Path,
+    filename: &str,
+    e: impl std::fmt::Display,
+    opts: &Options,
+) -> Option<JsonFileResult> {
+    if opts.output_format != OutputFormat::Json {
+        eprintln!("{} - {}", filename.red(), e);
+        None
+    } else {
+        Some(JsonFileResult::error(file, e))
+    }
 }
 
 fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, String) {
@@ -252,22 +260,7 @@ fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, S
                 let json = info.render(filename, file, opts.output_format, &mut out);
                 (json, out)
             }
-            Err(e) => {
-                if opts.output_format != OutputFormat::Json {
-                    eprintln!("{} - {}", filename.red(), e);
-                    (None, out)
-                } else {
-                    (
-                        Some(JsonFileResult {
-                            file: file.display().to_string(),
-                            status: Some(FileStatus::Error),
-                            error: Some(e.to_string()),
-                            ..Default::default()
-                        }),
-                        out,
-                    )
-                }
-            }
+            Err(e) => (tag_read_error(file, filename, e, opts), out),
         }
     } else {
         match read_ape_tag_from_file(file) {
@@ -303,22 +296,7 @@ fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, S
                 let json = info.render(filename, file, opts.output_format, &mut out);
                 (json, out)
             }
-            Err(e) => {
-                if opts.output_format != OutputFormat::Json {
-                    eprintln!("{} - {}", filename.red(), e);
-                    (None, out)
-                } else {
-                    (
-                        Some(JsonFileResult {
-                            file: file.display().to_string(),
-                            status: Some(FileStatus::Error),
-                            error: Some(e.to_string()),
-                            ..Default::default()
-                        }),
-                        out,
-                    )
-                }
-            }
+            Err(e) => (tag_read_error(file, filename, e, opts), out),
         }
     }
 }

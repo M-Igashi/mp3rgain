@@ -437,19 +437,20 @@ struct RgResidual {
 impl RgResidual {
     fn to_ape(&self) -> ape::ApeReplayGain {
         ape::ApeReplayGain {
-            track_gain: Some(format!("{:+.6} dB", self.track_gain_db)),
-            track_peak: Some(format!("{:.6}", self.track_peak)),
-            album_gain: self.album.map(|(g, _)| format!("{:+.6} dB", g)),
-            album_peak: self.album.map(|(_, p)| format!("{:.6}", p)),
+            track_gain: Some(ape::format_rg_gain(self.track_gain_db)),
+            track_peak: Some(ape::format_rg_peak(self.track_peak)),
+            album_gain: self.album.map(|(g, _)| ape::format_rg_gain(g)),
+            album_peak: self.album.map(|(_, p)| ape::format_rg_peak(p)),
         }
     }
 
     fn to_id3v2(&self) -> id3v2::Id3v2ReplayGain {
+        let ape = self.to_ape();
         id3v2::Id3v2ReplayGain {
-            track_gain: Some(format!("{:+.6} dB", self.track_gain_db)),
-            track_peak: Some(format!("{:.6}", self.track_peak)),
-            album_gain: self.album.map(|(g, _)| format!("{:+.6} dB", g)),
-            album_peak: self.album.map(|(_, p)| format!("{:.6}", p)),
+            track_gain: ape.track_gain,
+            track_peak: ape.track_peak,
+            album_gain: ape.album_gain,
+            album_peak: ape.album_peak,
             ..Default::default()
         }
     }
@@ -574,7 +575,7 @@ fn apply_mp3_id3v2_bytes(
                 let post = crate::analyze(w)?;
                 (post.min_gain(), post.max_gain())
             };
-            rg.minmax = Some(format!("{},{}", min, max));
+            rg.minmax = Some(ape::format_minmax(min, max));
         }
 
         if opts.write_replaygain_tags {

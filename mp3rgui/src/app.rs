@@ -574,10 +574,11 @@ impl Mp3rgainApp {
 
     /// File indices spanning the visible range between two file indices,
     /// inclusive. The two endpoints are translated to display positions via
-    /// `compute_display_order`, the inclusive range is collected in display
+    /// the cached display order, the inclusive range is collected in display
     /// order, then mapped back to file indices.
-    fn range_in_display_order(&self, anchor: usize, idx: usize) -> Vec<usize> {
-        let order = self.compute_display_order();
+    fn range_in_display_order(&mut self, anchor: usize, idx: usize) -> Vec<usize> {
+        self.ensure_display_order();
+        let order = &self.display_order_cache;
         let anchor_pos = order.iter().position(|&i| i == anchor);
         let idx_pos = order.iter().position(|&i| i == idx);
         match (anchor_pos, idx_pos) {

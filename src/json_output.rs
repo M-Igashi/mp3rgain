@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::path::Path;
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -58,6 +59,19 @@ pub struct JsonFileResult {
     pub warning: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dry_run: Option<bool>,
+}
+
+impl JsonFileResult {
+    /// Error record for `file` — the shared shape every per-file command
+    /// emits when an operation fails.
+    pub fn error(file: &Path, e: impl std::fmt::Display) -> Self {
+        Self {
+            file: file.display().to_string(),
+            status: Some(FileStatus::Error),
+            error: Some(e.to_string()),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Serialize, Clone, Copy)]

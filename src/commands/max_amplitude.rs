@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::utils::{finish_without_summary, for_each_file};
-use crate::json_output::{FileStatus, JsonFileResult};
+use crate::json_output::JsonFileResult;
 use crate::util::get_filename;
 
 pub fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
@@ -85,15 +85,7 @@ fn process_max_amplitude(file: &Path, opts: &Options) -> (Option<JsonFileResult>
         }
         Err(e) => {
             if opts.output_format == OutputFormat::Json {
-                (
-                    Some(JsonFileResult {
-                        file: file.display().to_string(),
-                        status: Some(FileStatus::Error),
-                        error: Some(e.to_string()),
-                        ..Default::default()
-                    }),
-                    out,
-                )
+                (Some(JsonFileResult::error(file, e)), out)
             } else {
                 if !opts.quiet {
                     eprintln!("{} - {}", filename.red(), e);

@@ -5,24 +5,13 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::commands::utils::{create_json_summary, finish_with_summary, for_each_file};
-use crate::json_output::JsonOutput;
+use crate::commands::utils::{finish_with_summary, for_each_file, report_zero_steps};
 use crate::processors::apply::{process_apply, process_apply_channel};
 use crate::util::get_filename;
 
 pub fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
     if steps == 0 {
-        if opts.output_format == OutputFormat::Json {
-            let output = JsonOutput {
-                files: Some(vec![]),
-                album: None,
-                summary: Some(create_json_summary(files.len(), 0, 0, opts.dry_run)),
-            };
-            println!("{}", serde_json::to_string_pretty(&output)?);
-        } else if !opts.quiet {
-            println!("{}: gain is 0, nothing to do", "info".cyan());
-        }
-        return Ok(());
+        return report_zero_steps(files, opts);
     }
 
     let db_value = steps_to_db(steps);
@@ -80,17 +69,7 @@ pub fn cmd_apply_channel(
     opts: &Options,
 ) -> Result<()> {
     if steps == 0 {
-        if opts.output_format == OutputFormat::Json {
-            let output = JsonOutput {
-                files: Some(vec![]),
-                album: None,
-                summary: Some(create_json_summary(files.len(), 0, 0, opts.dry_run)),
-            };
-            println!("{}", serde_json::to_string_pretty(&output)?);
-        } else if !opts.quiet {
-            println!("{}: gain is 0, nothing to do", "info".cyan());
-        }
-        return Ok(());
+        return report_zero_steps(files, opts);
     }
 
     let db_value = steps_to_db(steps);

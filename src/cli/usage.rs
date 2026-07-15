@@ -90,7 +90,10 @@ pub fn print_usage() {
     );
     println!("    - Changes are lossless and reversible");
     println!("    - Gain changes are stored in APEv2 tags for undo support");
-    println!("    - Progress bar shown automatically for 5+ files");
+    println!(
+        "    - Progress bar shown automatically for {}+ files",
+        crate::progress::PROGRESS_THRESHOLD
+    );
     if replaygain::is_available() {
         println!(
             "    - ReplayGain analysis is {} (target: {} dB)",

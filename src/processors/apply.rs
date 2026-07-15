@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::*;
-use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions, ClippingDetection};
+use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions};
 use mp3rgain::{analyze, mp4meta, steps_to_db, Channel};
 use std::fmt::Write as _;
 use std::path::Path;
@@ -9,7 +9,7 @@ use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
 
-use super::utils::warn_aac_multi_track;
+use super::utils::{emit_clipping_warning, warn_aac_multi_track};
 
 pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<(JsonFileResult, String)> {
     let mut out = String::new();
@@ -40,38 +40,31 @@ fn process_apply_into(
     // In that case the prediction feeds nothing the caller can observe, so
     // skip it — a `--dry-run -c`/`-q` sweep then avoids a full read per file.
     if opts.dry_run {
-        let (actual_steps, warning_msg) =
-            if !opts.prevent_clipping && (opts.ignore_clipping || opts.quiet) {
-                (steps, None)
-            } else {
-                let mut apply_opts = ApplyOptions::new(steps);
-                apply_opts.prevent_clipping = opts.prevent_clipping;
-                apply_opts.wrap = opts.wrap_gain;
-                match predict_apply(file, &apply_opts) {
-                    Ok(report) => {
-                        let warning = emit_clipping_warning_headroom(
-                            steps,
-                            &report,
-                            opts,
-                            dry_run_prefix,
-                            filename,
-                        );
-                        (report.actual_steps, warning)
-                    }
-                    Err(e) => {
-                        if opts.output_format == OutputFormat::Text && !opts.quiet {
-                            eprintln!("  {} {} - {}", "x".red(), filename, e);
-                        }
-                        return Ok(JsonFileResult {
-                            file: file.display().to_string(),
-                            status: Some(FileStatus::Error),
-                            error: Some(e.to_string()),
-                            dry_run: Some(true),
-                            ..Default::default()
-                        });
-                    }
+        let (actual_steps, warning_msg) = if !opts.prevent_clipping
+            && (opts.ignore_clipping || opts.quiet)
+        {
+            (steps, None)
+        } else {
+            let mut apply_opts = ApplyOptions::new(steps);
+            apply_opts.prevent_clipping = opts.prevent_clipping;
+            apply_opts.wrap = opts.wrap_gain;
+            match predict_apply(file, &apply_opts) {
+                Ok(report) => {
+                    let warning =
+                        emit_clipping_warning(steps, &report, opts, dry_run_prefix, filename, None);
+                    (report.actual_steps, warning)
                 }
-            };
+                Err(e) => {
+                    if opts.output_format == OutputFormat::Text && !opts.quiet {
+                        eprintln!("  {} {} - {}", "x".red(), filename, e);
+                    }
+                    return Ok(JsonFileResult {
+                        dry_run: Some(true),
+                        ..JsonFileResult::error(file, e)
+                    });
+                }
+            }
+        };
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             writeln!(
                 out,
@@ -108,7 +101,7 @@ fn process_apply_into(
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {
             let clip_warn =
-                emit_clipping_warning_headroom(steps, &report, opts, dry_run_prefix, filename);
+                emit_clipping_warning(steps, &report, opts, dry_run_prefix, filename, None);
             let sat_warn = emit_saturation_warning(&report, opts, filename);
             let warning_msg = combine_warnings(clip_warn, sat_warn);
 
@@ -149,62 +142,9 @@ fn process_apply_into(
                 eprintln!("  {} {} - {}", "x".red(), filename, e);
             }
 
-            Ok(JsonFileResult {
-                file: file.display().to_string(),
-                status: Some(FileStatus::Error),
-                error: Some(e.to_string()),
-                ..Default::default()
-            })
+            Ok(JsonFileResult::error(file, e))
         }
     }
-}
-
-/// Render the user-visible clipping warning after a real or predicted
-/// apply, using the headroom diagnostic from [`ApplyReport`].
-fn emit_clipping_warning_headroom(
-    requested_steps: i32,
-    report: &mp3rgain::ApplyReport,
-    opts: &Options,
-    dry_run_prefix: &str,
-    filename: &str,
-) -> Option<String> {
-    let Some(ClippingDetection::Headroom(headroom_steps)) = report.clipping_detected else {
-        return None;
-    };
-    if report.clipping_prevented {
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
-            eprintln!(
-                "  {} {}{} - gain reduced from {} to {} steps to prevent clipping",
-                "!".yellow(),
-                dry_run_prefix,
-                filename,
-                requested_steps,
-                report.actual_steps
-            );
-        }
-        return Some(format!(
-            "gain reduced from {} to {} steps to prevent clipping",
-            requested_steps, report.actual_steps
-        ));
-    }
-    if opts.ignore_clipping || opts.quiet {
-        return None;
-    }
-    if opts.output_format == OutputFormat::Text {
-        eprintln!(
-            "  {} {}{} - clipping warning: requested {} steps but only {} headroom",
-            "!".yellow(),
-            dry_run_prefix,
-            filename,
-            requested_steps,
-            headroom_steps
-        );
-        eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
-    }
-    Some(format!(
-        "clipping warning: requested {} steps but only {} headroom",
-        requested_steps, headroom_steps
-    ))
 }
 
 /// Warn when a saturating manual-gain apply clamped global_gain values at
@@ -340,12 +280,7 @@ fn process_apply_channel_into(
                 eprintln!("  {} {} - {}", "x".red(), filename, e);
             }
 
-            Ok(JsonFileResult {
-                file: file.display().to_string(),
-                status: Some(FileStatus::Error),
-                error: Some(e.to_string()),
-                ..Default::default()
-            })
+            Ok(JsonFileResult::error(file, e))
         }
     }
 }
