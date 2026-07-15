@@ -1235,6 +1235,12 @@ fn process_audio_buffer(
     }
 }
 
+/// Byte-level progress callback: `(file_index, bytes_read, total_bytes)`.
+pub type AlbumProgressFn<'a> = &'a dyn Fn(usize, u64, u64);
+
+/// Per-file completion callback: `(file_index, path)`.
+pub type AlbumCompleteFn<'a> = &'a (dyn Fn(usize, &Path) + Sync);
+
 /// Options for [`analyze_album_with_options`] (issue #250).
 ///
 /// `Default` is serial, strict analysis of the first audio track with no
@@ -1256,11 +1262,11 @@ pub struct AlbumAnalysisOptions<'a> {
     /// called after each decoded packet (#106). Only driven on the serial
     /// path; ignored when decoding in parallel (use [`Self::on_complete`]
     /// for file-count progress instead).
-    pub on_progress: Option<&'a dyn Fn(usize, u64, u64)>,
+    pub on_progress: Option<AlbumProgressFn<'a>>,
     /// Per-file completion callback `(file_index, path)`, invoked after each
     /// file finishes (whether it succeeded or failed). On the parallel path
     /// it is called from rayon worker threads, so it must be `Sync`.
-    pub on_complete: Option<&'a (dyn Fn(usize, &Path) + Sync)>,
+    pub on_complete: Option<AlbumCompleteFn<'a>>,
     /// Cooperative cancellation, checked at file boundaries. Once set,
     /// remaining files are not analyzed and [`Error::Cancelled`] is
     /// returned. Files already being decoded run to completion.
