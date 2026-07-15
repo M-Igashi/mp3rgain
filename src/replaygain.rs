@@ -664,14 +664,19 @@ struct EqualLoudnessFilter {
     butter_a: [f64; 3],
     /// Butter filter B coefficients
     butter_b: [f64; 3],
-    /// Yule filter state (input history)
-    yule_x: [f64; 11],
-    /// Yule filter state (output history)
-    yule_y: [f64; 11],
-    /// Butter filter state (input history)
-    butter_x: [f64; 3],
-    /// Butter filter state (output history)
-    butter_y: [f64; 3],
+    /// Yule filter state (input history), ring buffer
+    yule_x: [f64; 16],
+    /// Yule filter state (output history), ring buffer
+    yule_y: [f64; 16],
+    /// Butter filter state (input history), ring buffer
+    butter_x: [f64; 4],
+    /// Butter filter state (output history), ring buffer
+    butter_y: [f64; 4],
+    /// Ring write position; steps backwards (mod 16) per sample so the
+    /// value written i samples ago lives at `(pos + i) & 15`. Power-of-two
+    /// capacities let the hot loop wrap with a mask instead of shifting
+    /// the history arrays every sample (issue #255).
+    pos: usize,
 }
 
 #[cfg(feature = "replaygain")]
@@ -700,41 +705,48 @@ impl EqualLoudnessFilter {
             yule_b,
             butter_a,
             butter_b,
-            yule_x: [0.0; 11],
-            yule_y: [0.0; 11],
-            butter_x: [0.0; 3],
-            butter_y: [0.0; 3],
+            yule_x: [0.0; 16],
+            yule_y: [0.0; 16],
+            butter_x: [0.0; 4],
+            butter_y: [0.0; 4],
+            pos: 0,
         })
     }
 
     fn process(&mut self, sample: f64) -> f64 {
-        // Shift Yule-Walker filter history and insert new sample
-        self.yule_x.copy_within(0..10, 1);
-        self.yule_y.copy_within(0..10, 1);
-        self.yule_x[0] = sample;
+        // Ring-buffer history: `pos` steps backwards each sample, so the
+        // sample from i steps ago sits at `(pos + i) & mask`. This replaces
+        // the previous per-sample `copy_within` shifts (issue #255) while
+        // performing the exact same arithmetic in the same order, so the
+        // output stays bit-identical (guarded by the golden test below).
+        // 16 is a multiple of 4, so `pos & 3` decrements consistently for
+        // the Butterworth ring as well.
+        self.pos = (self.pos + 15) & 15;
+        let pos = self.pos;
+        self.yule_x[pos] = sample;
 
         // Apply Yule-Walker filter with denormal prevention.
         // The 1e-10 constant prevents denormal float slowdowns on silent audio
         // (see gain_analysis.c filterYule()). The explicit loop with a fixed
         // upper bound gives the optimizer a better shot at unrolling /
         // vectorizing this hot path than the iterator chain.
-        let mut yule_out = DENORMAL_PREVENTION + self.yule_b[0] * self.yule_x[0];
+        let mut yule_out = DENORMAL_PREVENTION + self.yule_b[0] * sample;
         for i in 1..11 {
-            yule_out += self.yule_b[i] * self.yule_x[i] - self.yule_a[i] * self.yule_y[i];
+            let j = (pos + i) & 15;
+            yule_out += self.yule_b[i] * self.yule_x[j] - self.yule_a[i] * self.yule_y[j];
         }
-        self.yule_y[0] = yule_out;
+        self.yule_y[pos] = yule_out;
 
-        // Shift Butterworth filter history and insert Yule output
-        self.butter_x.copy_within(0..2, 1);
-        self.butter_y.copy_within(0..2, 1);
-        self.butter_x[0] = yule_out;
+        let bpos = pos & 3;
+        self.butter_x[bpos] = yule_out;
 
         // Apply Butterworth high-pass filter with denormal prevention
-        let mut butter_out = DENORMAL_PREVENTION + self.butter_b[0] * self.butter_x[0];
+        let mut butter_out = DENORMAL_PREVENTION + self.butter_b[0] * yule_out;
         for i in 1..3 {
-            butter_out += self.butter_b[i] * self.butter_x[i] - self.butter_a[i] * self.butter_y[i];
+            let j = (bpos + i) & 3;
+            butter_out += self.butter_b[i] * self.butter_x[j] - self.butter_a[i] * self.butter_y[j];
         }
-        self.butter_y[0] = butter_out;
+        self.butter_y[bpos] = butter_out;
 
         butter_out
     }
