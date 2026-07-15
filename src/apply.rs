@@ -693,24 +693,34 @@ pub fn read_mtime(path: &Path) -> Option<SystemTime> {
 /// APEv2 path; skip the call when writing ID3v2 (`-s i`) or when stored-tag
 /// writing is disabled.
 pub fn write_album_minmax(files: &[(&Path, Option<(u8, u8)>)]) {
+    use rayon::prelude::*;
+
+    // The fallback analyze() is a full-file frame walk, so run the range
+    // collection in parallel like the apply pass that precedes it (#252).
+    let ranges: Vec<Option<(u8, u8)>> = files
+        .par_iter()
+        .map(|&(file, range)| {
+            range.or_else(|| {
+                crate::analyze(file)
+                    .ok()
+                    .map(|a| (a.max_gain(), a.min_gain()))
+            })
+        })
+        .collect();
+
     let mut album_min = u8::MAX;
     let mut album_max = u8::MIN;
     let mut mp3_files: Vec<&Path> = Vec::new();
-    for &(file, range) in files {
-        let range = range.or_else(|| {
-            crate::analyze(file)
-                .ok()
-                .map(|a| (a.max_gain(), a.min_gain()))
-        });
-        if let Some((max, min)) = range {
+    for (&(file, _), range) in files.iter().zip(&ranges) {
+        if let Some((max, min)) = *range {
             album_min = album_min.min(min);
             album_max = album_max.max(max);
             mp3_files.push(file);
         }
     }
-    for file in mp3_files {
+    mp3_files.par_iter().for_each(|file| {
         let _ = ape::write_ape_album_minmax(file, album_min, album_max);
-    }
+    });
 }
 
 #[cfg(test)]
