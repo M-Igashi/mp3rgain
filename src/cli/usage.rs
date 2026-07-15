@@ -35,8 +35,8 @@ pub fn print_usage() {
     println!("    -s <mode>   Stored tag handling:");
     println!("                  c = check/show stored tag info");
     println!("                  d = delete stored tag info");
-    println!("                  s = skip (ignore) stored tag info");
-    println!("                  r = force recalculation");
+    println!("                  s = skip (don't write) stored tag info");
+    println!("                  r = force recalculation (always on; kept for compatibility)");
     println!("                  i = use ID3v2 tags (not fully supported)");
     println!("                  a = use APEv2 tags (default)");
     println!("    -p          Preserve original file timestamp");

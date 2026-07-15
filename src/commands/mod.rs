@@ -49,6 +49,15 @@ pub fn run(mut opts: Options) -> Result<()> {
         );
     }
 
+    // -s r warning: mp3rgain never reads stored tags as an analysis cache,
+    // so recalculation is always in effect (issue #253)
+    if opts.force_recalc && !opts.quiet && opts.output_format == OutputFormat::Text {
+        eprintln!(
+            "{}: -s r (force recalculation) is accepted for compatibility but has no effect (mp3rgain always recalculates)",
+            "note".cyan()
+        );
+    }
+
     // Determine action based on options
     if opts.max_amplitude_only {
         // -x: only find max amplitude

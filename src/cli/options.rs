@@ -13,11 +13,9 @@ pub enum OutputFormat {
 pub enum StoredTagMode {
     #[default]
     None, // Default behavior
-    Check,    // -s c: Check/show stored tag info
-    Delete,   // -s d: Delete stored tag info
-    Skip,     // -s s: Skip (ignore) stored tag info
-    Recalc,   // -s r: Force recalculation
-    UseApev2, // -s a: Use APEv2 tags (default)
+    Check,  // -s c: Check/show stored tag info
+    Delete, // -s d: Delete stored tag info
+    Skip,   // -s s: Skip (don't write) stored tag info
 }
 
 #[derive(Default)]
@@ -29,14 +27,18 @@ pub struct Options {
     pub gain_modifier: i32,    // -m <i>: modify suggested gain by integer steps
 
     // Mode options
-    pub undo: bool,                     // -u
-    pub stored_tag_mode: StoredTagMode, // -s <mode>
-    pub use_id3v2: bool,                // -s i: use ID3v2 tags instead of APEv2
-    pub track_gain: bool,               // -r (apply track gain)
-    pub album_gain: bool,               // -a (apply album gain)
-    pub skip_album: bool,               // -e: skip album analysis
-    pub max_amplitude_only: bool,       // -x: only find max amplitude
-    pub track_index: Option<u32>,       // -i <index>: track index for multi-track files
+    pub undo: bool, // -u
+    // -s <mode>. Orthogonal to `use_id3v2`: the mode says *what* to do with
+    // stored tags (check / delete / skip writing), while `use_id3v2` says
+    // *where* they live (-s i: ID3v2 frames, -s a: APEv2, the default).
+    pub stored_tag_mode: StoredTagMode,
+    pub use_id3v2: bool,    // -s i: use ID3v2 tags instead of APEv2 (-s a resets)
+    pub force_recalc: bool, // -s r: accepted for compatibility (always recalculates)
+    pub track_gain: bool,   // -r (apply track gain)
+    pub album_gain: bool,   // -a (apply album gain)
+    pub skip_album: bool,   // -e: skip album analysis
+    pub max_amplitude_only: bool, // -x: only find max amplitude
+    pub track_index: Option<u32>, // -i <index>: track index for multi-track files
 
     // Behavior options
     pub preserve_timestamp: bool,    // -p
