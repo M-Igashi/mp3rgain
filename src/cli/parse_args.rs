@@ -106,11 +106,12 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                         "c" => opts.stored_tag_mode = StoredTagMode::Check,
                         "d" => opts.stored_tag_mode = StoredTagMode::Delete,
                         "s" => opts.stored_tag_mode = StoredTagMode::Skip,
-                        "r" => opts.stored_tag_mode = StoredTagMode::Recalc,
-                        "i" => {
-                            opts.use_id3v2 = true;
-                        }
-                        "a" => opts.stored_tag_mode = StoredTagMode::UseApev2,
+                        // mp3gain compatibility: mp3rgain never reads stored
+                        // tags as an analysis cache, so "force recalculation"
+                        // is always in effect. Accepted with a notice (#253).
+                        "r" => opts.force_recalc = true,
+                        "i" => opts.use_id3v2 = true,
+                        "a" => opts.use_id3v2 = false,
                         other => {
                             eprintln!(
                                 "{}: unknown -s mode '{}', use c/d/s/r/i/a",
@@ -491,17 +492,16 @@ mod tests {
             parse_args(&args(&["-s", "s"])).unwrap().stored_tag_mode,
             StoredTagMode::Skip
         );
-        assert_eq!(
-            parse_args(&args(&["-s", "r"])).unwrap().stored_tag_mode,
-            StoredTagMode::Recalc
-        );
-        assert_eq!(
-            parse_args(&args(&["-s", "a"])).unwrap().stored_tag_mode,
-            StoredTagMode::UseApev2
-        );
-        // -s i sets use_id3v2 instead of stored_tag_mode
+        // -s r is a compatibility no-op flag, not a mode (#253)
+        let opts = parse_args(&args(&["-s", "r"])).unwrap();
+        assert!(opts.force_recalc);
+        assert_eq!(opts.stored_tag_mode, StoredTagMode::None);
+        // -s i / -s a toggle the tag format; last one wins
         let opts = parse_args(&args(&["-s", "i"])).unwrap();
         assert!(opts.use_id3v2);
+        let opts = parse_args(&args(&["-s", "i", "-s", "a"])).unwrap();
+        assert!(!opts.use_id3v2);
+        assert_eq!(opts.stored_tag_mode, StoredTagMode::None);
     }
 
     #[test]
