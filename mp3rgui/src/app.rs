@@ -794,14 +794,18 @@ impl Mp3rgainApp {
         if self.files.is_empty() || self.is_processing {
             return;
         }
-        for file in &mut self.files {
-            file.status = FileStatus::Pending;
+        // Issue #254: scope to the current selection (or all files when none
+        // selected) like every other start_* action, and only reset the
+        // targeted rows so unselected results survive.
+        let targets = self.target_indices();
+        for &idx in &targets {
+            if let Some(f) = self.files.get_mut(idx) {
+                f.status = FileStatus::Pending;
+            }
         }
-        let jobs: Vec<(usize, PathBuf)> = self
-            .files
+        let jobs: Vec<(usize, PathBuf)> = targets
             .iter()
-            .enumerate()
-            .map(|(i, f)| (i, f.path.clone()))
+            .filter_map(|&i| self.files.get(i).map(|f| (i, f.path.clone())))
             .collect();
         let count = jobs.len();
         self.begin_worker(
@@ -818,13 +822,16 @@ impl Mp3rgainApp {
             return;
         }
 
+        // Issue #254: scope to the current selection (or all files when none
+        // selected) like every other start_* action.
         let jobs: Vec<CheckTagsJob> = self
-            .files
+            .target_indices()
             .iter()
-            .enumerate()
-            .map(|(idx, f)| CheckTagsJob {
-                idx,
-                path: f.path.clone(),
+            .filter_map(|&idx| {
+                self.files.get(idx).map(|f| CheckTagsJob {
+                    idx,
+                    path: f.path.clone(),
+                })
             })
             .collect();
         let count = jobs.len();
