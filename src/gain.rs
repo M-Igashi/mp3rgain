@@ -180,28 +180,54 @@ impl GainOptions {
         read_from: &Path,
         write_to: &Path,
     ) -> Result<SaturationStats> {
+        self.apply_to_path_with_stats_preread(read_from, write_to, None)
+    }
+
+    /// [`apply_to_path_with_stats`] variant that accepts the file's bytes if
+    /// a caller already read them. The apply pipeline's clipping check reads
+    /// the file for its headroom scan; handing that buffer through here saves
+    /// a second full read of the unchanged file (issue #251). `read_from` is
+    /// still used for error reporting and when `preread` is `None`.
+    pub(crate) fn apply_to_path_with_stats_preread(
+        &self,
+        read_from: &Path,
+        write_to: &Path,
+        preread: Option<Vec<u8>>,
+    ) -> Result<SaturationStats> {
         let same_path = read_from == write_to;
+        let read = |preread: Option<Vec<u8>>| match preread {
+            Some(data) => Ok(data),
+            None => fs::read(read_from).map_err(|e| Error::io_read(read_from, e)),
+        };
 
         if self.steps == 0 {
             // No undo/minmax on a zero-step apply (nothing to undo), but the
             // ReplayGain items still need to be recorded when requested.
             if let Some(rg) = &self.replaygain {
-                let data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
+                let data = read(preread)?;
                 let mut tag = read_ape_tag(&data).unwrap_or_default();
                 tag.set_replaygain(rg);
                 let new_data = replace_ape_tag(&data, &tag);
                 fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
             } else if !same_path {
-                fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
+                match preread {
+                    Some(data) => {
+                        fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
+                    }
+                    None => {
+                        fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
+                    }
+                }
             }
             return Ok(SaturationStats::default());
         }
 
+        let data = read(preread)?;
         if let Some(channel) = self.channel {
             if self.undo {
-                apply_gain_channel_with_undo(read_from, write_to, channel, self.steps)
+                apply_gain_channel_with_undo(data, write_to, channel, self.steps)
             } else {
-                apply_gain_channel_impl(read_from, write_to, channel, self.steps)
+                apply_gain_channel_impl(data, write_to, channel, self.steps)
             }
         } else {
             let mode = if self.wrap {
@@ -211,7 +237,7 @@ impl GainOptions {
             };
             if self.undo {
                 apply_gain_with_undo_impl_to_path(
-                    read_from,
+                    data,
                     write_to,
                     self.steps,
                     mode,
@@ -219,7 +245,7 @@ impl GainOptions {
                 )
             } else {
                 apply_gain_simple_to_path(
-                    read_from,
+                    data,
                     write_to,
                     self.steps,
                     mode,
@@ -345,16 +371,14 @@ pub fn would_clip(peak: f64, gain_db: f64) -> bool {
 // =============================================================================
 
 /// Simple gain application (no undo tag).
-/// Reads from `read_from` and writes the modified bytes to `write_to`.
+/// Modifies the file's bytes in `data` and writes them to `write_to`.
 fn apply_gain_simple_to_path(
-    read_from: &Path,
+    mut data: Vec<u8>,
     write_to: &Path,
     gain_steps: i32,
     mode: GainMode,
     replaygain: Option<&ApeReplayGain>,
 ) -> Result<SaturationStats> {
-    let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
-
     let stats = apply_gain_to_data(&mut data, gain_steps, mode, None);
 
     if let Some(rg) = replaygain {
@@ -375,14 +399,12 @@ fn apply_gain_simple_to_path(
 /// one write. The previous version re-read the file for each step (4 reads +
 /// 2 writes per apply), which dominated batch throughput.
 fn apply_gain_with_undo_impl_to_path(
-    read_from: &Path,
+    mut data: Vec<u8>,
     write_to: &Path,
     gain_steps: i32,
     mode: GainMode,
     replaygain: Option<&ApeReplayGain>,
 ) -> Result<SaturationStats> {
-    let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
-
     let mut tag = read_ape_tag(&data).unwrap_or_default();
 
     // Accumulate into BOTH channel slots independently: a prior `-l`
@@ -425,12 +447,11 @@ fn apply_gain_with_undo_impl_to_path(
 
 /// Apply gain to a specific channel (no undo)
 fn apply_gain_channel_impl(
-    read_from: &Path,
+    mut data: Vec<u8>,
     write_to: &Path,
     channel: Channel,
     gain_steps: i32,
 ) -> Result<SaturationStats> {
-    let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
     let analysis = analyze_data(&data)?;
     if analysis.channel_mode() == ChannelMode::Mono {
         return Err(Error::ChannelGainOnMono);
@@ -450,12 +471,11 @@ fn apply_gain_channel_impl(
 
 /// Apply channel-specific gain and store undo information in APEv2 tag
 fn apply_gain_channel_with_undo(
-    read_from: &Path,
+    mut data: Vec<u8>,
     write_to: &Path,
     channel: Channel,
     gain_steps: i32,
 ) -> Result<SaturationStats> {
-    let mut data = fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
     let analysis = analyze_data(&data)?;
     if analysis.channel_mode() == ChannelMode::Mono {
         return Err(Error::ChannelGainOnMono);
