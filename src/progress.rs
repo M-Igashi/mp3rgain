@@ -154,10 +154,3 @@ pub fn create_analysis_progress_bar(
     ));
     Some(pb)
 }
-
-pub fn update_analysis_progress(pb: &Option<ProgressBar>, bytes_read: u64, total_bytes: u64) {
-    if let Some(ref pb) = pb {
-        pb.set_length(total_bytes);
-        pb.set_position(bytes_read);
-    }
-}

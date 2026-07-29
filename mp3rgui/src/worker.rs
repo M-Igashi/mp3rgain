@@ -298,9 +298,7 @@ pub fn spawn_album_analysis(
 
     thread::spawn(move || {
         let group_count = groups.len();
-        let threads = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1);
+        let threads = available_threads();
 
         let mut analyzed_total = 0usize;
         let mut skipped_total = 0usize;
@@ -604,11 +602,7 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
             run_job_pool(jobs, &cancel_w, move |job: UndoJob| {
                 send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
-                let original_mtime = if ui_opts.preserve_timestamp {
-                    read_mtime(&job.path)
-                } else {
-                    None
-                };
+                let original_mtime = saved_mtime(&job.path, ui_opts.preserve_timestamp);
 
                 // Peek at the undo tag before running undo, so we can tell the
                 // UI how many steps to reverse on the display. We can't read
@@ -707,11 +701,7 @@ pub fn spawn_delete_tags(
             run_job_pool(jobs, &cancel_w, move |job: DeleteTagsJob| {
                 send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
-                let original_mtime = if preserve_timestamp {
-                    read_mtime(&job.path)
-                } else {
-                    None
-                };
+                let original_mtime = saved_mtime(&job.path, preserve_timestamp);
 
                 let result = mp3rgain::delete_gain_tags_auto(&job.path, use_id3v2);
 
@@ -955,6 +945,22 @@ fn build_apply_options(
     opts
 }
 
+/// Worker thread count: available cores, falling back to 1.
+fn available_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+}
+
+/// mtime snapshot to restore after a write when "preserve timestamp" is on.
+fn saved_mtime(path: &Path, preserve: bool) -> Option<std::time::SystemTime> {
+    if preserve {
+        read_mtime(path)
+    } else {
+        None
+    }
+}
+
 /// Drain `jobs` through a pool of `available_parallelism` scoped worker
 /// threads, calling `per_job` for each job. Blocks until the queue is empty
 /// or `cancel` is observed (checked between jobs). Each pool thread gets its
@@ -965,11 +971,7 @@ where
     J: Send,
     F: Fn(J) + Clone + Send,
 {
-    let pool_size = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
-        .max(1)
-        .min(jobs.len());
+    let pool_size = available_threads().min(jobs.len());
 
     // Popping takes from the Vec's tail; reverse once so files are picked
     // up in the order the caller listed them.

@@ -1,6 +1,5 @@
 use anyhow::Result;
 use colored::*;
-use indicatif::MultiProgress;
 use mp3rgain::replaygain::{self, AlbumAnalysisReport, ReplayGainResult};
 use mp3rgain::{mp4meta, peak_to_pcm_sample, steps_to_db};
 use rayon::prelude::*;
@@ -9,15 +8,16 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::threading::effective_threads;
-use crate::commands::utils::{finish_without_summary, for_each_file_with_analysis_bar};
+use crate::commands::utils::{
+    finish_without_summary, for_each_file_with_analysis_bar, run_album_analysis, TSV_HEADER,
+};
 use crate::processors::info::{format_rg_row, process_info, scan_gain_range_for_row};
-use crate::progress::{album_progress_callbacks, create_album_progress_pb_in};
 use crate::util::get_filename;
 
 pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
     // Print mp3gain-compatible TSV header
     if opts.output_format == OutputFormat::Tsv {
-        println!("File\tMP3 gain\tdB gain\tMax Amplitude\tMax global_gain\tMin global_gain");
+        println!("{}", TSV_HEADER);
     }
 
     // ReplayGain-based TSV/Text output: one album analysis pass provides both
@@ -183,35 +183,7 @@ fn analyze_set(
         return None;
     }
     let paths: Vec<&Path> = set.iter().map(|&(_, p)| p).collect();
-
-    let show_progress = !opts.quiet && opts.output_format == OutputFormat::Text;
-    let mp = MultiProgress::new();
-    let pb = if show_progress {
-        Some(create_album_progress_pb_in(&mp, paths.len(), parallel))
-    } else {
-        None
-    };
-    let file_names: Vec<&str> = set.iter().map(|&(_, p)| get_filename(p)).collect();
-    let (on_progress, on_complete) = album_progress_callbacks(&pb, file_names);
-
-    let report = replaygain::analyze_album_with_options(
-        &paths,
-        &replaygain::AlbumAnalysisOptions {
-            track_index: opts.track_index,
-            threads,
-            skip_errors: true,
-            // Serial drives the byte-level bar; parallel ticks per file.
-            on_progress: (!parallel).then_some(&on_progress as _),
-            on_complete: parallel.then_some(&on_complete as _),
-            cancel: None,
-        },
-    );
-
-    if let Some(pb) = pb {
-        pb.finish_and_clear();
-    }
-
-    report.ok()
+    run_album_analysis(&paths, opts, threads, parallel, true).ok()
 }
 
 /// Basic per-file info (JSON output or builds without the replaygain feature).

@@ -1,6 +1,5 @@
 use anyhow::Result;
 use colored::*;
-use indicatif::MultiProgress;
 use mp3rgain::replaygain::{self, AlbumAnalysisReport, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{steps_to_db, AacAlbumInfo};
 use rayon::prelude::*;
@@ -11,14 +10,11 @@ use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::commands::threading::effective_threads;
 use crate::commands::utils::{
     create_json_summary, exit_if_failed, finish_with_summary, for_each_file_with_analysis_bar,
-    print_dry_run_notice, update_counters,
+    print_dry_run_notice, run_album_analysis, update_counters,
 };
 use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
 use crate::processors::replaygain::{process_apply_replaygain_with_album, process_track_gain};
-use crate::progress::{
-    album_progress_callbacks, create_album_progress_pb_in, create_progress_bar, progress_finish,
-    progress_inc, progress_set_message,
-};
+use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
 use crate::util::get_filename;
 
 fn print_target_with_modifier(opts: &Options) {
@@ -44,15 +40,6 @@ fn require_replaygain_feature() {
         );
         eprintln!("  Install with: cargo install mp3rgain --features replaygain");
         std::process::exit(1);
-    }
-}
-
-fn failure_json_result(file: &Path, msg: Option<String>) -> JsonFileResult {
-    JsonFileResult {
-        file: file.display().to_string(),
-        status: Some(FileStatus::Error),
-        error: msg,
-        ..Default::default()
     }
 }
 
@@ -111,37 +98,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     let threads = effective_threads(opts);
     let parallel = threads > 1 && files.len() > 1;
 
-    let show_progress = !opts.quiet && opts.output_format == OutputFormat::Text;
-    let mp = MultiProgress::new();
-
-    // One progress bar shared between strict/lenient and serial/parallel paths.
-    // Serial paths drive byte-level progress via `on_progress`; parallel paths
-    // drive file-count progress via `on_complete`.
-    let analysis_pb = if show_progress {
-        Some(create_album_progress_pb_in(&mp, files.len(), parallel))
-    } else {
-        None
-    };
-    let file_names: Vec<&str> = files.iter().map(|f| get_filename(f)).collect();
-    let (on_progress, on_complete) = album_progress_callbacks(&analysis_pb, file_names);
-
-    let album_analysis: mp3rgain::error::Result<AlbumAnalysisReport> =
-        replaygain::analyze_album_with_options(
-            &file_refs,
-            &replaygain::AlbumAnalysisOptions {
-                track_index: opts.track_index,
-                threads,
-                skip_errors: opts.skip_errors,
-                // Serial drives the byte-level bar; parallel ticks per file.
-                on_progress: (!parallel).then_some(&on_progress as _),
-                on_complete: parallel.then_some(&on_complete as _),
-                cancel: None,
-            },
-        );
-
-    if let Some(pb) = analysis_pb {
-        pb.finish_and_clear();
-    }
+    let album_analysis = run_album_analysis(&file_refs, opts, threads, parallel, opts.skip_errors);
 
     match album_analysis {
         Ok(report) => {
@@ -229,7 +186,10 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                                     ..Default::default()
                                 }
                             }
-                            None => failure_json_result(file, failure_msgs[i].clone()),
+                            None => JsonFileResult::error(
+                                file,
+                                failure_msgs[i].as_deref().unwrap_or("analysis failed"),
+                            ),
                         })
                         .collect();
 
@@ -309,8 +269,8 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                     }
                     for (i, slot) in by_index.iter_mut().enumerate() {
                         if slot.is_none() {
-                            if let Some(msg) = failure_msgs[i].clone() {
-                                *slot = Some(failure_json_result(&files[i], Some(msg)));
+                            if let Some(msg) = &failure_msgs[i] {
+                                *slot = Some(JsonFileResult::error(&files[i], msg));
                             }
                         }
                     }
@@ -345,7 +305,10 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                             range_by_idx[i] = range;
                             result
                         }
-                        None => failure_json_result(file, failure_msgs[i].clone()),
+                        None => JsonFileResult::error(
+                            file,
+                            failure_msgs[i].as_deref().unwrap_or("analysis failed"),
+                        ),
                     };
                     update_counters(&result, &mut successful, &mut failed);
 

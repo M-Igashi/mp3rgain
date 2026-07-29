@@ -110,7 +110,7 @@ impl ApeTag {
     /// Get MP3GAIN_UNDO value as gain steps
     pub fn get_undo_gain(&self) -> Option<i32> {
         self.get(TAG_MP3GAIN_UNDO)
-            .and_then(|v| v.split(',').next()?.trim().parse::<i32>().ok())
+            .map(|v| parse_undo_values(Some(v)).0)
     }
 
     /// Set MP3GAIN_UNDO value
@@ -521,6 +521,19 @@ pub(crate) fn format_rg_gain(gain_db: f64) -> String {
 /// Format a `REPLAYGAIN_*_PEAK` tag value.
 pub(crate) fn format_rg_peak(peak: f64) -> String {
     format!("{:.6}", peak)
+}
+
+/// Parse a `REPLAYGAIN_*_GAIN` tag value (e.g. `"+3.500000 dB"`) into dB.
+/// Inverse of [`format_rg_gain`]; tolerant of a missing `dB` suffix and
+/// surrounding whitespace.
+pub fn parse_rg_gain(s: &str) -> Option<f64> {
+    s.trim().trim_end_matches("dB").trim().parse().ok()
+}
+
+/// Parse a `REPLAYGAIN_*_PEAK` tag value into a linear peak.
+/// Inverse of [`format_rg_peak`].
+pub fn parse_rg_peak(s: &str) -> Option<f64> {
+    s.trim().parse().ok()
 }
 
 /// Parse the wrap flag (third field, `W`/`N`) of an MP3GAIN_UNDO tag value.

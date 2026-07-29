@@ -6,7 +6,7 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             ui.spacing_mut().button_padding = egui::vec2(8.0, 4.0);
 
             // Add Files button
-            ui.add_enabled_ui(!app.is_processing, |ui| {
+            ui.add_enabled_ui(!app.is_processing(), |ui| {
                 if ui.button("Add Files").clicked() {
                     if let Some(paths) = rfd::FileDialog::new()
                         .add_filter("Audio files", mp3rgain::SUPPORTED_EXTENSIONS)
@@ -26,7 +26,7 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             ui.separator();
 
             // Analysis buttons
-            ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing, |ui| {
+            ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing(), |ui| {
                 if ui.button("Track Analysis").clicked() {
                     app.start_analyze_tracks(ctx);
                 }
@@ -38,7 +38,7 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             ui.separator();
 
             // Gain buttons
-            ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing, |ui| {
+            ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing(), |ui| {
                 if ui.button("Track Gain").clicked() {
                     app.start_apply_track_gain(ctx);
                 }
@@ -51,7 +51,7 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
 
             // Remove buttons
             ui.add_enabled_ui(
-                !app.selected_indices.is_empty() && !app.is_processing,
+                !app.selected_indices.is_empty() && !app.is_processing(),
                 |ui| {
                     if ui.button("Remove").clicked() {
                         app.remove_selected();
@@ -59,7 +59,7 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
                 },
             );
 
-            ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing, |ui| {
+            ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing(), |ui| {
                 if ui.button("Clear All").clicked() {
                     app.clear_files();
                 }
@@ -68,7 +68,7 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             ui.separator();
 
             // Cancel — only enabled while a worker is running.
-            ui.add_enabled_ui(app.is_processing, |ui| {
+            ui.add_enabled_ui(app.is_processing(), |ui| {
                 if ui.button("Cancel").clicked() {
                     app.cancel_current_work();
                 }
@@ -79,7 +79,7 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             // Target volume
             ui.label("Target:");
             ui.add_enabled(
-                !app.is_processing,
+                !app.is_processing(),
                 egui::DragValue::new(&mut app.target_volume)
                     .speed(0.1)
                     .range(75.0..=100.0)

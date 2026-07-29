@@ -2,18 +2,18 @@ use anyhow::Result;
 use colored::*;
 use indicatif::ProgressBar;
 use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions};
-use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult};
+use mp3rgain::replaygain::{AudioFileType, ReplayGainResult};
 use mp3rgain::{apply_gain_to_peak, mp4meta, steps_to_db, AacAlbumInfo};
 use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::json_output::{FileStatus, JsonFileResult};
-use crate::progress::update_analysis_progress;
 use crate::util::get_filename;
 
 use super::utils::{
-    emit_clipping_warning, restore_timestamp, save_original_mtime, warn_aac_multi_track,
+    analyze_track, emit_clipping_warning, report_file_error, restore_timestamp,
+    save_original_mtime, warn_aac_multi_track,
 };
 
 pub fn process_track_gain(
@@ -45,15 +45,7 @@ fn process_track_gain_into(
         )?;
     }
 
-    let rg_result = if let Some(pb) = analysis_pb {
-        replaygain::analyze_track_with_progress(file, opts.track_index, &|bytes, total| {
-            update_analysis_progress(&Some(pb.clone()), bytes, total);
-        })
-    } else {
-        replaygain::analyze_track_with_index(file, opts.track_index)
-    };
-
-    match rg_result {
+    match analyze_track(file, opts, analysis_pb) {
         Ok(result) => {
             // Apply gain modifier (-m steps + -d dB, combined into steps)
             let base_steps = result.gain_steps();
@@ -108,13 +100,7 @@ fn process_track_gain_into(
             apply_replaygain_with_album_into(file, modified_steps, &result, opts, None, out)
                 .map(|(r, _)| r)
         }
-        Err(e) => {
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
-                eprintln!("  {} {} - {}", "x".red(), filename, e);
-            }
-
-            Ok(JsonFileResult::error(file, e))
-        }
+        Err(e) => Ok(report_file_error(file, filename, e, opts)),
     }
 }
 
@@ -146,7 +132,6 @@ fn apply_replaygain_with_album_into(
     out: &mut String,
 ) -> Result<(JsonFileResult, Option<(u8, u8)>)> {
     let filename = get_filename(file);
-    let dry_run_prefix = opts.dry_run_prefix();
     let is_aac = result.file_type() == AudioFileType::Aac;
 
     // Dry run: don't actually modify. Clipping prevention still needs to
@@ -158,14 +143,8 @@ fn apply_replaygain_with_album_into(
         apply_opts.prevent_clipping = opts.prevent_clipping;
         apply_opts.wrap = opts.wrap_gain;
         let report = predict_apply(file, &apply_opts)?;
-        let warning_msg = emit_clipping_warning(
-            steps,
-            &report,
-            opts,
-            dry_run_prefix,
-            filename,
-            Some(result.peak()),
-        );
+        let warning_msg =
+            emit_clipping_warning(steps, &report, opts, filename, Some(result.peak()));
         let actual_steps = report.actual_steps;
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             writeln!(
@@ -198,16 +177,8 @@ fn apply_replaygain_with_album_into(
     // before calling into the unified pipeline so we can apply that
     // policy.
     if is_aac {
-        return apply_replaygain_aac_with_album_into(
-            file,
-            steps,
-            result,
-            opts,
-            album_info,
-            dry_run_prefix,
-            out,
-        )
-        .map(|r| (r, None));
+        return apply_replaygain_aac_with_album_into(file, steps, result, opts, album_info, out)
+            .map(|r| (r, None));
     }
 
     // MP3 path: hand the whole pipeline to apply_with_options.
@@ -226,14 +197,8 @@ fn apply_replaygain_with_album_into(
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {
-            let warning_msg = emit_clipping_warning(
-                steps,
-                &report,
-                opts,
-                dry_run_prefix,
-                filename,
-                Some(result.peak()),
-            );
+            let warning_msg =
+                emit_clipping_warning(steps, &report, opts, filename, Some(result.peak()));
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 writeln!(
@@ -261,13 +226,7 @@ fn apply_replaygain_with_album_into(
                 report.gain_range,
             ))
         }
-        Err(e) => {
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
-                eprintln!("  {} {} - {}", "x".red(), filename, e);
-            }
-
-            Ok((JsonFileResult::error(file, e), None))
-        }
+        Err(e) => Ok((report_file_error(file, filename, e, opts), None)),
     }
 }
 
@@ -287,7 +246,6 @@ fn apply_replaygain_aac_with_album_into(
     result: &ReplayGainResult,
     opts: &Options,
     album_info: Option<&AacAlbumInfo>,
-    dry_run_prefix: &str,
     out: &mut String,
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
@@ -325,7 +283,6 @@ fn apply_replaygain_aac_with_album_into(
                 requested_steps,
                 &report,
                 opts,
-                dry_run_prefix,
                 filename,
                 Some(result.peak()),
             );
@@ -407,12 +364,6 @@ fn apply_replaygain_aac_with_album_into(
                 ..Default::default()
             })
         }
-        Err(e) => {
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
-                eprintln!("  {} {} - {}", "x".red(), filename, e);
-            }
-
-            Ok(JsonFileResult::error(file, e))
-        }
+        Err(e) => Ok(report_file_error(file, filename, e, opts)),
     }
 }

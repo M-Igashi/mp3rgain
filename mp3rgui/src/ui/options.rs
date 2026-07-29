@@ -6,7 +6,7 @@ use crate::app::Mp3rgainApp;
 /// half-applied batch can't see its settings change mid-flight.
 pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     egui::TopBottomPanel::top("options_panel").show(ctx, |ui| {
-        ui.add_enabled_ui(!app.is_processing, |ui| {
+        ui.add_enabled_ui(!app.is_processing(), |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Options:");
 

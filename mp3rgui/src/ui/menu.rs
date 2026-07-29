@@ -47,7 +47,7 @@ fn file_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) {
 
 fn analysis_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     ui.menu_button("Analysis", |ui| {
-        ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing, |ui| {
+        ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing(), |ui| {
             if ui.button("Track Analysis").clicked() {
                 app.start_analyze_tracks(ctx);
                 ui.close_menu();
@@ -71,7 +71,7 @@ fn analysis_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) 
 
 fn modify_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     ui.menu_button("Modify Gain", |ui| {
-        ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing, |ui| {
+        ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing(), |ui| {
             if ui.button("Apply Track Gain").clicked() {
                 app.start_apply_track_gain(ctx);
                 ui.close_menu();

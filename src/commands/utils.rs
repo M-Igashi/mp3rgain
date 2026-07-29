@@ -1,6 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use indicatif::{MultiProgress, ProgressBar};
+use mp3rgain::replaygain::{self, AlbumAnalysisReport};
 use rayon::prelude::*;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
@@ -9,10 +10,53 @@ use crate::cli::options::{Options, OutputFormat};
 use crate::commands::threading::effective_threads;
 use crate::json_output::{FileStatus, JsonFileResult, JsonOutput, JsonSummary};
 use crate::progress::{
-    create_analysis_progress_bar, create_file_count_pb_in, create_progress_bar, progress_finish,
-    progress_inc, progress_set_message,
+    album_progress_callbacks, create_album_progress_pb_in, create_analysis_progress_bar,
+    create_file_count_pb_in, create_progress_bar, progress_finish, progress_inc,
+    progress_set_message,
 };
 use crate::util::get_filename;
+
+/// Run one album analysis over `paths`, driving the shared album progress
+/// bar. Serial runs get the byte-level bar via `on_progress`; parallel runs
+/// tick per file via `on_complete`. Shared by `cmd_info` and `cmd_album_gain`.
+pub fn run_album_analysis(
+    paths: &[&Path],
+    opts: &Options,
+    threads: usize,
+    parallel: bool,
+    skip_errors: bool,
+) -> mp3rgain::error::Result<AlbumAnalysisReport> {
+    let show_progress = !opts.quiet && opts.output_format == OutputFormat::Text;
+    let mp = MultiProgress::new();
+    let pb = if show_progress {
+        Some(create_album_progress_pb_in(&mp, paths.len(), parallel))
+    } else {
+        None
+    };
+    let file_names: Vec<&str> = paths.iter().map(|p| get_filename(p)).collect();
+    let (on_progress, on_complete) = album_progress_callbacks(&pb, file_names);
+
+    let report = replaygain::analyze_album_with_options(
+        paths,
+        &replaygain::AlbumAnalysisOptions {
+            track_index: opts.track_index,
+            threads,
+            skip_errors,
+            on_progress: (!parallel).then_some(&on_progress as _),
+            on_complete: parallel.then_some(&on_complete as _),
+            cancel: None,
+        },
+    );
+
+    if let Some(pb) = pb {
+        pb.finish_and_clear();
+    }
+    report
+}
+
+/// mp3gain-compatible TSV header shared by the info and apply commands.
+pub const TSV_HEADER: &str =
+    "File\tMP3 gain\tdB gain\tMax Amplitude\tMax global_gain\tMin global_gain";
 
 /// Run `per_file` over every file — in parallel when `-j` allows it — with
 /// progress reporting and ordered stdout flushing. `per_file` returns the

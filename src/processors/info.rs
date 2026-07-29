@@ -8,7 +8,7 @@ use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::json_output::{FileStatus, JsonFileResult};
-use crate::progress::update_analysis_progress;
+use crate::processors::utils::analyze_track;
 use crate::util::get_filename;
 
 /// Scan the file's global_gain range for an info row. MP3-only: AAC files
@@ -115,15 +115,7 @@ fn process_info_into(
     if matches!(opts.output_format, OutputFormat::Tsv | OutputFormat::Text)
         && replaygain::is_available()
     {
-        let rg_result = if let Some(pb) = analysis_pb {
-            replaygain::analyze_track_with_progress(file, opts.track_index, &|bytes, total| {
-                update_analysis_progress(&Some(pb.clone()), bytes, total);
-            })
-        } else {
-            replaygain::analyze_track_with_index(file, opts.track_index)
-        };
-
-        match rg_result {
+        match analyze_track(file, opts, analysis_pb) {
             Ok(rg_result) => {
                 let (result, text) =
                     format_rg_row(file, opts, &rg_result, scan_gain_range_for_row(file))?;

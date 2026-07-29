@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::commands::utils::{finish_with_summary, for_each_file, report_zero_steps};
+use crate::commands::utils::{finish_with_summary, for_each_file, report_zero_steps, TSV_HEADER};
 use crate::processors::apply::{process_apply, process_apply_channel};
 use crate::util::get_filename;
 
@@ -18,7 +18,7 @@ pub fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
     let dry_run_prefix = opts.dry_run_prefix();
 
     if opts.output_format == OutputFormat::Tsv {
-        println!("File\tMP3 gain\tdB gain\tMax Amplitude\tMax global_gain\tMin global_gain");
+        println!("{}", TSV_HEADER);
     }
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {

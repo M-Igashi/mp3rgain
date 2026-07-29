@@ -8,7 +8,7 @@ use crate::cli::options::{Options, OutputFormat};
 use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
 
-use super::utils::{restore_timestamp, save_original_mtime};
+use super::utils::{report_file_error, restore_timestamp, save_original_mtime};
 
 pub fn process_undo(file: &Path, opts: &Options) -> Result<(JsonFileResult, String)> {
     let mut out = String::new();
@@ -79,12 +79,6 @@ fn process_undo_into(file: &Path, opts: &Options, out: &mut String) -> Result<Js
                 })
             }
         }
-        Err(e) => {
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
-                eprintln!("  {} {} - {}", "x".red(), filename, e);
-            }
-
-            Ok(JsonFileResult::error(file, e))
-        }
+        Err(e) => Ok(report_file_error(file, filename, e, opts)),
     }
 }

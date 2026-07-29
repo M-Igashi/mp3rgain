@@ -2,8 +2,9 @@ use crate::worker::{
     self, ApplyJob, ApplyOptionsUi, CheckTagsJob, DeleteTagsJob, StoredTagsView, UndoJob,
     WorkerEvent, WorkerHandle,
 };
+use mp3rgain::ape::{parse_rg_gain, parse_rg_peak};
 use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
-use mp3rgain::{db_to_linear, db_to_steps, would_clip, AacAlbumInfo, Channel};
+use mp3rgain::{apply_gain_to_peak, db_to_steps, would_clip, AacAlbumInfo, Channel};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::TryRecvError;
@@ -187,7 +188,6 @@ pub struct Mp3rgainApp {
     pub target_volume: f64,
     pub selected_indices: Vec<usize>,
     pub total_progress: f32,
-    pub is_processing: bool,
     pub status_message: String,
     /// User-toggleable apply flags surfaced in the Options panel.
     pub apply_options: ApplyOptionsUi,
@@ -209,11 +209,9 @@ pub struct Mp3rgainApp {
     /// a full clear).
     pub selection_anchor: Option<usize>,
 
-    /// Active worker thread + its mpsc receiver and cancel flag.
-    /// `None` when nothing is running.
-    worker: Option<WorkerHandle>,
-    /// What kind of work the active worker is doing.
-    worker_kind: Option<WorkerKind>,
+    /// Active worker thread + its mpsc receiver and cancel flag, tagged with
+    /// the kind of work it is doing. `None` when nothing is running.
+    worker: Option<(WorkerKind, WorkerHandle)>,
     /// Counter incremented as worker emits `FileStart` events — drives the
     /// progress bar without needing to know the total in advance.
     started_files: usize,
@@ -277,7 +275,6 @@ impl Mp3rgainApp {
             target_volume: settings.target_volume,
             selected_indices: Vec::new(),
             total_progress: 0.0,
-            is_processing: false,
             status_message: String::new(),
             apply_options: settings.apply_options,
             confirm_delete_tags: false,
@@ -285,7 +282,6 @@ impl Mp3rgainApp {
             channel_gain_modal: ChannelGainModal::default(),
             selection_anchor: None,
             worker: None,
-            worker_kind: None,
             started_files: 0,
             total_files_in_job: 0,
             last_target_volume: settings.target_volume,
@@ -423,7 +419,7 @@ impl Mp3rgainApp {
     }
 
     pub fn add_files(&mut self, paths: Vec<PathBuf>) {
-        if self.is_processing {
+        if self.is_processing() {
             if !paths.is_empty() {
                 self.pending_drops.extend(paths);
                 self.status_message = format!(
@@ -475,7 +471,7 @@ impl Mp3rgainApp {
     }
 
     pub fn add_folder(&mut self, folder: PathBuf, recursive: bool) {
-        if self.is_processing {
+        if self.is_processing() {
             return;
         }
         let paths_to_add = mp3rgain::collect_audio_files(&folder, recursive).unwrap_or_default();
@@ -483,7 +479,7 @@ impl Mp3rgainApp {
     }
 
     pub fn remove_selected(&mut self) {
-        if self.is_processing {
+        if self.is_processing() {
             return;
         }
         let mut indices = self.selected_indices.clone();
@@ -502,7 +498,7 @@ impl Mp3rgainApp {
     }
 
     pub fn clear_files(&mut self) {
-        if self.is_processing {
+        if self.is_processing() {
             return;
         }
         self.files.clear();
@@ -515,7 +511,7 @@ impl Mp3rgainApp {
     /// Replace the current selection with every file in the table. Used by
     /// the Cmd+A / Ctrl+A shortcut.
     pub fn select_all(&mut self) {
-        if self.is_processing || self.files.is_empty() {
+        if self.is_processing() || self.files.is_empty() {
             return;
         }
         self.selected_indices = (0..self.files.len()).collect();
@@ -591,7 +587,7 @@ impl Mp3rgainApp {
     }
 
     pub fn cancel_current_work(&mut self) {
-        if let Some(worker) = self.worker.as_ref() {
+        if let Some((_, worker)) = self.worker.as_ref() {
             worker.request_cancel();
             self.status_message = "Cancelling...".to_string();
         }
@@ -608,7 +604,7 @@ impl Mp3rgainApp {
     }
 
     pub fn start_analyze_tracks(&mut self, ctx: &egui::Context) {
-        if self.files.is_empty() || self.is_processing || !replaygain::is_available() {
+        if self.files.is_empty() || self.is_processing() || !replaygain::is_available() {
             if !replaygain::is_available() {
                 self.status_message = "ReplayGain feature not available".to_string();
             }
@@ -639,7 +635,7 @@ impl Mp3rgainApp {
     }
 
     pub fn start_analyze_album(&mut self, ctx: &egui::Context) {
-        if self.files.is_empty() || self.is_processing || !replaygain::is_available() {
+        if self.files.is_empty() || self.is_processing() || !replaygain::is_available() {
             if !replaygain::is_available() {
                 self.status_message = "ReplayGain feature not available".to_string();
             }
@@ -700,7 +696,7 @@ impl Mp3rgainApp {
     }
 
     pub fn start_apply_track_gain(&mut self, ctx: &egui::Context) {
-        if self.files.is_empty() || self.is_processing {
+        if self.files.is_empty() || self.is_processing() {
             return;
         }
 
@@ -756,7 +752,7 @@ impl Mp3rgainApp {
     /// so the UI funnels the click through `confirm_delete_tags` first and
     /// this is only called after the user confirms.
     pub fn start_delete_tags(&mut self, ctx: &egui::Context) {
-        if self.files.is_empty() || self.is_processing {
+        if self.files.is_empty() || self.is_processing() {
             return;
         }
 
@@ -791,7 +787,7 @@ impl Mp3rgainApp {
     /// audio for the true peak but skips the loudness analysis, so it is
     /// lighter than Track Analysis (not decode-free).
     pub fn start_find_max_amplitude(&mut self, ctx: &egui::Context) {
-        if self.files.is_empty() || self.is_processing {
+        if self.files.is_empty() || self.is_processing() {
             return;
         }
         // Issue #254: scope to the current selection (or all files when none
@@ -818,7 +814,7 @@ impl Mp3rgainApp {
     /// Scan every loaded file for existing ReplayGain / undo tags and
     /// populate `FileEntry::stored_tags`. Read-only.
     pub fn start_check_stored_tags(&mut self, ctx: &egui::Context) {
-        if self.files.is_empty() || self.is_processing {
+        if self.files.is_empty() || self.is_processing() {
             return;
         }
 
@@ -849,7 +845,7 @@ impl Mp3rgainApp {
     /// read-only stored-tag worker; only runs while idle so it never collides
     /// with another job.
     fn start_import_scan(&mut self, ctx: &egui::Context) {
-        if self.is_processing || self.pending_import_scan.is_empty() {
+        if self.is_processing() || self.pending_import_scan.is_empty() {
             return;
         }
         let indices = std::mem::take(&mut self.pending_import_scan);
@@ -879,7 +875,7 @@ impl Mp3rgainApp {
     /// left None so `apply_with_options` uses the headroom-based clipping
     /// check.
     pub fn start_apply_manual_gain(&mut self, ctx: &egui::Context, steps: i32) {
-        if self.files.is_empty() || self.is_processing || steps == 0 {
+        if self.files.is_empty() || self.is_processing() || steps == 0 {
             return;
         }
 
@@ -916,7 +912,7 @@ impl Mp3rgainApp {
     /// `-l`: apply gain to a single channel of the targeted files. AAC files
     /// are silently skipped (channel gain is MP3-only).
     pub fn start_apply_channel_gain(&mut self, ctx: &egui::Context, channel: Channel, steps: i32) {
-        if self.files.is_empty() || self.is_processing || steps == 0 {
+        if self.files.is_empty() || self.is_processing() || steps == 0 {
             return;
         }
 
@@ -955,7 +951,7 @@ impl Mp3rgainApp {
     /// Undo gain changes on selected files (or all files when no selection).
     /// Library calls dispatch internally on file format and `use_id3v2`.
     pub fn start_undo(&mut self, ctx: &egui::Context) {
-        if self.files.is_empty() || self.is_processing {
+        if self.files.is_empty() || self.is_processing() {
             return;
         }
 
@@ -987,7 +983,7 @@ impl Mp3rgainApp {
     }
 
     pub fn start_apply_album_gain(&mut self, ctx: &egui::Context) {
-        if self.files.is_empty() || self.is_processing {
+        if self.files.is_empty() || self.is_processing() {
             return;
         }
 
@@ -1029,13 +1025,19 @@ impl Mp3rgainApp {
         );
     }
 
+    pub fn is_processing(&self) -> bool {
+        self.worker.is_some()
+    }
+
+    fn worker_kind(&self) -> Option<WorkerKind> {
+        self.worker.as_ref().map(|(kind, _)| *kind)
+    }
+
     fn begin_worker(&mut self, kind: WorkerKind, total: usize, handle: WorkerHandle) {
         // The start_* callers just reset row statuses to Pending, which a
         // Status sort must observe.
         self.display_order_dirty = true;
-        self.worker = Some(handle);
-        self.worker_kind = Some(kind);
-        self.is_processing = true;
+        self.worker = Some((kind, handle));
         self.total_progress = 0.0;
         self.status_message = match kind {
             WorkerKind::TrackAnalysis => "Analyzing tracks...".to_string(),
@@ -1058,7 +1060,7 @@ impl Mp3rgainApp {
         // `apply_event` without conflicting with the receiver borrow.
         let mut events = Vec::new();
         let mut worker_finished = false;
-        if let Some(worker) = self.worker.as_ref() {
+        if let Some((_, worker)) = self.worker.as_ref() {
             loop {
                 match worker.rx.try_recv() {
                     Ok(event) => events.push(event),
@@ -1080,8 +1082,6 @@ impl Mp3rgainApp {
         }
         if worker_finished {
             self.worker = None;
-            self.worker_kind = None;
-            self.is_processing = false;
             if !self.pending_drops.is_empty() {
                 let paths = std::mem::take(&mut self.pending_drops);
                 self.add_files(paths);
@@ -1092,8 +1092,9 @@ impl Mp3rgainApp {
     fn apply_event(&mut self, event: WorkerEvent) {
         match event {
             WorkerEvent::FileStart { idx } => {
+                let kind = self.worker_kind();
                 if let Some(file) = self.files.get_mut(idx) {
-                    match self.worker_kind {
+                    match kind {
                         Some(WorkerKind::TrackApply)
                         | Some(WorkerKind::AlbumApply)
                         | Some(WorkerKind::DeleteTags) => {
@@ -1135,8 +1136,7 @@ impl Mp3rgainApp {
                 album_info,
             } => {
                 let target = self.target_volume;
-                let album_gain = target - REPLAYGAIN_REFERENCE_DB + album_info.album_gain_db;
-                let album_volume = REPLAYGAIN_REFERENCE_DB - album_info.album_gain_db;
+                let (album_volume, album_gain) = volume_and_gain(album_info.album_gain_db, target);
                 let album_clip = would_clip(album_info.album_peak, album_gain);
 
                 for (idx, track_result) in successful {
@@ -1211,7 +1211,7 @@ impl Mp3rgainApp {
             }
             WorkerEvent::StoredTagsRead { idx, view } => {
                 let target = self.target_volume;
-                let is_import = self.worker_kind == Some(WorkerKind::ImportScan);
+                let is_import = self.worker_kind() == Some(WorkerKind::ImportScan);
                 if let Some(file) = self.files.get_mut(idx) {
                     if is_import {
                         Self::populate_from_stored_tags(file, &view, target);
@@ -1272,9 +1272,9 @@ impl Mp3rgainApp {
         result: &ReplayGainResult,
         target_volume: f64,
     ) {
-        file.volume = Some(REPLAYGAIN_REFERENCE_DB - result.gain_db());
+        let (volume, gain) = volume_and_gain(result.gain_db(), target_volume);
+        file.volume = Some(volume);
         file.clipping = result.peak() >= 1.0;
-        let gain = target_volume - REPLAYGAIN_REFERENCE_DB + result.gain_db();
         file.track_gain = Some(gain);
         file.track_clip = would_clip(result.peak(), gain);
     }
@@ -1292,22 +1292,22 @@ impl Mp3rgainApp {
             return;
         }
         let mut found = false;
-        if let Some(track_gain_db) = view.track_gain.as_deref().and_then(parse_db) {
-            file.volume = Some(REPLAYGAIN_REFERENCE_DB - track_gain_db);
-            let gain = target_volume - REPLAYGAIN_REFERENCE_DB + track_gain_db;
+        if let Some(track_gain_db) = view.track_gain.as_deref().and_then(parse_rg_gain) {
+            let (volume, gain) = volume_and_gain(track_gain_db, target_volume);
+            file.volume = Some(volume);
             file.track_gain = Some(gain);
-            if let Some(peak) = view.track_peak.as_deref().and_then(parse_linear) {
+            if let Some(peak) = view.track_peak.as_deref().and_then(parse_rg_peak) {
                 file.clipping = peak >= 1.0;
                 file.track_clip = would_clip(peak, gain);
                 file.stored_track_peak = Some(peak);
             }
             found = true;
         }
-        if let Some(album_gain_db) = view.album_gain.as_deref().and_then(parse_db) {
-            file.album_volume = Some(REPLAYGAIN_REFERENCE_DB - album_gain_db);
-            let album_gain = target_volume - REPLAYGAIN_REFERENCE_DB + album_gain_db;
+        if let Some(album_gain_db) = view.album_gain.as_deref().and_then(parse_rg_gain) {
+            let (album_volume, album_gain) = volume_and_gain(album_gain_db, target_volume);
+            file.album_volume = Some(album_volume);
             file.album_gain = Some(album_gain);
-            if let Some(peak) = view.album_peak.as_deref().and_then(parse_linear) {
+            if let Some(peak) = view.album_peak.as_deref().and_then(parse_rg_peak) {
                 file.album_clip = would_clip(peak, album_gain);
                 file.stored_album_peak = Some(peak);
             }
@@ -1340,7 +1340,7 @@ impl Mp3rgainApp {
             file.album_gain = Some(g - db_applied);
         }
         if let Some(track) = file.track_result.take() {
-            let new_peak = track.peak() * db_to_linear(db_applied);
+            let new_peak = apply_gain_to_peak(track.peak(), db_applied);
             file.clipping = new_peak >= 1.0;
             file.track_clip = file
                 .track_gain
@@ -1352,8 +1352,10 @@ impl Mp3rgainApp {
                 .unwrap_or(false);
             file.track_result = Some(track.with_peak(new_peak));
         } else {
-            let scale = db_to_linear(db_applied);
-            if let Some(new_peak) = file.stored_track_peak.map(|p| p * scale) {
+            if let Some(new_peak) = file
+                .stored_track_peak
+                .map(|p| apply_gain_to_peak(p, db_applied))
+            {
                 file.stored_track_peak = Some(new_peak);
                 file.clipping = new_peak >= 1.0;
                 file.track_clip = file
@@ -1361,7 +1363,10 @@ impl Mp3rgainApp {
                     .map(|g| would_clip(new_peak, g))
                     .unwrap_or(false);
             }
-            if let Some(new_peak) = file.stored_album_peak.map(|p| p * scale) {
+            if let Some(new_peak) = file
+                .stored_album_peak
+                .map(|p| apply_gain_to_peak(p, db_applied))
+            {
                 file.stored_album_peak = Some(new_peak);
                 file.album_clip = file
                     .album_gain
@@ -1372,15 +1377,13 @@ impl Mp3rgainApp {
     }
 }
 
-/// Parse a stored ReplayGain gain string such as `"+3.50 dB"` into dB.
-/// Tolerant of the optional `dB` suffix and surrounding whitespace.
-fn parse_db(s: &str) -> Option<f64> {
-    s.trim().trim_end_matches("dB").trim().parse::<f64>().ok()
-}
-
-/// Parse a stored linear peak string such as `"0.988553"`.
-fn parse_linear(s: &str) -> Option<f64> {
-    s.trim().parse::<f64>().ok()
+/// Display pair for a ReplayGain value: volume relative to the 89 dB
+/// reference, and the gain re-targeted to `target`.
+fn volume_and_gain(gain_db: f64, target: f64) -> (f64, f64) {
+    (
+        REPLAYGAIN_REFERENCE_DB - gain_db,
+        target - REPLAYGAIN_REFERENCE_DB + gain_db,
+    )
 }
 
 /// Compare two `Option<f64>` values, putting `None` always at the bottom
