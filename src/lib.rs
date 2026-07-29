@@ -189,6 +189,114 @@ pub fn delete_gain_tags_auto(file_path: &Path, use_id3v2: bool) -> Result<()> {
     }
 }
 
+/// Tag store a [`StoredGainTags`] snapshot was read from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GainTagSource {
+    /// MP4/AAC iTunes freeform tags.
+    Aac,
+    /// ID3v2 TXXX frames.
+    Id3v2,
+    /// APEv2 tag. `tag_present` distinguishes a file with no APE tag at all
+    /// from one whose APE tag simply carries no mp3gain items.
+    Ape { tag_present: bool },
+}
+
+/// Owned snapshot of the gain tags stored in one file, as returned by
+/// [`read_gain_tags_auto`]. `None` means the tag is absent (not an error).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredGainTags {
+    pub source: GainTagSource,
+    pub track_gain: Option<String>,
+    pub track_peak: Option<String>,
+    pub album_gain: Option<String>,
+    pub album_peak: Option<String>,
+    pub undo: Option<String>,
+    pub minmax: Option<String>,
+    /// APE-only `MP3GAIN_ALBUM_MINMAX`; always `None` for AAC and ID3v2.
+    pub album_minmax: Option<String>,
+}
+
+impl StoredGainTags {
+    fn empty(source: GainTagSource) -> Self {
+        Self {
+            source,
+            track_gain: None,
+            track_peak: None,
+            album_gain: None,
+            album_peak: None,
+            undo: None,
+            minmax: None,
+            album_minmax: None,
+        }
+    }
+
+    /// True if at least one gain tag is present.
+    pub fn has_any(&self) -> bool {
+        self.track_gain.is_some()
+            || self.track_peak.is_some()
+            || self.album_gain.is_some()
+            || self.album_peak.is_some()
+            || self.undo.is_some()
+            || self.minmax.is_some()
+            || self.album_minmax.is_some()
+    }
+}
+
+/// Read stored gain tags (ReplayGain plus mp3gain undo/minmax) without
+/// modifying the file, auto-dispatching by file format and tag mode.
+///
+/// Mirrors [`delete_gain_tags_auto`]'s dispatch: AAC files read the MP4
+/// freeform tags, MP3 files read ID3v2 when `use_id3v2` is set and APE
+/// otherwise. The AAC branch is fail-soft (unreadable tags come back
+/// empty); ID3v2/APE read errors are propagated.
+pub fn read_gain_tags_auto(file_path: &Path, use_id3v2: bool) -> Result<StoredGainTags> {
+    #[cfg(feature = "aac")]
+    {
+        if mp4meta::is_aac_file(file_path) {
+            let undo_tags = mp4meta::read_undo_tags(file_path).unwrap_or_default();
+            let rg_tags = mp4meta::read_replaygain_tags(file_path).unwrap_or_default();
+            return Ok(StoredGainTags {
+                source: GainTagSource::Aac,
+                track_gain: rg_tags.track_gain().map(str::to_string),
+                track_peak: rg_tags.track_peak().map(str::to_string),
+                album_gain: rg_tags.album_gain().map(str::to_string),
+                album_peak: rg_tags.album_peak().map(str::to_string),
+                undo: undo_tags.undo().map(str::to_string),
+                minmax: undo_tags.minmax().map(str::to_string),
+                album_minmax: None,
+            });
+        }
+    }
+    if use_id3v2 {
+        let rg = id3v2::read_id3v2_replaygain(file_path)?;
+        return Ok(StoredGainTags {
+            source: GainTagSource::Id3v2,
+            track_gain: rg.track_gain,
+            track_peak: rg.track_peak,
+            album_gain: rg.album_gain,
+            album_peak: rg.album_peak,
+            undo: rg.undo,
+            minmax: rg.minmax,
+            album_minmax: None,
+        });
+    }
+    match ape::read_ape_tag_from_file(file_path)? {
+        Some(tag) => Ok(StoredGainTags {
+            source: GainTagSource::Ape { tag_present: true },
+            track_gain: tag.get(TAG_REPLAYGAIN_TRACK_GAIN).map(str::to_string),
+            track_peak: tag.get(TAG_REPLAYGAIN_TRACK_PEAK).map(str::to_string),
+            album_gain: tag.get(TAG_REPLAYGAIN_ALBUM_GAIN).map(str::to_string),
+            album_peak: tag.get(TAG_REPLAYGAIN_ALBUM_PEAK).map(str::to_string),
+            undo: tag.get(TAG_MP3GAIN_UNDO).map(str::to_string),
+            minmax: tag.get(TAG_MP3GAIN_MINMAX).map(str::to_string),
+            album_minmax: tag.get(TAG_MP3GAIN_ALBUM_MINMAX).map(str::to_string),
+        }),
+        None => Ok(StoredGainTags::empty(GainTagSource::Ape {
+            tag_present: false,
+        })),
+    }
+}
+
 /// Read the left-channel undo step count without modifying the file.
 ///
 /// Mirrors [`undo_gain_auto`]'s dispatch so the returned value matches what

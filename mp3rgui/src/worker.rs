@@ -13,11 +13,7 @@ use mp3rgain::apply::{
     ApplyOptions,
 };
 use mp3rgain::replaygain::{self, ReplayGainResult};
-use mp3rgain::{
-    id3v2, mp4meta, read_ape_tag_from_file, AacAlbumInfo, Channel, TAG_MP3GAIN_MINMAX,
-    TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
-    TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
-};
+use mp3rgain::{read_gain_tags_auto, AacAlbumInfo, Channel, GainTagSource};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -834,7 +830,7 @@ pub fn spawn_find_max_amplitude(ctx: egui::Context, files: Vec<(usize, PathBuf)>
 /// Spawn the stored-tag scanner. Iterates files serially (tag reads are
 /// I/O-light) and emits `StoredTagsRead` for each.
 ///
-/// Dispatch mirrors the CLI's `process_check_tags`:
+/// Dispatch is shared with the CLI via `mp3rgain::read_gain_tags_auto`:
 ///   - AAC: MP4 freeform RG + undo
 ///   - MP3 + `use_id3v2`: ID3v2 TXXX RG
 ///   - MP3: APE
@@ -876,46 +872,27 @@ pub fn spawn_check_stored_tags(
 }
 
 fn read_stored_tags(path: &Path, use_id3v2: bool) -> StoredTagsView {
-    if mp4meta::is_aac_file(path) {
-        let undo_tags = mp4meta::read_undo_tags(path).unwrap_or_default();
-        let rg_tags = mp4meta::read_replaygain_tags(path).unwrap_or_default();
-        return StoredTagsView {
-            format: Some("MP4"),
-            track_gain: rg_tags.track_gain().map(str::to_string),
-            track_peak: rg_tags.track_peak().map(str::to_string),
-            album_gain: rg_tags.album_gain().map(str::to_string),
-            album_peak: rg_tags.album_peak().map(str::to_string),
-            undo: undo_tags.undo().map(str::to_string),
-            minmax: undo_tags.minmax().map(str::to_string),
-        };
-    }
-    if use_id3v2 {
-        let rg = id3v2::read_id3v2_replaygain(path).unwrap_or_default();
-        return StoredTagsView {
-            format: Some("ID3v2"),
-            track_gain: rg.track_gain,
-            track_peak: rg.track_peak,
-            album_gain: rg.album_gain,
-            album_peak: rg.album_peak,
-            undo: rg.undo,
-            minmax: rg.minmax,
-        };
-    }
-    // APE
-    if let Ok(Some(tag)) = read_ape_tag_from_file(path) {
-        return StoredTagsView {
-            format: Some("APE"),
-            track_gain: tag.get(TAG_REPLAYGAIN_TRACK_GAIN).map(str::to_string),
-            track_peak: tag.get(TAG_REPLAYGAIN_TRACK_PEAK).map(str::to_string),
-            album_gain: tag.get(TAG_REPLAYGAIN_ALBUM_GAIN).map(str::to_string),
-            album_peak: tag.get(TAG_REPLAYGAIN_ALBUM_PEAK).map(str::to_string),
-            undo: tag.get(TAG_MP3GAIN_UNDO).map(str::to_string),
-            minmax: tag.get(TAG_MP3GAIN_MINMAX).map(str::to_string),
-        };
-    }
-    StoredTagsView {
-        format: Some("APE"),
-        ..Default::default()
+    match read_gain_tags_auto(path, use_id3v2) {
+        Ok(tags) => StoredTagsView {
+            format: Some(match tags.source {
+                GainTagSource::Aac => "MP4",
+                GainTagSource::Id3v2 => "ID3v2",
+                GainTagSource::Ape { .. } => "APE",
+            }),
+            track_gain: tags.track_gain,
+            track_peak: tags.track_peak,
+            album_gain: tags.album_gain,
+            album_peak: tags.album_peak,
+            undo: tags.undo,
+            minmax: tags.minmax,
+        },
+        // Read error: render as an empty tag set, like the pre-unification
+        // fail-soft branches did. The AAC branch never errors, so the label
+        // follows the MP3 tag mode.
+        Err(_) => StoredTagsView {
+            format: Some(if use_id3v2 { "ID3v2" } else { "APE" }),
+            ..Default::default()
+        },
     }
 }
 
