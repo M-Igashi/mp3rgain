@@ -12,6 +12,8 @@
 
 **Lossless MP3/AAC volume adjustment - a modern mp3gain / aacgain replacement written in Rust**
 
+🌐 **Website:** [mp3rgain.tyna.ninja](https://mp3rgain.tyna.ninja/)
+
 mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global_gain` field in each frame. This preserves audio quality while achieving permanent volume changes.
 
 > **The only actively maintained CLI for lossless AAC/M4A bitstream gain adjustment.**
