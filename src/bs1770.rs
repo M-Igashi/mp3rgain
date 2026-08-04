@@ -188,36 +188,29 @@ impl BlockEnergies {
     /// measurable loudness" rather than a huge gain.
     pub fn integrated_lufs(&self) -> f64 {
         let absolute_gate = loudness_to_energy(ABSOLUTE_GATE_LUFS);
-
-        let mut sum = 0.0;
-        let mut count = 0usize;
-        for &e in &self.energies {
-            if e > absolute_gate {
-                sum += e;
-                count += 1;
-            }
-        }
-        if count == 0 {
+        let Some(ungated_mean) = gated_mean(&self.energies, absolute_gate) else {
             return f64::NEG_INFINITY;
-        }
+        };
 
-        let relative_gate = (sum / count as f64) * RELATIVE_GATE_FACTOR;
-        let gate = absolute_gate.max(relative_gate);
-
-        let mut sum = 0.0;
-        let mut count = 0usize;
-        for &e in &self.energies {
-            if e > gate {
-                sum += e;
-                count += 1;
-            }
+        let gate = absolute_gate.max(ungated_mean * RELATIVE_GATE_FACTOR);
+        match gated_mean(&self.energies, gate) {
+            Some(mean) => energy_to_loudness(mean),
+            None => f64::NEG_INFINITY,
         }
-        if count == 0 {
-            return f64::NEG_INFINITY;
-        }
-
-        energy_to_loudness(sum / count as f64)
     }
+}
+
+/// Mean of the energies strictly above `gate`; `None` when none survive.
+fn gated_mean(energies: &[f64], gate: f64) -> Option<f64> {
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for &e in energies {
+        if e > gate {
+            sum += e;
+            count += 1;
+        }
+    }
+    (count > 0).then(|| sum / count as f64)
 }
 
 /// Streaming BS.1770 analyzer for one track.
@@ -324,7 +317,7 @@ mod tests {
     }
 
     fn append_sine(samples: &mut Vec<f64>, level_dbfs: f64, seconds: f64, sample_rate: u32) {
-        let amplitude = 10f64.powf(level_dbfs / 20.0);
+        let amplitude = crate::gain::db_to_linear(level_dbfs);
         let count = (seconds * sample_rate as f64) as usize;
         let step = 2.0 * std::f64::consts::PI * 997.0 / sample_rate as f64;
         for n in 0..count {

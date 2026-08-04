@@ -80,6 +80,25 @@ impl AnalysisMode {
             AnalysisMode::R128 => Some(R128_REFERENCE_LUFS),
         }
     }
+
+    /// Unit label for loudness values measured in this mode.
+    pub fn unit(&self) -> &'static str {
+        if self.target_lufs().is_some() {
+            "LUFS"
+        } else {
+            "dB"
+        }
+    }
+
+    /// Lowercase short name (`"rg1"` / `"rg2"` / `"r128"`) for machine-readable
+    /// output, following the [`Channel::name`](crate::Channel::name) convention.
+    pub fn name(&self) -> &'static str {
+        match self {
+            AnalysisMode::Rg1 => "rg1",
+            AnalysisMode::Rg2 => "rg2",
+            AnalysisMode::R128 => "r128",
+        }
+    }
 }
 
 impl std::fmt::Display for AnalysisMode {
@@ -1062,10 +1081,13 @@ impl LoudnessState {
 
 /// Convert integrated LUFS to `(loudness, gain_db)` for the mode's target.
 /// Fully-gated input (silence) has no measurable loudness and is treated as
-/// already at target: gain 0.
+/// already at target: gain 0. Only reachable from BS.1770 branches, so an
+/// RG1 mode here is a programming error.
 #[cfg(feature = "replaygain")]
 fn lufs_loudness_and_gain(lufs: f64, mode: AnalysisMode) -> (f64, f64) {
-    let target = mode.target_lufs().unwrap_or(RG2_REFERENCE_LUFS);
+    let target = mode
+        .target_lufs()
+        .expect("BS.1770 gain calculation requires an RG2/R128 mode");
     if lufs.is_finite() {
         (lufs, target - lufs)
     } else {
@@ -1092,7 +1114,6 @@ enum TrackAnalyzer {
     },
     Bs1770 {
         analyzer: crate::bs1770::Bs1770Analyzer,
-        frame_buf: Vec<f64>,
     },
 }
 
@@ -1210,7 +1231,6 @@ fn analyze_track_internal(
         }
         _ => TrackAnalyzer::Bs1770 {
             analyzer: crate::bs1770::Bs1770Analyzer::new(sample_rate, channels),
-            frame_buf: Vec::with_capacity(channels),
         },
     };
     let mut peak: f64 = 0.0;
@@ -1238,10 +1258,9 @@ fn analyze_track_internal(
             TrackAnalyzer::Rg1 { filters, analyzer } => {
                 process_audio_buffer(&decoded, filters, analyzer, &mut peak)
             }
-            TrackAnalyzer::Bs1770 {
-                analyzer,
-                frame_buf,
-            } => process_audio_buffer_bs1770(&decoded, analyzer, frame_buf, &mut peak),
+            TrackAnalyzer::Bs1770 { analyzer } => {
+                process_audio_buffer_bs1770(&decoded, analyzer, &mut peak)
+            }
         }
 
         // Report progress
@@ -1291,8 +1310,7 @@ pub fn analyze_track_with_index(
     file_path: &Path,
     track_index: Option<u32>,
 ) -> Result<ReplayGainResult> {
-    let internal = analyze_track_internal(file_path, track_index, None, AnalysisMode::default())?;
-    Ok(internal.result)
+    analyze_track_with_mode(file_path, track_index, AnalysisMode::default(), None)
 }
 
 /// Analyze a single track using the given analysis mode (issue #269).
@@ -1324,13 +1342,12 @@ pub fn analyze_track_with_progress(
     track_index: Option<u32>,
     on_progress: &dyn Fn(u64, u64),
 ) -> Result<ReplayGainResult> {
-    let internal = analyze_track_internal(
+    analyze_track_with_mode(
         file_path,
         track_index,
-        Some(on_progress),
         AnalysisMode::default(),
-    )?;
-    Ok(internal.result)
+        Some(on_progress),
+    )
 }
 
 /// Scale factor to convert normalized float samples to 16-bit integer range.
@@ -1340,6 +1357,9 @@ pub fn analyze_track_with_progress(
 /// scale them to match the original algorithm's expected input range.
 /// Without this scaling, gain values are off by 20 * log10(32768) ≈ 90.31 dB.
 const SAMPLE_SCALE_16BIT: f64 = 32768.0;
+
+/// Scale factor for 32-bit integer samples (2^31).
+const SAMPLE_SCALE_32BIT: f64 = 2147483648.0;
 
 /// Process an audio buffer and feed filtered samples to the analyzer
 #[cfg(feature = "replaygain")]
@@ -1400,7 +1420,7 @@ fn process_audio_buffer(
             let channels = buf.num_planes();
             let frames = buf.frames();
             // Scale S32 to 16-bit range: divide by 2^16 to go from 32-bit to 16-bit range
-            let scale = SAMPLE_SCALE_16BIT / 2147483648.0;
+            let scale = SAMPLE_SCALE_16BIT / SAMPLE_SCALE_32BIT;
             let left_plane = buf.plane(0).unwrap();
             let right_plane = (channels >= 2).then(|| buf.plane(1).unwrap());
 
@@ -1433,7 +1453,6 @@ fn process_audio_buffer(
 fn process_audio_buffer_bs1770(
     buffer: &GenericAudioBufferRef,
     analyzer: &mut crate::bs1770::Bs1770Analyzer,
-    frame_buf: &mut Vec<f64>,
     peak: &mut f64,
 ) {
     fn feed<T: Copy>(
@@ -1441,17 +1460,38 @@ fn process_audio_buffer_bs1770(
         frames: usize,
         conv: impl Fn(T) -> f64,
         analyzer: &mut crate::bs1770::Bs1770Analyzer,
-        frame_buf: &mut Vec<f64>,
         peak: &mut f64,
     ) {
-        for frame in 0..frames {
-            frame_buf.clear();
-            for plane in planes {
-                let v = conv(plane[frame]);
-                *peak = peak.max(v.abs());
-                frame_buf.push(v);
+        // Mono and stereo (all MP3, nearly all AAC) go through fixed-size
+        // frames, mirroring the RG1 path's hoisted-plane specialization;
+        // rarer multichannel layouts fall back to a per-packet buffer.
+        match planes {
+            [mono] => {
+                for &s in &mono[..frames] {
+                    let v = conv(s);
+                    *peak = peak.max(v.abs());
+                    analyzer.add_frame(&[v]);
+                }
             }
-            analyzer.add_frame(frame_buf);
+            [left, right] => {
+                for (&l, &r) in left[..frames].iter().zip(&right[..frames]) {
+                    let l = conv(l);
+                    let r = conv(r);
+                    *peak = peak.max(l.abs()).max(r.abs());
+                    analyzer.add_frame(&[l, r]);
+                }
+            }
+            _ => {
+                let mut frame_buf = vec![0.0; planes.len()];
+                for frame in 0..frames {
+                    for (dst, plane) in frame_buf.iter_mut().zip(planes) {
+                        let v = conv(plane[frame]);
+                        *peak = peak.max(v.abs());
+                        *dst = v;
+                    }
+                    analyzer.add_frame(&frame_buf);
+                }
+            }
         }
     }
 
@@ -1460,14 +1500,7 @@ fn process_audio_buffer_bs1770(
             let planes: Vec<&[f32]> = (0..buf.num_planes())
                 .map(|i| buf.plane(i).unwrap())
                 .collect();
-            feed(
-                &planes,
-                buf.frames(),
-                |s| s as f64,
-                analyzer,
-                frame_buf,
-                peak,
-            );
+            feed(&planes, buf.frames(), |s| s as f64, analyzer, peak);
         }
         GenericAudioBufferRef::S16(buf) => {
             let planes: Vec<&[i16]> = (0..buf.num_planes())
@@ -1478,7 +1511,6 @@ fn process_audio_buffer_bs1770(
                 buf.frames(),
                 |s| s as f64 / SAMPLE_SCALE_16BIT,
                 analyzer,
-                frame_buf,
                 peak,
             );
         }
@@ -1489,9 +1521,8 @@ fn process_audio_buffer_bs1770(
             feed(
                 &planes,
                 buf.frames(),
-                |s| s as f64 / 2147483648.0,
+                |s| s as f64 / SAMPLE_SCALE_32BIT,
                 analyzer,
-                frame_buf,
                 peak,
             );
         }
@@ -1944,7 +1975,7 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
             GenericAudioBufferRef::S32(buf) => {
                 for ch in 0..buf.num_planes() {
                     for &sample in buf.plane(ch).unwrap() {
-                        let s = (sample as f64).abs() / 2147483648.0;
+                        let s = (sample as f64).abs() / SAMPLE_SCALE_32BIT;
                         max_peak = max_peak.max(s);
                     }
                 }

@@ -1333,12 +1333,21 @@ impl Mp3rgainApp {
         if file.status != FileStatus::Pending {
             return;
         }
-        let is_rg1 = mode == AnalysisMode::Rg1;
+        // `(volume column, gain column)` for one stored gain value: the RG1
+        // display pair, or — outside RG1, where the tag carries no LUFS
+        // loudness — the tag gain as-is with an empty Volume column.
+        let display = |gain_db: f64| -> (Option<f64>, f64) {
+            if mode == AnalysisMode::Rg1 {
+                let (volume, gain) = volume_and_gain(gain_db, target_volume, AnalysisMode::Rg1);
+                (Some(volume), gain)
+            } else {
+                (None, gain_db)
+            }
+        };
         let mut found = false;
         if let Some(track_gain_db) = view.track_gain.as_deref().and_then(parse_rg_gain) {
-            let (volume, gain) = volume_and_gain(track_gain_db, target_volume, AnalysisMode::Rg1);
-            let gain = if is_rg1 { gain } else { track_gain_db };
-            file.volume = is_rg1.then_some(volume);
+            let (volume, gain) = display(track_gain_db);
+            file.volume = volume;
             file.track_gain = Some(gain);
             if let Some(peak) = view.track_peak.as_deref().and_then(parse_rg_peak) {
                 file.clipping = peak >= 1.0;
@@ -1348,10 +1357,8 @@ impl Mp3rgainApp {
             found = true;
         }
         if let Some(album_gain_db) = view.album_gain.as_deref().and_then(parse_rg_gain) {
-            let (album_volume, album_gain) =
-                volume_and_gain(album_gain_db, target_volume, AnalysisMode::Rg1);
-            let album_gain = if is_rg1 { album_gain } else { album_gain_db };
-            file.album_volume = is_rg1.then_some(album_volume);
+            let (album_volume, album_gain) = display(album_gain_db);
+            file.album_volume = album_volume;
             file.album_gain = Some(album_gain);
             if let Some(peak) = view.album_peak.as_deref().and_then(parse_rg_peak) {
                 file.album_clip = would_clip(peak, album_gain);

@@ -8,18 +8,8 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat, StoredTagMode};
-use crate::json_output::{analysis_mode_str, FileStatus, JsonFileResult};
+use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
-
-/// Unit label for a result's loudness value: LUFS for the BS.1770 modes,
-/// dB for RG1.
-fn loudness_unit(result: &ReplayGainResult) -> &'static str {
-    if result.loudness_lufs().is_some() {
-        "LUFS"
-    } else {
-        "dB"
-    }
-}
 
 use super::utils::{
     analyze_track, emit_clipping_warning, report_file_error, restore_timestamp,
@@ -67,7 +57,7 @@ fn process_track_gain_into(
                     out,
                     "      Loudness: {:.1} {}, Gain: {:+.1} dB ({} steps{}), Peak: {:.4}",
                     result.loudness_db(),
-                    loudness_unit(&result),
+                    result.analysis_mode().unit(),
                     result.gain_db(),
                     base_steps,
                     if modifier_steps != 0 {
@@ -98,15 +88,10 @@ fn process_track_gain_into(
                     writeln!(out, "  {} {} (no adjustment needed)", ".".cyan(), filename)?;
                 }
                 return Ok(JsonFileResult {
-                    file: file.display().to_string(),
                     status: Some(FileStatus::Skipped),
-                    loudness_db: Some(result.loudness_db()),
-                    loudness_lufs: result.loudness_lufs(),
-                    analysis_mode: Some(analysis_mode_str(result.analysis_mode())),
-                    peak: Some(result.peak()),
                     gain_applied_steps: Some(0),
                     gain_applied_db: Some(0.0),
-                    ..Default::default()
+                    ..JsonFileResult::from_analysis(file, &result)
                 });
             }
 
@@ -171,17 +156,12 @@ fn apply_replaygain_with_album_into(
         }
         return Ok((
             JsonFileResult {
-                file: file.display().to_string(),
                 status: Some(FileStatus::DryRun),
-                loudness_db: Some(result.loudness_db()),
-                loudness_lufs: result.loudness_lufs(),
-                analysis_mode: Some(analysis_mode_str(result.analysis_mode())),
-                peak: Some(result.peak()),
                 gain_applied_steps: Some(actual_steps),
                 gain_applied_db: Some(steps_to_db(actual_steps)),
                 warning: warning_msg,
                 dry_run: Some(true),
-                ..Default::default()
+                ..JsonFileResult::from_analysis(file, result)
             },
             None,
         ));
@@ -228,17 +208,12 @@ fn apply_replaygain_with_album_into(
 
             Ok((
                 JsonFileResult {
-                    file: file.display().to_string(),
                     status: Some(FileStatus::Success),
                     frames: Some(report.modified),
-                    loudness_db: Some(result.loudness_db()),
-                    loudness_lufs: result.loudness_lufs(),
-                    analysis_mode: Some(analysis_mode_str(result.analysis_mode())),
-                    peak: Some(result.peak()),
                     gain_applied_steps: Some(report.actual_steps),
                     gain_applied_db: Some(steps_to_db(report.actual_steps)),
                     warning: warning_msg,
-                    ..Default::default()
+                    ..JsonFileResult::from_analysis(file, result)
                 },
                 report.gain_range,
             ))
@@ -371,16 +346,11 @@ fn apply_replaygain_aac_with_album_into(
             }
 
             Ok(JsonFileResult {
-                file: file.display().to_string(),
                 status: Some(FileStatus::Success),
-                loudness_db: Some(result.loudness_db()),
-                loudness_lufs: result.loudness_lufs(),
-                analysis_mode: Some(analysis_mode_str(result.analysis_mode())),
-                peak: Some(result.peak()),
                 gain_applied_steps: Some(actual_steps),
                 gain_applied_db: Some(steps_to_db(actual_steps)),
                 warning: warning_msg,
-                ..Default::default()
+                ..JsonFileResult::from_analysis(file, result)
             })
         }
         Err(e) => Ok(report_file_error(file, filename, e, opts)),

@@ -1,16 +1,6 @@
-use mp3rgain::replaygain::AnalysisMode;
+use mp3rgain::replaygain::ReplayGainResult;
 use serde::Serialize;
 use std::path::Path;
-
-/// JSON identifier for an [`AnalysisMode`] (issue #269).
-pub fn analysis_mode_str(mode: AnalysisMode) -> &'static str {
-    match mode {
-        AnalysisMode::Rg1 => "rg1",
-        AnalysisMode::Rg2 => "rg2",
-        AnalysisMode::R128 => "r128",
-        _ => "unknown",
-    }
-}
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -84,6 +74,20 @@ impl JsonFileResult {
             file: file.display().to_string(),
             status: Some(FileStatus::Error),
             error: Some(e.to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// Base record for `file` carrying a ReplayGain analysis (loudness, mode,
+    /// peak). Call sites layer their status / gain fields on top with struct
+    /// update syntax.
+    pub fn from_analysis(file: &Path, result: &ReplayGainResult) -> Self {
+        Self {
+            file: file.display().to_string(),
+            loudness_db: Some(result.loudness_db()),
+            loudness_lufs: result.loudness_lufs(),
+            analysis_mode: Some(result.analysis_mode().name()),
+            peak: Some(result.peak()),
             ..Default::default()
         }
     }
