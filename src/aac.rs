@@ -1285,22 +1285,17 @@ fn apply_aac_gain_to_data(data: &mut [u8], analysis: &AacAnalysis, gain_steps: i
 // Public API
 // =============================================================================
 
-/// Apply gain adjustment to AAC/M4A file (lossless, in-place modification).
+/// Apply gain adjustment to an AAC/M4A file (lossless), reading from
+/// `read_from` and writing to `write_to`.
 ///
-/// Modifies `global_gain` values directly in the file without container rewriting.
-/// Each gain step is approximately 1.5 dB. Values are clamped to 0-255 range.
-///
-/// Returns the number of modified gain locations.
-pub fn apply_aac_gain(file_path: &Path, gain_steps: i32) -> Result<usize> {
-    apply_aac_gain_to_path(file_path, file_path, gain_steps)
-}
-
-/// Apply gain reading from `read_from` and writing to `write_to`.
-///
-/// When `read_from == write_to`, behaves identically to [`apply_aac_gain`].
-/// When the paths differ, reads `read_from` once and writes the modified bytes
+/// Modifies `global_gain` values directly without container rewriting.
+/// Each gain step is approximately 1.5 dB; values are clamped to 0-255.
+/// When `read_from == write_to`, the file is modified in place. When the
+/// paths differ, reads `read_from` once and writes the modified bytes
 /// directly to `write_to` — the caller (e.g. `apply_with_temp_file`) is
 /// responsible for the rename to atomically swap the file (issue #135).
+///
+/// Returns the number of modified gain locations.
 pub fn apply_aac_gain_to_path(read_from: &Path, write_to: &Path, gain_steps: i32) -> Result<usize> {
     apply_aac_gain_to_path_with_analysis(read_from, write_to, gain_steps, None)
 }
@@ -1337,36 +1332,20 @@ pub(crate) fn apply_aac_gain_to_path_with_analysis(
     Ok(modified)
 }
 
-/// Apply gain adjustment and store undo information in iTunes freeform tags.
+/// Apply gain and store undo information in iTunes freeform tags, reading
+/// from `read_from` and writing to `write_to`.
 ///
 /// Undo tags are stored cumulatively: each application adds to the existing
-/// undo value, so multiple gain changes can be fully reversed with a single undo.
-///
-/// Returns the number of modified gain locations.
+/// undo value, so multiple gain changes can be fully reversed with a single
+/// undo. The atomic-write step targets `write_to`, so when this is called
+/// from `apply_with_temp_file` with `write_to == temp_path`, the temp file
+/// ends up containing the fully-rewritten MP4 ready to be renamed over the
+/// original (issue #135). Takes an optional pre-computed analysis of
+/// `read_from` — see [`apply_aac_gain_to_path_with_analysis`] (issue #188).
 //
 // Performs exactly one read and one atomic write: analysis, undo-tag parsing,
 // gain application, and metadata rewrite all run against an in-memory buffer
 // (issue #135).
-pub fn apply_aac_gain_with_undo(file_path: &Path, gain_steps: i32) -> Result<usize> {
-    apply_aac_gain_with_undo_to_path(file_path, file_path, gain_steps)
-}
-
-/// Read-from-A / write-to-B variant of [`apply_aac_gain_with_undo`].
-///
-/// The atomic-write step targets `write_to`, so when this is called from
-/// `apply_with_temp_file` with `write_to == temp_path`, the temp file ends up
-/// containing the fully-rewritten MP4 ready to be renamed over the original
-/// (issue #135).
-pub fn apply_aac_gain_with_undo_to_path(
-    read_from: &Path,
-    write_to: &Path,
-    gain_steps: i32,
-) -> Result<usize> {
-    apply_aac_gain_with_undo_to_path_with_analysis(read_from, write_to, gain_steps, None)
-}
-
-/// [`apply_aac_gain_with_undo_to_path`] with an optional pre-computed analysis
-/// of `read_from` — see [`apply_aac_gain_to_path_with_analysis`] (issue #188).
 pub(crate) fn apply_aac_gain_with_undo_to_path_with_analysis(
     read_from: &Path,
     write_to: &Path,
