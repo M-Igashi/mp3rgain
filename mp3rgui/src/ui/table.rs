@@ -68,6 +68,24 @@ fn sort_header(
 }
 
 pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
+    // BS.1770 modes show loudness in LUFS instead of the 89 dB-relative
+    // volume (issue #272); the headers carry the unit so mixed-up scales
+    // are visible at a glance.
+    let lufs = app.analysis_mode.target_lufs().is_some();
+    let (volume_header, album_volume_header) = if lufs {
+        ("Volume (LUFS)", "Album (LUFS)")
+    } else {
+        ("Volume", "Album Vol")
+    };
+    let volume_hover = if lufs {
+        "Track Analysis: BS.1770 integrated loudness in LUFS. \
+         Find Max Amplitude: available headroom in dB before clipping. \
+         Click to sort."
+    } else {
+        "Track Analysis: current loudness relative to ReplayGain reference (89 dB). \
+         Find Max Amplitude: available headroom in dB before clipping. \
+         Click to sort."
+    };
     app.ensure_display_order();
     // Set lookup instead of `Vec::contains` per row, which made selection
     // O(rows × selected) per frame; the set allocation is reused across
@@ -102,15 +120,7 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                     sort_header(ui, app, "Path/File", SortColumn::Filename, "");
                 });
                 header.col(|ui| {
-                    sort_header(
-                        ui,
-                        app,
-                        "Volume",
-                        SortColumn::Volume,
-                        "Track Analysis: current loudness relative to ReplayGain reference (89 dB). \
-                         Find Max Amplitude: available headroom in dB before clipping. \
-                         Click to sort.",
-                    );
+                    sort_header(ui, app, volume_header, SortColumn::Volume, volume_hover);
                 });
                 header.col(|ui| {
                     ui.strong("Clip");
@@ -122,7 +132,7 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                     ui.strong("Clip(T)");
                 });
                 header.col(|ui| {
-                    sort_header(ui, app, "Album Vol", SortColumn::AlbumVolume, "");
+                    sort_header(ui, app, album_volume_header, SortColumn::AlbumVolume, "");
                 });
                 header.col(|ui| {
                     sort_header(ui, app, "Album Gain", SortColumn::AlbumGain, "");
@@ -150,100 +160,100 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
             // `rows` (vs per-row `body.row`) lays out only the rows
             // inside the viewport; fixed 18.0 height makes it a drop-in.
             body.rows(18.0, display_order.len(), |mut row| {
-                    let Some(&idx) = display_order.get(row.index()) else {
-                        return;
-                    };
-                    let Some(file) = app.files.get(idx) else {
-                        return;
-                    };
-                    let is_selected = selected.contains(&idx);
-                    row.set_selected(is_selected);
+                let Some(&idx) = display_order.get(row.index()) else {
+                    return;
+                };
+                let Some(file) = app.files.get(idx) else {
+                    return;
+                };
+                let is_selected = selected.contains(&idx);
+                row.set_selected(is_selected);
 
-                        row.col(|ui| {
-                            let path_text = file.path.to_string_lossy();
-                            // Issue #223: optionally show just the file name;
-                            // the full path stays on hover either way.
-                            let label_text: &str = if app.show_filename_only {
-                                file.filename.as_str()
-                            } else {
-                                path_text.as_ref()
-                            };
-                            let resp = ui
-                                .selectable_label(is_selected, label_text)
-                                .on_hover_text(path_text.as_ref());
-                            if resp.clicked() {
-                                let mode = ui.input(|i| {
-                                    let toggle = i.modifiers.ctrl || i.modifiers.command;
-                                    let shift = i.modifiers.shift;
-                                    match (shift, toggle) {
-                                        (true, true) => ClickMode::RangeAdd,
-                                        (true, false) => ClickMode::Range,
-                                        (false, true) => ClickMode::Toggle,
-                                        (false, false) => ClickMode::Replace,
-                                    }
-                                });
-                                pending_click = Some((idx, mode));
-                            }
-                            // Issue #161 item 4: right-click → reveal in
-                            // file manager. Captured for after-loop apply.
-                            resp.context_menu(|ui| {
-                                if ui.button("Open file location").clicked() {
-                                    pending_reveal = Some(file.path.clone());
-                                    ui.close_menu();
-                                }
-                            });
-                        });
-                        row.col(|ui| {
-                            if let Some(v) = file.volume {
-                                ui.label(format!("{:.1}", v));
+                row.col(|ui| {
+                    let path_text = file.path.to_string_lossy();
+                    // Issue #223: optionally show just the file name;
+                    // the full path stays on hover either way.
+                    let label_text: &str = if app.show_filename_only {
+                        file.filename.as_str()
+                    } else {
+                        path_text.as_ref()
+                    };
+                    let resp = ui
+                        .selectable_label(is_selected, label_text)
+                        .on_hover_text(path_text.as_ref());
+                    if resp.clicked() {
+                        let mode = ui.input(|i| {
+                            let toggle = i.modifiers.ctrl || i.modifiers.command;
+                            let shift = i.modifiers.shift;
+                            match (shift, toggle) {
+                                (true, true) => ClickMode::RangeAdd,
+                                (true, false) => ClickMode::Range,
+                                (false, true) => ClickMode::Toggle,
+                                (false, false) => ClickMode::Replace,
                             }
                         });
-                        row.col(|ui| {
-                            if file.clipping {
-                                ui.colored_label(egui::Color32::RED, "Y");
-                            }
-                        });
-                        row.col(|ui| {
-                            if let Some(g) = file.track_gain {
-                                let color = if file.track_clip {
-                                    egui::Color32::RED
-                                } else {
-                                    ui.style().visuals.text_color()
-                                };
-                                ui.colored_label(color, format!("{:+.1} dB", g));
-                            }
-                        });
-                        row.col(|ui| {
-                            if file.track_clip {
-                                ui.colored_label(egui::Color32::RED, "Y");
-                            }
-                        });
-                        row.col(|ui| {
-                            if let Some(v) = file.album_volume {
-                                ui.label(format!("{:.1}", v));
-                            }
-                        });
-                        row.col(|ui| {
-                            if let Some(g) = file.album_gain {
-                                let color = if file.album_clip {
-                                    egui::Color32::RED
-                                } else {
-                                    ui.style().visuals.text_color()
-                                };
-                                ui.colored_label(color, format!("{:+.1} dB", g));
-                            }
-                        });
-                        row.col(|ui| {
-                            if file.album_clip {
-                                ui.colored_label(egui::Color32::RED, "Y");
-                            }
-                        });
-                        row.col(|ui| {
-                            render_stored_tags_cell(ui, file.stored_tags.as_ref());
-                        });
-                        row.col(|ui| {
-                            ui.label(file.status.label());
-                        });
+                        pending_click = Some((idx, mode));
+                    }
+                    // Issue #161 item 4: right-click → reveal in
+                    // file manager. Captured for after-loop apply.
+                    resp.context_menu(|ui| {
+                        if ui.button("Open file location").clicked() {
+                            pending_reveal = Some(file.path.clone());
+                            ui.close_menu();
+                        }
+                    });
+                });
+                row.col(|ui| {
+                    if let Some(v) = file.volume {
+                        ui.label(format!("{:.1}", v));
+                    }
+                });
+                row.col(|ui| {
+                    if file.clipping {
+                        ui.colored_label(egui::Color32::RED, "Y");
+                    }
+                });
+                row.col(|ui| {
+                    if let Some(g) = file.track_gain {
+                        let color = if file.track_clip {
+                            egui::Color32::RED
+                        } else {
+                            ui.style().visuals.text_color()
+                        };
+                        ui.colored_label(color, format!("{:+.1} dB", g));
+                    }
+                });
+                row.col(|ui| {
+                    if file.track_clip {
+                        ui.colored_label(egui::Color32::RED, "Y");
+                    }
+                });
+                row.col(|ui| {
+                    if let Some(v) = file.album_volume {
+                        ui.label(format!("{:.1}", v));
+                    }
+                });
+                row.col(|ui| {
+                    if let Some(g) = file.album_gain {
+                        let color = if file.album_clip {
+                            egui::Color32::RED
+                        } else {
+                            ui.style().visuals.text_color()
+                        };
+                        ui.colored_label(color, format!("{:+.1} dB", g));
+                    }
+                });
+                row.col(|ui| {
+                    if file.album_clip {
+                        ui.colored_label(egui::Color32::RED, "Y");
+                    }
+                });
+                row.col(|ui| {
+                    render_stored_tags_cell(ui, file.stored_tags.as_ref());
+                });
+                row.col(|ui| {
+                    ui.label(file.status.label());
+                });
             });
         });
     });

@@ -1,4 +1,5 @@
 use crate::app::Mp3rgainApp;
+use mp3rgain::replaygain::AnalysisMode;
 
 /// Apply-options checkbox row, shown right below the toolbar.
 ///
@@ -59,6 +60,34 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
                         "Show only the file name in the Path/File column instead of \
                          the full path. The full path is still shown on hover.",
                     );
+
+                ui.separator();
+
+                // Loudness measurement mode (issue #272). Switching modes
+                // invalidates cached analysis results — RG1 and BS.1770
+                // numbers live on different scales.
+                ui.label("Analysis:");
+                let before = app.analysis_mode;
+                ui.radio_value(&mut app.analysis_mode, AnalysisMode::Rg1, "RG 1.0")
+                    .on_hover_text(
+                        "ReplayGain 1.0 (default): mp3gain-compatible values, \
+                         89 dB reference. Keeps re-scans consistent with \
+                         libraries normalized by mp3gain.",
+                    );
+                ui.radio_value(&mut app.analysis_mode, AnalysisMode::Rg2, "RG 2.0")
+                    .on_hover_text(
+                        "ReplayGain 2.0: BS.1770 integrated loudness, -18 LUFS \
+                         reference (same perceived level as 89 dB). \
+                         CLI --rg2.",
+                    );
+                ui.radio_value(&mut app.analysis_mode, AnalysisMode::R128, "R128")
+                    .on_hover_text(
+                        "EBU R128: BS.1770 integrated loudness, -23 LUFS \
+                         broadcast target. CLI --r128.",
+                    );
+                if app.analysis_mode != before {
+                    app.invalidate_analysis_results();
+                }
             });
         });
     });
