@@ -25,21 +25,25 @@ pub fn report_file_error(
     JsonFileResult::error(file, e)
 }
 
-/// Analyze one track, driving the byte-level analysis bar when present.
+/// Analyze one track with the selected analysis mode, driving the byte-level
+/// analysis bar when present.
 pub fn analyze_track(
     file: &Path,
     opts: &Options,
     analysis_pb: Option<&ProgressBar>,
 ) -> mp3rgain::Result<ReplayGainResult> {
-    match analysis_pb {
-        Some(pb) => {
-            replaygain::analyze_track_with_progress(file, opts.track_index, &|bytes, total| {
-                pb.set_length(total);
-                pb.set_position(bytes);
-            })
+    let on_progress = analysis_pb.map(|pb| {
+        move |bytes, total| {
+            pb.set_length(total);
+            pb.set_position(bytes);
         }
-        None => replaygain::analyze_track_with_index(file, opts.track_index),
-    }
+    });
+    replaygain::analyze_track_with_mode(
+        file,
+        opts.track_index,
+        opts.analysis_mode,
+        on_progress.as_ref().map(|cb| cb as &dyn Fn(u64, u64)),
+    )
 }
 
 pub fn save_original_mtime(file: &Path, opts: &Options) -> Option<SystemTime> {

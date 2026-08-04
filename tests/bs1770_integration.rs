@@ -15,6 +15,7 @@ fn lufs(file: &str) -> f64 {
         Path::new(&format!("tests/fixtures/{}", file)),
         None,
         AnalysisMode::Rg2,
+        None,
     )
     .unwrap()
     .loudness_db()
@@ -30,8 +31,8 @@ fn fixture_lufs_matches_ffmpeg_ebur128() {
 #[test]
 fn rg2_and_r128_share_measurement_and_differ_by_target() {
     let path = Path::new("tests/fixtures/test_mono.mp3");
-    let rg2 = analyze_track_with_mode(path, None, AnalysisMode::Rg2).unwrap();
-    let r128 = analyze_track_with_mode(path, None, AnalysisMode::R128).unwrap();
+    let rg2 = analyze_track_with_mode(path, None, AnalysisMode::Rg2, None).unwrap();
+    let r128 = analyze_track_with_mode(path, None, AnalysisMode::R128, None).unwrap();
 
     assert_eq!(rg2.loudness_db(), r128.loudness_db());
     assert!((rg2.gain_db() - (RG2_REFERENCE_LUFS - rg2.loudness_db())).abs() < 1e-12);
@@ -44,7 +45,7 @@ fn rg2_and_r128_share_measurement_and_differ_by_target() {
 fn default_mode_is_unchanged_rg1() {
     let path = Path::new("tests/fixtures/test_mono.mp3");
     let default = analyze_track(path).unwrap();
-    let rg1 = analyze_track_with_mode(path, None, AnalysisMode::Rg1).unwrap();
+    let rg1 = analyze_track_with_mode(path, None, AnalysisMode::Rg1, None).unwrap();
     assert_eq!(default, rg1);
     assert_eq!(default.analysis_mode(), AnalysisMode::Rg1);
 }

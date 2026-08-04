@@ -1,5 +1,16 @@
+use mp3rgain::replaygain::AnalysisMode;
 use serde::Serialize;
 use std::path::Path;
+
+/// JSON identifier for an [`AnalysisMode`] (issue #269).
+pub fn analysis_mode_str(mode: AnalysisMode) -> &'static str {
+    match mode {
+        AnalysisMode::Rg1 => "rg1",
+        AnalysisMode::Rg2 => "rg2",
+        AnalysisMode::R128 => "r128",
+        _ => "unknown",
+    }
+}
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -50,6 +61,10 @@ pub struct JsonFileResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub loudness_db: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub loudness_lufs: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_mode: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub peak: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_amplitude: Option<f64>,
@@ -77,6 +92,10 @@ impl JsonFileResult {
 #[derive(Serialize, Clone, Copy)]
 pub struct JsonAlbumResult {
     pub loudness_db: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loudness_lufs: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_mode: Option<&'static str>,
     pub gain_db: f64,
     pub gain_steps: i32,
     pub peak: f64,

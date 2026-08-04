@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::*;
-use mp3rgain::replaygain::{self, AlbumAnalysisReport, REPLAYGAIN_REFERENCE_DB};
+use mp3rgain::replaygain::{self, AlbumAnalysisReport, AnalysisMode, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{steps_to_db, AacAlbumInfo};
 use rayon::prelude::*;
 use std::io::{self, Write};
@@ -12,23 +12,42 @@ use crate::commands::utils::{
     create_json_summary, exit_if_failed, finish_with_summary, for_each_file_with_analysis_bar,
     print_dry_run_notice, run_album_analysis, update_counters,
 };
-use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
+use crate::json_output::{
+    analysis_mode_str, FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput,
+};
 use crate::processors::replaygain::{process_apply_replaygain_with_album, process_track_gain};
 use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
 use crate::util::get_filename;
 
 fn print_target_with_modifier(opts: &Options) {
     let modifier_steps = opts.gain_modifier_steps();
-    if modifier_steps != 0 {
-        let modifier_db = steps_to_db(modifier_steps);
-        println!(
-            "  Target: {:.1} dB (ReplayGain {} dB {:+.1} dB modifier)",
-            REPLAYGAIN_REFERENCE_DB + modifier_db,
-            REPLAYGAIN_REFERENCE_DB,
-            modifier_db,
-        );
-    } else {
-        println!("  Target: {} dB (ReplayGain 1.0)", REPLAYGAIN_REFERENCE_DB);
+    let modifier_db = steps_to_db(modifier_steps);
+    match opts.analysis_mode.target_lufs() {
+        Some(target) => {
+            if modifier_steps != 0 {
+                println!(
+                    "  Target: {:.1} LUFS ({} {} LUFS {:+.1} dB modifier)",
+                    target + modifier_db,
+                    opts.analysis_mode,
+                    target,
+                    modifier_db,
+                );
+            } else {
+                println!("  Target: {} LUFS ({})", target, opts.analysis_mode);
+            }
+        }
+        None => {
+            if modifier_steps != 0 {
+                println!(
+                    "  Target: {:.1} dB (ReplayGain {} dB {:+.1} dB modifier)",
+                    REPLAYGAIN_REFERENCE_DB + modifier_db,
+                    REPLAYGAIN_REFERENCE_DB,
+                    modifier_db,
+                );
+            } else {
+                println!("  Target: {} dB (ReplayGain 1.0)", REPLAYGAIN_REFERENCE_DB);
+            }
+        }
     }
 }
 
@@ -133,8 +152,11 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             let modifier_steps = opts.gain_modifier_steps();
             let modified_gain_steps = album_result.album_gain_steps() + modifier_steps;
 
+            let is_lufs = opts.analysis_mode != AnalysisMode::Rg1;
             let json_album = JsonAlbumResult {
                 loudness_db: album_result.album_loudness_db(),
+                loudness_lufs: is_lufs.then(|| album_result.album_loudness_db()),
+                analysis_mode: Some(analysis_mode_str(opts.analysis_mode)),
                 gain_db: album_result.album_gain_db(),
                 gain_steps: modified_gain_steps,
                 peak: album_result.album_peak(),
@@ -148,8 +170,9 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 println!();
                 println!(
-                    "  Album loudness: {:.1} dB",
-                    album_result.album_loudness_db()
+                    "  Album loudness: {:.1} {}",
+                    album_result.album_loudness_db(),
+                    if is_lufs { "LUFS" } else { "dB" }
                 );
                 println!(
                     "  Album gain:     {:+.1} dB ({} steps{})",
@@ -180,6 +203,8 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                                     file: file.display().to_string(),
                                     status: Some(FileStatus::Skipped),
                                     loudness_db: Some(track.loudness_db()),
+                                    loudness_lufs: track.loudness_lufs(),
+                                    analysis_mode: Some(analysis_mode_str(track.analysis_mode())),
                                     peak: Some(track.peak()),
                                     gain_applied_steps: Some(0),
                                     gain_applied_db: Some(0.0),

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use colored::*;
+use mp3rgain::replaygain::AnalysisMode;
 use mp3rgain::Channel;
 use std::path::PathBuf;
 
@@ -27,6 +28,24 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
 
         if arg == "--skip-errors" {
             opts.skip_errors = true;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--rg2" {
+            if opts.analysis_mode == AnalysisMode::R128 {
+                anyhow::bail!("--rg2 and --r128 are mutually exclusive");
+            }
+            opts.analysis_mode = AnalysisMode::Rg2;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--r128" {
+            if opts.analysis_mode == AnalysisMode::Rg2 {
+                anyhow::bail!("--rg2 and --r128 are mutually exclusive");
+            }
+            opts.analysis_mode = AnalysisMode::R128;
             i += 1;
             continue;
         }
@@ -640,6 +659,31 @@ mod tests {
     fn invalid_attached_gain_returns_error() {
         let result = parse_args(&args(&["-gabc"]));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn analysis_mode_flags() {
+        // Default stays RG1 (mp3gain compatible)
+        let opts = parse_args(&args(&["-r", "song.mp3"])).unwrap();
+        assert_eq!(opts.analysis_mode, AnalysisMode::Rg1);
+
+        let opts = parse_args(&args(&["--rg2", "-r", "song.mp3"])).unwrap();
+        assert_eq!(opts.analysis_mode, AnalysisMode::Rg2);
+        assert!(opts.track_gain);
+
+        let opts = parse_args(&args(&["-a", "--r128", "song.mp3"])).unwrap();
+        assert_eq!(opts.analysis_mode, AnalysisMode::R128);
+        assert!(opts.album_gain);
+
+        // Repeating the same flag is fine
+        let opts = parse_args(&args(&["--rg2", "--rg2", "song.mp3"])).unwrap();
+        assert_eq!(opts.analysis_mode, AnalysisMode::Rg2);
+    }
+
+    #[test]
+    fn rg2_and_r128_are_mutually_exclusive() {
+        assert!(parse_args(&args(&["--rg2", "--r128", "song.mp3"])).is_err());
+        assert!(parse_args(&args(&["--r128", "--rg2", "song.mp3"])).is_err());
     }
 
     #[test]

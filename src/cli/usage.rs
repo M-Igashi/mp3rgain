@@ -28,6 +28,8 @@ pub fn print_usage() {
     println!("    -m <i>      Modify suggested gain by integer i");
     println!("    -r          Apply Track gain (ReplayGain analysis)");
     println!("    -a          Apply Album gain (ReplayGain analysis)");
+    println!("    --rg2       ReplayGain 2.0 analysis (BS.1770, -18 LUFS reference)");
+    println!("    --r128      EBU R128 analysis (BS.1770, -23 LUFS target)");
     println!("    -e          Skip album analysis (even with multiple files)");
     println!("    -i <n>      Specify which audio track to process (default: 0)");
     println!("    -u          Undo gain changes (restore from APEv2 tag)");
@@ -64,6 +66,8 @@ pub fn print_usage() {
     println!("    mp3rgain -r -d 4.5 song.mp3    Apply track gain, target +4.5 dB louder");
     println!("    mp3rgain -r song.mp3           Analyze and apply track gain");
     println!("    mp3rgain -a *.mp3              Analyze and apply album gain");
+    println!("    mp3rgain -r --rg2 song.mp3     Track gain via ReplayGain 2.0 (BS.1770)");
+    println!("    mp3rgain -a --r128 *.mp3       Album gain to the EBU R128 target");
     println!("    mp3rgain -r -m 2 *.mp3         Apply track gain + 2 steps");
     println!("    mp3rgain -e *.mp3              Track gain only (skip album calc)");
     println!("    mp3rgain -u song.mp3           Undo previous gain changes");
@@ -100,6 +104,8 @@ pub fn print_usage() {
             "enabled".green(),
             REPLAYGAIN_REFERENCE_DB
         );
+        println!("    - Default analysis is ReplayGain 1.0 (mp3gain-identical values);");
+        println!("      --rg2 / --r128 opt into BS.1770 loudness measurement");
     } else {
         println!();
         println!("{}", "REPLAYGAIN:".yellow().bold());
