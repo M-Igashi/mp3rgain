@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::json_output::{analysis_mode_str, FileStatus, JsonFileResult};
+use crate::json_output::{FileStatus, JsonFileResult};
 use crate::processors::utils::analyze_track;
 use crate::util::get_filename;
 
@@ -79,17 +79,12 @@ pub fn format_rg_row(
 
     Ok((
         JsonFileResult {
-            file: file.display().to_string(),
-            loudness_db: Some(rg_result.loudness_db()),
-            loudness_lufs: rg_result.loudness_lufs(),
-            analysis_mode: Some(analysis_mode_str(rg_result.analysis_mode())),
             gain_applied_db: Some(gain_db),
             gain_applied_steps: Some(gain_steps),
-            peak: Some(rg_result.peak()),
             max_amplitude: Some(max_amp),
             max_gain: Some(max_gain),
             min_gain: Some(min_gain),
-            ..Default::default()
+            ..JsonFileResult::from_analysis(file, rg_result)
         },
         out,
     ))
