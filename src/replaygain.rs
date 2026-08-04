@@ -46,6 +46,52 @@ pub const REPLAYGAIN_REFERENCE_DB: f64 = 89.0;
 /// Source: https://replaygain.hydrogenaud.io/calibration.html
 const PINK_REF: f64 = 64.82;
 
+/// ReplayGain 2.0 reference level in LUFS. This is the same perceived level
+/// as the 89 dB SPL reference of ReplayGain 1.0, expressed on the BS.1770
+/// scale — only the measurement algorithm differs between the two modes.
+pub const RG2_REFERENCE_LUFS: f64 = -18.0;
+
+/// EBU R128 broadcast target level in LUFS.
+pub const R128_REFERENCE_LUFS: f64 = -23.0;
+
+/// Loudness measurement algorithm used for gain calculation (issue #269).
+///
+/// [`Rg1`](AnalysisMode::Rg1) is the default and reproduces mp3gain's values
+/// exactly; the BS.1770-based modes are strictly opt-in.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum AnalysisMode {
+    /// ReplayGain 1.0 (mp3gain-compatible, 89 dB SPL reference).
+    #[default]
+    Rg1,
+    /// ReplayGain 2.0: BS.1770 integrated loudness, -18 LUFS reference.
+    Rg2,
+    /// EBU R128: BS.1770 integrated loudness, -23 LUFS target.
+    R128,
+}
+
+impl AnalysisMode {
+    /// Target level in LUFS for the BS.1770-based modes; `None` for RG1.
+    pub fn target_lufs(&self) -> Option<f64> {
+        match self {
+            AnalysisMode::Rg1 => None,
+            AnalysisMode::Rg2 => Some(RG2_REFERENCE_LUFS),
+            AnalysisMode::R128 => Some(R128_REFERENCE_LUFS),
+        }
+    }
+}
+
+impl std::fmt::Display for AnalysisMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AnalysisMode::Rg1 => f.write_str("ReplayGain 1.0"),
+            AnalysisMode::Rg2 => f.write_str("ReplayGain 2.0"),
+            AnalysisMode::R128 => f.write_str("EBU R128"),
+        }
+    }
+}
+
 /// Audio file type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -76,6 +122,8 @@ pub struct ReplayGainResult {
     peak: f64,
     sample_rate: u32,
     file_type: AudioFileType,
+    #[cfg_attr(feature = "serde", serde(default))]
+    analysis_mode: AnalysisMode,
 }
 
 impl ReplayGainResult {
@@ -86,6 +134,7 @@ impl ReplayGainResult {
         peak: f64,
         sample_rate: u32,
         file_type: AudioFileType,
+        analysis_mode: AnalysisMode,
     ) -> Self {
         Self {
             loudness_db,
@@ -93,9 +142,12 @@ impl ReplayGainResult {
             peak,
             sample_rate,
             file_type,
+            analysis_mode,
         }
     }
 
+    /// Measured loudness: the RG1 histogram value in [`AnalysisMode::Rg1`],
+    /// or the BS.1770 integrated loudness in LUFS in the other modes.
     pub fn loudness_db(&self) -> f64 {
         self.loudness_db
     }
@@ -110,6 +162,9 @@ impl ReplayGainResult {
     }
     pub fn file_type(&self) -> AudioFileType {
         self.file_type
+    }
+    pub fn analysis_mode(&self) -> AnalysisMode {
+        self.analysis_mode
     }
 
     /// Convert gain in dB to MP3 gain steps (1.5 dB per step)
@@ -962,19 +1017,86 @@ impl MediaSource for ProgressMediaSource {
     }
 }
 
-/// Internal result containing both ReplayGainResult and histogram for album calculation
+/// Per-track loudness state kept for album accumulation, one variant per
+/// measurement algorithm. Modes never mix within one album analysis.
+#[cfg(feature = "replaygain")]
+enum LoudnessState {
+    Rg1(LoudnessHistogram),
+    Bs1770(crate::bs1770::BlockEnergies),
+}
+
+#[cfg(feature = "replaygain")]
+impl LoudnessState {
+    fn new(mode: AnalysisMode) -> Self {
+        match mode {
+            AnalysisMode::Rg1 => LoudnessState::Rg1(LoudnessHistogram::new()),
+            _ => LoudnessState::Bs1770(crate::bs1770::BlockEnergies::new()),
+        }
+    }
+
+    fn accumulate(&mut self, other: &LoudnessState) {
+        match (self, other) {
+            (LoudnessState::Rg1(a), LoudnessState::Rg1(b)) => a.accumulate(b),
+            (LoudnessState::Bs1770(a), LoudnessState::Bs1770(b)) => a.accumulate(b),
+            _ => debug_assert!(false, "mixed analysis modes in album accumulation"),
+        }
+    }
+
+    /// `(loudness, gain_db)` of the accumulated state under `mode`.
+    fn loudness_and_gain(&self, mode: AnalysisMode) -> (f64, f64) {
+        match self {
+            LoudnessState::Rg1(histogram) => {
+                let loudness = histogram.get_loudness();
+                (loudness, PINK_REF - loudness)
+            }
+            LoudnessState::Bs1770(blocks) => lufs_loudness_and_gain(blocks.integrated_lufs(), mode),
+        }
+    }
+}
+
+/// Convert integrated LUFS to `(loudness, gain_db)` for the mode's target.
+/// Fully-gated input (silence) has no measurable loudness and is treated as
+/// already at target: gain 0.
+#[cfg(feature = "replaygain")]
+fn lufs_loudness_and_gain(lufs: f64, mode: AnalysisMode) -> (f64, f64) {
+    let target = mode.target_lufs().unwrap_or(RG2_REFERENCE_LUFS);
+    if lufs.is_finite() {
+        (lufs, target - lufs)
+    } else {
+        (target, 0.0)
+    }
+}
+
+/// Internal result containing both ReplayGainResult and the loudness state
+/// for album calculation
 #[cfg(feature = "replaygain")]
 struct TrackAnalysisInternal {
     result: ReplayGainResult,
-    histogram: LoudnessHistogram,
+    state: LoudnessState,
 }
 
-/// Internal function to analyze a track and return both result and histogram
+/// Per-track analyzer, selected by [`AnalysisMode`]. The RG1 variant is the
+/// original mp3gain algorithm and must stay bit-identical; the BS.1770
+/// variant feeds normalized samples of all channels to [`crate::bs1770`].
+#[cfg(feature = "replaygain")]
+enum TrackAnalyzer {
+    Rg1 {
+        filters: Vec<EqualLoudnessFilter>,
+        analyzer: ReplayGainAnalyzer,
+    },
+    Bs1770 {
+        analyzer: crate::bs1770::Bs1770Analyzer,
+        frame_buf: Vec<f64>,
+    },
+}
+
+/// Internal function to analyze a track and return both result and loudness state
 #[cfg(feature = "replaygain")]
 fn analyze_track_internal(
     file_path: &Path,
     track_index: Option<u32>,
     progress: Option<&dyn Fn(u64, u64)>,
+    mode: AnalysisMode,
 ) -> Result<TrackAnalysisInternal> {
     // Detect file type
     let file_type = detect_file_type(file_path);
@@ -1066,14 +1188,25 @@ fn analyze_track_internal(
         .make_audio_decoder(audio_params, &AudioDecoderOptions::default())
         .map_err(|e| Error::Decode(Box::new(e)))?;
 
-    // Create filter for each channel
-    let mut filters: Vec<EqualLoudnessFilter> = (0..channels)
-        .map(|_| {
-            EqualLoudnessFilter::new(sample_rate).ok_or(Error::UnsupportedSampleRate(sample_rate))
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    let mut analyzer = ReplayGainAnalyzer::new(sample_rate);
+    let mut track_analyzer = match mode {
+        AnalysisMode::Rg1 => {
+            // Create filter for each channel
+            let filters: Vec<EqualLoudnessFilter> = (0..channels)
+                .map(|_| {
+                    EqualLoudnessFilter::new(sample_rate)
+                        .ok_or(Error::UnsupportedSampleRate(sample_rate))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            TrackAnalyzer::Rg1 {
+                filters,
+                analyzer: ReplayGainAnalyzer::new(sample_rate),
+            }
+        }
+        _ => TrackAnalyzer::Bs1770 {
+            analyzer: crate::bs1770::Bs1770Analyzer::new(sample_rate, channels),
+            frame_buf: Vec::with_capacity(channels),
+        },
+    };
     let mut peak: f64 = 0.0;
 
     // Process all packets
@@ -1095,7 +1228,15 @@ fn analyze_track_internal(
         };
 
         // Process audio buffer
-        process_audio_buffer(&decoded, &mut filters, &mut analyzer, &mut peak);
+        match &mut track_analyzer {
+            TrackAnalyzer::Rg1 { filters, analyzer } => {
+                process_audio_buffer(&decoded, filters, analyzer, &mut peak)
+            }
+            TrackAnalyzer::Bs1770 {
+                analyzer,
+                frame_buf,
+            } => process_audio_buffer_bs1770(&decoded, analyzer, frame_buf, &mut peak),
+        }
 
         // Report progress
         if let (Some(cb), Some(ref tracker)) = (progress, &position_tracker) {
@@ -1108,19 +1249,28 @@ fn analyze_track_internal(
         cb(file_size, file_size);
     }
 
-    // Finish any remaining samples in the last window
-    analyzer.finish_window();
+    // Finish analysis and calculate loudness and gain
+    let (loudness_db, gain_db, state) = match track_analyzer {
+        TrackAnalyzer::Rg1 { mut analyzer, .. } => {
+            // Finish any remaining samples in the last window
+            analyzer.finish_window();
+            let loudness_db = analyzer.get_loudness();
+            (
+                loudness_db,
+                PINK_REF - loudness_db,
+                LoudnessState::Rg1(analyzer.into_histogram()),
+            )
+        }
+        TrackAnalyzer::Bs1770 { analyzer, .. } => {
+            let blocks = analyzer.into_blocks();
+            let (loudness_db, gain_db) = lufs_loudness_and_gain(blocks.integrated_lufs(), mode);
+            (loudness_db, gain_db, LoudnessState::Bs1770(blocks))
+        }
+    };
 
-    // Calculate loudness and gain
-    let loudness_db = analyzer.get_loudness();
-    let gain_db = PINK_REF - loudness_db;
+    let result = ReplayGainResult::new(loudness_db, gain_db, peak, sample_rate, file_type, mode);
 
-    let result = ReplayGainResult::new(loudness_db, gain_db, peak, sample_rate, file_type);
-
-    Ok(TrackAnalysisInternal {
-        result,
-        histogram: analyzer.into_histogram(),
-    })
+    Ok(TrackAnalysisInternal { result, state })
 }
 
 /// Analyze a single track and calculate ReplayGain
@@ -1135,7 +1285,22 @@ pub fn analyze_track_with_index(
     file_path: &Path,
     track_index: Option<u32>,
 ) -> Result<ReplayGainResult> {
-    let internal = analyze_track_internal(file_path, track_index, None)?;
+    let internal = analyze_track_internal(file_path, track_index, None, AnalysisMode::default())?;
+    Ok(internal.result)
+}
+
+/// Analyze a single track using the given analysis mode (issue #269).
+///
+/// [`AnalysisMode::Rg1`] is identical to [`analyze_track_with_index`]; the
+/// other modes measure BS.1770 integrated loudness and compute the gain
+/// against the mode's target level.
+#[cfg(feature = "replaygain")]
+pub fn analyze_track_with_mode(
+    file_path: &Path,
+    track_index: Option<u32>,
+    mode: AnalysisMode,
+) -> Result<ReplayGainResult> {
+    let internal = analyze_track_internal(file_path, track_index, None, mode)?;
     Ok(internal.result)
 }
 
@@ -1151,7 +1316,12 @@ pub fn analyze_track_with_progress(
     track_index: Option<u32>,
     on_progress: &dyn Fn(u64, u64),
 ) -> Result<ReplayGainResult> {
-    let internal = analyze_track_internal(file_path, track_index, Some(on_progress))?;
+    let internal = analyze_track_internal(
+        file_path,
+        track_index,
+        Some(on_progress),
+        AnalysisMode::default(),
+    )?;
     Ok(internal.result)
 }
 
@@ -1247,6 +1417,82 @@ fn process_audio_buffer(
     }
 }
 
+/// Feed normalized (full scale = 1.0) samples from a decoded buffer to the
+/// BS.1770 analyzer. Unlike the RG1 path, all channels are analyzed (the
+/// analyzer applies BS.1770 channel weights) and no 16-bit scaling is
+/// applied — LUFS is defined relative to digital full scale.
+#[cfg(feature = "replaygain")]
+fn process_audio_buffer_bs1770(
+    buffer: &GenericAudioBufferRef,
+    analyzer: &mut crate::bs1770::Bs1770Analyzer,
+    frame_buf: &mut Vec<f64>,
+    peak: &mut f64,
+) {
+    fn feed<T: Copy>(
+        planes: &[&[T]],
+        frames: usize,
+        conv: impl Fn(T) -> f64,
+        analyzer: &mut crate::bs1770::Bs1770Analyzer,
+        frame_buf: &mut Vec<f64>,
+        peak: &mut f64,
+    ) {
+        for frame in 0..frames {
+            frame_buf.clear();
+            for plane in planes {
+                let v = conv(plane[frame]);
+                *peak = peak.max(v.abs());
+                frame_buf.push(v);
+            }
+            analyzer.add_frame(frame_buf);
+        }
+    }
+
+    match buffer {
+        GenericAudioBufferRef::F32(buf) => {
+            let planes: Vec<&[f32]> = (0..buf.num_planes())
+                .map(|i| buf.plane(i).unwrap())
+                .collect();
+            feed(
+                &planes,
+                buf.frames(),
+                |s| s as f64,
+                analyzer,
+                frame_buf,
+                peak,
+            );
+        }
+        GenericAudioBufferRef::S16(buf) => {
+            let planes: Vec<&[i16]> = (0..buf.num_planes())
+                .map(|i| buf.plane(i).unwrap())
+                .collect();
+            feed(
+                &planes,
+                buf.frames(),
+                |s| s as f64 / SAMPLE_SCALE_16BIT,
+                analyzer,
+                frame_buf,
+                peak,
+            );
+        }
+        GenericAudioBufferRef::S32(buf) => {
+            let planes: Vec<&[i32]> = (0..buf.num_planes())
+                .map(|i| buf.plane(i).unwrap())
+                .collect();
+            feed(
+                &planes,
+                buf.frames(),
+                |s| s as f64 / 2147483648.0,
+                analyzer,
+                frame_buf,
+                peak,
+            );
+        }
+        _ => {
+            // Unsupported format, skip
+        }
+    }
+}
+
 /// Byte-level progress callback: `(file_index, bytes_read, total_bytes)`.
 pub type AlbumProgressFn<'a> = &'a dyn Fn(usize, u64, u64);
 
@@ -1283,6 +1529,9 @@ pub struct AlbumAnalysisOptions<'a> {
     /// remaining files are not analyzed and [`Error::Cancelled`] is
     /// returned. Files already being decoded run to completion.
     pub cancel: Option<&'a AtomicBool>,
+    /// Loudness measurement algorithm (issue #269). Defaults to
+    /// [`AnalysisMode::Rg1`], the mp3gain-compatible algorithm.
+    pub mode: AnalysisMode,
 }
 
 /// Analyze multiple tracks for album gain (strict, serial, no callbacks).
@@ -1325,12 +1574,13 @@ fn analyze_album_serial(
         on_complete,
         skip_errors,
         cancel,
+        mode,
         ..
     } = *opts;
     let mut track_results = Vec::with_capacity(files.len());
     let mut album_peak: f64 = 0.0;
-    // Album histogram accumulates all track histograms (like B[] in original mp3gain)
-    let mut album_histogram = LoudnessHistogram::new();
+    // Album state accumulates all track states (like B[] in original mp3gain)
+    let mut album_state = LoudnessState::new(mode);
     let mut failures: Vec<(usize, String)> = Vec::new();
     let mut successful_indices: Vec<usize> = Vec::with_capacity(files.len());
 
@@ -1342,15 +1592,15 @@ fn analyze_album_serial(
         let file_progress: Option<Box<dyn Fn(u64, u64) + '_>> =
             on_progress.map(|cb| Box::new(move |bytes, total| cb(i, bytes, total)) as _);
 
-        // Analyze each track and get histogram
-        let track = analyze_track_internal(file, track_index, file_progress.as_deref());
+        // Analyze each track and get its loudness state
+        let track = analyze_track_internal(file, track_index, file_progress.as_deref(), mode);
         if let Some(cb) = on_complete {
             cb(i, file);
         }
         match track {
             Ok(internal) => {
                 album_peak = album_peak.max(internal.result.peak);
-                album_histogram.accumulate(&internal.histogram);
+                album_state.accumulate(&internal.state);
                 track_results.push(internal.result);
                 successful_indices.push(i);
             }
@@ -1368,9 +1618,8 @@ fn analyze_album_serial(
         return Err(Error::AllFilesFailed { count: files.len() });
     }
 
-    // Calculate album loudness from combined histogram (95th percentile)
-    let album_loudness_db = album_histogram.get_loudness();
-    let album_gain_db = PINK_REF - album_loudness_db;
+    // Calculate album loudness from the combined state
+    let (album_loudness_db, album_gain_db) = album_state.loudness_and_gain(mode);
 
     let album = AlbumGainResult::new(track_results, album_loudness_db, album_gain_db, album_peak);
     Ok(AlbumAnalysisReport {
@@ -1392,17 +1641,18 @@ fn analyze_album_parallel_internal(
         on_complete,
         skip_errors,
         cancel,
+        mode,
         ..
     } = *opts;
 
     let mut track_results = Vec::with_capacity(files.len());
     let mut album_peak: f64 = 0.0;
-    let mut album_histogram = LoudnessHistogram::new();
+    let mut album_state = LoudnessState::new(mode);
     let mut failures: Vec<(usize, String)> = Vec::new();
     let mut successful_indices: Vec<usize> = Vec::with_capacity(files.len());
 
     // par_iter().collect() preserves input order, which keeps album_peak
-    // / album_histogram folding deterministic and matches the serial path
+    // / album_state folding deterministic and matches the serial path
     // bit-for-bit. Strict mode short-circuits at the first error; lenient
     // collects all outcomes so failures can be reported alongside successes.
     if skip_errors {
@@ -1413,7 +1663,7 @@ fn analyze_album_parallel_internal(
                 if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
                     return Err(Error::Cancelled);
                 }
-                let r = analyze_track_internal(file, track_index, None);
+                let r = analyze_track_internal(file, track_index, None, mode);
                 if let Some(cb) = on_complete {
                     cb(i, file);
                 }
@@ -1427,7 +1677,7 @@ fn analyze_album_parallel_internal(
             match r {
                 Ok(internal) => {
                     album_peak = album_peak.max(internal.result.peak);
-                    album_histogram.accumulate(&internal.histogram);
+                    album_state.accumulate(&internal.state);
                     track_results.push(internal.result);
                     successful_indices.push(i);
                 }
@@ -1444,7 +1694,7 @@ fn analyze_album_parallel_internal(
                 if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
                     return Err(Error::Cancelled);
                 }
-                let r = analyze_track_internal(file, track_index, None);
+                let r = analyze_track_internal(file, track_index, None, mode);
                 if let Some(cb) = on_complete {
                     cb(i, file);
                 }
@@ -1453,7 +1703,7 @@ fn analyze_album_parallel_internal(
             .collect::<Result<Vec<_>>>()?;
         for (i, internal) in internals.into_iter().enumerate() {
             album_peak = album_peak.max(internal.result.peak);
-            album_histogram.accumulate(&internal.histogram);
+            album_state.accumulate(&internal.state);
             track_results.push(internal.result);
             successful_indices.push(i);
         }
@@ -1463,8 +1713,7 @@ fn analyze_album_parallel_internal(
         return Err(Error::AllFilesFailed { count: files.len() });
     }
 
-    let album_loudness_db = album_histogram.get_loudness();
-    let album_gain_db = PINK_REF - album_loudness_db;
+    let (album_loudness_db, album_gain_db) = album_state.loudness_and_gain(mode);
 
     let album = AlbumGainResult::new(track_results, album_loudness_db, album_gain_db, album_peak);
     Ok(AlbumAnalysisReport {
@@ -1490,6 +1739,18 @@ pub fn analyze_track(_file_path: &Path) -> Result<ReplayGainResult> {
 pub fn analyze_track_with_index(
     _file_path: &Path,
     _track_index: Option<u32>,
+) -> Result<ReplayGainResult> {
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
+}
+
+#[cfg(not(feature = "replaygain"))]
+pub fn analyze_track_with_mode(
+    _file_path: &Path,
+    _track_index: Option<u32>,
+    _mode: AnalysisMode,
 ) -> Result<ReplayGainResult> {
     Err(Error::FeatureNotAvailable {
         feature: "ReplayGain analysis",
@@ -1714,7 +1975,14 @@ mod tests {
 
     #[test]
     fn with_peak_replaces_peak_and_preserves_other_fields() {
-        let original = ReplayGainResult::new(-15.0, 6.0, 0.5, 44_100, AudioFileType::Mp3);
+        let original = ReplayGainResult::new(
+            -15.0,
+            6.0,
+            0.5,
+            44_100,
+            AudioFileType::Mp3,
+            AnalysisMode::Rg1,
+        );
         let updated = original.clone().with_peak(0.8);
         assert_eq!(updated.peak(), 0.8);
         assert_eq!(updated.gain_db(), original.gain_db());

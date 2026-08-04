@@ -50,6 +50,7 @@
 //! - [`gain`] - Gain adjustment operations and the [`GainOptions`] builder
 //! - [`ape`] - APEv2 tag reading, writing, and management
 //! - [`replaygain`] - ReplayGain loudness analysis
+//! - [`bs1770`] - ITU-R BS.1770 loudness engine for the RG2/R128 modes (feature-gated)
 //! - [`mp4meta`] - MP4/M4A metadata handling
 //! - [`aac`] - AAC bitstream parsing (feature-gated)
 //!
@@ -66,6 +67,8 @@ mod aac_codebooks;
 pub mod analysis;
 pub mod ape;
 pub mod apply;
+#[cfg(feature = "replaygain")]
+pub mod bs1770;
 pub mod error;
 mod frame;
 pub mod gain;
