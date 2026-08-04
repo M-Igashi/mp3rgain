@@ -749,7 +749,14 @@ mod tests {
     use crate::replaygain::AudioFileType;
 
     fn track_with_peak(peak: f64) -> ReplayGainResult {
-        ReplayGainResult::new(0.0, 0.0, peak, 44_100, AudioFileType::Mp3)
+        ReplayGainResult::new(
+            0.0,
+            0.0,
+            peak,
+            44_100,
+            AudioFileType::Mp3,
+            Default::default(),
+        )
     }
 
     fn opts_with_track(steps: i32, peak: f64, prevent_clipping: bool) -> ApplyOptions {
