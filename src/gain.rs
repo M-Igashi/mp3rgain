@@ -15,9 +15,6 @@ pub const GAIN_STEP_DB: f64 = 1.5;
 /// Maximum global_gain value
 pub const MAX_GAIN: u8 = 255;
 
-/// Minimum global_gain value
-pub const MIN_GAIN: u8 = 0;
-
 /// Channel selection for independent gain adjustment
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -44,14 +41,6 @@ impl Channel {
             0 => Some(Channel::Left),
             1 => Some(Channel::Right),
             _ => None,
-        }
-    }
-
-    /// Get the opposite channel
-    pub fn other(&self) -> Self {
-        match self {
-            Channel::Left => Channel::Right,
-            Channel::Right => Channel::Left,
         }
     }
 
@@ -162,7 +151,7 @@ impl GainOptions {
 
     /// Apply the configured gain adjustment, reading from `read_from` and writing
     /// to `write_to`. When the two paths are the same, this is equivalent to
-    /// [`apply`].
+    /// [`Self::apply`].
     ///
     /// Used by the `--temp-file` (`-t`) path so that the modified audio is written
     /// directly to the temp file without an intermediate full-file copy of the

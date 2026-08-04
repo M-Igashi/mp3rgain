@@ -187,25 +187,6 @@ pub fn delete_id3v2_replaygain(path: &Path) -> Result<()> {
     write_tag(path, &tag)
 }
 
-/// Write undo information to ID3v2 TXXX frames
-pub fn write_id3v2_undo(
-    path: &Path,
-    left_gain: i32,
-    right_gain: i32,
-    wrap: bool,
-    min: u8,
-    max: u8,
-) -> Result<()> {
-    write_id3v2_replaygain(
-        path,
-        &Id3v2ReplayGain {
-            undo: Some(crate::ape::format_undo_value(left_gain, right_gain, wrap)),
-            minmax: Some(crate::ape::format_minmax(min, max)),
-            ..Default::default()
-        },
-    )
-}
-
 /// Undo gain changes based on ID3v2 undo tag information
 pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
     let rg = read_id3v2_replaygain(path)?;

@@ -94,11 +94,11 @@ pub use error::{Error, Result};
 pub use gain::{
     apply_gain, apply_gain_db, apply_gain_to_peak, db_to_linear, db_to_steps, peak_to_headroom_db,
     peak_to_pcm_sample, steps_to_db, undo_gain, would_clip, Channel, GainOptions, GAIN_STEP_DB,
-    MAX_GAIN, MIN_GAIN,
+    MAX_GAIN,
 };
 pub use id3v2::{
     delete_id3v2_replaygain, read_id3v2_replaygain, undo_gain_id3v2, write_id3v2_replaygain,
-    write_id3v2_undo, Id3v2ReplayGain,
+    Id3v2ReplayGain,
 };
 
 use std::path::{Path, PathBuf};
