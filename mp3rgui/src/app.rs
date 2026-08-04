@@ -3,7 +3,7 @@ use crate::worker::{
     WorkerEvent, WorkerHandle,
 };
 use mp3rgain::ape::{parse_rg_gain, parse_rg_peak};
-use mp3rgain::replaygain::{self, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
+use mp3rgain::replaygain::{self, AnalysisMode, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{apply_gain_to_peak, db_to_steps, would_clip, AacAlbumInfo, Channel};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -167,6 +167,8 @@ struct PersistedSettings {
     show_filename_only: bool,
     #[serde(default)]
     single_album: bool,
+    #[serde(default)]
+    analysis_mode: AnalysisMode,
 }
 
 impl Default for PersistedSettings {
@@ -176,6 +178,7 @@ impl Default for PersistedSettings {
             target_volume: 89.0,
             show_filename_only: false,
             single_album: false,
+            analysis_mode: AnalysisMode::default(),
         }
     }
 }
@@ -260,6 +263,11 @@ pub struct Mp3rgainApp {
     /// as a single album regardless of directory (issue #224). Off = each
     /// folder is its own album, the default (issue #159).
     pub single_album: bool,
+
+    /// Loudness measurement mode for Track / Album Analysis (issue #272).
+    /// RG 1.0 (mp3gain-compatible) by default; the BS.1770 modes normalize
+    /// to their fixed LUFS targets and show loudness in LUFS.
+    pub analysis_mode: AnalysisMode,
 }
 
 impl Mp3rgainApp {
@@ -294,7 +302,28 @@ impl Mp3rgainApp {
             pending_drops: Vec::new(),
             show_filename_only: settings.show_filename_only,
             single_album: settings.single_album,
+            analysis_mode: settings.analysis_mode,
         }
+    }
+
+    /// Drop all analysis-derived row values. Called when the analysis mode
+    /// changes: RG1 and BS.1770 numbers live on different scales, so cached
+    /// results must not be reused across modes (issue #272). The stored-tag
+    /// snapshot is kept — it reflects the file, not the analysis.
+    pub fn invalidate_analysis_results(&mut self) {
+        for file in &mut self.files {
+            file.volume = None;
+            file.clipping = false;
+            file.track_gain = None;
+            file.track_clip = false;
+            file.album_volume = None;
+            file.album_gain = None;
+            file.album_clip = false;
+            file.track_result = None;
+            file.album_info = None;
+            file.status = FileStatus::Pending;
+        }
+        self.display_order_dirty = true;
     }
 
     /// Toggle the sort state when the given header is clicked. First click on
@@ -630,7 +659,7 @@ impl Mp3rgainApp {
         self.begin_worker(
             WorkerKind::TrackAnalysis,
             jobs.len(),
-            worker::spawn_track_analysis(ctx.clone(), jobs),
+            worker::spawn_track_analysis(ctx.clone(), jobs, self.analysis_mode),
         );
     }
 
@@ -691,7 +720,7 @@ impl Mp3rgainApp {
         self.begin_worker(
             WorkerKind::AlbumAnalysis,
             total,
-            worker::spawn_album_analysis(ctx.clone(), group_jobs),
+            worker::spawn_album_analysis(ctx.clone(), group_jobs, self.analysis_mode),
         );
     }
 
@@ -1136,7 +1165,8 @@ impl Mp3rgainApp {
                 album_info,
             } => {
                 let target = self.target_volume;
-                let (album_volume, album_gain) = volume_and_gain(album_info.album_gain_db, target);
+                let (album_volume, album_gain) =
+                    volume_and_gain(album_info.album_gain_db, target, self.analysis_mode);
                 let album_clip = would_clip(album_info.album_peak, album_gain);
 
                 for (idx, track_result) in successful {
@@ -1211,10 +1241,11 @@ impl Mp3rgainApp {
             }
             WorkerEvent::StoredTagsRead { idx, view } => {
                 let target = self.target_volume;
+                let mode = self.analysis_mode;
                 let is_import = self.worker_kind() == Some(WorkerKind::ImportScan);
                 if let Some(file) = self.files.get_mut(idx) {
                     if is_import {
-                        Self::populate_from_stored_tags(file, &view, target);
+                        Self::populate_from_stored_tags(file, &view, target, mode);
                     }
                     file.stored_tags = Some(view);
                 }
@@ -1266,13 +1297,15 @@ impl Mp3rgainApp {
     }
 
     /// Populate a file entry with track-level analysis results.
-    /// Volume is displayed relative to ReplayGain reference (89 dB) for MP3Gain compatibility.
+    /// In RG1 mode volume is displayed relative to the 89 dB reference for
+    /// mp3gain compatibility; in the BS.1770 modes it is the LUFS loudness.
     fn populate_track_analysis(
         file: &mut FileEntry,
         result: &ReplayGainResult,
         target_volume: f64,
     ) {
-        let (volume, gain) = volume_and_gain(result.gain_db(), target_volume);
+        let (volume, gain) =
+            volume_and_gain(result.gain_db(), target_volume, result.analysis_mode());
         file.volume = Some(volume);
         file.clipping = result.peak() >= 1.0;
         file.track_gain = Some(gain);
@@ -1287,14 +1320,25 @@ impl Mp3rgainApp {
     /// real analysis is never overwritten. Leaves `track_result` None — the
     /// tags carry no full analysis — so applying gain afterwards falls back to
     /// the headroom-based clipping check, exactly like manual gain.
-    fn populate_from_stored_tags(file: &mut FileEntry, view: &StoredTagsView, target_volume: f64) {
+    ///
+    /// In the BS.1770 modes the tag carries no loudness on the LUFS scale
+    /// (and no record of which algorithm wrote it), so the gain is shown
+    /// as-is and the Volume column is left empty (issue #272).
+    fn populate_from_stored_tags(
+        file: &mut FileEntry,
+        view: &StoredTagsView,
+        target_volume: f64,
+        mode: AnalysisMode,
+    ) {
         if file.status != FileStatus::Pending {
             return;
         }
+        let is_rg1 = mode == AnalysisMode::Rg1;
         let mut found = false;
         if let Some(track_gain_db) = view.track_gain.as_deref().and_then(parse_rg_gain) {
-            let (volume, gain) = volume_and_gain(track_gain_db, target_volume);
-            file.volume = Some(volume);
+            let (volume, gain) = volume_and_gain(track_gain_db, target_volume, AnalysisMode::Rg1);
+            let gain = if is_rg1 { gain } else { track_gain_db };
+            file.volume = is_rg1.then_some(volume);
             file.track_gain = Some(gain);
             if let Some(peak) = view.track_peak.as_deref().and_then(parse_rg_peak) {
                 file.clipping = peak >= 1.0;
@@ -1304,8 +1348,10 @@ impl Mp3rgainApp {
             found = true;
         }
         if let Some(album_gain_db) = view.album_gain.as_deref().and_then(parse_rg_gain) {
-            let (album_volume, album_gain) = volume_and_gain(album_gain_db, target_volume);
-            file.album_volume = Some(album_volume);
+            let (album_volume, album_gain) =
+                volume_and_gain(album_gain_db, target_volume, AnalysisMode::Rg1);
+            let album_gain = if is_rg1 { album_gain } else { album_gain_db };
+            file.album_volume = is_rg1.then_some(album_volume);
             file.album_gain = Some(album_gain);
             if let Some(peak) = view.album_peak.as_deref().and_then(parse_rg_peak) {
                 file.album_clip = would_clip(peak, album_gain);
@@ -1377,13 +1423,20 @@ impl Mp3rgainApp {
     }
 }
 
-/// Display pair for a ReplayGain value: volume relative to the 89 dB
-/// reference, and the gain re-targeted to `target`.
-fn volume_and_gain(gain_db: f64, target: f64) -> (f64, f64) {
-    (
-        REPLAYGAIN_REFERENCE_DB - gain_db,
-        target - REPLAYGAIN_REFERENCE_DB + gain_db,
-    )
+/// Display pair for a ReplayGain value, mode-aware (issue #272).
+///
+/// RG1: volume relative to the 89 dB reference, and the gain re-targeted to
+/// the user-adjustable `target`. BS.1770 modes: measured loudness in LUFS,
+/// and the gain to the mode's fixed LUFS target (the Target control is
+/// disabled in those modes).
+fn volume_and_gain(gain_db: f64, target: f64, mode: AnalysisMode) -> (f64, f64) {
+    match mode.target_lufs() {
+        Some(target_lufs) => (target_lufs - gain_db, gain_db),
+        None => (
+            REPLAYGAIN_REFERENCE_DB - gain_db,
+            target - REPLAYGAIN_REFERENCE_DB + gain_db,
+        ),
+    }
 }
 
 /// Compare two `Option<f64>` values, putting `None` always at the bottom
@@ -1481,6 +1534,7 @@ impl eframe::App for Mp3rgainApp {
             target_volume: self.target_volume,
             show_filename_only: self.show_filename_only,
             single_album: self.single_album,
+            analysis_mode: self.analysis_mode,
         };
         eframe::set_value(storage, SETTINGS_KEY, &settings);
     }

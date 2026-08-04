@@ -12,7 +12,7 @@ use mp3rgain::apply::{
     apply_with_options, predict_apply, read_mtime, restore_timestamp, write_album_minmax,
     ApplyOptions,
 };
-use mp3rgain::replaygain::{self, ReplayGainResult};
+use mp3rgain::replaygain::{self, AnalysisMode, ReplayGainResult};
 use mp3rgain::{read_gain_tags_auto, AacAlbumInfo, Channel, GainTagSource};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -217,7 +217,11 @@ impl Default for ApplyOptionsUi {
 /// file emits a `TrackAnalyzed` event immediately so the table updates as
 /// work happens instead of in a single batch at the end. Cancellation is
 /// checked between files.
-pub fn spawn_track_analysis(ctx: egui::Context, files: Vec<(usize, PathBuf)>) -> WorkerHandle {
+pub fn spawn_track_analysis(
+    ctx: egui::Context,
+    files: Vec<(usize, PathBuf)>,
+    mode: AnalysisMode,
+) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_w = Arc::clone(&cancel);
@@ -232,7 +236,7 @@ pub fn spawn_track_analysis(ctx: egui::Context, files: Vec<(usize, PathBuf)>) ->
             let (analyzed, errors) = (&analyzed, &errors);
             run_job_pool(files, &cancel_w, move |(idx, path)| {
                 send(&tx, &ctx, WorkerEvent::FileStart { idx });
-                match replaygain::analyze_track(&path) {
+                match replaygain::analyze_track_with_mode(&path, None, mode, None) {
                     Ok(result) => {
                         analyzed.fetch_add(1, Ordering::Relaxed);
                         send(&tx, &ctx, WorkerEvent::TrackAnalyzed { idx, result });
@@ -287,6 +291,7 @@ pub fn spawn_track_analysis(ctx: egui::Context, files: Vec<(usize, PathBuf)>) ->
 pub fn spawn_album_analysis(
     ctx: egui::Context,
     groups: Vec<Vec<(usize, PathBuf)>>,
+    mode: AnalysisMode,
 ) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -334,6 +339,7 @@ pub fn spawn_album_analysis(
                     skip_errors: true,
                     on_complete: Some(&on_complete),
                     cancel: Some(&cancel_w),
+                    mode,
                     ..Default::default()
                 },
             );

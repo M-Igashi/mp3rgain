@@ -76,15 +76,28 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
 
             ui.separator();
 
-            // Target volume
+            // Target volume. Adjustable on the 89 dB scale in RG1 mode;
+            // the BS.1770 modes normalize to their fixed LUFS target
+            // (issue #272).
             ui.label("Target:");
-            ui.add_enabled(
-                !app.is_processing(),
-                egui::DragValue::new(&mut app.target_volume)
-                    .speed(0.1)
-                    .range(75.0..=100.0)
-                    .suffix(" dB"),
-            );
+            match app.analysis_mode.target_lufs() {
+                Some(target_lufs) => {
+                    ui.label(format!("{} LUFS", target_lufs)).on_hover_text(
+                        "Fixed target of the selected analysis mode. \
+                         Switch back to RG 1.0 in the Options row to adjust \
+                         the target.",
+                    );
+                }
+                None => {
+                    ui.add_enabled(
+                        !app.is_processing(),
+                        egui::DragValue::new(&mut app.target_volume)
+                            .speed(0.1)
+                            .range(75.0..=100.0)
+                            .suffix(" dB"),
+                    );
+                }
+            }
         });
     });
 }
