@@ -202,8 +202,8 @@ All core functionality complete:
 
 ### Future Enhancements
 
-- [ ] EBU R128 loudness analysis (`--r128` option, ITU-R BS.1770 / LUFS-based)
-- [ ] ReplayGain 2.0 support (`--rg2` option, R128-based with -18 LUFS reference)
+- [x] EBU R128 loudness analysis (`--r128` option, ITU-R BS.1770 / LUFS-based) (#269, #270, #271)
+- [x] ReplayGain 2.0 support (`--rg2` option, R128-based with -18 LUFS reference) (#269, #270, #271)
 - [ ] Official Debian repository (ITP submission)
 - [ ] Homebrew core inclusion (currently in tap)
 - [ ] Fedora/RPM package

@@ -122,6 +122,8 @@ A native GUI application (`mp3rgui`) is available for users who prefer a graphic
 |--------|-------------|
 | `-r` | Apply Track gain (ReplayGain) |
 | `-a` | Apply Album gain (ReplayGain) |
+| `--rg2` | Use ReplayGain 2.0 analysis (BS.1770, −18 LUFS reference) |
+| `--r128` | Use EBU R128 analysis (BS.1770, −23 LUFS target) |
 | `-g <i>` | Apply gain of i steps (1 step = 1.5 dB) |
 | `-d <n>` | Modify suggested dB gain by n (mp3gain-compatible; applied with `-r` / `-a`) |
 | `-u` | Undo gain changes |
@@ -157,7 +159,7 @@ The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained up
 
 **AAC/M4A on the CLI is the differentiator.** Among CLIs, rsgain / loudgain / FFmpeg either only write ReplayGain tags (which non-compliant players ignore) or re-encode the audio. foobar2000 has a comparable "Apply ReplayGain to file content" feature for AAC in MP4/MKA, but it is Windows GUI only, has no undo, and is unsuited for batch, headless, or container workflows. mp3rgain fills the cross-platform, scriptable, reversible niche.
 
-mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) for full compatibility with the original mp3gain / aacgain. Loudness values will differ from EBU R128/LUFS-based tools (foobar2000, loudgain, ffmpeg loudnorm).
+mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) by default for full compatibility with the original mp3gain / aacgain — an existing library re-scans to identical values. Modern BS.1770 loudness measurement is available as an opt-in: `--rg2` (ReplayGain 2.0, −18 LUFS reference) and `--r128` (EBU R128, −23 LUFS target) produce values consistent with foobar2000, loudgain, and ffmpeg loudnorm.
 
 ## Use mp3rgain in Docker / CI
 

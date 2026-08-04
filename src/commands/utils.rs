@@ -45,7 +45,7 @@ pub fn run_album_analysis(
             on_progress: (!parallel).then_some(&on_progress as _),
             on_complete: parallel.then_some(&on_complete as _),
             cancel: None,
-            mode: Default::default(),
+            mode: opts.analysis_mode,
         },
     );
 

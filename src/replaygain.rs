@@ -167,6 +167,12 @@ impl ReplayGainResult {
         self.analysis_mode
     }
 
+    /// Integrated loudness in LUFS when measured with a BS.1770-based mode;
+    /// `None` for [`AnalysisMode::Rg1`].
+    pub fn loudness_lufs(&self) -> Option<f64> {
+        self.analysis_mode.target_lufs().map(|_| self.loudness_db)
+    }
+
     /// Convert gain in dB to MP3 gain steps (1.5 dB per step)
     pub fn gain_steps(&self) -> i32 {
         crate::gain::db_to_steps(self.gain_db)
@@ -1293,14 +1299,16 @@ pub fn analyze_track_with_index(
 ///
 /// [`AnalysisMode::Rg1`] is identical to [`analyze_track_with_index`]; the
 /// other modes measure BS.1770 integrated loudness and compute the gain
-/// against the mode's target level.
+/// against the mode's target level. `on_progress` behaves like
+/// [`analyze_track_with_progress`].
 #[cfg(feature = "replaygain")]
 pub fn analyze_track_with_mode(
     file_path: &Path,
     track_index: Option<u32>,
     mode: AnalysisMode,
+    on_progress: Option<&dyn Fn(u64, u64)>,
 ) -> Result<ReplayGainResult> {
-    let internal = analyze_track_internal(file_path, track_index, None, mode)?;
+    let internal = analyze_track_internal(file_path, track_index, on_progress, mode)?;
     Ok(internal.result)
 }
 
@@ -1751,6 +1759,7 @@ pub fn analyze_track_with_mode(
     _file_path: &Path,
     _track_index: Option<u32>,
     _mode: AnalysisMode,
+    _on_progress: Option<&dyn Fn(u64, u64)>,
 ) -> Result<ReplayGainResult> {
     Err(Error::FeatureNotAvailable {
         feature: "ReplayGain analysis",

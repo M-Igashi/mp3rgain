@@ -64,6 +64,28 @@ Each file is normalized individually to the 89 dB reference level.
 Analyze and apply Album gain using the ReplayGain 1.0 algorithm.
 All files are treated as an album and normalized together.
 .TP
+.B \-\-rg2
+Measure loudness with the ReplayGain 2.0 algorithm (ITU-R BS.1770
+integrated loudness, gated) against the \-18 LUFS reference instead of
+the default ReplayGain 1.0 algorithm. The reference corresponds to the
+same perceived level as the classic 89 dB SPL reference; only the
+measurement is different. Combines with
+.BR \-r ,
+.BR \-a ,
+.BR \-d ,
+.B \-m
+and
+.BR \-k .
+Mutually exclusive with
+.BR \-\-r128 .
+.TP
+.B \-\-r128
+Like
+.BR \-\-rg2 ,
+but normalizes to the EBU R128 broadcast target of \-23 LUFS.
+Mutually exclusive with
+.BR \-\-rg2 .
+.TP
 .B \-e
 Skip album analysis even when processing multiple files.
 Apply track gain only.

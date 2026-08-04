@@ -1,3 +1,4 @@
+use mp3rgain::replaygain::AnalysisMode;
 use mp3rgain::Channel;
 use std::path::PathBuf;
 
@@ -36,7 +37,10 @@ pub struct Options {
     pub force_recalc: bool, // -s r: accepted for compatibility (always recalculates)
     pub track_gain: bool,   // -r (apply track gain)
     pub album_gain: bool,   // -a (apply album gain)
-    pub skip_album: bool,   // -e: skip album analysis
+    // --rg2 / --r128: opt-in BS.1770 loudness modes (issue #269).
+    // Default Rg1 keeps mp3gain-identical values.
+    pub analysis_mode: AnalysisMode,
+    pub skip_album: bool,         // -e: skip album analysis
     pub max_amplitude_only: bool, // -x: only find max amplitude
     pub track_index: Option<u32>, // -i <index>: track index for multi-track files
 
