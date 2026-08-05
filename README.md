@@ -16,9 +16,6 @@
 
 mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global_gain` field in each frame. This preserves audio quality while achieving permanent volume changes.
 
-> **The only actively maintained CLI for lossless AAC/M4A bitstream gain adjustment.**
-> aacgain (the historic CLI) has been unmaintained since ~2009 and rarely builds on modern 64-bit systems. foobar2000 also offers re-encode-free AAC gain on MP4/MKA via its "Apply ReplayGain to file content" feature (Windows GUI only, no undo). mp3rgain is the actively maintained, cross-platform, scriptable, undoable option for headless / batch / CI use.
-
 ## Features
 
 - **CLI lossless AAC bitstream gain**: re-encode-free `global_gain` rewrite for AAC/M4A — replacing the long-abandoned aacgain, with `-u` undo (foobar2000's GUI equivalent has no undo path)
