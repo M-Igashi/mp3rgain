@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current Status: v2.8.0 (Production Ready)
+## Current Status: v3.0.0 (Production Ready)
 
 **Positioning:** mp3rgain is the only actively maintained CLI that performs lossless `global_gain` rewrite on AAC/M4A files (aacgain has been abandoned since ~2009; foobar2000's "Apply ReplayGain to file content" offers a comparable scalefactor-based AAC rewrite but is Windows GUI only with no undo). For MP3 it's a modern drop-in replacement for mp3gain; for AAC on the command line it has no equivalent.
 
@@ -198,12 +198,19 @@ All core functionality complete:
 - [x] MP3 apply/undo on a single in-memory buffer — one read and one write per file (10d04a6)
 - [x] GUI: parallel Find Max Amplitude / Undo / Delete Tags and a virtualized file table for large libraries (#194)
 
+### v3.0.0 - BS.1770 Loudness Modes & API Cleanup (Issue #269)
+
+- [x] ITU-R BS.1770-4 gated loudness engine, no new dependencies (#270, PR #273)
+- [x] Opt-in `--rg2` (ReplayGain 2.0, -18 LUFS) and `--r128` (EBU R128, -23 LUFS) CLI flags;
+      RG1 stays the default with mp3gain-identical values (#271, PR #274)
+- [x] GUI analysis mode selector with LUFS display (#272, PR #275)
+- [x] Removed unused public API items (semver-major) (#266, PR #276)
+- [x] Post-review simplification pass over the v3.0 changes (PR #277)
+
 ## Upcoming Goals
 
 ### Future Enhancements
 
-- [x] EBU R128 loudness analysis (`--r128` option, ITU-R BS.1770 / LUFS-based) (#269, #270, #271)
-- [x] ReplayGain 2.0 support (`--rg2` option, R128-based with -18 LUFS reference) (#269, #270, #271)
 - [ ] Official Debian repository (ITP submission)
 - [ ] Homebrew core inclusion (currently in tap)
 - [ ] Fedora/RPM package

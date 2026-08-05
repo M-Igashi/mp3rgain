@@ -77,8 +77,8 @@ All options from the original mp3gain are fully implemented in mp3rgain:
 
 | Aspect | mp3rgain | aacgain/mp3gain |
 |--------|----------|-----------------|
-| Algorithm | ReplayGain 1.0 | ReplayGain 1.0 |
-| Reference level | 89 dB | 89 dB |
+| Algorithm | ReplayGain 1.0 (default); BS.1770 opt-in via `--rg2` / `--r128` (v3.0+) | ReplayGain 1.0 |
+| Reference level | 89 dB (RG1) / −18 LUFS (`--rg2`) / −23 LUFS (`--r128`) | 89 dB |
 | Window size | 50ms | 50ms |
 | Percentile | 95th | 95th |
 | Equal-loudness filter | Yule-Walker + Butterworth | Yule-Walker + Butterworth |
