@@ -211,6 +211,21 @@ function isReal(name) {
   return !name.endsWith('.sha256') && !name.endsWith('.tar.gz.sha256');
 }
 
+// The release assets for every tag before v2.0.0 were deleted from GitHub on
+// 2026-08-07 to tidy up the releases page. GitHub tracks download_count per
+// asset and discards it with the asset, so from that snapshot onwards the API
+// under-reports the all-time total by a fixed amount. This is the sum those
+// assets had reached in the last snapshot that still contained them
+// (2026-08-06, same isReal filter), re-added so the trend stays continuous.
+const ARCHIVED_ASSET_DOWNLOADS = 2848;
+const ARCHIVED_FROM_DATE = '2026-08-07';
+
+function ghTotalFor(snapshot) {
+  const live = snapshot.github_releases.reduce((sum, r) =>
+    sum + r.assets.filter(a => isReal(a.name)).reduce((s, a) => s + a.download_count, 0), 0);
+  return snapshot.date >= ARCHIVED_FROM_DATE ? live + ARCHIVED_ASSET_DOWNLOADS : live;
+}
+
 function classifyAsset(name) {
   if (name.startsWith('mp3rgui')) return 'gui';
   if (name.startsWith('mp3rgain')) return 'cli';
@@ -241,8 +256,7 @@ async function main() {
 
   // Summary cards
   const ghReleases = latest.github_releases;
-  const ghTotal = ghReleases.reduce((sum, r) =>
-    sum + r.assets.filter(a => isReal(a.name)).reduce((s, a) => s + a.download_count, 0), 0);
+  const ghTotal = ghTotalFor(latest);
   document.getElementById('gh-total').textContent = num(ghTotal);
   document.getElementById('crates-total').textContent = num(latest.crates_io.total_downloads);
   const ppaCliTotal = latest.ppa_cli?.total_downloads || 0;
@@ -365,8 +379,7 @@ async function main() {
   // Trend chart (only if we have history)
   if (data.length > 1) {
     const trendLabels = data.map(d => d.date);
-    const trendGH = data.map(d => d.github_releases.reduce((sum, r) =>
-      sum + r.assets.filter(a => isReal(a.name)).reduce((s, a) => s + a.download_count, 0), 0));
+    const trendGH = data.map(ghTotalFor);
     const trendCrates = data.map(d => d.crates_io.total_downloads);
     const trendPPA = data.map(d => (d.ppa_cli?.total_downloads || 0) + (d.ppa_gui?.total_downloads || 0));
     const trendPkgstats = data.map(d => (d.pkgstats || []).reduce((s, p) => s + (p.count || 0), 0));
