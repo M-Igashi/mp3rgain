@@ -54,14 +54,14 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 Binaries for all platforms are also available from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases).
 
 > [!NOTE]
-> **Windows: Defender may flag `mp3rgui.exe` as a false positive.**
-> The GUI is an unsigned, statically linked Rust binary, which occasionally trips
-> Microsoft Defender's cloud/ML heuristics (e.g. `Trojan:Win32/Sprisky.U!cl`).
-> It is a false positive — every release is built from public source by a
+> **Windows: Defender occasionally flags `mp3rgui.exe` as a false positive.**
+> The GUI is an unsigned, statically linked Rust binary, which sometimes trips
+> Microsoft Defender's cloud/ML heuristics. Any such detection is a false positive:
+> every release is built from public source by a
 > [public GitHub Actions workflow](.github/workflows/release.yml), and each release
-> ships `.sha256` files so you can verify what you downloaded. False positives are
-> reported to Microsoft as they appear, and usually clear within a few days once
-> the definitions update. If you hit this, please
+> ships `.sha256` files so you can verify what you downloaded. Detections are
+> reported to Microsoft when they appear — the v3.0.0 binaries were analysed and
+> confirmed **"Not malware"**. If you hit a detection on a newer release, please
 > [open an issue](https://github.com/M-Igashi/mp3rgain/issues) so it can be reported.
 
 ## Quick Start
