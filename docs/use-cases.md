@@ -4,7 +4,7 @@ This document describes real-world use cases for mp3rgain.
 
 ## Standout Capability: Lossless AAC Volume Adjustment on the CLI
 
-mp3rgain is the **only actively maintained CLI** that performs lossless `global_gain` rewrite on AAC/M4A files. ([foobar2000](https://www.foobar2000.org/)'s "Apply ReplayGain to file content" does a comparable scalefactor-based AAC adjustment in MP4/MKA — if you are on a Windows desktop and happy in a GUI, use it. It has no undo path and no command line.) Use cases that specifically benefit from a scriptable, cross-platform option:
+mp3rgain is the **only actively maintained CLI** that runs a ReplayGain analysis and then performs a lossless `global_gain` rewrite on AAC/M4A files — tags *and* baked-in gain, the way aacgain used to. ([foobar2000](https://www.foobar2000.org/) is the reference-grade ReplayGain suite and its "Apply ReplayGain to file content" does a comparable scalefactor-based AAC adjustment in MP4/MKA — if you are on a Windows desktop and happy in a GUI, use it. It has no undo path and no command line.) Use cases that specifically benefit from a scriptable, cross-platform option:
 
 - **iTunes / Apple Music libraries on macOS / Linux**: Most personal music libraries on Apple platforms are AAC/M4A. Normalizing them without re-encoding from a non-Windows host previously had no maintained option.
 - **DJ workflows with AAC**: DJ hardware (CDJs, XDJs, controllers) ignores ReplayGain tags. AAC tracks bought from iTunes Store or other M4A sources previously had to be re-encoded to lose loudness, sacrificing quality.
