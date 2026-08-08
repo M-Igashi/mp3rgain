@@ -309,6 +309,7 @@ fn apply_replaygain_aac_with_album_into(
             apply_gain_to_peak(album.album_peak, applied_db),
         );
     }
+    tags.set_algorithm(result.analysis_mode());
 
     match mp4meta::write_replaygain_tags(file, &tags) {
         Ok(()) => {

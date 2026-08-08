@@ -3,7 +3,7 @@ use colored::*;
 use mp3rgain::{
     read_gain_tags_auto, GainTagSource, StoredGainTags, TAG_MP3GAIN_ALBUM_MINMAX,
     TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
-    TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
+    TAG_REPLAYGAIN_ALGORITHM, TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -46,6 +46,7 @@ impl CheckTagInfo<'_> {
                     (TAG_REPLAYGAIN_TRACK_PEAK, &tags.track_peak),
                     (TAG_REPLAYGAIN_ALBUM_GAIN, &tags.album_gain),
                     (TAG_REPLAYGAIN_ALBUM_PEAK, &tags.album_peak),
+                    (TAG_REPLAYGAIN_ALGORITHM, &tags.algorithm),
                 ];
                 for (label, value) in rg_fields {
                     if let Some(v) = value {
@@ -61,7 +62,9 @@ impl CheckTagInfo<'_> {
             OutputFormat::Tsv => {
                 writeln!(
                     out,
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    // The algorithm column is appended last so existing
+                    // column indices stay stable for scripts.
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     filename,
                     tags.undo.as_deref().unwrap_or("-"),
                     tags.minmax.as_deref().unwrap_or("-"),
@@ -69,7 +72,8 @@ impl CheckTagInfo<'_> {
                     tags.track_peak.as_deref().unwrap_or("-"),
                     tags.album_gain.as_deref().unwrap_or("-"),
                     tags.album_peak.as_deref().unwrap_or("-"),
-                    tags.album_minmax.as_deref().unwrap_or("-")
+                    tags.album_minmax.as_deref().unwrap_or("-"),
+                    tags.algorithm.as_deref().unwrap_or("-")
                 )
                 .ok();
                 None

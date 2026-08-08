@@ -90,6 +90,22 @@ impl AnalysisMode {
         }
     }
 
+    /// Value for the `REPLAYGAIN_ALGORITHM` tag, or `None` when the mode needs
+    /// no tag. Suggested by skamp on the Hydrogenaudio mp3rgain thread.
+    ///
+    /// [`Rg1`](AnalysisMode::Rg1) writes nothing: every mp3gain-era file in
+    /// existence carries untagged classic values, so an absent tag already
+    /// means "classic" and adding one would gratuitously diverge from
+    /// mp3gain's output. `ITU-R BS.1770` is the string foobar2000 writes for
+    /// the RG2 measurement; R128 shares it because the measurement is the
+    /// same and only the target level differs.
+    pub fn algorithm_tag(&self) -> Option<&'static str> {
+        match self {
+            AnalysisMode::Rg1 => None,
+            AnalysisMode::Rg2 | AnalysisMode::R128 => Some("ITU-R BS.1770"),
+        }
+    }
+
     /// Lowercase short name (`"rg1"` / `"rg2"` / `"r128"`) for machine-readable
     /// output, following the [`Channel::name`](crate::Channel::name) convention.
     pub fn name(&self) -> &'static str {

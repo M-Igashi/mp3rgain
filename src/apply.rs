@@ -266,6 +266,7 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
                 if let Some((album_gain, album_peak)) = res.album {
                     tags.set_album(album_gain, album_peak);
                 }
+                tags.set_algorithm(res.mode);
                 mp4meta::write_replaygain_tags(file_path, &tags)?;
             }
         } else if !ape_rg_folded || needs_reanalysis {
@@ -449,6 +450,7 @@ struct RgResidual {
     track_gain_db: f64,
     track_peak: f64,
     album: Option<(f64, f64)>,
+    mode: crate::replaygain::AnalysisMode,
 }
 
 impl RgResidual {
@@ -458,6 +460,7 @@ impl RgResidual {
             track_peak: Some(ape::format_rg_peak(self.track_peak)),
             album_gain: self.album.map(|(g, _)| ape::format_rg_gain(g)),
             album_peak: self.album.map(|(_, p)| ape::format_rg_peak(p)),
+            algorithm: self.mode.algorithm_tag().map(str::to_string),
         }
     }
 
@@ -468,6 +471,7 @@ impl RgResidual {
             track_peak: ape.track_peak,
             album_gain: ape.album_gain,
             album_peak: ape.album_peak,
+            algorithm: ape.algorithm,
             ..Default::default()
         }
     }
@@ -487,6 +491,9 @@ fn compute_rg_residual(
     reanalyze: bool,
 ) -> Option<RgResidual> {
     let track = opts.track_result.as_ref()?;
+    // Re-analysis must use the mode the original measurement used, or the
+    // residual would mix an RG1 reading into an RG2/R128 gain value.
+    let mode = track.analysis_mode();
 
     let arithmetic = || {
         let db = steps_to_db(actual_steps);
@@ -497,7 +504,7 @@ fn compute_rg_residual(
         )
     };
     let (track_gain_db, track_peak, applied_db) = if reanalyze {
-        match crate::replaygain::analyze_track(modified_path) {
+        match crate::replaygain::analyze_track_with_mode(modified_path, None, mode, None) {
             Ok(post) => (
                 post.gain_db(),
                 post.peak(),
@@ -522,6 +529,7 @@ fn compute_rg_residual(
         track_gain_db,
         track_peak,
         album,
+        mode,
     })
 }
 
@@ -605,6 +613,7 @@ fn apply_mp3_id3v2_bytes(
                 rg.track_peak = values.track_peak;
                 rg.album_gain = values.album_gain;
                 rg.album_peak = values.album_peak;
+                rg.algorithm = values.algorithm;
             }
         }
 
