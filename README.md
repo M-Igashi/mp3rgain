@@ -20,7 +20,7 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 
 - **CLI lossless AAC bitstream gain**: re-encode-free `global_gain` rewrite for AAC/M4A — replacing the long-abandoned aacgain, with `-u` undo (foobar2000's GUI equivalent has no undo path)
 - **Lossless & Reversible**: No re-encoding, all changes can be undone (MP3 and AAC)
-- **ReplayGain**: Track and album gain analysis for MP3 and AAC/M4A
+- **ReplayGain**: Track and album gain analysis for MP3 and AAC/M4A, with standard `REPLAYGAIN_*` tags written alongside the bitstream change (APEv2, ID3v2 TXXX, or MP4 freeform)
 - **Zero dependencies**: Single static binary (no ffmpeg, no mp3gain, no aacgain)
 - **Cross-platform**: macOS, Linux, Windows (x86_64 and ARM64)
 - **mp3gain / aacgain compatible**: Drop-in replacement with identical CLI
@@ -165,14 +165,18 @@ real-corpus benchmark numbers.
 
 The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained upstream since ~2015 (though distribution maintainers continue to apply security patches). [aacgain](http://aacgain.altosdesign.com/), its AAC counterpart, has been unmaintained since ~2009 and is effectively unbuildable on modern 64-bit systems. mp3rgain is a modern, memory-safe replacement written in Rust that covers both.
 
-**AAC/M4A on the CLI is the differentiator.** Among CLIs, rsgain / loudgain / FFmpeg either only write ReplayGain tags (which non-compliant players ignore) or re-encode the audio. [foobar2000](https://www.foobar2000.org/) has a comparable "Apply ReplayGain to file content" feature for AAC in MP4/MKA, but it is Windows GUI only, has no undo, and is not built for batch, headless, or container workflows. mp3rgain fills the cross-platform, scriptable, reversible niche.
+These are all ReplayGain tools, mp3rgain included — it runs a ReplayGain analysis and writes the standard `REPLAYGAIN_*` tags like any tagger. What separates them is where the correction ends up. rsgain / loudgain / FFmpeg `-af replaygain` stop at the tags, which non-compliant players ignore; `ffmpeg loudnorm` re-encodes. The mp3gain lineage — mp3gain, aacgain, and now mp3rgain — writes the tags *and* bakes the gain into the bitstream, losslessly and reversibly.
+
+**AAC/M4A on the CLI is the differentiator.** That combination is what has no other maintained CLI implementation: [foobar2000](https://www.foobar2000.org/) offers an equivalent "Apply ReplayGain to file content" pass for AAC in MP4/MKA, but it is Windows GUI only, has no undo, and is not built for batch, headless, or container workflows. mp3rgain fills the cross-platform, scriptable, reversible niche.
 
 > [!TIP]
-> **On Windows with a GUI, and want current ReplayGain? Use [foobar2000](https://www.foobar2000.org/).**
-> Its ReplayGain scanner is BS.1770-based, it covers more formats than mp3rgain does, and it can
-> bake gain into MP3 and AAC bitstreams too. mp3rgain is the better fit when you need a command
-> line, a non-Windows host, mp3gain-identical ReplayGain 1.0 values, or an undo path — and the two
-> coexist fine, since mp3rgain writes the same standard `REPLAYGAIN_*` tags foobar2000 reads.
+> **Want the most standards-faithful ReplayGain, on Windows, in a GUI? Use [foobar2000](https://www.foobar2000.org/).**
+> It is the closest thing ReplayGain 2.0 has to a reference implementation — a full BS.1770 scanner
+> whose numbers other tools get checked against — it tags far more formats than mp3rgain does, and
+> it can bake gain into MP3 and AAC bitstreams too. mp3rgain is the better fit when you need a
+> command line, a non-Windows host, mp3gain-identical ReplayGain 1.0 values, or an undo path — and
+> the two coexist fine, since mp3rgain writes the same standard `REPLAYGAIN_*` tags foobar2000
+> reads, with `--rg2` deliberately matching its measurement.
 
 mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) by default for full compatibility with the original mp3gain / aacgain — an existing library re-scans to identical values. Modern BS.1770 loudness measurement is available as an opt-in: `--rg2` (ReplayGain 2.0, −18 LUFS reference) and `--r128` (EBU R128, −23 LUFS target) produce values consistent with foobar2000, loudgain, and ffmpeg loudnorm.
 
@@ -184,8 +188,8 @@ Official multi-arch images (`linux/amd64`, `linux/arm64`) are published to GHCR:
 
 ```
 ghcr.io/m-igashi/mp3rgain:latest
-ghcr.io/m-igashi/mp3rgain:v2          # latest 2.x
-ghcr.io/m-igashi/mp3rgain:v2.8.0      # exact version
+ghcr.io/m-igashi/mp3rgain:v3          # latest 3.x
+ghcr.io/m-igashi/mp3rgain:v3.1.0      # exact version
 ```
 
 The image is built `FROM scratch` with a fully static (musl) binary — no

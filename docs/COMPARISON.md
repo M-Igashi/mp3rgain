@@ -2,7 +2,13 @@
 
 This document provides a detailed comparison between mp3rgain and the original aacgain/mp3gain tools.
 
-> **Headline:** mp3rgain is the **only actively maintained CLI** that performs lossless `global_gain` rewrite on AAC/M4A files. aacgain has been effectively abandoned since ~2009 and is unbuildable on most modern 64-bit systems; among other CLIs, rsgain / loudgain / FFmpeg either tags-only or re-encodes. foobar2000 has a comparable "Apply ReplayGain to file content" feature for AAC in MP4/MKA, but it is Windows GUI only with no undo and is not built for batch / headless / CI use. If you need re-encode-free AAC volume adjustment from a script, container, or non-Windows host in 2026, mp3rgain is the only practical choice — **on a Windows desktop with a GUI, foobar2000 is the one to reach for.**
+> **Headline:** mp3rgain is the **only actively maintained CLI** that performs lossless `global_gain` rewrite on AAC/M4A files. aacgain has been effectively abandoned since ~2009 and is unbuildable on most modern 64-bit systems; among other CLIs, rsgain / loudgain stop at ReplayGain tags and FFmpeg re-encodes. foobar2000 has a comparable "Apply ReplayGain to file content" feature for AAC in MP4/MKA, but it is Windows GUI only with no undo and is not built for batch / headless / CI use. If you need re-encode-free AAC volume adjustment from a script, container, or non-Windows host in 2026, mp3rgain is the only practical choice — **on a Windows desktop with a GUI, foobar2000 is the one to reach for.**
+
+> **A framing note before the tables:** every tool discussed here is a ReplayGain tool, mp3rgain
+> included. The mp3gain lineage (mp3gain, aacgain, mp3rgain) runs a ReplayGain analysis, writes the
+> standard `REPLAYGAIN_*` tags, *and* bakes the correction into the bitstream; foobar2000 can do
+> both as well. "Tagger vs gain tool" is the wrong axis — the axis that matters is whether a tool
+> can touch the bitstream at all, and whether it can put it back.
 
 ## Overview
 
@@ -11,7 +17,7 @@ This document provides a detailed comparison between mp3rgain and the original a
 | **Language** | Rust | C | C |
 | **Last Update** | Active (2026) | 2022 | 2018 |
 | **License** | MIT | LGPL | LGPL |
-| **Version** | 2.8.0 | 1.8.2 | 1.6.2 |
+| **Version** | 3.1.0 | 1.8.2 | 1.6.2 |
 | **Repository** | [M-Igashi/mp3rgain](https://github.com/M-Igashi/mp3rgain) | [dgilman/aacgain](https://github.com/dgilman/aacgain) | SourceForge |
 
 ## Feature Comparison
@@ -254,20 +260,20 @@ If you apply `global_gain` adjustment with mp3rgain and later add ReplayGain tag
 
 For AAC/M4A files specifically, the choice of tool matters more than for MP3, because almost no other modern tool can avoid re-encoding:
 
-| Tool | AAC approach | Lossless? | Player-agnostic? | Maintained? | CLI / scriptable? |
-|------|--------------|-----------|------------------|-------------|-------------------|
-| **mp3rgain** | `global_gain` rewrite | **Yes** | **Yes** | **Yes (active)** | **Yes** |
-| aacgain | `global_gain` rewrite | Yes | Yes | No (~2009) | Yes |
-| foobar2000 "Apply ReplayGain to file content" | scalefactor rewrite (MP4/MKA AAC) | Yes (one-shot, no undo) | Yes | Yes | No (Windows GUI only) |
-| rsgain | ReplayGain 2.0 tags | Yes (file untouched) | No (player must read tags) | Yes | Yes |
-| loudgain | ReplayGain 2.0 tags | Yes (file untouched) | No (player must read tags) | Yes | Yes |
-| FFmpeg `volume` | Re-encode | No (lossy) | Yes | Yes | Yes |
-| FFmpeg `loudnorm` | Re-encode | No (lossy) | Yes | Yes | Yes |
-| beets ReplayGain plugin | Tags via backend | Yes (file untouched) | No (player must read tags) | Yes | Yes |
+| Tool | AAC approach | Writes RG tags? | Lossless? | Player-agnostic? | Maintained? | CLI / scriptable? |
+|------|--------------|-----------------|-----------|------------------|-------------|-------------------|
+| **mp3rgain** | `global_gain` rewrite | **Yes (RG1 / RG2 / R128)** | **Yes** | **Yes** | **Yes (active)** | **Yes** |
+| aacgain | `global_gain` rewrite | Yes (RG1) | Yes | Yes | No (~2009) | Yes |
+| foobar2000 "Apply ReplayGain to file content" | scalefactor rewrite (MP4/MKA AAC) | Yes (RG2 — reference implementation) | Yes (one-shot, no undo) | Yes | Yes | No (Windows GUI only) |
+| rsgain | ReplayGain 2.0 tags | Yes (RG2 / R128) | Yes (file untouched) | No (player must read tags) | Yes | Yes |
+| loudgain | ReplayGain 2.0 tags | Yes (RG2 / R128) | Yes (file untouched) | No (player must read tags) | Yes | Yes |
+| FFmpeg `volume` | Re-encode | No | No (lossy) | Yes | Yes | Yes |
+| FFmpeg `loudnorm` | Re-encode | No | No (lossy) | Yes | Yes | Yes |
+| beets ReplayGain plugin | Tags via backend | Yes (backend-dependent) | Yes (file untouched) | No (player must read tags) | Yes | Yes |
 
 **The "lossless + player-agnostic + maintained + CLI/scriptable + reversible" intersection contains exactly one tool: mp3rgain.** This matters for DJ equipment, car audio, smart speakers, batch / Docker / CI pipelines, and any environment where the playback device ignores ReplayGain tags or where a desktop GUI is not an option.
 
-That is a statement about the intersection, not a ranking. [foobar2000](https://www.foobar2000.org/) covers the lossless / player-agnostic / maintained cells and does so well; what it does not offer is a command line, a non-Windows host, or an undo path. **If you are on Windows, working in a GUI, and want current BS.1770 ReplayGain, foobar2000 is the tool to recommend** — it also covers more formats than mp3rgain and its scanner is the reference many people compare against. The two interoperate: mp3rgain writes the standard `REPLAYGAIN_*` tags foobar2000 reads, and `--rg2` matches its measurement.
+That is a statement about the intersection, not a ranking. [foobar2000](https://www.foobar2000.org/) covers the lossless / player-agnostic / maintained cells and does so well; what it does not offer is a command line, a non-Windows host, or an undo path. **If you are on Windows, working in a GUI, and want the most standards-faithful ReplayGain, foobar2000 is the tool to recommend** — it is the closest thing ReplayGain 2.0 has to a reference implementation, and it tags far more formats than mp3rgain does. The two interoperate by design: mp3rgain writes the standard `REPLAYGAIN_*` tags foobar2000 reads, and `--rg2` is built to reproduce its measurement rather than to offer a rival one.
 
 ### When to Use global_gain vs ReplayGain Tags
 
@@ -281,6 +287,11 @@ That is a statement about the intersection, not a ranking. [foobar2000](https://
 | Maximum flexibility | ReplayGain tags (rsgain) |
 
 For most modern listening setups, **ReplayGain tags are the cleaner solution**. Use `global_gain` adjustment when your playback device doesn't support ReplayGain tags.
+
+Note that this is not an either/or for mp3rgain users: applying gain also writes the standard
+`REPLAYGAIN_TRACK_GAIN` / `REPLAYGAIN_ALBUM_GAIN` tags (residual values, per mp3gain's convention),
+so a tag-aware player and a tag-blind one converge on the same loudness. `-s s` skips the tags if
+you want the bitstream change alone.
 
 ## Security
 
