@@ -30,6 +30,7 @@ pub const RG_TRACK_GAIN: &str = "replaygain_track_gain";
 pub const RG_TRACK_PEAK: &str = "replaygain_track_peak";
 pub const RG_ALBUM_GAIN: &str = "replaygain_album_gain";
 pub const RG_ALBUM_PEAK: &str = "replaygain_album_peak";
+pub const RG_ALGORITHM: &str = "replaygain_algorithm";
 
 /// Undo tag keys (iTunes freeform format, same namespace)
 pub const UNDO_TAG: &str = "mp3rgain_undo";
@@ -161,6 +162,7 @@ pub struct ReplayGainTags {
     track_peak: Option<String>,
     album_gain: Option<String>,
     album_peak: Option<String>,
+    algorithm: Option<String>,
 }
 
 impl ReplayGainTags {
@@ -176,6 +178,9 @@ impl ReplayGainTags {
     pub fn album_peak(&self) -> Option<&str> {
         self.album_peak.as_deref()
     }
+    pub fn algorithm(&self) -> Option<&str> {
+        self.algorithm.as_deref()
+    }
 
     pub fn set_track(&mut self, gain_db: f64, peak: f64) {
         self.track_gain = Some(crate::ape::format_rg_gain(gain_db));
@@ -187,11 +192,18 @@ impl ReplayGainTags {
         self.album_peak = Some(crate::ape::format_rg_peak(peak));
     }
 
+    /// Record the loudness algorithm `mode` measured with. A no-op for the
+    /// mp3gain-compatible RG1 mode, which writes no algorithm tag.
+    pub fn set_algorithm(&mut self, mode: crate::replaygain::AnalysisMode) {
+        self.algorithm = mode.algorithm_tag().map(str::to_string);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.track_gain.is_none()
             && self.track_peak.is_none()
             && self.album_gain.is_none()
             && self.album_peak.is_none()
+            && self.algorithm.is_none()
     }
 }
 
@@ -210,6 +222,9 @@ impl std::fmt::Display for ReplayGainTags {
         if let Some(ref p) = self.album_peak {
             parts.push(format!("Album Peak: {}", p));
         }
+        if let Some(ref a) = self.algorithm {
+            parts.push(format!("Algorithm: {}", a));
+        }
         if parts.is_empty() {
             f.write_str("(no tags)")
         } else {
@@ -220,11 +235,12 @@ impl std::fmt::Display for ReplayGainTags {
 
 impl ReplayGainTags {
     fn to_freeform_tags(&self) -> Vec<FreeformTag> {
-        let entries: [(&str, &Option<String>); 4] = [
+        let entries: [(&str, &Option<String>); 5] = [
             (RG_TRACK_GAIN, &self.track_gain),
             (RG_TRACK_PEAK, &self.track_peak),
             (RG_ALBUM_GAIN, &self.album_gain),
             (RG_ALBUM_PEAK, &self.album_peak),
+            (RG_ALGORITHM, &self.algorithm),
         ];
 
         entries
@@ -555,6 +571,9 @@ pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
             }
             x if x.eq_ignore_ascii_case(RG_ALBUM_PEAK) => {
                 tags.album_peak = Some(tag.value().to_string());
+            }
+            x if x.eq_ignore_ascii_case(RG_ALGORITHM) => {
+                tags.algorithm = Some(tag.value().to_string());
             }
             _ => {}
         }
@@ -897,6 +916,7 @@ fn is_replaygain_freeform(data: &[u8], pos: usize, header: &BoxHeader) -> bool {
             || name.eq_ignore_ascii_case(RG_TRACK_PEAK)
             || name.eq_ignore_ascii_case(RG_ALBUM_GAIN)
             || name.eq_ignore_ascii_case(RG_ALBUM_PEAK)
+            || name.eq_ignore_ascii_case(RG_ALGORITHM)
     })
 }
 

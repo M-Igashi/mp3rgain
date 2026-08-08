@@ -21,6 +21,11 @@ pub const TAG_REPLAYGAIN_TRACK_GAIN: &str = "REPLAYGAIN_TRACK_GAIN";
 pub const TAG_REPLAYGAIN_TRACK_PEAK: &str = "REPLAYGAIN_TRACK_PEAK";
 pub const TAG_REPLAYGAIN_ALBUM_GAIN: &str = "REPLAYGAIN_ALBUM_GAIN";
 pub const TAG_REPLAYGAIN_ALBUM_PEAK: &str = "REPLAYGAIN_ALBUM_PEAK";
+/// Loudness algorithm the gain values were measured with. Only written by the
+/// BS.1770 modes (`--rg2` / `--r128`) — see [`AnalysisMode::algorithm_tag`].
+///
+/// [`AnalysisMode::algorithm_tag`]: crate::AnalysisMode::algorithm_tag
+pub const TAG_REPLAYGAIN_ALGORITHM: &str = "REPLAYGAIN_ALGORITHM";
 
 /// APEv2 tag item
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,11 +131,12 @@ impl ApeTag {
 
     /// Set the `REPLAYGAIN_*` items present in `rg` (issue #232).
     pub(crate) fn set_replaygain(&mut self, rg: &ApeReplayGain) {
-        let fields: [(&str, &Option<String>); 4] = [
+        let fields: [(&str, &Option<String>); 5] = [
             (TAG_REPLAYGAIN_TRACK_GAIN, &rg.track_gain),
             (TAG_REPLAYGAIN_TRACK_PEAK, &rg.track_peak),
             (TAG_REPLAYGAIN_ALBUM_GAIN, &rg.album_gain),
             (TAG_REPLAYGAIN_ALBUM_PEAK, &rg.album_peak),
+            (TAG_REPLAYGAIN_ALGORITHM, &rg.algorithm),
         ];
         for (key, value) in fields {
             if let Some(v) = value {
@@ -460,13 +466,15 @@ pub struct ApeReplayGain {
     pub track_peak: Option<String>,
     pub album_gain: Option<String>,
     pub album_peak: Option<String>,
+    /// `REPLAYGAIN_ALGORITHM`; `None` in the mp3gain-compatible RG1 mode.
+    pub algorithm: Option<String>,
 }
 
 /// Add (or replace) the `REPLAYGAIN_*` items in `file_path`'s APEv2 tag.
 ///
 /// Existing items written by the gain-apply step (`MP3GAIN_UNDO`,
-/// `MP3GAIN_MINMAX`) are preserved — only the four ReplayGain keys present
-/// in `rg` are set.
+/// `MP3GAIN_MINMAX`) are preserved — only the ReplayGain keys present in
+/// `rg` are set.
 pub fn write_ape_replaygain(file_path: &Path, rg: &ApeReplayGain) -> Result<()> {
     rewrite_ape_tail(file_path, |tag| tag.set_replaygain(rg))
 }
@@ -646,6 +654,7 @@ mod tests {
             track_peak: Some("0.250000".to_string()),
             album_gain: None,
             album_peak: None,
+            algorithm: None,
         };
         write_ape_replaygain(&path, &rg).unwrap();
 
@@ -656,6 +665,29 @@ mod tests {
         assert_eq!(out.get(TAG_REPLAYGAIN_TRACK_PEAK), Some("0.250000"));
         // Album fields were None, so they must not be written.
         assert_eq!(out.get(TAG_REPLAYGAIN_ALBUM_GAIN), None);
+        // RG1 writes no algorithm tag.
+        assert_eq!(out.get(TAG_REPLAYGAIN_ALGORITHM), None);
+    }
+
+    /// The BS.1770 modes record `REPLAYGAIN_ALGORITHM` so players
+    /// can tell an RG2/R128 measurement from a classic mp3gain one.
+    #[test]
+    fn write_ape_replaygain_records_algorithm() {
+        let data = replace_ape_tag(&vec![0u8; 20_000], &ApeTag::new());
+        let path = write_temp("rg_algorithm.mp3", &data);
+
+        let rg = ApeReplayGain {
+            track_gain: Some("-2.00 dB".to_string()),
+            track_peak: Some("0.900000".to_string()),
+            algorithm: crate::replaygain::AnalysisMode::Rg2
+                .algorithm_tag()
+                .map(str::to_string),
+            ..Default::default()
+        };
+        write_ape_replaygain(&path, &rg).unwrap();
+
+        let out = read_ape_tag_from_file(&path).unwrap().unwrap();
+        assert_eq!(out.get(TAG_REPLAYGAIN_ALGORITHM), Some("ITU-R BS.1770"));
     }
 
     /// Issue #210: write_ape_album_minmax adds MP3GAIN_ALBUM_MINMAX as `min,max`

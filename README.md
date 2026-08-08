@@ -176,6 +176,8 @@ The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained up
 
 mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) by default for full compatibility with the original mp3gain / aacgain — an existing library re-scans to identical values. Modern BS.1770 loudness measurement is available as an opt-in: `--rg2` (ReplayGain 2.0, −18 LUFS reference) and `--r128` (EBU R128, −23 LUFS target) produce values consistent with foobar2000, loudgain, and ffmpeg loudnorm.
 
+Files scanned with `--rg2` / `--r128` also carry a `REPLAYGAIN_ALGORITHM` tag set to `ITU-R BS.1770`, so a player (or you, years later) can tell which measurement produced the stored values. The default RG1 mode writes no such tag — an absent one means the classic mp3gain measurement, which is what every pre-existing tagged file already implies.
+
 ## Use mp3rgain in Docker / CI
 
 Official multi-arch images (`linux/amd64`, `linux/arm64`) are published to GHCR:

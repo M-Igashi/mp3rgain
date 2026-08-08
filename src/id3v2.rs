@@ -6,8 +6,8 @@
 
 use crate::ape::{
     parse_undo_values, parse_undo_wrap, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
-    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK,
+    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_ALGORITHM,
+    TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use crate::error::{Error, Result};
 use crate::gain::apply_undo_to_data;
@@ -25,6 +25,7 @@ const ALL_RG_DESCRIPTIONS: &[&str] = &[
     TAG_REPLAYGAIN_TRACK_PEAK,
     TAG_REPLAYGAIN_ALBUM_GAIN,
     TAG_REPLAYGAIN_ALBUM_PEAK,
+    TAG_REPLAYGAIN_ALGORITHM,
 ];
 
 /// ReplayGain and undo data stored in ID3v2 TXXX frames
@@ -34,6 +35,8 @@ pub struct Id3v2ReplayGain {
     pub track_peak: Option<String>,
     pub album_gain: Option<String>,
     pub album_peak: Option<String>,
+    /// `REPLAYGAIN_ALGORITHM`; `None` in the mp3gain-compatible RG1 mode.
+    pub algorithm: Option<String>,
     pub undo: Option<String>,
     pub minmax: Option<String>,
 }
@@ -135,6 +138,7 @@ pub fn read_id3v2_replaygain(path: &Path) -> Result<Id3v2ReplayGain> {
         track_peak: get_txxx(&tag, TAG_REPLAYGAIN_TRACK_PEAK),
         album_gain: get_txxx(&tag, TAG_REPLAYGAIN_ALBUM_GAIN),
         album_peak: get_txxx(&tag, TAG_REPLAYGAIN_ALBUM_PEAK),
+        algorithm: get_txxx(&tag, TAG_REPLAYGAIN_ALGORITHM),
         undo: get_txxx(&tag, TAG_MP3GAIN_UNDO),
         minmax: get_txxx(&tag, TAG_MP3GAIN_MINMAX),
     })
@@ -148,6 +152,7 @@ fn add_rg_frames(tag: &mut id3::Tag, rg: &Id3v2ReplayGain) {
         (TAG_REPLAYGAIN_TRACK_PEAK, &rg.track_peak),
         (TAG_REPLAYGAIN_ALBUM_GAIN, &rg.album_gain),
         (TAG_REPLAYGAIN_ALBUM_PEAK, &rg.album_peak),
+        (TAG_REPLAYGAIN_ALGORITHM, &rg.algorithm),
     ];
 
     for &(desc, value) in fields {

@@ -83,8 +83,8 @@ pub use analysis::{
 pub use ape::{
     delete_ape_tag, read_ape_tag, read_ape_tag_from_file, write_ape_album_minmax, write_ape_tag,
     ApeItem, ApeTag, TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
-    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK,
+    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_ALGORITHM,
+    TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
 pub use apply::{
     apply_with_options, predict_apply, write_album_minmax, AacAlbumInfo, ApplyOptions, ApplyReport,
@@ -213,6 +213,9 @@ pub struct StoredGainTags {
     pub track_peak: Option<String>,
     pub album_gain: Option<String>,
     pub album_peak: Option<String>,
+    /// `REPLAYGAIN_ALGORITHM`; only written by the `--rg2` / `--r128` modes,
+    /// so `None` on anything measured with mp3gain-compatible ReplayGain 1.0.
+    pub algorithm: Option<String>,
     pub undo: Option<String>,
     pub minmax: Option<String>,
     /// APE-only `MP3GAIN_ALBUM_MINMAX`; always `None` for AAC and ID3v2.
@@ -227,6 +230,7 @@ impl StoredGainTags {
             track_peak: None,
             album_gain: None,
             album_peak: None,
+            algorithm: None,
             undo: None,
             minmax: None,
             album_minmax: None,
@@ -239,6 +243,7 @@ impl StoredGainTags {
             || self.track_peak.is_some()
             || self.album_gain.is_some()
             || self.album_peak.is_some()
+            || self.algorithm.is_some()
             || self.undo.is_some()
             || self.minmax.is_some()
             || self.album_minmax.is_some()
@@ -264,6 +269,7 @@ pub fn read_gain_tags_auto(file_path: &Path, use_id3v2: bool) -> Result<StoredGa
                 track_peak: rg_tags.track_peak().map(str::to_string),
                 album_gain: rg_tags.album_gain().map(str::to_string),
                 album_peak: rg_tags.album_peak().map(str::to_string),
+                algorithm: rg_tags.algorithm().map(str::to_string),
                 undo: undo_tags.undo().map(str::to_string),
                 minmax: undo_tags.minmax().map(str::to_string),
                 album_minmax: None,
@@ -278,6 +284,7 @@ pub fn read_gain_tags_auto(file_path: &Path, use_id3v2: bool) -> Result<StoredGa
             track_peak: rg.track_peak,
             album_gain: rg.album_gain,
             album_peak: rg.album_peak,
+            algorithm: rg.algorithm,
             undo: rg.undo,
             minmax: rg.minmax,
             album_minmax: None,
@@ -290,6 +297,7 @@ pub fn read_gain_tags_auto(file_path: &Path, use_id3v2: bool) -> Result<StoredGa
             track_peak: tag.get(TAG_REPLAYGAIN_TRACK_PEAK).map(str::to_string),
             album_gain: tag.get(TAG_REPLAYGAIN_ALBUM_GAIN).map(str::to_string),
             album_peak: tag.get(TAG_REPLAYGAIN_ALBUM_PEAK).map(str::to_string),
+            algorithm: tag.get(TAG_REPLAYGAIN_ALGORITHM).map(str::to_string),
             undo: tag.get(TAG_MP3GAIN_UNDO).map(str::to_string),
             minmax: tag.get(TAG_MP3GAIN_MINMAX).map(str::to_string),
             album_minmax: tag.get(TAG_MP3GAIN_ALBUM_MINMAX).map(str::to_string),
