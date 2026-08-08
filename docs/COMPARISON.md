@@ -2,7 +2,7 @@
 
 This document provides a detailed comparison between mp3rgain and the original aacgain/mp3gain tools.
 
-> **Headline:** mp3rgain is the **only actively maintained CLI** that performs lossless `global_gain` rewrite on AAC/M4A files. aacgain has been effectively abandoned since ~2009 and is unbuildable on most modern 64-bit systems; among other CLIs, rsgain / loudgain / FFmpeg either tags-only or re-encodes. foobar2000 has a comparable "Apply ReplayGain to file content" feature for AAC in MP4/MKA, but it is Windows GUI only with no undo and is unsuited for batch / headless / CI use. If you need re-encode-free AAC volume adjustment from a script, container, or non-Windows host in 2026, mp3rgain is the only practical choice.
+> **Headline:** mp3rgain is the **only actively maintained CLI** that performs lossless `global_gain` rewrite on AAC/M4A files. aacgain has been effectively abandoned since ~2009 and is unbuildable on most modern 64-bit systems; among other CLIs, rsgain / loudgain / FFmpeg either tags-only or re-encodes. foobar2000 has a comparable "Apply ReplayGain to file content" feature for AAC in MP4/MKA, but it is Windows GUI only with no undo and is not built for batch / headless / CI use. If you need re-encode-free AAC volume adjustment from a script, container, or non-Windows host in 2026, mp3rgain is the only practical choice — **on a Windows desktop with a GUI, foobar2000 is the one to reach for.**
 
 ## Overview
 
@@ -265,7 +265,9 @@ For AAC/M4A files specifically, the choice of tool matters more than for MP3, be
 | FFmpeg `loudnorm` | Re-encode | No (lossy) | Yes | Yes | Yes |
 | beets ReplayGain plugin | Tags via backend | Yes (file untouched) | No (player must read tags) | Yes | Yes |
 
-**The "lossless + player-agnostic + maintained + CLI/scriptable + reversible" intersection contains exactly one tool: mp3rgain.** foobar2000 covers the lossless / player-agnostic / maintained cells but is GUI-only on Windows and irreversible. This matters for DJ equipment, car audio, smart speakers, batch / Docker / CI pipelines, and any environment where the playback device ignores ReplayGain tags or where a desktop GUI is not an option.
+**The "lossless + player-agnostic + maintained + CLI/scriptable + reversible" intersection contains exactly one tool: mp3rgain.** This matters for DJ equipment, car audio, smart speakers, batch / Docker / CI pipelines, and any environment where the playback device ignores ReplayGain tags or where a desktop GUI is not an option.
+
+That is a statement about the intersection, not a ranking. [foobar2000](https://www.foobar2000.org/) covers the lossless / player-agnostic / maintained cells and does so well; what it does not offer is a command line, a non-Windows host, or an undo path. **If you are on Windows, working in a GUI, and want current BS.1770 ReplayGain, foobar2000 is the tool to recommend** — it also covers more formats than mp3rgain and its scanner is the reference many people compare against. The two interoperate: mp3rgain writes the standard `REPLAYGAIN_*` tags foobar2000 reads, and `--rg2` matches its measurement.
 
 ### When to Use global_gain vs ReplayGain Tags
 
@@ -274,7 +276,7 @@ For AAC/M4A files specifically, the choice of tool matters more than for MP3, be
 | DJ equipment (CDJs, controllers) | `global_gain` (mp3rgain) |
 | Car stereos, portable players | `global_gain` (mp3rgain) |
 | Smart speakers, Chromecast | `global_gain` (mp3rgain) |
-| Desktop players (foobar2000, etc.) | ReplayGain tags (rsgain) |
+| Desktop players (foobar2000, etc.) | ReplayGain tags (rsgain, or foobar2000's own scanner) |
 | Streaming to phone apps | ReplayGain tags (rsgain) |
 | Maximum flexibility | ReplayGain tags (rsgain) |
 
