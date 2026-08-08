@@ -124,6 +124,15 @@ A native GUI application (`mp3rgui`) is available for users who prefer a graphic
 > ```
 > This is not needed when installing via Homebrew.
 
+> [!NOTE]
+> **The GUI needs OpenGL 2.0+, so it does not start over Remote Desktop.**
+> Windows' RDP display driver exposes only OpenGL 1.1, so a desktop where
+> `mp3rgui` runs fine will fail to start when you reach it over RDP. The same
+> applies to virtual machines without 3D acceleration. Use the `mp3rgain` CLI
+> in those sessions — it has no graphics dependency and covers the same
+> functionality. See [GUI System Requirements](docs/gui-requirements.md) for
+> the full list and workarounds.
+
 ## Command-Line Options
 
 | Option | Description |
@@ -153,6 +162,7 @@ real-corpus benchmark numbers.
 ## Documentation
 
 - [Migration Guide](docs/migrating-from-mp3gain.md) - Drop-in replacement for mp3gain: flag equivalence, sed/Dockerfile/CI substitution patterns, beets config
+- [GUI System Requirements](docs/gui-requirements.md) - `mp3rgui`'s OpenGL requirement, the Remote Desktop limitation, and workarounds
 - [Parallel Performance](docs/perf-parallel.md) - `-j` / `--threads` design and real-corpus benchmark numbers
 - [Roadmap](docs/roadmap.md) - Development plans and upcoming features
 - [Security](docs/security.md) - Memory safety and CVE analysis
