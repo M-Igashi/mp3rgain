@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod startup;
 mod ui;
 mod worker;
 
@@ -20,7 +21,7 @@ fn main() {
         options,
         Box::new(|cc| Ok(Box::new(Mp3rgainApp::new(cc)))),
     ) {
-        let msg = format!("Failed to start mp3rgain GUI:\n\n{e}");
+        let msg = startup::startup_error_message(startup::classify(&e), &e.to_string());
         eprintln!("{msg}");
         rfd::MessageDialog::new()
             .set_title("mp3rgain Error")
