@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current Status: v3.0.0 (Production Ready)
+## Current Status: v3.1.0 (Production Ready)
 
 **Positioning:** mp3rgain is the only actively maintained CLI that performs lossless `global_gain` rewrite on AAC/M4A files (aacgain has been abandoned since ~2009; foobar2000's "Apply ReplayGain to file content" offers a comparable scalefactor-based AAC rewrite but is Windows GUI only with no undo). For MP3 it's a modern drop-in replacement for mp3gain; for AAC on the command line it has no equivalent.
 
@@ -206,6 +206,12 @@ All core functionality complete:
 - [x] GUI analysis mode selector with LUFS display (#272, PR #275)
 - [x] Removed unused public API items (semver-major) (#266, PR #276)
 - [x] Post-review simplification pass over the v3.0 changes (PR #277)
+
+### v3.1.0 - Algorithm Tagging & GUI Diagnostics
+
+- [x] Write `REPLAYGAIN_ALGORITHM` (ID3v2/APEv2/MP4) when analyzing in `--rg2` or `--r128` mode (#287)
+- [x] GUI explains startup failures (missing GPU/display drivers) instead of dumping the raw error (#285)
+- [x] Packaging metadata and documentation updates (#283, #284, #286)
 
 ## Upcoming Goals
 
