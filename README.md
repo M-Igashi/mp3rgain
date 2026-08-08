@@ -165,7 +165,14 @@ real-corpus benchmark numbers.
 
 The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained upstream since ~2015 (though distribution maintainers continue to apply security patches). [aacgain](http://aacgain.altosdesign.com/), its AAC counterpart, has been unmaintained since ~2009 and is effectively unbuildable on modern 64-bit systems. mp3rgain is a modern, memory-safe replacement written in Rust that covers both.
 
-**AAC/M4A on the CLI is the differentiator.** Among CLIs, rsgain / loudgain / FFmpeg either only write ReplayGain tags (which non-compliant players ignore) or re-encode the audio. foobar2000 has a comparable "Apply ReplayGain to file content" feature for AAC in MP4/MKA, but it is Windows GUI only, has no undo, and is unsuited for batch, headless, or container workflows. mp3rgain fills the cross-platform, scriptable, reversible niche.
+**AAC/M4A on the CLI is the differentiator.** Among CLIs, rsgain / loudgain / FFmpeg either only write ReplayGain tags (which non-compliant players ignore) or re-encode the audio. [foobar2000](https://www.foobar2000.org/) has a comparable "Apply ReplayGain to file content" feature for AAC in MP4/MKA, but it is Windows GUI only, has no undo, and is not built for batch, headless, or container workflows. mp3rgain fills the cross-platform, scriptable, reversible niche.
+
+> [!TIP]
+> **On Windows with a GUI, and want current ReplayGain? Use [foobar2000](https://www.foobar2000.org/).**
+> Its ReplayGain scanner is BS.1770-based, it covers more formats than mp3rgain does, and it can
+> bake gain into MP3 and AAC bitstreams too. mp3rgain is the better fit when you need a command
+> line, a non-Windows host, mp3gain-identical ReplayGain 1.0 values, or an undo path — and the two
+> coexist fine, since mp3rgain writes the same standard `REPLAYGAIN_*` tags foobar2000 reads.
 
 mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) by default for full compatibility with the original mp3gain / aacgain — an existing library re-scans to identical values. Modern BS.1770 loudness measurement is available as an opt-in: `--rg2` (ReplayGain 2.0, −18 LUFS reference) and `--r128` (EBU R128, −23 LUFS target) produce values consistent with foobar2000, loudgain, and ffmpeg loudnorm.
 
