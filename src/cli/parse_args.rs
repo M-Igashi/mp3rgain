@@ -318,6 +318,12 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
         i += 1;
     }
 
+    // cmd.exe and PowerShell do not expand `*.mp3` for native programs.
+    #[cfg(windows)]
+    {
+        opts.files = super::wildcard::expand(std::mem::take(&mut opts.files));
+    }
+
     Ok(opts)
 }
 
