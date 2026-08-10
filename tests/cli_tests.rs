@@ -86,7 +86,7 @@ fn track_gain_tag(file: &Path) -> Option<String> {
 }
 
 /// An album whose gain rounds to 0 steps must still get per-track
-/// ReplayGain tags. Reported on the foobar2000 forum: album gain -0.04 dB
+/// ReplayGain tags. Reported on the Hydrogenaudio forum: album gain -0.04 dB
 /// (0 steps) made mp3rgain skip the album outright, discarding a +1.46 dB
 /// track gain it had already measured. The track path fixed the same class
 /// of bug in issue #206.

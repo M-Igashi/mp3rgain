@@ -181,7 +181,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             // would be written or `-k` must attenuate a clipping track — the
             // same reasoning as the track path (issue #206). Skipping outright
             // loses the per-track REPLAYGAIN_* tags for an album that merely
-            // happens to sit on target (reported on the foobar2000 forum:
+            // happens to sit on target (reported on the Hydrogenaudio forum:
             // album gain -0.04 dB, yet track 3 wants +1.46 dB).
             let writes_rg_tags = opts.stored_tag_mode != StoredTagMode::Skip
                 || album_result
