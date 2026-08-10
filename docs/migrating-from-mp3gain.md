@@ -84,7 +84,7 @@ are worth knowing:
 | `-w` | Wrap gain values instead of clamping |
 | `-n`, `--dry-run` | Preview changes without writing |
 | `-o text` / `-o json` / `-o tsv` | Explicit output format selection |
-| `-s i` | Use ID3v2 ReplayGain tags instead of APEv2 (partial) |
+| `-s i` | Write ReplayGain and undo tags as ID3v2 `TXXX` instead of APEv2 — needed for players that only read ID3v2 on MP3, foobar2000 included |
 | `-j <n>` / `--threads <n>` | Worker threads for ReplayGain analysis (default: auto). `MP3RGAIN_THREADS` env var also honored. `-j 1` reproduces mp3gain's serial behavior. See [docs/perf-parallel.md](perf-parallel.md). |
 | `--skip-errors` | Keep album analysis (`-a`) going past unreadable files; failed files are reported and excluded from the album gain |
 
@@ -136,7 +136,7 @@ These are the only behaviour differences worth knowing about:
 | Undo cleanup | mp3gain leaves empty APEv2 tags after `-u`; mp3rgain removes them | Audio data is identical; only the tag block differs |
 | ReplayGain analysis | mp3gain uses LAME; mp3rgain uses Symphonia + native Rust | Track/album gain values may differ by <0.1 dB. The *applied* gain is bit-identical for any given step value |
 | Format coverage | mp3gain handles MP3 only | mp3rgain also handles AAC/M4A/.mp4 (lossless `global_gain` rewrite, the same idea aacgain used) |
-| `-s i` (ID3v2) | Not supported in mp3gain | Marked "not fully supported" in `--help` — prefer the default APEv2 path unless you specifically need ReplayGain TXXX tags |
+| `-s i` (ID3v2) | Not supported in mp3gain | Writing, `-s c` inspection and `-u` undo all work against ID3v2 in this mode; `MP3GAIN_ALBUM_MINMAX` is the one APEv2-only extra. Keep the default APEv2 path for mp3gain interop, use `-s i` when a player needs ID3v2 ReplayGain |
 
 If you discover a case where mp3rgain produces non-identical output for an
 operation listed under [Identical behaviour](#identical-behaviour), please

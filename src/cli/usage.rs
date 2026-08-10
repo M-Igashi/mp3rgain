@@ -39,7 +39,7 @@ pub fn print_usage() {
     println!("                  d = delete stored tag info");
     println!("                  s = skip (don't write) stored tag info");
     println!("                  r = force recalculation (always on; kept for compatibility)");
-    println!("                  i = use ID3v2 tags (not fully supported)");
+    println!("                  i = use ID3v2 tags (needed for foobar2000 to see them)");
     println!("                  a = use APEv2 tags (default)");
     println!("    -p          Preserve original file timestamp");
     println!("    -c          Ignore clipping warnings");

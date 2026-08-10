@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::*;
-use mp3rgain::replaygain::{self, AlbumAnalysisReport, REPLAYGAIN_REFERENCE_DB};
+use mp3rgain::replaygain::{self, AlbumAnalysisReport, AudioFileType, REPLAYGAIN_REFERENCE_DB};
 use mp3rgain::{steps_to_db, AacAlbumInfo};
 use rayon::prelude::*;
 use std::io::{self, Write};
@@ -177,7 +177,21 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             // Apply album gain to all files
             let steps = modified_gain_steps;
 
-            if steps == 0 {
+            // A net 0-step album adjustment still has work to do when tags
+            // would be written or `-k` must attenuate a clipping track — the
+            // same reasoning as the track path (issue #206). Skipping outright
+            // loses the per-track REPLAYGAIN_* tags for an album that merely
+            // happens to sit on target (reported on the foobar2000 forum:
+            // album gain -0.04 dB, yet track 3 wants +1.46 dB).
+            let writes_rg_tags = opts.stored_tag_mode != StoredTagMode::Skip
+                || album_result
+                    .tracks()
+                    .iter()
+                    .any(|t| t.file_type() == AudioFileType::Aac);
+            let clip_prevention_applies =
+                opts.prevent_clipping && album_result.tracks().iter().any(|t| t.peak() > 1.0);
+
+            if steps == 0 && !writes_rg_tags && !clip_prevention_applies {
                 if opts.output_format == OutputFormat::Json {
                     let json_results: Vec<JsonFileResult> = files
                         .iter()

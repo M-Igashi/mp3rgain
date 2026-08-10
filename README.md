@@ -176,11 +176,22 @@ These are all ReplayGain tools, mp3rgain included — it runs a ReplayGain analy
 > it can bake gain into MP3 and AAC bitstreams too. mp3rgain is the better fit when you need a
 > command line, a non-Windows host, mp3gain-identical ReplayGain 1.0 values, or an undo path — and
 > the two coexist fine, since mp3rgain writes the same standard `REPLAYGAIN_*` tags foobar2000
-> reads, with `--rg2` deliberately matching its measurement.
+> reads, with `--rg2` deliberately matching its measurement. For MP3, add `-s i` so those tags
+> land in ID3v2 — see below.
 
 mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) by default for full compatibility with the original mp3gain / aacgain — an existing library re-scans to identical values. Modern BS.1770 loudness measurement is available as an opt-in: `--rg2` (ReplayGain 2.0, −18 LUFS reference) and `--r128` (EBU R128, −23 LUFS target) produce values consistent with foobar2000, loudgain, and ffmpeg loudnorm.
 
 Files scanned with `--rg2` / `--r128` also carry a `REPLAYGAIN_ALGORITHM` tag set to `ITU-R BS.1770`, so a player (or you, years later) can tell which measurement produced the stored values. The default RG1 mode writes no such tag — an absent one means the classic mp3gain measurement, which is what every pre-existing tagged file already implies.
+
+### Where the tags go (MP3)
+
+By default mp3rgain writes **APEv2**, exactly where mp3gain put its tags. Some players — foobar2000 among them — only look for ReplayGain in **ID3v2** on MP3, so they will not see the default tags. Pass `-s i` to write them as ID3v2 `TXXX` frames instead:
+
+```bash
+mp3rgain -r -s i *.mp3     # ReplayGain tags foobar2000 will read
+```
+
+`-s i` covers the whole round trip: the `REPLAYGAIN_*` values, `MP3GAIN_UNDO`, `-s c` inspection, and `-u` undo all use ID3v2 in that mode. The one APEv2-only extra is `MP3GAIN_ALBUM_MINMAX`. AAC/M4A is unaffected — it always uses MP4 freeform atoms, which foobar2000 reads.
 
 ## Use mp3rgain in Docker / CI
 
