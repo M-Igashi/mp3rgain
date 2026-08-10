@@ -154,30 +154,81 @@ pub fn apply_gain_db_auto(file_path: &Path, gain_db: f64) -> Result<usize> {
     gain::apply_gain_db(file_path, gain_db)
 }
 
+/// Which container MP3 tags are written to.
+///
+/// The two tag families have different audiences. `REPLAYGAIN_*` is read by
+/// players, and they look in ID3v2 — ffmpeg (and everything built on it) does
+/// not read APEv2 on MP3 at all, and Rockbox only handles APE tags for WavPack
+/// and Musepack. `MP3GAIN_UNDO` / `MP3GAIN_MINMAX` are read by nothing but the
+/// mp3gain lineage, which looks in APEv2. [`TagLayout::Split`] therefore sends
+/// each family where its readers are, and is the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TagLayout {
+    /// `REPLAYGAIN_*` in ID3v2 TXXX, `MP3GAIN_*` in APEv2. Default.
+    #[default]
+    Split,
+    /// Everything in APEv2 — byte-for-byte mp3gain behaviour (`-s a`).
+    Ape,
+    /// Everything in ID3v2 TXXX (`-s i`).
+    Id3v2,
+}
+
+impl TagLayout {
+    /// Whether `REPLAYGAIN_*` goes to ID3v2 TXXX.
+    pub fn replaygain_in_id3v2(self) -> bool {
+        matches!(self, TagLayout::Split | TagLayout::Id3v2)
+    }
+
+    /// Whether `MP3GAIN_UNDO` / `MP3GAIN_MINMAX` go to ID3v2 TXXX.
+    pub fn mp3gain_in_id3v2(self) -> bool {
+        matches!(self, TagLayout::Id3v2)
+    }
+}
+
 /// Undo previously-applied gain, auto-dispatching by file format and tag mode.
 ///
-/// AAC files go through the AAC undo path. For MP3, `use_id3v2 = true` routes
-/// to ID3v2; otherwise the default APE undo is used.
-pub fn undo_gain_auto(file_path: &Path, use_id3v2: bool) -> Result<usize> {
+/// AAC files go through the AAC undo path. For MP3 the undo tag is read from
+/// wherever `layout` puts it, falling back to the other container so a file
+/// tagged under a different layout still rolls back.
+pub fn undo_gain_auto(file_path: &Path, layout: TagLayout) -> Result<usize> {
     #[cfg(feature = "aac")]
     {
         if mp4meta::is_aac_file(file_path) {
             return aac::undo_aac_gain(file_path);
         }
     }
-    if use_id3v2 {
-        id3v2::undo_gain_id3v2(file_path)
-    } else {
-        gain::undo_gain(file_path)
+    let ape_has_undo = || {
+        ape::read_ape_tag_from_file(file_path)
+            .ok()
+            .flatten()
+            .is_some_and(|t| t.get(TAG_MP3GAIN_UNDO).is_some())
+    };
+    let id3v2_has_undo = || {
+        id3v2::read_id3v2_replaygain(file_path)
+            .ok()
+            .is_some_and(|rg| rg.undo.is_some())
+    };
+
+    if layout.mp3gain_in_id3v2() {
+        if id3v2_has_undo() || !ape_has_undo() {
+            return id3v2::undo_gain_id3v2(file_path);
+        }
+        return gain::undo_gain(file_path);
     }
+    if ape_has_undo() || !id3v2_has_undo() {
+        return gain::undo_gain(file_path);
+    }
+    id3v2::undo_gain_id3v2(file_path)
 }
 
 /// Delete ReplayGain / undo tags, auto-dispatching by file format and tag mode.
 ///
-/// For AAC, deletes both the ReplayGain and undo freeform tags. For MP3,
-/// `use_id3v2 = true` removes the ID3v2 frames; otherwise the APE tag is
-/// removed.
-pub fn delete_gain_tags_auto(file_path: &Path, use_id3v2: bool) -> Result<()> {
+/// For AAC, deletes both the ReplayGain and undo freeform tags. For MP3, both
+/// containers are cleared under [`TagLayout::Split`] — the point of `-s d` is
+/// to leave no gain tags behind, and a split-tagged file has them in two
+/// places.
+pub fn delete_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<()> {
     #[cfg(feature = "aac")]
     {
         if mp4meta::is_aac_file(file_path) {
@@ -185,10 +236,13 @@ pub fn delete_gain_tags_auto(file_path: &Path, use_id3v2: bool) -> Result<()> {
             return mp4meta::delete_undo_tags(file_path);
         }
     }
-    if use_id3v2 {
-        id3v2::delete_id3v2_replaygain(file_path)
-    } else {
-        ape::delete_ape_tag(file_path)
+    match layout {
+        TagLayout::Id3v2 => id3v2::delete_id3v2_replaygain(file_path),
+        TagLayout::Ape => ape::delete_ape_tag(file_path),
+        TagLayout::Split => {
+            id3v2::delete_id3v2_replaygain(file_path)?;
+            ape::delete_ape_tag(file_path)
+        }
     }
 }
 
@@ -202,6 +256,8 @@ pub enum GainTagSource {
     /// APEv2 tag. `tag_present` distinguishes a file with no APE tag at all
     /// from one whose APE tag simply carries no mp3gain items.
     Ape { tag_present: bool },
+    /// Both containers were read and merged ([`TagLayout::Split`]).
+    Split,
 }
 
 /// Owned snapshot of the gain tags stored in one file, as returned by
@@ -254,10 +310,13 @@ impl StoredGainTags {
 /// modifying the file, auto-dispatching by file format and tag mode.
 ///
 /// Mirrors [`delete_gain_tags_auto`]'s dispatch: AAC files read the MP4
-/// freeform tags, MP3 files read ID3v2 when `use_id3v2` is set and APE
-/// otherwise. The AAC branch is fail-soft (unreadable tags come back
-/// empty); ID3v2/APE read errors are propagated.
-pub fn read_gain_tags_auto(file_path: &Path, use_id3v2: bool) -> Result<StoredGainTags> {
+/// freeform tags, MP3 files read whichever container(s) `layout` uses. Under
+/// [`TagLayout::Split`] both are read and merged — each field prefers the
+/// container it is written to, then falls back to the other, so tags left by
+/// mp3gain or by an earlier `-s i` run still show up. The AAC branch is
+/// fail-soft (unreadable tags come back empty); ID3v2/APE read errors are
+/// propagated.
+pub fn read_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<StoredGainTags> {
     #[cfg(feature = "aac")]
     {
         if mp4meta::is_aac_file(file_path) {
@@ -276,7 +335,7 @@ pub fn read_gain_tags_auto(file_path: &Path, use_id3v2: bool) -> Result<StoredGa
             });
         }
     }
-    if use_id3v2 {
+    if layout.mp3gain_in_id3v2() {
         let rg = id3v2::read_id3v2_replaygain(file_path)?;
         return Ok(StoredGainTags {
             source: GainTagSource::Id3v2,
@@ -288,6 +347,35 @@ pub fn read_gain_tags_auto(file_path: &Path, use_id3v2: bool) -> Result<StoredGa
             undo: rg.undo,
             minmax: rg.minmax,
             album_minmax: None,
+        });
+    }
+    if layout == TagLayout::Split {
+        let id3 = id3v2::read_id3v2_replaygain(file_path)?;
+        let ape_tag = ape::read_ape_tag_from_file(file_path)?;
+        let ape_get = |key: &str| {
+            ape_tag
+                .as_ref()
+                .and_then(|t| t.get(key))
+                .map(str::to_string)
+        };
+        return Ok(StoredGainTags {
+            source: GainTagSource::Split,
+            track_gain: id3
+                .track_gain
+                .or_else(|| ape_get(TAG_REPLAYGAIN_TRACK_GAIN)),
+            track_peak: id3
+                .track_peak
+                .or_else(|| ape_get(TAG_REPLAYGAIN_TRACK_PEAK)),
+            album_gain: id3
+                .album_gain
+                .or_else(|| ape_get(TAG_REPLAYGAIN_ALBUM_GAIN)),
+            album_peak: id3
+                .album_peak
+                .or_else(|| ape_get(TAG_REPLAYGAIN_ALBUM_PEAK)),
+            algorithm: id3.algorithm.or_else(|| ape_get(TAG_REPLAYGAIN_ALGORITHM)),
+            undo: ape_get(TAG_MP3GAIN_UNDO).or(id3.undo),
+            minmax: ape_get(TAG_MP3GAIN_MINMAX).or(id3.minmax),
+            album_minmax: ape_get(TAG_MP3GAIN_ALBUM_MINMAX),
         });
     }
     match ape::read_ape_tag_from_file(file_path)? {
@@ -313,7 +401,7 @@ pub fn read_gain_tags_auto(file_path: &Path, use_id3v2: bool) -> Result<StoredGa
 /// Mirrors [`undo_gain_auto`]'s dispatch so the returned value matches what
 /// `undo_gain_auto` would roll back. Returns `None` if the tag is absent or
 /// unreadable.
-pub fn read_undo_steps(file_path: &Path, use_id3v2: bool) -> Option<i32> {
+pub fn read_undo_steps(file_path: &Path, layout: TagLayout) -> Option<i32> {
     #[cfg(feature = "aac")]
     {
         if mp4meta::is_aac_file(file_path) {
@@ -321,12 +409,25 @@ pub fn read_undo_steps(file_path: &Path, use_id3v2: bool) -> Option<i32> {
             return Some(ape::parse_undo_values(undo_tags.undo()).0);
         }
     }
-    if use_id3v2 {
+    let from_ape = || {
+        ape::read_ape_tag_from_file(file_path)
+            .ok()
+            .flatten()
+            .and_then(|t| t.get_undo_gain())
+    };
+    let from_id3v2 = || {
         let rg = id3v2::read_id3v2_replaygain(file_path).ok()?;
-        return Some(ape::parse_undo_values(rg.undo.as_deref()).0);
+        rg.undo
+            .as_deref()
+            .map(|u| ape::parse_undo_values(Some(u)).0)
+    };
+    // Same fallback order as undo_gain_auto, so the reported value matches
+    // what an undo would actually roll back.
+    if layout.mp3gain_in_id3v2() {
+        from_id3v2().or_else(from_ape)
+    } else {
+        from_ape().or_else(from_id3v2)
     }
-    let tag = ape::read_ape_tag_from_file(file_path).ok()??;
-    tag.get_undo_gain()
 }
 
 fn collect_audio_files_into(dir: &Path, recursive: bool, result: &mut Vec<PathBuf>) -> Result<()> {

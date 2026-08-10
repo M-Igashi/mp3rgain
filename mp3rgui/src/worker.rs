@@ -13,7 +13,7 @@ use mp3rgain::apply::{
     ApplyOptions,
 };
 use mp3rgain::replaygain::{self, AnalysisMode, ReplayGainResult};
-use mp3rgain::{read_gain_tags_auto, AacAlbumInfo, Channel, GainTagSource};
+use mp3rgain::{read_gain_tags_auto, AacAlbumInfo, Channel, GainTagSource, TagLayout};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -188,7 +188,10 @@ pub struct ApplyOptionsUi {
     pub prevent_clipping: bool,
     pub wrap: bool,
     pub preserve_timestamp: bool,
-    pub use_id3v2: bool,
+    /// Which container MP3 tags go in. `serde(default)` so settings files
+    /// written before this field existed load as the default split layout.
+    #[serde(default)]
+    pub tag_layout: TagLayout,
     /// When true, Apply Track / Album Gain runs in dry-run mode: the worker
     /// reports what `apply_with_options` *would* do but doesn't touch the
     /// file. Equivalent to the CLI's -n flag.
@@ -197,14 +200,13 @@ pub struct ApplyOptionsUi {
 
 impl Default for ApplyOptionsUi {
     fn default() -> Self {
-        // Safe defaults: prevent clipping, keep mtime, no wrap, no
-        // ID3v2-on-MP3 (the existing APE undo path is still the more
-        // widely compatible option).
+        // Safe defaults: prevent clipping, keep mtime, no wrap, and the
+        // split tag layout so players actually find the ReplayGain values.
         Self {
             prevent_clipping: true,
             wrap: false,
             preserve_timestamp: true,
-            use_id3v2: false,
+            tag_layout: TagLayout::default(),
             dry_run: false,
         }
     }
@@ -443,14 +445,15 @@ pub fn spawn_apply(
         // album-wide MP3GAIN_ALBUM_MINMAX after all files are applied — the
         // same mp3gain-parity step the CLI does (issue #210). APEv2 only and
         // not in dry-run.
-        let album_minmax_paths: Vec<PathBuf> = if !ui_opts.dry_run && !ui_opts.use_id3v2 {
-            jobs.iter()
-                .filter(|j| j.album_info.is_some())
-                .map(|j| j.path.clone())
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let album_minmax_paths: Vec<PathBuf> =
+            if !ui_opts.dry_run && !ui_opts.tag_layout.mp3gain_in_id3v2() {
+                jobs.iter()
+                    .filter(|j| j.album_info.is_some())
+                    .map(|j| j.path.clone())
+                    .collect()
+            } else {
+                Vec::new()
+            };
         // Post-apply (max, min) global_gain range per album file, taken from
         // the apply reports so the MINMAX step below doesn't re-analyze every
         // file (issue #232).
@@ -464,8 +467,9 @@ pub fn spawn_apply(
             run_job_pool(jobs, &cancel_w, move |job: ApplyJob| {
                 send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
-                let album_member =
-                    !ui_opts.dry_run && !ui_opts.use_id3v2 && job.album_info.is_some();
+                let album_member = !ui_opts.dry_run
+                    && !ui_opts.tag_layout.mp3gain_in_id3v2()
+                    && job.album_info.is_some();
                 let opts = build_apply_options(
                     job.steps,
                     job.track_result,
@@ -583,7 +587,7 @@ pub fn spawn_apply(
 /// parallelizes the same way apply does). Dispatches per file to the
 /// correct undo path:
 ///   - AAC: `mp3rgain::aac::undo_aac_gain`
-///   - MP3 + `use_id3v2`: `mp3rgain::undo_gain_id3v2`
+///   - MP3 + `TagLayout::Id3v2`: `mp3rgain::undo_gain_id3v2`
 ///   - MP3 (default APE): `mp3rgain::undo_gain`
 ///
 /// Mirrors the CLI's `process_undo` dispatch so behavior matches.
@@ -610,9 +614,9 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
                 // UI how many steps to reverse on the display. We can't read
                 // it after undo because undo_gain_auto deletes the tag (issue #171).
                 let steps_undone =
-                    mp3rgain::read_undo_steps(&job.path, ui_opts.use_id3v2).unwrap_or(0);
+                    mp3rgain::read_undo_steps(&job.path, ui_opts.tag_layout).unwrap_or(0);
 
-                let result = mp3rgain::undo_gain_auto(&job.path, ui_opts.use_id3v2);
+                let result = mp3rgain::undo_gain_auto(&job.path, ui_opts.tag_layout);
                 match result {
                     Ok(0) => {
                         skipped.fetch_add(1, Ordering::Relaxed);
@@ -680,12 +684,12 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
 ///
 /// Dispatch mirrors the CLI's `process_delete_tags`:
 ///   - AAC: `mp4meta::delete_replaygain_tags` + `delete_undo_tags`
-///   - MP3 + `use_id3v2`: `mp3rgain::delete_id3v2_replaygain`
+///   - MP3 + `TagLayout::Id3v2`: `mp3rgain::delete_id3v2_replaygain`
 ///   - MP3 (default APE): `mp3rgain::delete_ape_tag`
 pub fn spawn_delete_tags(
     ctx: egui::Context,
     jobs: Vec<DeleteTagsJob>,
-    use_id3v2: bool,
+    layout: TagLayout,
     preserve_timestamp: bool,
 ) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
@@ -705,7 +709,7 @@ pub fn spawn_delete_tags(
 
                 let original_mtime = saved_mtime(&job.path, preserve_timestamp);
 
-                let result = mp3rgain::delete_gain_tags_auto(&job.path, use_id3v2);
+                let result = mp3rgain::delete_gain_tags_auto(&job.path, layout);
 
                 match result {
                     Ok(()) => {
@@ -838,12 +842,12 @@ pub fn spawn_find_max_amplitude(ctx: egui::Context, files: Vec<(usize, PathBuf)>
 ///
 /// Dispatch is shared with the CLI via `mp3rgain::read_gain_tags_auto`:
 ///   - AAC: MP4 freeform RG + undo
-///   - MP3 + `use_id3v2`: ID3v2 TXXX RG
+///   - MP3 + `TagLayout::Id3v2`: ID3v2 TXXX RG
 ///   - MP3: APE
 pub fn spawn_check_stored_tags(
     ctx: egui::Context,
     jobs: Vec<CheckTagsJob>,
-    use_id3v2: bool,
+    layout: TagLayout,
 ) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -857,7 +861,7 @@ pub fn spawn_check_stored_tags(
                 return;
             }
             send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
-            let view = read_stored_tags(&job.path, use_id3v2);
+            let view = read_stored_tags(&job.path, layout);
             send(
                 &tx,
                 &ctx,
@@ -877,13 +881,14 @@ pub fn spawn_check_stored_tags(
     WorkerHandle { rx, cancel }
 }
 
-fn read_stored_tags(path: &Path, use_id3v2: bool) -> StoredTagsView {
-    match read_gain_tags_auto(path, use_id3v2) {
+fn read_stored_tags(path: &Path, layout: TagLayout) -> StoredTagsView {
+    match read_gain_tags_auto(path, layout) {
         Ok(tags) => StoredTagsView {
             format: Some(match tags.source {
                 GainTagSource::Aac => "MP4",
                 GainTagSource::Id3v2 => "ID3v2",
                 GainTagSource::Ape { .. } => "APE",
+                GainTagSource::Split => "ID3v2+APE",
             }),
             track_gain: tags.track_gain,
             track_peak: tags.track_peak,
@@ -896,7 +901,11 @@ fn read_stored_tags(path: &Path, use_id3v2: bool) -> StoredTagsView {
         // fail-soft branches did. The AAC branch never errors, so the label
         // follows the MP3 tag mode.
         Err(_) => StoredTagsView {
-            format: Some(if use_id3v2 { "ID3v2" } else { "APE" }),
+            format: Some(match layout {
+                TagLayout::Id3v2 => "ID3v2",
+                TagLayout::Ape => "APE",
+                TagLayout::Split => "ID3v2+APE",
+            }),
             ..Default::default()
         },
     }
@@ -924,7 +933,7 @@ fn build_apply_options(
     opts.prevent_clipping = ui_opts.prevent_clipping;
     opts.wrap = ui_opts.wrap;
     opts.preserve_timestamp = ui_opts.preserve_timestamp;
-    opts.use_id3v2 = ui_opts.use_id3v2;
+    opts.tag_layout = ui_opts.tag_layout;
     opts
 }
 

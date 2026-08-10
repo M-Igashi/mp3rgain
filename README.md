@@ -106,7 +106,7 @@ A native GUI application (`mp3rgui`) is available for users who prefer a graphic
 - Drag-and-drop file / folder loading (recurses subfolders)
 - Track and Album ReplayGain analysis (parallel, with Cancel)
 - Apply Track / Album Gain — shares the same `apply_with_options` pipeline as the CLI
-- **Options panel:** Prevent clipping (`-k`), Preserve mtime (`-p`), Wrap mode (`-w`), Use ID3v2 (`-s i`), Dry run (`-n`)
+- **Options panel:** Prevent clipping (`-k`), Preserve mtime (`-p`), Wrap mode (`-w`), MP3 tag layout (`-s a` / `-s i`), Dry run (`-n`)
 - **Modify Gain menu:** Apply Track / Album / Manual (`-g`) / Channel (`-l`) Gain, Undo (`-u`), Delete Stored Tags (`-s d`)
 - **Analysis menu:** Track / Album Analysis, Find Max Amplitude (`-x`), Check Stored Tags (`-s c`)
 - **Stored RG** table column shows existing ReplayGain / undo tags (APE / ID3v2 / MP4 freeform) with a per-tag breakdown on hover
@@ -176,8 +176,7 @@ These are all ReplayGain tools, mp3rgain included — it runs a ReplayGain analy
 > it can bake gain into MP3 and AAC bitstreams too. mp3rgain is the better fit when you need a
 > command line, a non-Windows host, mp3gain-identical ReplayGain 1.0 values, or an undo path — and
 > the two coexist fine, since mp3rgain writes the same standard `REPLAYGAIN_*` tags foobar2000
-> reads, with `--rg2` deliberately matching its measurement. For MP3, add `-s i` so those tags
-> land in ID3v2 — see below.
+> reads — in ID3v2, where it looks for them — with `--rg2` deliberately matching its measurement.
 
 mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) by default for full compatibility with the original mp3gain / aacgain — an existing library re-scans to identical values. Modern BS.1770 loudness measurement is available as an opt-in: `--rg2` (ReplayGain 2.0, −18 LUFS reference) and `--r128` (EBU R128, −23 LUFS target) produce values consistent with foobar2000, loudgain, and ffmpeg loudnorm.
 
@@ -185,13 +184,26 @@ Files scanned with `--rg2` / `--r128` also carry a `REPLAYGAIN_ALGORITHM` tag se
 
 ### Where the tags go (MP3)
 
-By default mp3rgain writes **APEv2**, exactly where mp3gain put its tags. Some players — foobar2000 among them — only look for ReplayGain in **ID3v2** on MP3, so they will not see the default tags. Pass `-s i` to write them as ID3v2 `TXXX` frames instead:
+MP3 has two competing metadata containers, and the two tag families mp3rgain writes have different audiences. By default each goes where its readers are:
+
+| Tag | Container | Read by |
+|-----|-----------|---------|
+| `REPLAYGAIN_*` | ID3v2 `TXXX` | Players. ffmpeg — and everything built on it — does not read APEv2 on MP3 at all, and Rockbox only handles APE tags for WavPack/Musepack. foobar2000 writes ReplayGain to ID3v2 and expects it there. |
+| `MP3GAIN_UNDO`, `MP3GAIN_MINMAX` | APEv2 | Nothing but the mp3gain lineage, which looks in APEv2. Keeping them there is what makes `-u` work on a library mp3gain already processed. |
+
+Two flags override the split when you want everything in one place:
 
 ```bash
-mp3rgain -r -s i *.mp3     # ReplayGain tags foobar2000 will read
+mp3rgain -r *.mp3          # default: ReplayGain in ID3v2, undo in APEv2
+mp3rgain -r -s a *.mp3     # everything in APEv2 — byte-for-byte mp3gain
+mp3rgain -r -s i *.mp3     # everything in ID3v2
 ```
 
-`-s i` covers the whole round trip: the `REPLAYGAIN_*` values, `MP3GAIN_UNDO`, `-s c` inspection, and `-u` undo all use ID3v2 in that mode. The one APEv2-only extra is `MP3GAIN_ALBUM_MINMAX`. AAC/M4A is unaffected — it always uses MP4 freeform atoms, which foobar2000 reads.
+`MP3GAIN_ALBUM_MINMAX` is APEv2-only in every mode. AAC/M4A is unaffected — it always uses MP4 freeform atoms.
+
+`-s c` reads both containers and merges them, and `-u` finds the undo tag in either, so files tagged by mp3gain or by an earlier `-s i` run still inspect and roll back correctly.
+
+> **Changed in 3.2.0.** Earlier versions put everything in APEv2. If you depend on the old layout, `-s a` restores it exactly. Re-running the default over an APEv2-tagged file moves the ReplayGain values to ID3v2 and clears the APEv2 copies so the two cannot disagree.
 
 ## Use mp3rgain in Docker / CI
 

@@ -1,5 +1,5 @@
 use mp3rgain::replaygain::AnalysisMode;
-use mp3rgain::Channel;
+use mp3rgain::{Channel, TagLayout};
 use std::path::PathBuf;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -29,14 +29,14 @@ pub struct Options {
 
     // Mode options
     pub undo: bool, // -u
-    // -s <mode>. Orthogonal to `use_id3v2`: the mode says *what* to do with
-    // stored tags (check / delete / skip writing), while `use_id3v2` says
-    // *where* they live (-s i: ID3v2 frames, -s a: APEv2, the default).
+    // -s <mode>. Orthogonal to `tag_layout`: the mode says *what* to do with
+    // stored tags (check / delete / skip writing), while `tag_layout` says
+    // *where* they live (-s i: all ID3v2, -s a: all APEv2, default: split).
     pub stored_tag_mode: StoredTagMode,
-    pub use_id3v2: bool,    // -s i: use ID3v2 tags instead of APEv2 (-s a resets)
-    pub force_recalc: bool, // -s r: accepted for compatibility (always recalculates)
-    pub track_gain: bool,   // -r (apply track gain)
-    pub album_gain: bool,   // -a (apply album gain)
+    pub tag_layout: TagLayout, // -s i / -s a
+    pub force_recalc: bool,    // -s r: accepted for compatibility (always recalculates)
+    pub track_gain: bool,      // -r (apply track gain)
+    pub album_gain: bool,      // -a (apply album gain)
     // --rg2 / --r128: opt-in BS.1770 loudness modes (issue #269).
     // Default Rg1 keeps mp3gain-identical values.
     pub analysis_mode: AnalysisMode,

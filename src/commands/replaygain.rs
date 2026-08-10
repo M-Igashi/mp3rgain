@@ -347,7 +347,10 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             // MP3 file after all gain is applied (the range is only known once the
             // whole album is done). APEv2 only — mp3gain has no AAC, and `-s i`
             // uses ID3v2; best-effort, so a tag hiccup never fails the album.
-            if !opts.dry_run && opts.stored_tag_mode != StoredTagMode::Skip && !opts.use_id3v2 {
+            if !opts.dry_run
+                && opts.stored_tag_mode != StoredTagMode::Skip
+                && !opts.tag_layout.mp3gain_in_id3v2()
+            {
                 let album_files: Vec<(&Path, Option<(u8, u8)>)> = successful_indices
                     .iter()
                     .map(|&i| (files[i].as_path(), range_by_idx[i]))

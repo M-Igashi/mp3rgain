@@ -143,7 +143,7 @@ fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, S
 
     let original_mtime = save_original_mtime(file, opts);
 
-    let delete_result = mp3rgain::delete_gain_tags_auto(file, opts.use_id3v2);
+    let delete_result = mp3rgain::delete_gain_tags_auto(file, opts.tag_layout);
 
     match delete_result {
         Ok(()) => {
@@ -203,7 +203,7 @@ fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, S
     let filename = get_filename(file);
     let mut out = String::new();
 
-    let tags = match read_gain_tags_auto(file, opts.use_id3v2) {
+    let tags = match read_gain_tags_auto(file, opts.tag_layout) {
         Ok(tags) => tags,
         Err(e) => return (tag_read_error(file, filename, e, opts), out),
     };
@@ -223,6 +223,7 @@ fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, S
         GainTagSource::Ape { tag_present: false } => {
             (TAG_MP3GAIN_UNDO, TAG_MP3GAIN_MINMAX, "no APE tag found")
         }
+        GainTagSource::Split => (TAG_MP3GAIN_UNDO, TAG_MP3GAIN_MINMAX, "no gain tags found"),
     };
 
     let info = CheckTagInfo {

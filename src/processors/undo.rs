@@ -34,7 +34,7 @@ fn process_undo_into(file: &Path, opts: &Options, out: &mut String) -> Result<Js
         });
     }
 
-    let undo_result = undo_gain_auto(file, opts.use_id3v2);
+    let undo_result = undo_gain_auto(file, opts.tag_layout);
 
     match undo_result {
         Ok(frames) => {
