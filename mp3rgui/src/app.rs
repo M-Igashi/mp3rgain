@@ -803,12 +803,12 @@ impl Mp3rgainApp {
             self.files[job_idx].status = FileStatus::Pending;
         }
         let count = jobs.len();
-        let use_id3v2 = self.apply_options.use_id3v2;
+        let layout = self.apply_options.tag_layout;
         let preserve = self.apply_options.preserve_timestamp;
         self.begin_worker(
             WorkerKind::DeleteTags,
             count,
-            worker::spawn_delete_tags(ctx.clone(), jobs, use_id3v2, preserve),
+            worker::spawn_delete_tags(ctx.clone(), jobs, layout, preserve),
         );
     }
 
@@ -860,11 +860,11 @@ impl Mp3rgainApp {
             })
             .collect();
         let count = jobs.len();
-        let use_id3v2 = self.apply_options.use_id3v2;
+        let layout = self.apply_options.tag_layout;
         self.begin_worker(
             WorkerKind::CheckTags,
             count,
-            worker::spawn_check_stored_tags(ctx.clone(), jobs, use_id3v2),
+            worker::spawn_check_stored_tags(ctx.clone(), jobs, layout),
         );
     }
 
@@ -891,11 +891,11 @@ impl Mp3rgainApp {
             return;
         }
         let count = jobs.len();
-        let use_id3v2 = self.apply_options.use_id3v2;
+        let layout = self.apply_options.tag_layout;
         self.begin_worker(
             WorkerKind::ImportScan,
             count,
-            worker::spawn_check_stored_tags(ctx.clone(), jobs, use_id3v2),
+            worker::spawn_check_stored_tags(ctx.clone(), jobs, layout),
         );
     }
 
@@ -978,7 +978,7 @@ impl Mp3rgainApp {
     }
 
     /// Undo gain changes on selected files (or all files when no selection).
-    /// Library calls dispatch internally on file format and `use_id3v2`.
+    /// Library calls dispatch internally on file format and `TagLayout`.
     pub fn start_undo(&mut self, ctx: &egui::Context) {
         if self.files.is_empty() || self.is_processing() {
             return;

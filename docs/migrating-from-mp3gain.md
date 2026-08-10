@@ -69,7 +69,7 @@ flags are accepted with the same semantics; mp3rgain adds a few extensions.
 | `-f` | Assume MPEG2 Layer III | Accepted; no effect (mp3rgain auto-detects) |
 | `-q` | Quiet mode | |
 | `-R` | Process directories recursively | |
-| `-s c` / `-s d` / `-s s` / `-s r` / `-s a` | Stored-tag handling: check / delete / skip / recalc / APEv2 (default) | Same modes as mp3gain |
+| `-s c` / `-s d` / `-s s` / `-s r` / `-s a` | Stored-tag handling: check / delete / skip / recalc / all-APEv2 | Same modes as mp3gain. `-s a` pins every tag to APEv2, which is mp3gain's layout and was mp3rgain's default before 3.2.0 |
 | `-o` (no argument) | TSV output | Default header matches mp3gain exactly (see [Output format](#output-format)) |
 
 ### mp3rgain extensions
@@ -84,7 +84,7 @@ are worth knowing:
 | `-w` | Wrap gain values instead of clamping |
 | `-n`, `--dry-run` | Preview changes without writing |
 | `-o text` / `-o json` / `-o tsv` | Explicit output format selection |
-| `-s i` | Use ID3v2 ReplayGain tags instead of APEv2 (partial) |
+| `-s i` | Put *every* tag in ID3v2 `TXXX`, undo included. Since 3.2.0 the default already writes `REPLAYGAIN_*` to ID3v2, so this is only needed when you want `MP3GAIN_UNDO` there too |
 | `-j <n>` / `--threads <n>` | Worker threads for ReplayGain analysis (default: auto). `MP3RGAIN_THREADS` env var also honored. `-j 1` reproduces mp3gain's serial behavior. See [docs/perf-parallel.md](perf-parallel.md). |
 | `--skip-errors` | Keep album analysis (`-a`) going past unreadable files; failed files are reported and excluded from the album gain |
 
@@ -119,8 +119,8 @@ For new integrations, prefer `-o json`, which is structured and stable.
 |--------------|---------|----------|---------|
 | APEv2 `mp3gain_undo` (MP3) | Written | Written | Bidirectional — either tool can undo the other's changes ([#210](https://github.com/M-Igashi/mp3rgain/issues/210); files written by mp3rgain ≤ 2.8.x used the opposite sign) |
 | APEv2 `mp3gain_minmax` (MP3) | Written | Written | Same |
-| APEv2 ReplayGain (`mp3gain_album_*`, `replaygain_*`) | Written | Written | Same |
-| ID3v2 TXXX/RVA2 ReplayGain | Not written | Written with `-s i` | Standard ReplayGain readers (foobar2000, mpd, etc.) recognise it |
+| APEv2 ReplayGain (`mp3gain_album_*`, `replaygain_*`) | Written | Written with `-s a` | Since 3.2.0 the default puts `REPLAYGAIN_*` in ID3v2 instead, and clears stale APEv2 copies so the two cannot disagree. `-s a` restores mp3gain's layout exactly |
+| ID3v2 TXXX ReplayGain | Not written | Written by default since 3.2.0 | Where standard ReplayGain readers look. ffmpeg does not read APEv2 on MP3 at all, and Rockbox only handles APE tags for WavPack/Musepack |
 | MP4 freeform metadata (AAC/M4A) | N/A | Written | mp3gain has no AAC support; mp3rgain stores AAC undo and ReplayGain in `com.apple.metadata.mdta:ReplayGain_*` and a `mp3gain_undo` freeform atom |
 
 For more on the choice between bitstream `global_gain` rewriting and
@@ -136,7 +136,7 @@ These are the only behaviour differences worth knowing about:
 | Undo cleanup | mp3gain leaves empty APEv2 tags after `-u`; mp3rgain removes them | Audio data is identical; only the tag block differs |
 | ReplayGain analysis | mp3gain uses LAME; mp3rgain uses Symphonia + native Rust | Track/album gain values may differ by <0.1 dB. The *applied* gain is bit-identical for any given step value |
 | Format coverage | mp3gain handles MP3 only | mp3rgain also handles AAC/M4A/.mp4 (lossless `global_gain` rewrite, the same idea aacgain used) |
-| `-s i` (ID3v2) | Not supported in mp3gain | Marked "not fully supported" in `--help` — prefer the default APEv2 path unless you specifically need ReplayGain TXXX tags |
+| Tag placement | mp3gain puts everything in APEv2 | Since 3.2.0 mp3rgain splits: `REPLAYGAIN_*` to ID3v2 where players look, `MP3GAIN_UNDO`/`MINMAX` to APEv2 where mp3gain looks. `-s a` restores the all-APEv2 layout; `-s i` puts everything in ID3v2. `MP3GAIN_ALBUM_MINMAX` is APEv2-only in every mode |
 
 If you discover a case where mp3rgain produces non-identical output for an
 operation listed under [Identical behaviour](#identical-behaviour), please

@@ -39,8 +39,8 @@ pub fn print_usage() {
     println!("                  d = delete stored tag info");
     println!("                  s = skip (don't write) stored tag info");
     println!("                  r = force recalculation (always on; kept for compatibility)");
-    println!("                  i = use ID3v2 tags (not fully supported)");
-    println!("                  a = use APEv2 tags (default)");
+    println!("                  i = put all tags in ID3v2");
+    println!("                  a = put all tags in APEv2 (mp3gain-identical)");
     println!("    -p          Preserve original file timestamp");
     println!("    -c          Ignore clipping warnings");
     println!("    -k          Prevent clipping (automatically limit gain)");
@@ -93,7 +93,8 @@ pub fn print_usage() {
         GAIN_STEP_DB
     );
     println!("    - Changes are lossless and reversible");
-    println!("    - Gain changes are stored in APEv2 tags for undo support");
+    println!("    - MP3 tags: REPLAYGAIN_* in ID3v2 (where players look),");
+    println!("      MP3GAIN_UNDO / MINMAX in APEv2 (where mp3gain looks)");
     println!(
         "    - Progress bar shown automatically for {}+ files",
         crate::progress::PROGRESS_THRESHOLD

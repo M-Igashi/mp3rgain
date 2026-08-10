@@ -188,7 +188,7 @@ fn apply_replaygain_with_album_into(
     // `-s i` ID3v2, and AAC all write the REPLAYGAIN_* tags (issue #204).
     apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
     apply_opts.write_replaygain_tags = opts.stored_tag_mode != StoredTagMode::Skip;
-    apply_opts.use_id3v2 = opts.use_id3v2;
+    apply_opts.tag_layout = opts.tag_layout;
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {

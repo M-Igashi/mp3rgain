@@ -1,5 +1,6 @@
 use crate::app::Mp3rgainApp;
 use mp3rgain::replaygain::AnalysisMode;
+use mp3rgain::TagLayout;
 
 /// Apply-options checkbox row, shown right below the toolbar.
 ///
@@ -30,12 +31,34 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
                          Disables the clipping check. CLI -w. Rarely useful — leave off.",
                     );
 
-                ui.checkbox(&mut app.apply_options.use_id3v2, "Use ID3v2 (MP3)")
-                    .on_hover_text(
-                        "MP3 only: store undo + ReplayGain tags in ID3v2 TXXX frames \
-                         instead of APE. Required for foobar2000 / Winamp / Rockbox \
-                         to see ReplayGain values on MP3. CLI -s i.",
-                    );
+                ui.horizontal(|ui| {
+                    ui.label("MP3 tags:");
+                    let layout = &mut app.apply_options.tag_layout;
+                    egui::ComboBox::from_id_salt("tag_layout")
+                        .selected_text(match layout {
+                            TagLayout::Split => "ReplayGain in ID3v2",
+                            TagLayout::Ape => "All in APEv2",
+                            TagLayout::Id3v2 => "All in ID3v2",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(layout, TagLayout::Split, "ReplayGain in ID3v2")
+                                .on_hover_text(
+                                    "Default. REPLAYGAIN_* in ID3v2 TXXX where players \
+                                 look, MP3GAIN_UNDO / MINMAX in APEv2 where mp3gain \
+                                 looks.",
+                                );
+                            ui.selectable_value(layout, TagLayout::Ape, "All in APEv2")
+                                .on_hover_text(
+                                    "Byte-for-byte mp3gain behaviour. ReplayGain-aware \
+                                     players will not find the values. CLI -s a.",
+                                );
+                            ui.selectable_value(layout, TagLayout::Id3v2, "All in ID3v2")
+                                .on_hover_text(
+                                    "Undo and ReplayGain both in ID3v2 TXXX frames. \
+                                     CLI -s i.",
+                                );
+                        });
+                });
 
                 ui.separator();
 

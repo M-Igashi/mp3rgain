@@ -579,9 +579,10 @@ fn test_file_not_modified_on_zero_gain() {
 // APEv2 ReplayGain tag writing (issue #204)
 // =============================================================================
 
-/// Issue #204: applying track gain in the default APEv2 mode must write the
-/// REPLAYGAIN_TRACK_* analysis tags alongside MP3GAIN_UNDO/MINMAX, matching
+/// Issue #204: applying track gain in the all-APEv2 layout (`-s a`) must write
+/// the REPLAYGAIN_TRACK_* analysis tags alongside MP3GAIN_UNDO/MINMAX, matching
 /// the original mp3gain. Previously only the MP3GAIN_* tags were written.
+/// (The default layout puts REPLAYGAIN_* in ID3v2 instead — see cli_tests.rs.)
 #[test]
 fn test_apply_track_gain_writes_ape_replaygain_tags() {
     use mp3rgain::apply::{apply_with_options, ApplyOptions};
@@ -595,7 +596,8 @@ fn test_apply_track_gain_writes_ape_replaygain_tags() {
 
     let mut opts = ApplyOptions::new(result.gain_steps());
     opts.track_result = Some(result);
-    opts.write_replaygain_tags = true; // default APEv2 path (use_id3v2 = false)
+    opts.write_replaygain_tags = true;
+    opts.tag_layout = mp3rgain::TagLayout::Ape;
     apply_with_options(&path, &opts).unwrap();
 
     let tag = read_ape_tag_from_file(&path).unwrap().expect("APE tag");
@@ -617,7 +619,8 @@ fn test_apply_track_gain_writes_ape_replaygain_tags() {
     cleanup(&path);
 }
 
-/// Album info must additionally populate the REPLAYGAIN_ALBUM_* APEv2 items.
+/// Album info must additionally populate the REPLAYGAIN_ALBUM_* APEv2 items
+/// in the all-APEv2 layout.
 #[test]
 fn test_apply_album_gain_writes_ape_album_replaygain_tags() {
     use mp3rgain::apply::{apply_with_options, AacAlbumInfo, ApplyOptions};
@@ -638,6 +641,7 @@ fn test_apply_album_gain_writes_ape_album_replaygain_tags() {
     opts.track_result = Some(result);
     opts.album_info = Some(album);
     opts.write_replaygain_tags = true;
+    opts.tag_layout = mp3rgain::TagLayout::Ape;
     let report = apply_with_options(&path, &opts).unwrap();
 
     // mp3gain writes the post-apply *residual* album values at 6-decimal

@@ -3,7 +3,7 @@
 //! Unix shells expand `*.mp3` before the process starts, but cmd.exe and
 //! PowerShell hand the pattern through untouched. Without this, a Windows user
 //! typing `mp3rgain *.mp3` gets "Failed to open '*.mp3'" (issue reported on the
-//! foobar2000 forum). The original mp3gain got this for free from the MSVC
+//! Hydrogenaudio forum). The original mp3gain got this for free from the MSVC
 //! `setargv` runtime hook.
 
 use std::path::{Path, PathBuf};

@@ -90,6 +90,9 @@ jobs:
       - name: Run integration tests
         run: cargo test --test integration_tests --verbose
 
+      - name: Run CLI tests
+        run: cargo test --test cli_tests --verbose
+
       - name: Build with replaygain feature
         run: cargo build --features replaygain --verbose
 

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::replaygain::AnalysisMode;
-use mp3rgain::Channel;
+use mp3rgain::{Channel, TagLayout};
 use std::path::PathBuf;
 
 use super::options::{Options, OutputFormat, StoredTagMode};
@@ -129,8 +129,8 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                         // tags as an analysis cache, so "force recalculation"
                         // is always in effect. Accepted with a notice (#253).
                         "r" => opts.force_recalc = true,
-                        "i" => opts.use_id3v2 = true,
-                        "a" => opts.use_id3v2 = false,
+                        "i" => opts.tag_layout = TagLayout::Id3v2,
+                        "a" => opts.tag_layout = TagLayout::Ape,
                         other => {
                             eprintln!(
                                 "{}: unknown -s mode '{}', use c/d/s/r/i/a",
@@ -523,9 +523,9 @@ mod tests {
         assert_eq!(opts.stored_tag_mode, StoredTagMode::None);
         // -s i / -s a toggle the tag format; last one wins
         let opts = parse_args(&args(&["-s", "i"])).unwrap();
-        assert!(opts.use_id3v2);
+        assert_eq!(opts.tag_layout, TagLayout::Id3v2);
         let opts = parse_args(&args(&["-s", "i", "-s", "a"])).unwrap();
-        assert!(!opts.use_id3v2);
+        assert_eq!(opts.tag_layout, TagLayout::Ape);
         assert_eq!(opts.stored_tag_mode, StoredTagMode::None);
     }
 

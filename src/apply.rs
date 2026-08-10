@@ -27,7 +27,7 @@ use crate::gain::{
     MAX_GAIN,
 };
 use crate::replaygain::ReplayGainResult;
-use crate::{ape, id3v2, mp4meta};
+use crate::{ape, id3v2, mp4meta, TagLayout};
 
 /// Per-process counter for `.mp3rgain_temp_*` filenames so parallel
 /// apply tasks operating on files in the same directory don't collide.
@@ -87,19 +87,18 @@ pub struct ApplyOptions {
     /// (issue #227), so the flag is accepted but has no effect.
     pub use_temp_file: bool,
 
-    /// Record an undo tag (APE for MP3, MP4 freeform for AAC, ID3v2 TXXX
-    /// when [`Self::use_id3v2`] is on).
+    /// Record an undo tag (MP4 freeform for AAC; for MP3 the container is
+    /// [`Self::tag_layout`] — APEv2 unless `-s i`).
     pub write_undo: bool,
 
     /// Write ReplayGain metadata tags. Requires [`Self::track_result`] to
-    /// be set. AAC writes to mp4 freeform metadata; MP3 writes ID3v2 TXXX
-    /// frames when [`Self::use_id3v2`] is on, otherwise APEv2 `REPLAYGAIN_*`
-    /// items (issue #204).
+    /// be set. AAC writes to mp4 freeform metadata; MP3 follows
+    /// [`Self::tag_layout`] (issue #204).
     pub write_replaygain_tags: bool,
 
-    /// `-s i`: MP3 only — use ID3v2 TXXX frames for undo and ReplayGain
-    /// instead of APE.
-    pub use_id3v2: bool,
+    /// MP3 only — which container(s) the tags go in. Defaults to
+    /// [`TagLayout::Split`].
+    pub tag_layout: TagLayout,
 
     /// `-l`: MP3 only — apply gain to a single channel (Stereo / Dual
     /// Channel) instead of all channels. AAC has no per-channel apply
@@ -129,7 +128,7 @@ impl ApplyOptions {
             use_temp_file: false,
             write_undo: true,
             write_replaygain_tags: false,
-            use_id3v2: false,
+            tag_layout: TagLayout::default(),
             channel: None,
             skip_clipping_check: false,
         }
@@ -233,11 +232,17 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
     let mut ape_rg_folded = false;
     let modified = if is_aac {
         apply_aac_bytes(file_path, actual_steps, opts, aac_analysis)?
-    } else if opts.use_id3v2 {
+    } else if opts.tag_layout.mp3gain_in_id3v2() {
         saturation = apply_mp3_id3v2_bytes(file_path, actual_steps, opts, mp3_data.take())?;
         saturation.frames
     } else {
-        let folded_rg = if opts.write_replaygain_tags && opts.channel.is_none() && !opts.wrap {
+        // Under Split the ReplayGain values belong in ID3v2, so nothing is
+        // folded into the APE write here — step 3 handles them.
+        let folded_rg = if opts.write_replaygain_tags
+            && opts.tag_layout == TagLayout::Ape
+            && opts.channel.is_none()
+            && !opts.wrap
+        {
             compute_rg_residual(file_path, opts, actual_steps, false).map(|r| r.to_ape())
         } else {
             None
@@ -256,7 +261,7 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
     // loudness shift is not uniform, so the modified file is re-analyzed for
     // the true post-apply residual and the APE items rewritten; channel
     // applies keep the legacy separate write.
-    if opts.write_replaygain_tags && !opts.use_id3v2 {
+    if opts.write_replaygain_tags && !opts.tag_layout.mp3gain_in_id3v2() {
         let needs_reanalysis =
             !is_aac && (opts.wrap || saturation.saturated_low > 0 || saturation.saturated_high > 0);
         if is_aac {
@@ -268,6 +273,15 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
                 }
                 tags.set_algorithm(res.mode);
                 mp4meta::write_replaygain_tags(file_path, &tags)?;
+            }
+        } else if opts.tag_layout == TagLayout::Split {
+            // Clear any APEv2 ReplayGain first: mp3gain or an earlier `-s a`
+            // run may have left values there, and they would now disagree
+            // with the authoritative ID3v2 ones.
+            ape::remove_ape_replaygain(file_path)?;
+            if let Some(res) = compute_rg_residual(file_path, opts, actual_steps, needs_reanalysis)
+            {
+                id3v2::write_id3v2_replaygain(file_path, &res.to_id3v2())?;
             }
         } else if !ape_rg_folded || needs_reanalysis {
             if let Some(res) = compute_rg_residual(file_path, opts, actual_steps, needs_reanalysis)

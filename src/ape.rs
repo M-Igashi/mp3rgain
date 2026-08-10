@@ -144,6 +144,23 @@ impl ApeTag {
             }
         }
     }
+
+    /// Drop every `REPLAYGAIN_*` item, keeping the `MP3GAIN_*` ones.
+    ///
+    /// Needed by [`crate::TagLayout::Split`]: the fresh values go to ID3v2, so
+    /// stale APEv2 copies left by mp3gain or an earlier `-s a` run would
+    /// otherwise linger and disagree with them.
+    pub(crate) fn remove_replaygain(&mut self) {
+        for key in [
+            TAG_REPLAYGAIN_TRACK_GAIN,
+            TAG_REPLAYGAIN_TRACK_PEAK,
+            TAG_REPLAYGAIN_ALBUM_GAIN,
+            TAG_REPLAYGAIN_ALBUM_PEAK,
+            TAG_REPLAYGAIN_ALGORITHM,
+        ] {
+            self.remove(key);
+        }
+    }
 }
 
 impl std::fmt::Display for ApeTag {
@@ -477,6 +494,31 @@ pub struct ApeReplayGain {
 /// `rg` are set.
 pub fn write_ape_replaygain(file_path: &Path, rg: &ApeReplayGain) -> Result<()> {
     rewrite_ape_tail(file_path, |tag| tag.set_replaygain(rg))
+}
+
+/// Drop the `REPLAYGAIN_*` items from `file_path`'s APEv2 tag, keeping
+/// `MP3GAIN_*`.
+///
+/// Used by [`crate::TagLayout::Split`], where the authoritative ReplayGain
+/// values live in ID3v2: an APEv2 copy left behind by mp3gain or an earlier
+/// `-s a` run would go stale the moment the ID3v2 values are rewritten. Files
+/// with no APEv2 ReplayGain items are left untouched rather than rewritten.
+pub(crate) fn remove_ape_replaygain(file_path: &Path) -> Result<()> {
+    let has_rg = read_ape_tag_from_file(file_path)?.is_some_and(|tag| {
+        [
+            TAG_REPLAYGAIN_TRACK_GAIN,
+            TAG_REPLAYGAIN_TRACK_PEAK,
+            TAG_REPLAYGAIN_ALBUM_GAIN,
+            TAG_REPLAYGAIN_ALBUM_PEAK,
+            TAG_REPLAYGAIN_ALGORITHM,
+        ]
+        .iter()
+        .any(|k| tag.get(k).is_some())
+    });
+    if !has_rg {
+        return Ok(());
+    }
+    rewrite_ape_tail(file_path, |tag| tag.remove_replaygain())
 }
 
 /// Add (or replace) the `MP3GAIN_ALBUM_MINMAX` item in `file_path`'s APEv2
