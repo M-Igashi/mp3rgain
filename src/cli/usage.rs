@@ -30,6 +30,8 @@ pub fn print_usage() {
     println!("    -a          Apply Album gain (ReplayGain analysis)");
     println!("    --rg2       ReplayGain 2.0 analysis (BS.1770, -18 LUFS reference)");
     println!("    --r128      EBU R128 analysis (BS.1770, -23 LUFS target)");
+    println!("    --true-peak Measure true peak (BS.1770-4 Annex 2) for REPLAYGAIN_*_PEAK");
+    println!("                (requires --rg2 or --r128; default is sample peak)");
     println!("    -e          Skip album analysis (even with multiple files)");
     println!("    -i <n>      Specify which audio track to process (default: 0)");
     println!("    -u          Undo gain changes (restore from APEv2 tag)");

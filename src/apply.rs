@@ -518,7 +518,14 @@ fn compute_rg_residual(
         )
     };
     let (track_gain_db, track_peak, applied_db) = if reanalyze {
-        match crate::replaygain::analyze_track_with_mode(modified_path, None, mode, None) {
+        // Match the original measurement exactly: same mode, and true peak
+        // when the original peak was a true peak (issue #292).
+        let reopts = crate::replaygain::TrackAnalysisOptions {
+            mode,
+            true_peak: track.is_true_peak(),
+            ..Default::default()
+        };
+        match crate::replaygain::analyze_track_with_options(modified_path, &reopts) {
             Ok(post) => (
                 post.gain_db(),
                 post.peak(),

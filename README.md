@@ -132,6 +132,7 @@ A native GUI application (`mp3rgui`) is available for users who prefer a graphic
 | `-a` | Apply Album gain (ReplayGain) |
 | `--rg2` | Use ReplayGain 2.0 analysis (BS.1770, −18 LUFS reference) |
 | `--r128` | Use EBU R128 analysis (BS.1770, −23 LUFS target) |
+| `--true-peak` | Measure true peak (BS.1770-4 Annex 2) for `REPLAYGAIN_*_PEAK` (with `--rg2` / `--r128`; default is sample peak) |
 | `-g <i>` | Apply gain of i steps (1 step = 1.5 dB) |
 | `-d <n>` | Modify suggested dB gain by n (mp3gain-compatible; applied with `-r` / `-a`) |
 | `-u` | Undo gain changes |

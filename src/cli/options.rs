@@ -40,6 +40,9 @@ pub struct Options {
     // --rg2 / --r128: opt-in BS.1770 loudness modes (issue #269).
     // Default Rg1 keeps mp3gain-identical values.
     pub analysis_mode: AnalysisMode,
+    // --true-peak: BS.1770-4 Annex 2 true peak for REPLAYGAIN_*_PEAK in the
+    // BS.1770 modes (issue #292). Requires --rg2 or --r128.
+    pub true_peak: bool,
     pub skip_album: bool,         // -e: skip album analysis
     pub max_amplitude_only: bool, // -x: only find max amplitude
     pub track_index: Option<u32>, // -i <index>: track index for multi-track files

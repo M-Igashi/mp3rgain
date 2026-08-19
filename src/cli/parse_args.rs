@@ -50,6 +50,12 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
             continue;
         }
 
+        if arg == "--true-peak" {
+            opts.true_peak = true;
+            i += 1;
+            continue;
+        }
+
         if arg == "--help" {
             print_usage();
             std::process::exit(0);
@@ -316,6 +322,13 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
         }
 
         i += 1;
+    }
+
+    // RG1's peak is mp3gain's MAX_AMPLITUDE semantics and must stay
+    // bit-compatible, so true peak is only defined for the BS.1770 modes
+    // (issue #292). Checked after the loop so flag order doesn't matter.
+    if opts.true_peak && opts.analysis_mode == AnalysisMode::Rg1 {
+        anyhow::bail!("--true-peak requires --rg2 or --r128");
     }
 
     // cmd.exe and PowerShell do not expand `*.mp3` for native programs.
@@ -690,6 +703,26 @@ mod tests {
     fn rg2_and_r128_are_mutually_exclusive() {
         assert!(parse_args(&args(&["--rg2", "--r128", "song.mp3"])).is_err());
         assert!(parse_args(&args(&["--r128", "--rg2", "song.mp3"])).is_err());
+    }
+
+    #[test]
+    fn true_peak_flag() {
+        let opts = parse_args(&args(&["-r", "--rg2", "--true-peak", "song.mp3"])).unwrap();
+        assert!(opts.true_peak);
+        assert_eq!(opts.analysis_mode, AnalysisMode::Rg2);
+
+        // Order-independent: --true-peak may precede the mode flag.
+        let opts = parse_args(&args(&["--true-peak", "--r128", "song.mp3"])).unwrap();
+        assert!(opts.true_peak);
+
+        let opts = parse_args(&args(&["--rg2", "song.mp3"])).unwrap();
+        assert!(!opts.true_peak);
+    }
+
+    #[test]
+    fn true_peak_requires_bs1770_mode() {
+        assert!(parse_args(&args(&["--true-peak", "song.mp3"])).is_err());
+        assert!(parse_args(&args(&["-r", "--true-peak", "song.mp3"])).is_err());
     }
 
     #[test]

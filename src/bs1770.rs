@@ -213,6 +213,78 @@ fn gated_mean(energies: &[f64], gate: f64) -> Option<f64> {
     (count > 0).then(|| sum / count as f64)
 }
 
+/// BS.1770-4 Annex 2 true-peak meter (issue #292).
+///
+/// Estimates inter-sample peaks by oversampling the input with a polyphase
+/// FIR interpolator — a 49-tap Hann-windowed sinc, the same design as
+/// libebur128. 4× oversampling at the common rates; 2× is sufficient at
+/// ≥ 88.2 kHz where a further octave of oversampling adds nothing below
+/// the original Nyquist.
+///
+/// The center tap lands exactly on one polyphase phase, so that phase
+/// reproduces the input samples unchanged — the reported peak is therefore
+/// always ≥ the sample peak. Values above 1.0 are expected for lossy codecs
+/// that reconstruct above the sample grid.
+pub struct TruePeakMeter {
+    /// Polyphase sub-filters: `factor` phases of up to `TAPS/factor + 1`
+    /// coefficients each. `phases[p][k]` multiplies the input from `k`
+    /// samples ago.
+    phases: Vec<Vec<f64>>,
+    /// Per-channel input history, most recent first.
+    history: Vec<Vec<f64>>,
+    peak: f64,
+}
+
+impl TruePeakMeter {
+    const TAPS: usize = 49;
+
+    pub fn new(sample_rate: u32, channels: usize) -> Self {
+        let factor: usize = if sample_rate >= 88_200 { 2 } else { 4 };
+        let mut phases = vec![Vec::new(); factor];
+        for j in 0..Self::TAPS {
+            let m = j as f64 - (Self::TAPS - 1) as f64 / 2.0;
+            let sinc = if m.abs() > 1e-9 {
+                let x = m * std::f64::consts::PI / factor as f64;
+                x.sin() / x
+            } else {
+                1.0
+            };
+            let window = 0.5
+                * (1.0 - (2.0 * std::f64::consts::PI * j as f64 / (Self::TAPS - 1) as f64).cos());
+            phases[j % factor].push(sinc * window);
+        }
+        let history_len = phases.iter().map(Vec::len).max().unwrap_or(0);
+        Self {
+            phases,
+            history: vec![vec![0.0; history_len]; channels.max(1)],
+            peak: 0.0,
+        }
+    }
+
+    /// Add one frame of normalized samples (full scale = 1.0), one per
+    /// channel. Extra samples beyond the configured channel count are
+    /// ignored.
+    #[inline]
+    pub fn add_frame(&mut self, frame: &[f64]) {
+        for (history, &sample) in self.history.iter_mut().zip(frame) {
+            history.rotate_right(1);
+            history[0] = sample;
+            for phase in &self.phases {
+                let mut acc = 0.0;
+                for (&c, &x) in phase.iter().zip(history.iter()) {
+                    acc += c * x;
+                }
+                self.peak = self.peak.max(acc.abs());
+            }
+        }
+    }
+
+    /// Maximum absolute interpolated amplitude seen so far.
+    pub fn peak(&self) -> f64 {
+        self.peak
+    }
+}
+
 /// Streaming BS.1770 analyzer for one track.
 ///
 /// Feed decoded frames with [`add_frame`](Self::add_frame), then take the
@@ -221,6 +293,9 @@ fn gated_mean(energies: &[f64], gate: f64) -> Option<f64> {
 pub struct Bs1770Analyzer {
     filters: Vec<KWeightingFilter>,
     weights: Vec<f64>,
+    /// Optional BS.1770-4 Annex 2 true-peak meter, fed the raw (pre
+    /// K-weighting) samples of every frame (issue #292).
+    true_peak: Option<TruePeakMeter>,
     /// Samples per 100 ms sub-block (rounded for rates not divisible by 10,
     /// e.g. 11025 Hz).
     subblock_len: usize,
@@ -242,6 +317,7 @@ impl Bs1770Analyzer {
         Self {
             filters: vec![KWeightingFilter::new(sample_rate); channels],
             weights: channel_weights(channels),
+            true_peak: None,
             subblock_len: (sample_rate as usize + 5) / 10,
             subblock_sum: 0.0,
             subblock_samples: 0,
@@ -251,11 +327,28 @@ impl Bs1770Analyzer {
         }
     }
 
+    /// [`new`](Self::new) plus a [`TruePeakMeter`] measuring the raw input
+    /// alongside the loudness analysis (issue #292).
+    pub fn new_with_true_peak(sample_rate: u32, channels: usize) -> Self {
+        let mut analyzer = Self::new(sample_rate, channels);
+        analyzer.true_peak = Some(TruePeakMeter::new(sample_rate, channels.max(1)));
+        analyzer
+    }
+
+    /// True peak measured so far; `None` unless constructed with
+    /// [`new_with_true_peak`](Self::new_with_true_peak).
+    pub fn true_peak(&self) -> Option<f64> {
+        self.true_peak.as_ref().map(TruePeakMeter::peak)
+    }
+
     /// Add one frame of normalized samples (full scale = 1.0), one per
     /// channel. Extra samples beyond the configured channel count are
     /// ignored; missing ones count as silence.
     #[inline]
     pub fn add_frame(&mut self, frame: &[f64]) {
+        if let Some(meter) = &mut self.true_peak {
+            meter.add_frame(frame);
+        }
         let mut acc = 0.0;
         for ((filter, &weight), &sample) in self.filters.iter_mut().zip(&self.weights).zip(frame) {
             let y = filter.process(sample);
@@ -441,5 +534,72 @@ mod tests {
         append_sine(&mut samples, -23.0, 20.0, 11025);
         let lufs = integrated_stereo(&samples, 11025);
         assert!((lufs - -23.0).abs() < 0.2, "got {:.3}", lufs);
+    }
+
+    /// Worst-case inter-sample peak: a sine at fs/4 sampled at ±45° phase
+    /// hits only ±sin(45°) ≈ 0.707 on the sample grid while the waveform
+    /// peaks at 1.0. The sample peak underreads by 3 dB; the true-peak
+    /// meter must recover ≈ 0 dBTP (EBU Tech 3341 cases 17/18 allow
+    /// +0.2/−0.4 dB).
+    #[test]
+    fn true_peak_recovers_intersample_peak() {
+        for &rate in &[44100u32, 48000] {
+            let mut meter = TruePeakMeter::new(rate, 1);
+            let mut sample_peak = 0.0f64;
+            let step = 2.0 * std::f64::consts::PI / 4.0; // fs/4 tone
+            for n in 0..rate as usize {
+                let s = (step * n as f64 + std::f64::consts::PI / 4.0).sin();
+                sample_peak = sample_peak.max(s.abs());
+                meter.add_frame(&[s]);
+            }
+            assert!((sample_peak - 0.707).abs() < 0.01);
+            let tp_db = 20.0 * meter.peak().log10();
+            assert!(
+                tp_db > -0.4 && tp_db < 0.2,
+                "expected ~0 dBTP at {} Hz, got {:.3} dBTP",
+                rate,
+                tp_db
+            );
+        }
+    }
+
+    /// The center tap lands on one polyphase phase, so the interpolated
+    /// peak can never read below the sample peak.
+    #[test]
+    fn true_peak_never_below_sample_peak() {
+        let mut meter = TruePeakMeter::new(48000, 2);
+        let mut sample_peak = 0.0f64;
+        // Deterministic irregular signal.
+        let mut x = 0.123f64;
+        for _ in 0..48000 {
+            x = (x * 997.0).sin();
+            sample_peak = sample_peak.max(x.abs());
+            meter.add_frame(&[x, -x]);
+        }
+        assert!(meter.peak() >= sample_peak - 1e-12);
+    }
+
+    /// At ≥ 88.2 kHz the meter drops to 2× oversampling; a plain sine
+    /// aligned with the grid must still read its amplitude, not more than
+    /// a fraction of a dB high.
+    #[test]
+    fn true_peak_2x_at_high_rates() {
+        let mut meter = TruePeakMeter::new(96000, 1);
+        let mut samples = Vec::new();
+        append_sine(&mut samples, -6.0, 1.0, 96000);
+        for &s in &samples {
+            meter.add_frame(&[s]);
+        }
+        let expected = crate::gain::db_to_linear(-6.0);
+        assert!((meter.peak() - expected).abs() / expected < 0.01);
+    }
+
+    #[test]
+    fn true_peak_silence_is_zero() {
+        let mut meter = TruePeakMeter::new(44100, 2);
+        for _ in 0..44100 {
+            meter.add_frame(&[0.0, 0.0]);
+        }
+        assert_eq!(meter.peak(), 0.0);
     }
 }
