@@ -38,11 +38,14 @@ pub fn analyze_track(
             pb.set_position(bytes);
         }
     });
-    replaygain::analyze_track_with_mode(
+    replaygain::analyze_track_with_options(
         file,
-        opts.track_index,
-        opts.analysis_mode,
-        on_progress.as_ref().map(|cb| cb as &dyn Fn(u64, u64)),
+        &replaygain::TrackAnalysisOptions {
+            track_index: opts.track_index,
+            mode: opts.analysis_mode,
+            true_peak: opts.true_peak,
+            on_progress: on_progress.as_ref().map(|cb| cb as &dyn Fn(u64, u64)),
+        },
     )
 }
 

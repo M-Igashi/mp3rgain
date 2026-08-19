@@ -159,6 +159,10 @@ pub struct ReplayGainResult {
     file_type: AudioFileType,
     #[cfg_attr(feature = "serde", serde(default))]
     analysis_mode: AnalysisMode,
+    /// Whether `peak` is a BS.1770-4 Annex 2 true peak rather than the
+    /// decoded sample peak (issue #292).
+    #[cfg_attr(feature = "serde", serde(default))]
+    true_peak: bool,
 }
 
 impl ReplayGainResult {
@@ -178,6 +182,7 @@ impl ReplayGainResult {
             sample_rate,
             file_type,
             analysis_mode,
+            true_peak: false,
         }
     }
 
@@ -200,6 +205,13 @@ impl ReplayGainResult {
     }
     pub fn analysis_mode(&self) -> AnalysisMode {
         self.analysis_mode
+    }
+
+    /// `true` when [`peak`](Self::peak) is a BS.1770-4 Annex 2 true peak
+    /// (measured with [`TrackAnalysisOptions::true_peak`] in a BS.1770
+    /// mode) rather than the decoded sample peak (issue #292).
+    pub fn is_true_peak(&self) -> bool {
+        self.true_peak
     }
 
     /// Integrated loudness in LUFS when measured with a BS.1770-based mode;
@@ -1140,6 +1152,7 @@ fn analyze_track_internal(
     track_index: Option<u32>,
     progress: Option<&dyn Fn(u64, u64)>,
     mode: AnalysisMode,
+    true_peak: bool,
 ) -> Result<TrackAnalysisInternal> {
     // Detect file type
     let file_type = detect_file_type(file_path);
@@ -1245,6 +1258,12 @@ fn analyze_track_internal(
                 analyzer: ReplayGainAnalyzer::new(sample_rate),
             }
         }
+        // True peak is only defined for the BS.1770 modes — RG1's peak is
+        // mp3gain's MAX_AMPLITUDE semantics and must stay bit-compatible,
+        // so the flag is ignored there (issue #292).
+        _ if true_peak => TrackAnalyzer::Bs1770 {
+            analyzer: crate::bs1770::Bs1770Analyzer::new_with_true_peak(sample_rate, channels),
+        },
         _ => TrackAnalyzer::Bs1770 {
             analyzer: crate::bs1770::Bs1770Analyzer::new(sample_rate, channels),
         },
@@ -1291,6 +1310,7 @@ fn analyze_track_internal(
     }
 
     // Finish analysis and calculate loudness and gain
+    let mut is_true_peak = false;
     let (loudness_db, gain_db, state) = match track_analyzer {
         TrackAnalyzer::Rg1 { mut analyzer, .. } => {
             // Finish any remaining samples in the last window
@@ -1303,13 +1323,22 @@ fn analyze_track_internal(
             )
         }
         TrackAnalyzer::Bs1770 { analyzer, .. } => {
+            // The interpolator's passthrough phase makes the true peak
+            // ≥ sample peak by construction; the max() is a guard against
+            // rounding at the very margin.
+            if let Some(tp) = analyzer.true_peak() {
+                peak = peak.max(tp);
+                is_true_peak = true;
+            }
             let blocks = analyzer.into_blocks();
             let (loudness_db, gain_db) = lufs_loudness_and_gain(blocks.integrated_lufs(), mode);
             (loudness_db, gain_db, LoudnessState::Bs1770(blocks))
         }
     };
 
-    let result = ReplayGainResult::new(loudness_db, gain_db, peak, sample_rate, file_type, mode);
+    let mut result =
+        ReplayGainResult::new(loudness_db, gain_db, peak, sample_rate, file_type, mode);
+    result.true_peak = is_true_peak;
 
     Ok(TrackAnalysisInternal { result, state })
 }
@@ -1342,7 +1371,51 @@ pub fn analyze_track_with_mode(
     mode: AnalysisMode,
     on_progress: Option<&dyn Fn(u64, u64)>,
 ) -> Result<ReplayGainResult> {
-    let internal = analyze_track_internal(file_path, track_index, on_progress, mode)?;
+    analyze_track_with_options(
+        file_path,
+        &TrackAnalysisOptions {
+            track_index,
+            mode,
+            on_progress,
+            ..Default::default()
+        },
+    )
+}
+
+/// Options for [`analyze_track_with_options`].
+///
+/// `Default` is a strict RG1 analysis of the first audio track with no
+/// callbacks — the same behavior as [`analyze_track`].
+#[derive(Default)]
+pub struct TrackAnalysisOptions<'a> {
+    /// Which audio track to analyze in multi-track containers (default: first).
+    pub track_index: Option<u32>,
+    /// Loudness measurement algorithm (issue #269).
+    pub mode: AnalysisMode,
+    /// Measure BS.1770-4 Annex 2 true peak instead of the decoded sample
+    /// peak in the BS.1770 modes (issue #292). True peak estimates
+    /// inter-sample peaks by oversampling, so values above 1.0 are expected
+    /// and correct. Ignored in [`AnalysisMode::Rg1`], whose peak is
+    /// mp3gain's `MAX_AMPLITUDE` semantics and must stay bit-compatible.
+    pub true_peak: bool,
+    /// Byte-level progress callback, as in [`analyze_track_with_progress`].
+    pub on_progress: Option<&'a dyn Fn(u64, u64)>,
+}
+
+/// Analyze a single track with the full option set (issue #292). The other
+/// `analyze_track_*` functions are conveniences over this one.
+#[cfg(feature = "replaygain")]
+pub fn analyze_track_with_options(
+    file_path: &Path,
+    opts: &TrackAnalysisOptions,
+) -> Result<ReplayGainResult> {
+    let internal = analyze_track_internal(
+        file_path,
+        opts.track_index,
+        opts.on_progress,
+        opts.mode,
+        opts.true_peak,
+    )?;
     Ok(internal.result)
 }
 
@@ -1587,6 +1660,10 @@ pub struct AlbumAnalysisOptions<'a> {
     /// Loudness measurement algorithm (issue #269). Defaults to
     /// [`AnalysisMode::Rg1`], the mp3gain-compatible algorithm.
     pub mode: AnalysisMode,
+    /// Measure BS.1770-4 Annex 2 true peak instead of sample peak in the
+    /// BS.1770 modes (issue #292); see [`TrackAnalysisOptions::true_peak`].
+    /// Ignored in [`AnalysisMode::Rg1`].
+    pub true_peak: bool,
 }
 
 /// Analyze multiple tracks for album gain (strict, serial, no callbacks).
@@ -1630,6 +1707,7 @@ fn analyze_album_serial(
         skip_errors,
         cancel,
         mode,
+        true_peak,
         ..
     } = *opts;
     let mut track_results = Vec::with_capacity(files.len());
@@ -1648,7 +1726,8 @@ fn analyze_album_serial(
             on_progress.map(|cb| Box::new(move |bytes, total| cb(i, bytes, total)) as _);
 
         // Analyze each track and get its loudness state
-        let track = analyze_track_internal(file, track_index, file_progress.as_deref(), mode);
+        let track =
+            analyze_track_internal(file, track_index, file_progress.as_deref(), mode, true_peak);
         if let Some(cb) = on_complete {
             cb(i, file);
         }
@@ -1697,6 +1776,7 @@ fn analyze_album_parallel_internal(
         skip_errors,
         cancel,
         mode,
+        true_peak,
         ..
     } = *opts;
 
@@ -1718,7 +1798,7 @@ fn analyze_album_parallel_internal(
                 if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
                     return Err(Error::Cancelled);
                 }
-                let r = analyze_track_internal(file, track_index, None, mode);
+                let r = analyze_track_internal(file, track_index, None, mode, true_peak);
                 if let Some(cb) = on_complete {
                     cb(i, file);
                 }
@@ -1749,7 +1829,7 @@ fn analyze_album_parallel_internal(
                 if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
                     return Err(Error::Cancelled);
                 }
-                let r = analyze_track_internal(file, track_index, None, mode);
+                let r = analyze_track_internal(file, track_index, None, mode, true_peak);
                 if let Some(cb) = on_complete {
                     cb(i, file);
                 }
@@ -1807,6 +1887,17 @@ pub fn analyze_track_with_mode(
     _track_index: Option<u32>,
     _mode: AnalysisMode,
     _on_progress: Option<&dyn Fn(u64, u64)>,
+) -> Result<ReplayGainResult> {
+    Err(Error::FeatureNotAvailable {
+        feature: "ReplayGain analysis",
+        feature_flag: "replaygain",
+    })
+}
+
+#[cfg(not(feature = "replaygain"))]
+pub fn analyze_track_with_options(
+    _file_path: &Path,
+    _opts: &TrackAnalysisOptions,
 ) -> Result<ReplayGainResult> {
     Err(Error::FeatureNotAvailable {
         feature: "ReplayGain analysis",

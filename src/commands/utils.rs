@@ -46,6 +46,7 @@ pub fn run_album_analysis(
             on_complete: parallel.then_some(&on_complete as _),
             cancel: None,
             mode: opts.analysis_mode,
+            true_peak: opts.true_peak,
         },
     );
 
