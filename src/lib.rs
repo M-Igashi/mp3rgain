@@ -56,7 +56,7 @@
 //!
 //! ## Technical Details
 //!
-//! Each gain step equals 1.5 dB (fixed by MP3 specification).
+//! Each gain step scales amplitude by 2^(1/4) ≈ 1.505 dB (fixed by MP3 specification).
 //! The global_gain field is 8 bits, allowing values 0-255.
 
 #[cfg(feature = "aac")]

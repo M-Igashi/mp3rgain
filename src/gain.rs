@@ -9,8 +9,15 @@ use crate::frame::{apply_gain_to_data, scan_gain_range, GainMode, SaturationStat
 use std::fs;
 use std::path::Path;
 
-/// MP3 gain step size in dB (fixed by format specification)
-pub const GAIN_STEP_DB: f64 = 1.5;
+/// MP3 gain step size in dB (fixed by format specification).
+///
+/// One `global_gain` step scales amplitude by 2^(1/4), i.e. exactly
+/// `20*log10(2)/4 ≈ 1.50515 dB` — commonly rounded to "1.5 dB" in docs and
+/// UI. mp3gain itself divides by `5.0 * log10(2.0)` when converting dB to
+/// steps, so using the exact value here matches its rounding. The previous
+/// approximation of 1.5 made post-apply residual ReplayGain tags drift by
+/// ~0.005 dB per applied step (issue #291).
+pub const GAIN_STEP_DB: f64 = 1.505_149_978_319_906;
 
 /// Maximum global_gain value
 pub const MAX_GAIN: u8 = 255;
@@ -511,13 +518,35 @@ mod tests {
         assert_eq!(db_to_steps(1.5), 1);
         assert_eq!(db_to_steps(3.0), 2);
         assert_eq!(db_to_steps(-1.5), -1);
-        assert_eq!(db_to_steps(2.25), 2);
+        // 2.25 / 1.50515 = 1.495 -> 1 step, matching mp3gain's own rounding
+        // (it divides by 5*log10(2), not by 1.5).
+        assert_eq!(db_to_steps(2.25), 1);
     }
 
     #[test]
     fn test_steps_to_db() {
         assert_eq!(steps_to_db(0), 0.0);
-        assert_eq!(steps_to_db(1), 1.5);
-        assert_eq!(steps_to_db(-2), -3.0);
+        assert!((steps_to_db(1) - 1.505_149_978).abs() < 1e-9);
+        assert!((steps_to_db(-2) - -3.010_299_957).abs() < 1e-9);
+    }
+
+    /// The exact step constant: 20*log10(2)/4.
+    #[test]
+    fn gain_step_matches_physical_constant() {
+        assert!((GAIN_STEP_DB - 20.0 * 2.0_f64.log10() / 4.0).abs() < 1e-15);
+    }
+
+    /// Issue #291: the residual after N steps must be exact, so applying and
+    /// re-measuring cannot drift. 7 steps at the old 1.5 constant drifted by
+    /// 0.036 dB; with the exact constant the round-trip is lossless.
+    #[test]
+    fn steps_to_db_roundtrip_has_no_drift() {
+        for steps in -15..=15 {
+            let db = steps_to_db(steps);
+            assert_eq!(db_to_steps(db), steps);
+            // physical shift of `steps` global_gain steps
+            let physical = 20.0 * (2.0_f64.powf(steps as f64 / 4.0)).log10();
+            assert!((db - physical).abs() < 1e-9, "steps={steps}");
+        }
     }
 }
