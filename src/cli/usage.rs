@@ -8,7 +8,7 @@ pub fn print_version() {
     println!("mp3rgain version {}", VERSION);
     println!("A modern mp3gain replacement written in Rust");
     println!();
-    println!("Each gain step = {} dB", GAIN_STEP_DB);
+    println!("Each gain step = {:.4} dB", GAIN_STEP_DB);
 }
 
 pub fn print_usage() {
@@ -20,7 +20,7 @@ pub fn print_usage() {
     println!();
     println!("{}", "OPTIONS:".cyan().bold());
     println!(
-        "    -g <i>      Apply gain of i steps (each step = {} dB)",
+        "    -g <i>      Apply gain of i steps (each step = {:.4} dB)",
         GAIN_STEP_DB
     );
     println!("    -d <n>      Modify suggested/target gain by n dB (rounded to nearest step)");
@@ -61,8 +61,8 @@ pub fn print_usage() {
     println!();
     println!("{}", "EXAMPLES:".cyan().bold());
     println!("    mp3rgain song.mp3              Show file info");
-    println!("    mp3rgain -g 2 song.mp3         Apply +2 steps (+3.0 dB)");
-    println!("    mp3rgain -g -3 song.mp3        Apply -3 steps (-4.5 dB)");
+    println!("    mp3rgain -g 2 song.mp3         Apply +2 steps (+3.01 dB)");
+    println!("    mp3rgain -g -3 song.mp3        Apply -3 steps (-4.52 dB)");
     println!("    mp3rgain -r -d 4.5 song.mp3    Apply track gain, target +4.5 dB louder");
     println!("    mp3rgain -r song.mp3           Analyze and apply track gain");
     println!("    mp3rgain -a *.mp3              Analyze and apply album gain");
@@ -89,7 +89,7 @@ pub fn print_usage() {
     println!();
     println!("{}", "NOTES:".cyan().bold());
     println!(
-        "    - Each gain step = {} dB (fixed by MP3 specification)",
+        "    - Each gain step = {:.4} dB (fixed by MP3 specification)",
         GAIN_STEP_DB
     );
     println!("    - Changes are lossless and reversible");

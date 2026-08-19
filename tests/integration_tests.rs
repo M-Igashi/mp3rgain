@@ -555,8 +555,8 @@ fn test_headroom_calculation() {
     // Headroom should be 255 - max_gain
     assert_eq!(info.headroom_steps(), (255 - info.max_gain()) as i32);
 
-    // Headroom in dB should be steps * 1.5
-    let expected_db = info.headroom_steps() as f64 * 1.5;
+    // Headroom in dB should be steps * GAIN_STEP_DB (2^(1/4) per step)
+    let expected_db = info.headroom_steps() as f64 * mp3rgain::GAIN_STEP_DB;
     assert!((info.headroom_db() - expected_db).abs() < 0.01);
 }
 

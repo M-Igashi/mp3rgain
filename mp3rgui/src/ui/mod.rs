@@ -135,7 +135,7 @@ fn render_manual_gain_modal(app: &mut Mp3rgainApp, ctx: &egui::Context) {
                 let db = mp3rgain::steps_to_db(modal_state.steps);
                 ui.label(format!("= {:+.2} dB", db));
             });
-            ui.label("1 step = 1.5 dB. Negative values lower the volume.");
+            ui.label("1 step ≈ 1.5 dB. Negative values lower the volume.");
             modal_state.steps != 0
         },
     );
