@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::frame::{iterate_frames, read_gain_at, scan_gain_range};
-use crate::gain::{GAIN_STEP_DB, MAX_GAIN};
+use crate::gain::{steps_to_db, MAX_GAIN};
 
 use std::fs;
 use std::path::Path;
@@ -62,7 +62,7 @@ impl Mp3Analysis {
         self.headroom_steps
     }
     pub fn headroom_db(&self) -> f64 {
-        self.headroom_steps as f64 * GAIN_STEP_DB
+        steps_to_db(self.headroom_steps)
     }
 }
 
@@ -272,7 +272,7 @@ pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
     let (min_gain, max_gain) = read_gain_range(file_path)?;
 
     let headroom_steps = (MAX_GAIN - max_gain) as i32;
-    let headroom_db = headroom_steps as f64 * GAIN_STEP_DB;
+    let headroom_db = steps_to_db(headroom_steps);
     let max_amplitude = crate::gain::db_to_linear(-headroom_db);
 
     Ok(MaxAmplitudeResult::new(max_amplitude, max_gain, min_gain))

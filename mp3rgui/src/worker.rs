@@ -194,7 +194,10 @@ pub struct ApplyOptionsUi {
     pub tag_layout: TagLayout,
     /// When true, Apply Track / Album Gain runs in dry-run mode: the worker
     /// reports what `apply_with_options` *would* do but doesn't touch the
-    /// file. Equivalent to the CLI's -n flag.
+    /// file. Equivalent to the CLI's -n flag. `serde(default)` for the same
+    /// reason as `tag_layout`: without it, a settings file written before this
+    /// field existed fails to deserialize and silently resets every option.
+    #[serde(default)]
     pub dry_run: bool,
 }
 
@@ -928,7 +931,6 @@ fn build_apply_options(
     // Always-on safety rails.
     opts.write_undo = true;
     opts.write_replaygain_tags = channel.is_none();
-    opts.use_temp_file = true;
     // User-toggleable.
     opts.prevent_clipping = ui_opts.prevent_clipping;
     opts.wrap = ui_opts.wrap;

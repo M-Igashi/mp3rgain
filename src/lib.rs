@@ -320,8 +320,7 @@ pub fn read_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<Stored
     #[cfg(feature = "aac")]
     {
         if mp4meta::is_aac_file(file_path) {
-            let undo_tags = mp4meta::read_undo_tags(file_path).unwrap_or_default();
-            let rg_tags = mp4meta::read_replaygain_tags(file_path).unwrap_or_default();
+            let (undo_tags, rg_tags) = mp4meta::read_gain_tags(file_path).unwrap_or_default();
             return Ok(StoredGainTags {
                 source: GainTagSource::Aac,
                 track_gain: rg_tags.track_gain().map(str::to_string),

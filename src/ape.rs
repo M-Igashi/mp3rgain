@@ -27,6 +27,16 @@ pub const TAG_REPLAYGAIN_ALBUM_PEAK: &str = "REPLAYGAIN_ALBUM_PEAK";
 /// [`AnalysisMode::algorithm_tag`]: crate::AnalysisMode::algorithm_tag
 pub const TAG_REPLAYGAIN_ALGORITHM: &str = "REPLAYGAIN_ALGORITHM";
 
+/// Every `REPLAYGAIN_*` key mp3rgain writes, for the read/remove paths that
+/// need to treat them as a set.
+pub(crate) const REPLAYGAIN_KEYS: [&str; 5] = [
+    TAG_REPLAYGAIN_TRACK_GAIN,
+    TAG_REPLAYGAIN_TRACK_PEAK,
+    TAG_REPLAYGAIN_ALBUM_GAIN,
+    TAG_REPLAYGAIN_ALBUM_PEAK,
+    TAG_REPLAYGAIN_ALGORITHM,
+];
+
 /// APEv2 tag item
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -151,13 +161,7 @@ impl ApeTag {
     /// stale APEv2 copies left by mp3gain or an earlier `-s a` run would
     /// otherwise linger and disagree with them.
     pub(crate) fn remove_replaygain(&mut self) {
-        for key in [
-            TAG_REPLAYGAIN_TRACK_GAIN,
-            TAG_REPLAYGAIN_TRACK_PEAK,
-            TAG_REPLAYGAIN_ALBUM_GAIN,
-            TAG_REPLAYGAIN_ALBUM_PEAK,
-            TAG_REPLAYGAIN_ALGORITHM,
-        ] {
+        for key in REPLAYGAIN_KEYS {
             self.remove(key);
         }
     }
@@ -504,17 +508,8 @@ pub fn write_ape_replaygain(file_path: &Path, rg: &ApeReplayGain) -> Result<()> 
 /// `-s a` run would go stale the moment the ID3v2 values are rewritten. Files
 /// with no APEv2 ReplayGain items are left untouched rather than rewritten.
 pub(crate) fn remove_ape_replaygain(file_path: &Path) -> Result<()> {
-    let has_rg = read_ape_tag_from_file(file_path)?.is_some_and(|tag| {
-        [
-            TAG_REPLAYGAIN_TRACK_GAIN,
-            TAG_REPLAYGAIN_TRACK_PEAK,
-            TAG_REPLAYGAIN_ALBUM_GAIN,
-            TAG_REPLAYGAIN_ALBUM_PEAK,
-            TAG_REPLAYGAIN_ALGORITHM,
-        ]
-        .iter()
-        .any(|k| tag.get(k).is_some())
-    });
+    let has_rg = read_ape_tag_from_file(file_path)?
+        .is_some_and(|tag| REPLAYGAIN_KEYS.iter().any(|k| tag.get(k).is_some()));
     if !has_rg {
         return Ok(());
     }

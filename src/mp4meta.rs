@@ -40,18 +40,10 @@ pub const MINMAX_TAG: &str = "mp3rgain_minmax";
 const ITUNES_NAMESPACE: &str = "com.apple.iTunes";
 
 /// MP4 box/atom types
-#[allow(dead_code)]
-const FTYP: u32 = u32::from_be_bytes(*b"ftyp");
 pub(crate) const MOOV: u32 = u32::from_be_bytes(*b"moov");
 const UDTA: u32 = u32::from_be_bytes(*b"udta");
 const META: u32 = u32::from_be_bytes(*b"meta");
 const ILST: u32 = u32::from_be_bytes(*b"ilst");
-#[allow(dead_code)]
-const FREE: u32 = u32::from_be_bytes(*b"free");
-#[allow(dead_code)]
-pub(crate) const MDAT: u32 = u32::from_be_bytes(*b"mdat");
-#[allow(dead_code)]
-const HDLR: u32 = u32::from_be_bytes(*b"hdlr");
 const FREEFORM: u32 = u32::from_be_bytes(*b"----");
 const MEAN: u32 = u32::from_be_bytes(*b"mean");
 const NAME: u32 = u32::from_be_bytes(*b"name");
@@ -109,11 +101,6 @@ impl BoxHeader {
         } else {
             self.size - self.header_size as u64
         }
-    }
-
-    #[allow(dead_code)]
-    fn type_str(&self) -> String {
-        String::from_utf8_lossy(&self.box_type.to_be_bytes()).to_string()
     }
 }
 
@@ -478,23 +465,41 @@ fn serialize_freeform_tag(tag: &FreeformTag) -> Vec<u8> {
 }
 
 /// Read all iTunes freeform tags from an MP4/M4A file.
-/// Navigates moov -> udta -> meta -> ilst and collects tags with the iTunes namespace.
+///
+/// Only the `moov` box is loaded, not the whole file — `mdat` dwarfs the
+/// metadata, so a tag read shouldn't pay for the audio payload (issue #188).
+/// Fail-soft like the slice variant: an unreadable file or a missing box
+/// yields no tags.
 fn read_itunes_freeform_tags(file_path: &Path) -> Result<Vec<FreeformTag>> {
-    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-    Ok(read_itunes_freeform_tags_from_data(&data))
+    let Some(moov) = read_moov_content(file_path) else {
+        return Ok(Vec::new());
+    };
+    Ok(freeform_tags_in_moov(&moov, 0, moov.len()))
 }
 
-/// Slice-based variant of `read_itunes_freeform_tags`.
+/// Slice-based variant of `read_itunes_freeform_tags`, for callers that
+/// already hold the whole file.
 /// Returns an empty vec for any non-fatal parse failure (missing moov / udta / meta / ilst).
+#[cfg(feature = "aac")]
 pub(crate) fn read_itunes_freeform_tags_from_data(data: &[u8]) -> Vec<FreeformTag> {
-    let (moov_pos, moov_header) = match find_box(data, MOOV) {
-        Some(x) => x,
-        None => return Vec::new(),
+    let Some((moov_pos, moov_header)) = find_box(data, MOOV) else {
+        return Vec::new();
     };
+    freeform_tags_in_moov(
+        data,
+        moov_pos + moov_header.header_size as usize,
+        moov_header.content_size() as usize,
+    )
+}
 
-    let moov_content_start = moov_pos + moov_header.header_size as usize;
-    let moov_content_size = moov_header.content_size() as usize;
-
+/// Collect the iTunes freeform tags reachable from a `moov` region of `data`,
+/// navigating udta -> meta -> ilst. Offsets are relative to `data`, so callers
+/// may pass either the whole file or a standalone `moov` content buffer.
+fn freeform_tags_in_moov(
+    data: &[u8],
+    moov_content_start: usize,
+    moov_content_size: usize,
+) -> Vec<FreeformTag> {
     let (udta_pos, udta_header) =
         match find_box_in_container(data, moov_content_start, moov_content_size, UDTA) {
             Some(x) => x,
@@ -555,10 +560,26 @@ pub(crate) fn read_itunes_freeform_tags_from_data(data: &[u8]) -> Vec<FreeformTa
 
 /// Read ReplayGain tags from MP4/M4A file
 pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
+    Ok(replaygain_tags_from_freeform(&read_itunes_freeform_tags(
+        file_path,
+    )?))
+}
+
+/// Read the undo and ReplayGain tags in a single `moov` pass, for callers that
+/// need both — reading them separately walked the file twice (issue #188).
+#[cfg(feature = "aac")]
+pub(crate) fn read_gain_tags(file_path: &Path) -> Result<(UndoTags, ReplayGainTags)> {
     let freeform_tags = read_itunes_freeform_tags(file_path)?;
+    Ok((
+        undo_tags_from_freeform(&freeform_tags),
+        replaygain_tags_from_freeform(&freeform_tags),
+    ))
+}
+
+fn replaygain_tags_from_freeform(freeform_tags: &[FreeformTag]) -> ReplayGainTags {
     let mut tags = ReplayGainTags::default();
 
-    for tag in &freeform_tags {
+    for tag in freeform_tags {
         match tag.name() {
             x if x.eq_ignore_ascii_case(RG_TRACK_GAIN) => {
                 tags.track_gain = Some(tag.value().to_string());
@@ -579,7 +600,7 @@ pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
         }
     }
 
-    Ok(tags)
+    tags
 }
 
 /// Read undo tags from MP4/M4A file
@@ -589,6 +610,7 @@ pub fn read_undo_tags(file_path: &Path) -> Result<UndoTags> {
 }
 
 /// Slice-based variant of `read_undo_tags`.
+#[cfg(feature = "aac")]
 pub(crate) fn read_undo_tags_from_data(data: &[u8]) -> UndoTags {
     let freeform_tags = read_itunes_freeform_tags_from_data(data);
     undo_tags_from_freeform(&freeform_tags)
@@ -1418,6 +1440,15 @@ pub fn count_audio_tracks(file_path: &Path) -> usize {
 mod tests {
     use super::*;
 
+    /// Wrap `content` in an MP4 box of type `typ`.
+    fn mp4_box(typ: &[u8; 4], content: &[u8]) -> Vec<u8> {
+        let mut v = Vec::with_capacity(8 + content.len());
+        v.extend_from_slice(&((content.len() + 8) as u32).to_be_bytes());
+        v.extend_from_slice(typ);
+        v.extend_from_slice(content);
+        v
+    }
+
     #[test]
     fn test_freeform_tag_serialization() {
         let tag = FreeformTag::new(
@@ -1522,14 +1553,6 @@ mod tests {
     fn test_detect_codec_and_count_tracks_reads_moov_only() {
         use std::io::Write;
 
-        fn mp4_box(typ: &[u8; 4], content: &[u8]) -> Vec<u8> {
-            let mut v = Vec::with_capacity(8 + content.len());
-            v.extend_from_slice(&((content.len() + 8) as u32).to_be_bytes());
-            v.extend_from_slice(typ);
-            v.extend_from_slice(content);
-            v
-        }
-
         fn audio_trak(codec: &[u8; 4]) -> Vec<u8> {
             let entry = mp4_box(codec, &[]);
             let mut stsd_content = vec![0u8; 4]; // version + flags
@@ -1568,6 +1591,55 @@ mod tests {
             );
             assert_eq!(count_audio_tracks(&path), 2, "{name}");
             assert!(is_aac_file(&path), "{name}");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Tag reads load only `moov` too, so they must agree with the whole-file
+    /// reader in both box layouts (issue #188). Guards the moov-only rewrite
+    /// of `read_itunes_freeform_tags` and the single-pass `read_gain_tags`.
+    #[cfg(feature = "aac")]
+    #[test]
+    fn test_tag_reads_from_moov_only_match_whole_file() {
+        use std::io::Write;
+
+        let mut rg = ReplayGainTags::default();
+        rg.set_track(3.5, 0.98765);
+        rg.set_album(2.0, 0.99999);
+        let undo = UndoTags::new(Some("+003,+003,N".to_string()), Some("80,120".to_string()));
+
+        // One ilst carrying both tag sets — the undo pass preserves the RG items.
+        let rg_ilst = create_ilst_box(&rg, &[]);
+        let ilst = create_ilst_box_undo(&undo, &rg_ilst[8..]);
+        let moov = mp4_box(b"moov", &create_udta_box(&create_meta_box(&ilst)));
+        let ftyp = mp4_box(b"ftyp", b"M4A \x00\x00\x00\x00M4A ");
+        let mdat = mp4_box(b"mdat", &[0u8; 4096]);
+
+        let dir = std::env::temp_dir().join("mp3rgain_test_moov_only_tags");
+        let _ = std::fs::create_dir_all(&dir);
+
+        for (name, layout) in [
+            ("faststart.m4a", [&ftyp, &moov, &mdat]),
+            ("trailing_moov.m4a", [&ftyp, &mdat, &moov]),
+        ] {
+            let path = dir.join(name);
+            let mut f = std::fs::File::create(&path).unwrap();
+            for part in layout {
+                f.write_all(part).unwrap();
+            }
+            drop(f);
+
+            let whole_file = std::fs::read(&path).unwrap();
+            assert_eq!(
+                read_itunes_freeform_tags(&path).unwrap(),
+                read_itunes_freeform_tags_from_data(&whole_file),
+                "{name}"
+            );
+
+            let (undo_read, rg_read) = read_gain_tags(&path).unwrap();
+            assert_eq!(undo_read, undo, "{name}");
+            assert_eq!(rg_read, rg, "{name}");
         }
 
         let _ = std::fs::remove_dir_all(&dir);

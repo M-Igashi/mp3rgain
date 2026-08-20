@@ -9,13 +9,10 @@ pub(crate) const APE_FLAG_HEADER_PRESENT: u32 = 1 << 31;
 
 /// Parsed MP3 frame header
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct FrameHeader {
     pub version: MpegVersion,
     pub has_crc: bool,
-    pub bitrate_kbps: u32,
     pub sample_rate: u32,
-    pub padding: bool,
     pub channel_mode: ChannelMode,
     pub frame_size: usize,
 }
@@ -131,9 +128,7 @@ pub(crate) fn parse_header(header: &[u8]) -> Option<FrameHeader> {
     Some(FrameHeader {
         version,
         has_crc,
-        bitrate_kbps,
         sample_rate,
-        padding,
         channel_mode,
         frame_size,
     })
@@ -556,8 +551,10 @@ mod tests {
         assert!(parsed.is_some());
         let h = parsed.unwrap();
         assert_eq!(h.version, MpegVersion::Mpeg1);
-        assert_eq!(h.bitrate_kbps, 128);
         assert_eq!(h.sample_rate, 44100);
+        // 1152 samples at 128 kbps / 44.1 kHz, no padding — covers the
+        // bitrate and sample-rate table lookups that feed frame_size.
+        assert_eq!(h.frame_size, 417);
     }
 
     #[test]

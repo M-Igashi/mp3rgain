@@ -183,7 +183,6 @@ fn apply_replaygain_with_album_into(
     apply_opts.prevent_clipping = opts.prevent_clipping;
     apply_opts.wrap = opts.wrap_gain;
     apply_opts.preserve_timestamp = opts.preserve_timestamp;
-    apply_opts.use_temp_file = opts.use_temp_file;
     // RG path writes undo and ReplayGain tags unless -s s. Default APE,
     // `-s i` ID3v2, and AAC all write the REPLAYGAIN_* tags (issue #204).
     apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
@@ -256,7 +255,6 @@ fn apply_replaygain_aac_with_album_into(
     apply_opts.prevent_clipping = opts.prevent_clipping;
     apply_opts.wrap = opts.wrap_gain;
     apply_opts.preserve_timestamp = false;
-    apply_opts.use_temp_file = opts.use_temp_file;
     // AAC tag writing is fail-soft, so we drive it ourselves below.
     apply_opts.write_replaygain_tags = false;
 

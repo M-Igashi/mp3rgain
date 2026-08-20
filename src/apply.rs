@@ -82,11 +82,6 @@ pub struct ApplyOptions {
     /// `-p`: restore the file's mtime after writing.
     pub preserve_timestamp: bool,
 
-    /// `-t`: historically opted into temp-file writes. All file rewrites now
-    /// go through a sibling temp file + atomic rename unconditionally
-    /// (issue #227), so the flag is accepted but has no effect.
-    pub use_temp_file: bool,
-
     /// Record an undo tag (MP4 freeform for AAC; for MP3 the container is
     /// [`Self::tag_layout`] — APEv2 unless `-s i`).
     pub write_undo: bool,
@@ -116,7 +111,7 @@ pub struct ApplyOptions {
 
 impl ApplyOptions {
     /// Construct with a requested step count and "safe" defaults
-    /// (undo on, no temp file, no clipping prevention, no tag writing).
+    /// (undo on, no clipping prevention, no tag writing).
     pub fn new(steps: i32) -> Self {
         Self {
             steps,
@@ -125,7 +120,6 @@ impl ApplyOptions {
             prevent_clipping: false,
             wrap: false,
             preserve_timestamp: false,
-            use_temp_file: false,
             write_undo: true,
             write_replaygain_tags: false,
             tag_layout: TagLayout::default(),
@@ -186,9 +180,9 @@ pub enum ClippingDetection {
 /// 1. Optional clipping check (headroom-based for `-g`/`-l`, peak-based
 ///    when [`ApplyOptions::track_result`] is set).
 /// 2. Gain application — MP3 APE / MP3 ID3v2 / AAC, via temp file +
-///    atomic rename. The MP3 undo and ReplayGain tags (ID3v2 TXXX with
-///    [`ApplyOptions::use_id3v2`], APEv2 by default — issue #204) are
-///    folded into the same write (issues #227, #232).
+///    atomic rename. The MP3 undo and ReplayGain tags (container chosen by
+///    [`ApplyOptions::tag_layout`] — issue #204) are folded into the same
+///    write (issues #227, #232).
 /// 3. Remaining ReplayGain tag writes: AAC mp4 metadata, and the APEv2
 ///    re-write for wrap/saturated or channel applies.
 /// 4. Mtime restoration when [`ApplyOptions::preserve_timestamp`] is on.
@@ -645,10 +639,9 @@ fn apply_mp3_id3v2_bytes(
     })
 }
 
-/// Build a unique `.mp3rgain_temp_*` sibling path for `file`. Shared by the
-/// MP3 temp-file write and the MP4 `atomic_write` so parallel tasks writing
-/// in the same directory never collide (one process-wide counter).
-pub(crate) fn temp_sibling_path(file: &Path, ext: &str) -> std::path::PathBuf {
+/// Build a unique `.mp3rgain_temp_*` sibling path for `file` so parallel tasks
+/// writing in the same directory never collide (one process-wide counter).
+fn temp_sibling_path(file: &Path, ext: &str) -> std::path::PathBuf {
     let parent = file.parent().unwrap_or(Path::new("."));
     let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     parent.join(format!(
@@ -661,7 +654,7 @@ pub(crate) fn temp_sibling_path(file: &Path, ext: &str) -> std::path::PathBuf {
 
 /// Copy `original`'s permissions onto `temp`, fsync it, and rename it over
 /// `original` (issue #227).
-pub(crate) fn persist_temp(original: &Path, temp: &Path) -> Result<()> {
+fn persist_temp(original: &Path, temp: &Path) -> Result<()> {
     let finish = || -> std::io::Result<()> {
         // fsync needs a writable handle on Windows, and must happen before
         // the permission copy in case the original mode is read-only.
@@ -681,22 +674,20 @@ pub(crate) fn persist_temp(original: &Path, temp: &Path) -> Result<()> {
 /// permissions, fsync, rename. A failure leaves the original untouched
 /// (issue #227).
 pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("tmp");
-    let temp = temp_sibling_path(path, ext);
-    let result = std::fs::write(&temp, data)
-        .map_err(|e| Error::io_write(path, e))
-        .and_then(|_| persist_temp(path, &temp));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    result
+    with_temp_file(path, |original, temp| {
+        std::fs::write(temp, data).map_err(|e| Error::io_write(original, e))
+    })
 }
 
-fn with_temp_file<T, F>(file: &Path, operation: F) -> Result<T>
+/// Run `operation(original, temp)` against a fresh sibling temp path, then
+/// fsync the temp file and rename it over the original (issue #227). The temp
+/// file is removed on failure, leaving the original untouched.
+pub(crate) fn with_temp_file<T, F>(file: &Path, operation: F) -> Result<T>
 where
     F: FnOnce(&Path, &Path) -> Result<T>,
 {
-    let temp_path = temp_sibling_path(file, "mp3");
+    let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("tmp");
+    let temp_path = temp_sibling_path(file, ext);
     let result = operation(file, &temp_path).and_then(|value| {
         persist_temp(file, &temp_path)?;
         Ok(value)

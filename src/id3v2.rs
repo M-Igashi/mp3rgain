@@ -82,11 +82,13 @@ fn is_frame_encodable(frame: &id3::Frame) -> bool {
         .is_ok()
 }
 
-fn write_tag_direct(path: &Path, tag: &id3::Tag) -> Result<()> {
-    let mut sanitized = tag.clone();
-    sanitized.frames_vec_mut().retain(is_frame_encodable);
-    sanitized
-        .write_to_path(path, TARGET_VERSION)
+/// Write `tag` to `path`, dropping the frames [`is_frame_encodable`] rejects.
+///
+/// Takes `&mut` so the unencodable frames can be filtered in place: cloning the
+/// tag first would copy every frame, including multi-megabyte embedded art.
+fn write_tag_direct(path: &Path, tag: &mut id3::Tag) -> Result<()> {
+    tag.frames_vec_mut().retain(is_frame_encodable);
+    tag.write_to_path(path, TARGET_VERSION)
         .map_err(|e| Error::Id3v2Error {
             message: e.to_string(),
         })
@@ -94,16 +96,11 @@ fn write_tag_direct(path: &Path, tag: &id3::Tag) -> Result<()> {
 
 /// Rewrite the tag atomically: copy the file to a sibling temp, write the tag
 /// there, then fsync + rename over the original (issue #227).
-fn write_tag(path: &Path, tag: &id3::Tag) -> Result<()> {
-    let temp = crate::apply::temp_sibling_path(path, "mp3");
-    let result = std::fs::copy(path, &temp)
-        .map_err(|e| Error::io_write(path, e))
-        .and_then(|_| write_tag_direct(&temp, tag))
-        .and_then(|_| crate::apply::persist_temp(path, &temp));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    result
+fn write_tag(path: &Path, tag: &mut id3::Tag) -> Result<()> {
+    crate::apply::with_temp_file(path, |original, temp| {
+        std::fs::copy(original, temp).map_err(|e| Error::io_write(original, e))?;
+        write_tag_direct(temp, tag)
+    })
 }
 
 fn get_txxx(tag: &id3::Tag, description: &str) -> Option<String> {
@@ -170,7 +167,7 @@ fn add_rg_frames(tag: &mut id3::Tag, rg: &Id3v2ReplayGain) {
 pub fn write_id3v2_replaygain(path: &Path, rg: &Id3v2ReplayGain) -> Result<()> {
     let mut tag = read_tag(path)?;
     add_rg_frames(&mut tag, rg);
-    write_tag(path, &tag)
+    write_tag(path, &mut tag)
 }
 
 /// [`write_id3v2_replaygain`] without the temp+rename dance, for callers that
@@ -178,7 +175,7 @@ pub fn write_id3v2_replaygain(path: &Path, rg: &Id3v2ReplayGain) -> Result<()> {
 pub(crate) fn write_id3v2_replaygain_direct(path: &Path, rg: &Id3v2ReplayGain) -> Result<()> {
     let mut tag = read_tag(path)?;
     add_rg_frames(&mut tag, rg);
-    write_tag_direct(path, &tag)
+    write_tag_direct(path, &mut tag)
 }
 
 /// Delete all ReplayGain and undo TXXX frames from ID3v2 tag
@@ -189,7 +186,7 @@ pub fn delete_id3v2_replaygain(path: &Path) -> Result<()> {
         remove_txxx_ci(&mut tag, desc);
     }
 
-    write_tag(path, &tag)
+    write_tag(path, &mut tag)
 }
 
 /// Undo gain changes based on ID3v2 undo tag information
@@ -212,20 +209,14 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
     // Revert the audio and strip the undo/minmax frames in one visible write
     // (temp + rename) so a failed tag rewrite can't leave the delta applied
     // with the undo tag still present (issue #227).
-    let temp = crate::apply::temp_sibling_path(path, "mp3");
-    let result = std::fs::write(&temp, &data)
-        .map_err(|e| Error::io_write(path, e))
-        .and_then(|_| {
-            let mut tag = read_tag(&temp)?;
-            remove_txxx_ci(&mut tag, TAG_MP3GAIN_UNDO);
-            remove_txxx_ci(&mut tag, TAG_MP3GAIN_MINMAX);
-            write_tag_direct(&temp, &tag)
-        })
-        .and_then(|_| crate::apply::persist_temp(path, &temp));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    result.map(|_| frames)
+    crate::apply::with_temp_file(path, |original, temp| {
+        std::fs::write(temp, &data).map_err(|e| Error::io_write(original, e))?;
+        let mut tag = read_tag(temp)?;
+        remove_txxx_ci(&mut tag, TAG_MP3GAIN_UNDO);
+        remove_txxx_ci(&mut tag, TAG_MP3GAIN_MINMAX);
+        write_tag_direct(temp, &mut tag)
+    })?;
+    Ok(frames)
 }
 
 #[cfg(test)]

@@ -153,8 +153,6 @@ const INTENSITY_HCB2: u8 = 14;
 const INTENSITY_HCB: u8 = 15;
 const ESC_HCB: u8 = 11;
 
-#[allow(dead_code)]
-const ONLY_LONG_SEQUENCE: u8 = 0;
 const EIGHT_SHORT_SEQUENCE: u8 = 2;
 
 const MAX_SFBS: usize = 64;

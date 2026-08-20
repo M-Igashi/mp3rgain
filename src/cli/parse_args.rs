@@ -209,10 +209,6 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
 
                     opts.channel_gain = Some((channel, gain));
                 }
-                "r" => opts.track_gain = true,
-                "a" => opts.album_gain = true,
-                "e" => opts.skip_album = true,
-                "x" => opts.max_amplitude_only = true,
                 "i" => {
                     i += 1;
                     if i >= args.len() {
@@ -233,16 +229,6 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                     }
                     opts.threads = Some(parse_thread_count(&args[i], "-j")?);
                 }
-                "u" => opts.undo = true,
-                "p" => opts.preserve_timestamp = true,
-                "c" => opts.ignore_clipping = true,
-                "k" => opts.prevent_clipping = true,
-                "q" => opts.quiet = true,
-                "R" => opts.recursive = true,
-                "n" => opts.dry_run = true,
-                "w" => opts.wrap_gain = true,
-                "t" => opts.use_temp_file = true,
-                "f" => opts.assume_mpeg2 = true,
                 "v" => {
                     print_version();
                     std::process::exit(0);
@@ -251,7 +237,8 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                     print_usage();
                     std::process::exit(0);
                 }
-                // Handle combined short flags like -qp, -kc, etc.
+                // Boolean short flags, single (-q) or combined (-qp, -kc).
+                // One table for both forms so the two can't drift apart.
                 _ if flag.chars().all(|c| "pqckuranRewxtf".contains(c)) => {
                     for c in flag.chars() {
                         match c {
