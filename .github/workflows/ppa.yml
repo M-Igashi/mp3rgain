@@ -33,9 +33,9 @@ on:
         type: string
         default: "ppa:m-igashi/mp3rgui"
       target_distro:
-        description: "Target Ubuntu distro (questing, noble, etc.)"
+        description: "Target Ubuntu distro (resolute, stonking, etc.)"
         type: string
-        default: "questing"
+        default: "resolute"
 
 permissions:
   contents: read
@@ -155,7 +155,7 @@ jobs:
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
           PPA_REV: ${{ inputs.ppa_revision || '1' }}
           TARGET_PPA: ${{ inputs.target_ppa_cli || 'ppa:m-igashi/mp3rgain' }}
-          TARGET_DISTRO: ${{ inputs.target_distro || 'questing' }}
+          TARGET_DISTRO: ${{ inputs.target_distro || 'resolute' }}
         run: |
           PKG=mp3rgain
           ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"
@@ -315,7 +315,7 @@ jobs:
           GPG_KEY_ID: ${{ steps.meta.outputs.gpg_key_id }}
           PPA_REV: ${{ inputs.ppa_revision || '1' }}
           TARGET_PPA: ${{ inputs.target_ppa_gui || 'ppa:m-igashi/mp3rgui' }}
-          TARGET_DISTRO: ${{ inputs.target_distro || 'questing' }}
+          TARGET_DISTRO: ${{ inputs.target_distro || 'resolute' }}
         run: |
           PKG=mp3rgui
           ORIG="build-ppa/${PKG}_${VERSION}.orig.tar.xz"

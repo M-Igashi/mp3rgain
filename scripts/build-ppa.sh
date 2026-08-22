@@ -30,7 +30,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="${PROJECT_DIR}/build-ppa"
 
 # Supported Ubuntu releases
-ALL_DISTROS=("noble")
+ALL_DISTROS=("resolute")
 
 # Defaults
 UPLOAD=false

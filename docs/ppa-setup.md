@@ -19,9 +19,9 @@ sudo apt update
 sudo apt install mp3rgui
 ```
 
-**Supported platform**: Ubuntu 25.10 (questing), amd64 and arm64.
-Older Ubuntu releases (including 24.04 LTS noble) ship Cargo 1.75 which
-cannot build `symphonia-core 0.6.0-alpha.2` (requires Rust >= 1.79).
+**Supported platform**: Ubuntu 26.04 LTS (resolute), amd64 and arm64.
+Older Ubuntu releases (including 24.04 LTS noble) ship Cargo 1.75, below the
+Rust 1.85 that `symphonia` and `id3` require.
 
 ## Prerequisites
 
@@ -120,8 +120,8 @@ From the project root:
 # Build for all Ubuntu releases (both CLI and GUI)
 ./scripts/build-ppa.sh
 
-# Build only CLI for questing
-./scripts/build-ppa.sh --package=cli --distro=questing
+# Build only CLI for resolute
+./scripts/build-ppa.sh --package=cli --distro=resolute
 
 # Build and upload
 ./scripts/build-ppa.sh --upload
@@ -148,13 +148,15 @@ From the project root:
 
 | Codename | Version | Status | Notes |
 |----------|---------|--------|-------|
-| questing | 25.10 | Supported (default) | Rust 1.83+ — builds pass |
-| noble | 24.04 LTS | Not supported | Cargo 1.75 cannot build symphonia-core 0.6.0-alpha.2 (requires Rust >= 1.79) |
+| resolute | 26.04 LTS | Supported (default) | Rust 1.93 — comfortably above the 1.85 MSRV |
+| stonking | 26.10 | Should work, untested | Development series; same Rust 1.93 |
+| questing | 25.10 | **Dead** | End of life. Launchpad rejects uploads: "questing is obsolete and will not accept new uploads" |
+| noble | 24.04 LTS | Not supported | Cargo 1.75, below the 1.85 MSRV |
 
 ### What the Script Does
 
 1. Exports clean source from git
-2. Converts `Cargo.lock` v4 to v3, downgrades `edition = "2024"` to `"2021"`, strips `rust-version` declarations and `checksum` lines (compatibility shims for older distros; no-ops on questing)
+2. Converts `Cargo.lock` v4 to v3, downgrades `edition = "2024"` to `"2021"`, strips `rust-version` declarations and `checksum` lines (compatibility shims for older distros; no-ops on resolute)
 3. Runs `cargo vendor` to bundle all Rust dependencies
 4. Removes Windows/macOS-only binaries and stubs platform-specific crates
 5. Creates `.cargo/config.toml` for offline builds
@@ -168,8 +170,8 @@ From the project root:
 If you built without `--upload`:
 
 ```bash
-dput ppa:m-igashi/mp3rgain build-ppa/mp3rgain/build-questing/mp3rgain_*_source.changes
-dput ppa:m-igashi/mp3rgui  build-ppa/mp3rgui/build-questing/mp3rgui_*_source.changes
+dput ppa:m-igashi/mp3rgain build-ppa/mp3rgain/build-resolute/mp3rgain_*_source.changes
+dput ppa:m-igashi/mp3rgui  build-ppa/mp3rgui/build-resolute/mp3rgui_*_source.changes
 ```
 
 ## After Upload
@@ -236,7 +238,7 @@ Each version's orig tarball can only be uploaded once. Options:
 ### "lock file version 4 requires -Znext-lockfile-bump"
 
 Ubuntu noble's cargo (Rust 1.75) doesn't support Cargo.lock v4. This is
-one of several reasons we target questing (25.10) instead. The workflow
+one of several reasons we target resolute (26.04 LTS) instead. The workflow
 still runs the v4→v3 conversion for compatibility.
 
 ### "Build-Depends not satisfiable"
