@@ -1,6 +1,6 @@
 [package]
 name = "mp3rgui"
-version = "3.2.0"
+version = "3.3.0"
 edition = "2021"
 authors = ["Jesse Pinkman <M-Igashi@users.noreply.github.com>"]
 description = "GUI application for mp3rgain - lossless MP3 volume adjustment"
@@ -22,6 +22,12 @@ rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 # macOS/Windows: use native file dialogs
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 rfd = "0.15"
+
+# Windows: also compile the wgpu backend. The glow backend needs an OpenGL 2.0+
+# ICD, which many Windows machines lack (issue #282); wgpu reaches the same
+# screen through D3D12 / Vulkan. Both are built so MP3RGUI_RENDERER can switch.
+[target.'cfg(windows)'.dependencies]
+eframe = { version = "0.31", features = ["persistence", "wgpu"] }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

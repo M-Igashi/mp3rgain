@@ -1,10 +1,51 @@
-//! Diagnosis of `eframe::run_native` startup failures (issue #282).
+//! Renderer selection and diagnosis of `eframe::run_native` startup failures
+//! (issue #282).
 //!
 //! The raw eframe error is accurate but unhelpful — a user who sees
 //! "egui_glow requires opengl 2.0+" has no way to know that installing a
 //! graphics driver, or just using the CLI, would solve their problem.
+//!
+//! Explaining the failure is only half the fix. On Windows the GUI now asks
+//! for the wgpu backend instead, which does not need OpenGL at all.
 
 use eframe::Error;
+
+/// Environment variable that overrides the backend choice: `glow` or `wgpu`.
+const RENDERER_ENV: &str = "MP3RGUI_RENDERER";
+
+/// Which eframe backend to ask for.
+///
+/// Windows defaults to wgpu. The glow backend needs an OpenGL 2.0+ ICD, and
+/// plenty of Windows machines do not have one — VMs without 3D acceleration,
+/// RDP sessions, and stale or missing GPU driver installs all fail that way
+/// (issue #282). wgpu reaches the same screen through D3D12 or Vulkan, and
+/// falls back to the WARP software adapter, so it starts where glow cannot.
+///
+/// Every other platform keeps glow: it is smaller, and OpenGL is dependable on
+/// macOS and on the X11/Wayland stacks we ship to.
+///
+/// The choice cannot be retried at runtime — winit's `EVENT_LOOP_CREATED` is a
+/// process-global flag, so a second `run_native` always fails with
+/// `RecreationAttempt` rather than actually trying the other backend. That is
+/// why `MP3RGUI_RENDERER` exists: it is the escape hatch for a user hitting a
+/// backend-specific bug, and it needs no new build.
+pub fn renderer() -> eframe::Renderer {
+    match std::env::var(RENDERER_ENV).as_deref() {
+        Ok("glow") => return eframe::Renderer::Glow,
+        #[cfg(windows)]
+        Ok("wgpu") => return eframe::Renderer::Wgpu,
+        _ => {}
+    }
+
+    #[cfg(windows)]
+    {
+        eframe::Renderer::Wgpu
+    }
+    #[cfg(not(windows))]
+    {
+        eframe::Renderer::Glow
+    }
+}
 
 const CLI_HINT: &str =
     "  - Use the mp3rgain command-line tool instead. It does everything the GUI\n\
@@ -16,6 +57,13 @@ const CLI_HINT: &str =
 pub enum StartupFailure {
     /// No usable OpenGL 2.0+ context.
     NoOpenGl,
+    /// wgpu found no usable graphics adapter (Windows: D3D12 / Vulkan / WARP).
+    ///
+    /// Only `classify` on Windows produces this — wgpu is not compiled in
+    /// elsewhere — but the variant and its message stay unconditional so the
+    /// tests cover them on every platform.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    NoGpu,
     /// No window system to open a window on.
     NoDisplay,
     /// Anything else — no specific advice to give.
@@ -34,6 +82,8 @@ pub fn classify(err: &Error) -> StartupFailure {
         Error::OpenGL(_) | Error::Glutin(_) | Error::NoGlutinConfigs(..) => {
             StartupFailure::NoOpenGl
         }
+        #[cfg(windows)]
+        Error::Wgpu(_) => StartupFailure::NoGpu,
         Error::Winit(_) | Error::WinitEventLoop(_) => StartupFailure::NoDisplay,
         _ => StartupFailure::Unknown,
     }
@@ -54,6 +104,17 @@ pub fn startup_error_message(failure: StartupFailure, details: &str) -> String {
              What you can try:\n\
              \x20 - Install or update your graphics driver.\n\
              \x20 - On a virtual machine, enable 3D acceleration for the guest.\n\
+             {CLI_HINT}"
+        ),
+        StartupFailure::NoGpu => format!(
+            "No usable graphics adapter was found. The GUI needs Direct3D 12,\n\
+             Vulkan, or OpenGL, and this computer offered none of them.\n\
+             \n\
+             What you can try:\n\
+             \x20 - Install or update your graphics driver.\n\
+             \x20 - On a virtual machine, enable 3D acceleration for the guest.\n\
+             \x20 - Force the OpenGL backend instead: set the environment variable\n\
+             \x20   {RENDERER_ENV}=glow and start mp3rgui again.\n\
              {CLI_HINT}"
         ),
         StartupFailure::NoDisplay => format!(
@@ -98,6 +159,15 @@ mod tests {
         assert!(msg.contains("egui_glow requires opengl 2.0+"));
     }
 
+    /// A wgpu failure is the Windows-default backend giving up, so the advice
+    /// has to name the glow escape hatch as well as the CLI.
+    #[test]
+    fn no_gpu_offers_the_glow_override_and_the_cli() {
+        let msg = startup_error_message(StartupFailure::NoGpu, "no adapter");
+        assert!(msg.contains("MP3RGUI_RENDERER=glow"));
+        assert!(msg.contains("mp3rgain command-line tool"));
+    }
+
     #[test]
     fn unknown_failure_still_points_at_the_cli_and_issue_tracker() {
         let err = Error::AppCreation("something else broke".into());
@@ -115,6 +185,7 @@ mod tests {
     fn all_variants_share_headline_and_keep_details() {
         for failure in [
             StartupFailure::NoOpenGl,
+            StartupFailure::NoGpu,
             StartupFailure::NoDisplay,
             StartupFailure::Unknown,
         ] {

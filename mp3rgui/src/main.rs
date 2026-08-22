@@ -13,6 +13,7 @@ fn main() {
             .with_inner_size([900.0, 650.0])
             .with_min_inner_size([700.0, 500.0])
             .with_drag_and_drop(true),
+        renderer: startup::renderer(),
         ..Default::default()
     };
 
