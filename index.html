@@ -76,6 +76,9 @@
     <h2>Platform Share (All-Time, GitHub Releases)</h2>
     <p style="color:var(--muted);font-size:0.875rem;margin-bottom:1rem">
       Share of downloads by platform summed across every release. Excludes <code>.sha256</code> checksum fetches.
+      <br><strong>Windows (installer)</strong> is the GUI setup executable introduced in 3.3.0. It bundles both
+      architectures, so it cannot be split into x64 and ARM64 like the portable zips; it also counts the
+      version-free copy that backs the permanent download link.
     </p>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1.5rem">
       <div>
@@ -232,13 +235,26 @@ function classifyAsset(name) {
   return null;
 }
 
+// The Windows GUI installer (3.3.0+) carries both the x64 and arm64 binaries
+// and selects at install time, so it cannot be split by architecture the way
+// the portable zips can. Releases publish it twice -- once versioned, once
+// under a version-free name that backs the permanent
+// /releases/latest/download/ link -- and both names land on this one label so
+// the two counts add up instead of showing as separate platforms.
 function platformLabel(name) {
+  if (/-windows-setup\.exe$/.test(name)) return 'Windows (installer)';
   if (name.includes('macos')) return 'macOS';
   if (name.includes('windows-x86_64')) return 'Windows x64';
   if (name.includes('windows-arm64')) return 'Windows ARM64';
   if (name.includes('linux-x86_64') || name.includes('amd64')) return 'Linux x64';
   if (name.includes('linux-arm64') || name.includes('arm64')) return 'Linux ARM64';
   return name;
+}
+
+/** Sum download_count for every asset of `kind` carrying `label`. */
+function downloadsFor(assets, label) {
+  return assets.filter(a => platformLabel(a.name) === label)
+               .reduce((s, a) => s + a.download_count, 0);
 }
 
 async function main() {
@@ -297,8 +313,8 @@ async function main() {
     const cliAssets = latestRelease.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'cli');
     const guiAssets = latestRelease.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'gui');
     const platforms = [...new Set([...cliAssets, ...guiAssets].map(a => platformLabel(a.name)))];
-    const cliByPlatform = platforms.map(p => cliAssets.find(a => platformLabel(a.name) === p)?.download_count || 0);
-    const guiByPlatform = platforms.map(p => guiAssets.find(a => platformLabel(a.name) === p)?.download_count || 0);
+    const cliByPlatform = platforms.map(p => downloadsFor(cliAssets, p));
+    const guiByPlatform = platforms.map(p => downloadsFor(guiAssets, p));
     new Chart(document.getElementById('chart-platform'), {
       type: 'bar',
       data: {
@@ -314,13 +330,14 @@ async function main() {
 
   // Platform share (all-time): sum download_count across ALL releases,
   // split by CLI vs GUI, rendered as one pie per package.
-  const PLATFORM_ORDER = ['Linux x64', 'Linux ARM64', 'macOS', 'Windows x64', 'Windows ARM64'];
+  const PLATFORM_ORDER = ['Linux x64', 'Linux ARM64', 'macOS', 'Windows x64', 'Windows ARM64', 'Windows (installer)'];
   const PLATFORM_COLORS = {
     'Linux x64': COLORS.blue,
     'Linux ARM64': COLORS.green,
     'macOS': COLORS.gray,
     'Windows x64': COLORS.orange,
     'Windows ARM64': COLORS.purple,
+    'Windows (installer)': COLORS.red,
   };
   const allTimeByPlatform = kind => {
     const totals = {};
@@ -558,8 +575,11 @@ async function main() {
   ghReleases.forEach(r => {
     const cliDL = r.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'cli').reduce((s, a) => s + a.download_count, 0);
     const guiDL = r.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'gui').reduce((s, a) => s + a.download_count, 0);
-    const cliPlatforms = r.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'cli').map(a => platformLabel(a.name)).join(', ');
-    const guiPlatforms = r.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === 'gui').map(a => platformLabel(a.name)).join(', ');
+    const platformList = kind => [...new Set(
+      r.assets.filter(a => isReal(a.name) && classifyAsset(a.name) === kind).map(a => platformLabel(a.name))
+    )].join(', ');
+    const cliPlatforms = platformList('cli');
+    const guiPlatforms = platformList('gui');
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${r.tag}</td><td>${cliPlatforms || '-'}</td><td>${guiPlatforms || '-'}</td><td class="num">${num(cliDL)}</td><td class="num">${num(guiDL)}</td><td class="num">${num(cliDL + guiDL)}</td>`;
     tbody.appendChild(tr);
