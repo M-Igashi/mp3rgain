@@ -1007,6 +1007,7 @@ dependencies = [
  "objc2-foundation 0.2.2",
  "parking_lot",
  "percent-encoding",
+ "pollster",
  "profiling",
  "raw-window-handle",
  "ron",
@@ -1016,6 +1017,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "web-time",
+ "wgpu",
  "winapi",
  "windows-sys 0.59.0",
  "winit",
@@ -2185,7 +2187,7 @@ dependencies = [
 
 [[package]]
 name = "mp3rgain"
-version = "3.2.0"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "colored",
@@ -2200,7 +2202,7 @@ dependencies = [
 
 [[package]]
 name = "mp3rgui"
-version = "3.2.0"
+version = "3.3.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4399,6 +4401,7 @@ dependencies = [
  "document-features",
  "js-sys",
  "log",
+ "naga",
  "parking_lot",
  "profiling",
  "raw-window-handle",
@@ -4447,6 +4450,7 @@ dependencies = [
  "arrayvec",
  "ash",
  "bitflags 2.10.0",
+ "block",
  "bytemuck",
  "cfg_aliases",
  "core-graphics-types",
