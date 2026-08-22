@@ -28,6 +28,20 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 
 ## Installation
 
+### Windows: download the installer
+
+No terminal needed. The installer registers a Start Menu entry and an uninstaller,
+covers both Intel and ARM machines, and needs no administrator rights.
+
+**[Download mp3rgui for Windows](https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgui-windows-setup.exe)**
+
+Both links always resolve to the current release, so they are safe to bookmark or share:
+
+- <https://mp3rgain.tyna.ninja/download/windows>
+- <https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgui-windows-setup.exe>
+
+Everything else — the CLI, other platforms, and package managers — is below.
+
 ### CLI (`mp3rgain`)
 
 | Platform | Command |
@@ -35,7 +49,7 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 | macOS | `brew install M-Igashi/tap/mp3rgain` |
 | Windows | `winget install M-Igashi.mp3rgain` |
 | Arch Linux (AUR) | `yay -S mp3rgain-bin` |
-| Ubuntu 25.10 (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgain` (amd64/arm64) |
+| Ubuntu 26.04 LTS (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgain` (amd64/arm64) |
 | Debian | `sudo apt install ./mp3rgain_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) (ARM64 also available) |
 | Nix/NixOS | `nix profile install github:M-Igashi/mp3rgain` |
 | Docker | `docker pull ghcr.io/m-igashi/mp3rgain:latest` |
@@ -48,8 +62,12 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 | macOS | `brew install --cask M-Igashi/tap/mp3rgui` |
 | Windows | `winget install M-Igashi.mp3rgui` |
 | Arch Linux (AUR) | `yay -S mp3rgui` |
-| Ubuntu 25.10 (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgui && sudo apt install mp3rgui` (amd64/arm64) |
+| Ubuntu 26.04 LTS (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgui && sudo apt install mp3rgui` (amd64/arm64) |
 | Debian/Ubuntu | `sudo apt install ./mp3rgui_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) (ARM64 also available, requires Ubuntu 24.04+ / Debian trixie+) |
+
+On Windows, `winget` installs the GUI as a portable binary; use the
+[installer](https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgui-windows-setup.exe)
+above if you want a Start Menu entry and an uninstaller.
 
 Binaries for all platforms are also available from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases).
 
@@ -115,7 +133,8 @@ A native GUI application (`mp3rgui`) is available for users who prefer a graphic
 **Install:** See [Installation](#installation) above for Homebrew, Winget, and AUR options. Binaries are also available from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
 - `mp3rgui-*-macos-universal.dmg` (macOS)
 - `mp3rgui-*-linux-x86_64.tar.gz` / `mp3rgui-*-linux-arm64.tar.gz` (Linux)
-- `mp3rgui-*-windows-x86_64.zip` / `mp3rgui-*-windows-arm64.zip` (Windows)
+- `mp3rgui-windows-setup.exe` (Windows installer, x64 + ARM64 in one)
+- `mp3rgui-*-windows-x86_64.zip` / `mp3rgui-*-windows-arm64.zip` (Windows, portable)
 - `mp3rgui_*_amd64.deb` / `mp3rgui_*_arm64.deb` (Debian/Ubuntu)
 
 > **macOS manual download:** If you see "mp3rgui cannot be opened" warning, run:

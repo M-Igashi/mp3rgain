@@ -288,8 +288,14 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           cp "artifacts/mp3rgui-windows-installer/mp3rgui-${TAG}-windows-setup.exe" dist/
+          # Also publish under a version-free name. GitHub serves
+          # /releases/latest/download/<asset> only when the asset name is
+          # identical in every release, so this is what makes a permanent
+          # "download the current installer" link possible.
+          cp "dist/mp3rgui-${TAG}-windows-setup.exe" dist/mp3rgui-windows-setup.exe
           cd dist
           shasum -a 256 "mp3rgui-${TAG}-windows-setup.exe" > "mp3rgui-${TAG}-windows-setup.exe.sha256"
+          shasum -a 256 mp3rgui-windows-setup.exe > mp3rgui-windows-setup.exe.sha256
 
       - name: Extract checksums
         id: checksums
@@ -330,6 +336,8 @@ jobs:
             dist/mp3rgui-${{ github.ref_name }}-windows-arm64.zip.sha256
             dist/mp3rgui-${{ github.ref_name }}-windows-setup.exe
             dist/mp3rgui-${{ github.ref_name }}-windows-setup.exe.sha256
+            dist/mp3rgui-windows-setup.exe
+            dist/mp3rgui-windows-setup.exe.sha256
           draft: false
           generate_release_notes: true
 
