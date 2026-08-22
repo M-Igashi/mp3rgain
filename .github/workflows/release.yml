@@ -107,9 +107,39 @@ jobs:
           name: mp3rgui-${{ matrix.target }}
           path: mp3rgui/target/${{ matrix.target }}/release/mp3rgui.exe
 
+  build-installer:
+    name: Build Windows installer
+    needs: build-gui
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download GUI Windows binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: mp3rgui-*-pc-windows-msvc
+          path: artifacts
+
+      - name: Build installer
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          scripts/build-windows-installer.sh \
+            "${TAG#v}" \
+            "mp3rgui-${TAG}-windows-setup" \
+            artifacts/mp3rgui-x86_64-pc-windows-msvc/mp3rgui.exe \
+            artifacts/mp3rgui-aarch64-pc-windows-msvc/mp3rgui.exe
+
+      - name: Upload installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mp3rgui-windows-installer
+          path: target/windows-installer/mp3rgui-*-windows-setup.exe
+
   release:
     name: Create Release
-    needs: [build-cli, build-gui]
+    needs: [build-cli, build-gui, build-installer]
     runs-on: macos-latest
     permissions:
       contents: write
@@ -121,6 +151,7 @@ jobs:
       gui_macos_dmg_sha256: ${{ steps.checksums.outputs.gui_macos_dmg_sha256 }}
       gui_windows_x64_sha256: ${{ steps.checksums.outputs.gui_windows_x64_sha256 }}
       gui_windows_arm64_sha256: ${{ steps.checksums.outputs.gui_windows_arm64_sha256 }}
+      gui_windows_setup_sha256: ${{ steps.checksums.outputs.gui_windows_setup_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -252,6 +283,14 @@ jobs:
           cd ../../dist
           shasum -a 256 "mp3rgui-${TAG}-windows-arm64.zip" > "mp3rgui-${TAG}-windows-arm64.zip.sha256"
 
+      - name: Collect GUI Windows installer
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cp "artifacts/mp3rgui-windows-installer/mp3rgui-${TAG}-windows-setup.exe" dist/
+          cd dist
+          shasum -a 256 "mp3rgui-${TAG}-windows-setup.exe" > "mp3rgui-${TAG}-windows-setup.exe.sha256"
+
       - name: Extract checksums
         id: checksums
         env:
@@ -263,6 +302,7 @@ jobs:
           echo "gui_macos_dmg_sha256=$(cat "dist/mp3rgui-${TAG}-macos-universal.dmg.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "gui_windows_x64_sha256=$(cat "dist/mp3rgui-${TAG}-windows-x86_64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "gui_windows_arm64_sha256=$(cat "dist/mp3rgui-${TAG}-windows-arm64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "gui_windows_setup_sha256=$(cat "dist/mp3rgui-${TAG}-windows-setup.exe.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v2
@@ -288,6 +328,8 @@ jobs:
             dist/mp3rgui-${{ github.ref_name }}-windows-x86_64.zip.sha256
             dist/mp3rgui-${{ github.ref_name }}-windows-arm64.zip
             dist/mp3rgui-${{ github.ref_name }}-windows-arm64.zip.sha256
+            dist/mp3rgui-${{ github.ref_name }}-windows-setup.exe
+            dist/mp3rgui-${{ github.ref_name }}-windows-setup.exe.sha256
           draft: false
           generate_release_notes: true
 

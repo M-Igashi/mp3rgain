@@ -135,6 +135,17 @@ jobs:
       - name: Clippy
         run: cargo clippy --manifest-path mp3rgui/Cargo.toml -- -D warnings
 
+      # Compile the installer script so an .iss error is caught here rather
+      # than during a release. The same debug binary stands in for both
+      # architectures; only the script is under test.
+      - name: Build Windows installer (smoke)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          scripts/build-windows-installer.sh 0.0.0 mp3rgui-ci-smoke \
+            mp3rgui/target/debug/mp3rgui.exe \
+            mp3rgui/target/debug/mp3rgui.exe
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
