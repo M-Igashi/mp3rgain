@@ -41,7 +41,12 @@ if [ ! -x "$iscc" ]; then
 fi
 
 cd "$staging"
-"$iscc" "/DMyAppVersion=$version" "/DOutputBase=$output_base" mp3rgui.iss
+
+# Git Bash rewrites arguments that look like absolute POSIX paths, so a bare
+# /DMyAppVersion=... arrives at ISCC as C:/Program Files/Git/DMyAppVersion=...
+# and gets read as a second script filename. Turn that conversion off.
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
+  "$iscc" "/DMyAppVersion=$version" "/DOutputBase=$output_base" mp3rgui.iss
 
 test -f "$output_base.exe"
 echo "built $staging/$output_base.exe"
