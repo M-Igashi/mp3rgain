@@ -117,7 +117,10 @@ Delete stored tag information.
 Skip (ignore) stored tag information.
 .TP
 .B r
-Force recalculation, ignoring stored tags.
+Force recalculation, ignoring stored tags (the default; kept for mp3gain compatibility).
+.TP
+.B R
+Reuse stored ReplayGain tags with \fB\-r\fR/\fB\-a\fR instead of re-analyzing, rescanning only files whose tags are missing. This is mp3gain's default behavior. Album mode requires a consistent set of album tags on every file; otherwise the whole album is rescanned. Ignored with \fB\-s r\fR, \fB\-d\fR/\fB\-m\fR modifiers, or \fB\-\-rg2\fR/\fB\-\-r128\fR.
 .TP
 .B i
 Use ID3v2 tags (not fully supported, falls back to APEv2).

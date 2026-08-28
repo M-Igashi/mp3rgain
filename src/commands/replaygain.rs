@@ -1,6 +1,9 @@
 use anyhow::Result;
 use colored::*;
-use mp3rgain::replaygain::{self, AlbumAnalysisReport, AudioFileType, REPLAYGAIN_REFERENCE_DB};
+use mp3rgain::replaygain::{
+    self, AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult,
+    REPLAYGAIN_REFERENCE_DB,
+};
 use mp3rgain::{steps_to_db, AacAlbumInfo};
 use rayon::prelude::*;
 use std::io::{self, Write};
@@ -14,6 +17,7 @@ use crate::commands::utils::{
 };
 use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
 use crate::processors::replaygain::{process_apply_replaygain_with_album, process_track_gain};
+use crate::processors::utils::stored_file_type;
 use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
 use crate::util::get_filename;
 
@@ -77,6 +81,52 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     finish_with_summary(files.len(), json_results, successful, failed, opts)
 }
 
+/// `-s R` (issue #298): build an album report from stored tags. Requires
+/// every file to carry parseable `REPLAYGAIN_TRACK_*` and `REPLAYGAIN_ALBUM_*`
+/// values with no algorithm marker and a matching album gain. The stored
+/// values are residuals relative to each file's current loudness, so a
+/// partial or inconsistent set cannot be mixed with fresh analysis — any gap
+/// returns `None` and the whole album is rescanned.
+fn stored_album_report(files: &[PathBuf], opts: &Options) -> Option<AlbumAnalysisReport> {
+    if !opts.stored_tags_usable() {
+        return None;
+    }
+    let mut tracks = Vec::with_capacity(files.len());
+    let mut album_gain: Option<f64> = None;
+    let mut album_peak: f64 = 0.0;
+    for file in files {
+        let tags = mp3rgain::read_gain_tags_auto(file, opts.tag_layout).ok()?;
+        if tags.algorithm.is_some() {
+            return None;
+        }
+        let gain_db = tags.track_gain_db()?;
+        let peak = tags.track_peak_value()?;
+        let file_album_gain = tags.album_gain_db()?;
+        album_peak = album_peak.max(tags.album_peak_value()?);
+        match album_gain {
+            Some(g) if (g - file_album_gain).abs() > 0.05 => return None,
+            Some(_) => {}
+            None => album_gain = Some(file_album_gain),
+        }
+        tracks.push(ReplayGainResult::from_stored_tags(
+            gain_db,
+            peak,
+            stored_file_type(file),
+            opts.analysis_mode,
+        ));
+    }
+    Some(AlbumAnalysisReport {
+        album: AlbumGainResult::from_stored_tags(
+            tracks,
+            album_gain?,
+            album_peak,
+            opts.analysis_mode,
+        ),
+        failures: Vec::new(),
+        successful_indices: (0..files.len()).collect(),
+    })
+}
+
 pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     require_replaygain_feature();
 
@@ -93,17 +143,27 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         println!();
     }
 
-    // First, analyze all tracks
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
-        println!("  {} Analyzing tracks...", "->".cyan());
-    }
-
     let file_refs: Vec<&Path> = files.iter().map(|p| p.as_path()).collect();
 
     let threads = effective_threads(opts);
     let parallel = threads > 1 && files.len() > 1;
 
-    let album_analysis = run_album_analysis(&file_refs, opts, threads, parallel, opts.skip_errors);
+    // -s R: reuse stored album tags when every file carries a consistent
+    // set; otherwise fall back to the full rescan (issue #298).
+    let album_analysis = match stored_album_report(files, opts) {
+        Some(report) => {
+            if opts.output_format == OutputFormat::Text && !opts.quiet {
+                println!("  {} Using stored tags (no rescan)", "->".cyan());
+            }
+            Ok(report)
+        }
+        None => {
+            if opts.output_format == OutputFormat::Text && !opts.quiet {
+                println!("  {} Analyzing tracks...", "->".cyan());
+            }
+            run_album_analysis(&file_refs, opts, threads, parallel, opts.skip_errors)
+        }
+    };
 
     match album_analysis {
         Ok(report) => {

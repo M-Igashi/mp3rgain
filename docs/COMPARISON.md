@@ -72,6 +72,7 @@ All options from the original mp3gain are fully implemented in mp3rgain:
 | Option | Description |
 |--------|-------------|
 | `-R` | Recursive directory processing |
+| `-s R` | Reuse stored ReplayGain tags with `-r`/`-a`, rescanning only when tags are missing (mp3gain's *default* behavior, opt-in here) |
 | `-n` / `--dry-run` | Dry-run mode (preview changes without modifying files) |
 | `-o json` | JSON output format (for scripting and automation) |
 | `-o tsv` | Tab-separated output (database-friendly) |

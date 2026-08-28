@@ -157,6 +157,7 @@ A native GUI application (`mp3rgui`) is available for users who prefer a graphic
 | `-u` | Undo gain changes |
 | `-k` | Prevent clipping |
 | `-R` | Process directories recursively |
+| `-s R` | Reuse stored ReplayGain tags with `-r`/`-a`, rescanning only when tags are missing (mp3gain's default behavior) |
 | `--skip-errors` | Keep album analysis (`-a`) going past unreadable files |
 | `-n` | Dry-run mode |
 | `-j <n>` / `--threads <n>` | Worker threads for analysis (default: auto, 0=auto, 1=serial) |
