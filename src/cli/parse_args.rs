@@ -131,15 +131,17 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                         "c" => opts.stored_tag_mode = StoredTagMode::Check,
                         "d" => opts.stored_tag_mode = StoredTagMode::Delete,
                         "s" => opts.stored_tag_mode = StoredTagMode::Skip,
-                        // mp3gain compatibility: mp3rgain never reads stored
-                        // tags as an analysis cache, so "force recalculation"
-                        // is always in effect. Accepted with a notice (#253).
+                        // mp3gain compatibility: recalculation is mp3rgain's
+                        // default, so "force recalculation" only matters as an
+                        // override of -s R. Accepted with a notice (#253).
                         "r" => opts.force_recalc = true,
+                        // Reuse stored tags, rescan only when missing (#298).
+                        "R" => opts.use_stored_tags = true,
                         "i" => opts.tag_layout = TagLayout::Id3v2,
                         "a" => opts.tag_layout = TagLayout::Ape,
                         other => {
                             eprintln!(
-                                "{}: unknown -s mode '{}', use c/d/s/r/i/a",
+                                "{}: unknown -s mode '{}', use c/d/s/r/R/i/a",
                                 "error".red().bold(),
                                 other
                             );
@@ -521,6 +523,18 @@ mod tests {
         let opts = parse_args(&args(&["-s", "r"])).unwrap();
         assert!(opts.force_recalc);
         assert_eq!(opts.stored_tag_mode, StoredTagMode::None);
+        // -s R reuses stored tags, orthogonal to the mode enum (#298)
+        let opts = parse_args(&args(&["-s", "R", "-a"])).unwrap();
+        assert!(opts.use_stored_tags);
+        assert!(opts.stored_tags_usable());
+        assert_eq!(opts.stored_tag_mode, StoredTagMode::None);
+        // -s r, -d/-m, and the BS.1770 modes all disable tag reuse
+        let opts = parse_args(&args(&["-s", "R", "-s", "r"])).unwrap();
+        assert!(!opts.stored_tags_usable());
+        let opts = parse_args(&args(&["-s", "R", "-d", "3.0"])).unwrap();
+        assert!(!opts.stored_tags_usable());
+        let opts = parse_args(&args(&["-s", "R", "--rg2"])).unwrap();
+        assert!(!opts.stored_tags_usable());
         // -s i / -s a toggle the tag format; last one wins
         let opts = parse_args(&args(&["-s", "i"])).unwrap();
         assert_eq!(opts.tag_layout, TagLayout::Id3v2);

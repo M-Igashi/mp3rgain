@@ -40,7 +40,9 @@ pub fn print_usage() {
     println!("                  c = check/show stored tag info");
     println!("                  d = delete stored tag info");
     println!("                  s = skip (don't write) stored tag info");
-    println!("                  r = force recalculation (always on; kept for compatibility)");
+    println!("                  r = force recalculation (default; kept for compatibility)");
+    println!("                  R = reuse stored ReplayGain tags with -r/-a, re-analyzing");
+    println!("                      only when tags are missing (mp3gain's default behavior)");
     println!("                  i = put all tags in ID3v2");
     println!("                  a = put all tags in APEv2 (mp3gain-identical)");
     println!("    -p          Preserve original file timestamp");
@@ -74,6 +76,8 @@ pub fn print_usage() {
     println!("    mp3rgain -e *.mp3              Track gain only (skip album calc)");
     println!("    mp3rgain -u song.mp3           Undo previous gain changes");
     println!("    mp3rgain -x song.mp3           Show max amplitude only");
+    println!("    mp3rgain -s R -a *.mp3         Album gain from stored tags (rescan only");
+    println!("                                   if any file lacks them)");
     println!("    mp3rgain -s c *.mp3            Check stored tag info");
     println!("    mp3rgain -s d *.mp3            Delete stored tag info");
     println!("    mp3rgain -g 2 -p song.mp3      Apply gain, preserve timestamp");

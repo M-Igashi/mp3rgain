@@ -49,6 +49,39 @@ pub fn analyze_track(
     )
 }
 
+/// `-s R` (issue #298): build an analysis result from the file's stored
+/// `REPLAYGAIN_TRACK_*` tags, or `None` when the tags are absent, malformed,
+/// unreadable, or untrusted (see [`Options::stored_tags_usable`]) — the
+/// caller then falls back to a real analysis. A `REPLAYGAIN_ALGORITHM` tag
+/// marks BS.1770 values, which don't match the RG1 target this path trusts.
+pub fn stored_track_result(file: &Path, opts: &Options) -> Option<ReplayGainResult> {
+    if !opts.stored_tags_usable() {
+        return None;
+    }
+    let tags = mp3rgain::read_gain_tags_auto(file, opts.tag_layout).ok()?;
+    if tags.algorithm.is_some() {
+        return None;
+    }
+    let gain_db = tags.track_gain_db()?;
+    let peak = tags.track_peak_value()?;
+    Some(ReplayGainResult::from_stored_tags(
+        gain_db,
+        peak,
+        stored_file_type(file),
+        opts.analysis_mode,
+    ))
+}
+
+/// File type for a tag-derived result, mirroring the dispatch in
+/// [`mp3rgain::read_gain_tags_auto`].
+pub fn stored_file_type(file: &Path) -> mp3rgain::replaygain::AudioFileType {
+    if mp4meta::is_aac_file(file) {
+        mp3rgain::replaygain::AudioFileType::Aac
+    } else {
+        mp3rgain::replaygain::AudioFileType::Mp3
+    }
+}
+
 pub fn save_original_mtime(file: &Path, opts: &Options) -> Option<SystemTime> {
     if opts.preserve_timestamp && !opts.dry_run {
         mp3rgain::apply::read_mtime(file)

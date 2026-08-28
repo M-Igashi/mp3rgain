@@ -13,7 +13,7 @@ use crate::util::get_filename;
 
 use super::utils::{
     analyze_track, emit_clipping_warning, report_file_error, restore_timestamp,
-    save_original_mtime, warn_aac_multi_track,
+    save_original_mtime, stored_track_result, warn_aac_multi_track,
 };
 
 pub fn process_track_gain(
@@ -35,17 +35,31 @@ fn process_track_gain_into(
     let filename = get_filename(file);
     let dry_run_prefix = opts.dry_run_prefix();
 
+    // -s R: reuse stored tags when present and trusted; otherwise fall
+    // through to a normal analysis of just this file (issue #298).
+    let stored = stored_track_result(file, opts);
+
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         writeln!(
             out,
-            "  {} {}Analyzing {}...",
+            "  {} {}{} {}...",
             "->".cyan(),
             dry_run_prefix,
+            if stored.is_some() {
+                "Using stored tags for"
+            } else {
+                "Analyzing"
+            },
             filename
         )?;
     }
 
-    match analyze_track(file, opts, analysis_pb) {
+    let analysis = match stored {
+        Some(result) => Ok(result),
+        None => analyze_track(file, opts, analysis_pb),
+    };
+
+    match analysis {
         Ok(result) => {
             // Apply gain modifier (-m steps + -d dB, combined into steps)
             let base_steps = result.gain_steps();

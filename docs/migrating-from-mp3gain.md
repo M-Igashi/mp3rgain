@@ -69,7 +69,7 @@ flags are accepted with the same semantics; mp3rgain adds a few extensions.
 | `-f` | Assume MPEG2 Layer III | Accepted; no effect (mp3rgain auto-detects) |
 | `-q` | Quiet mode | |
 | `-R` | Process directories recursively | |
-| `-s c` / `-s d` / `-s s` / `-s r` / `-s a` | Stored-tag handling: check / delete / skip / recalc / all-APEv2 | Same modes as mp3gain. `-s a` pins every tag to APEv2, which is mp3gain's layout and was mp3rgain's default before 3.2.0 |
+| `-s c` / `-s d` / `-s s` / `-s r` / `-s a` | Stored-tag handling: check / delete / skip / recalc / all-APEv2 | Same modes as mp3gain. `-s a` pins every tag to APEv2, which is mp3gain's layout and was mp3rgain's default before 3.2.0. Note the default is inverted: mp3gain reuses stored tags unless you pass `-s r`, while mp3rgain re-analyzes unless you pass `-s R` (see below) |
 | `-o` (no argument) | TSV output | Default header matches mp3gain exactly (see [Output format](#output-format)) |
 
 ### mp3rgain extensions
@@ -84,6 +84,7 @@ are worth knowing:
 | `-w` | Wrap gain values instead of clamping |
 | `-n`, `--dry-run` | Preview changes without writing |
 | `-o text` / `-o json` / `-o tsv` | Explicit output format selection |
+| `-s R` | Reuse stored ReplayGain tags with `-r`/`-a`, rescanning only files whose tags are missing. This restores mp3gain's default behavior as an opt-in ([#298](https://github.com/M-Igashi/mp3rgain/issues/298)). Album mode requires a consistent set of album tags on every file, otherwise the whole album is rescanned. Ignored with `-s r`, `-d`/`-m`, or `--rg2`/`--r128` |
 | `-s i` | Put *every* tag in ID3v2 `TXXX`, undo included. Since 3.2.0 the default already writes `REPLAYGAIN_*` to ID3v2, so this is only needed when you want `MP3GAIN_UNDO` there too |
 | `-j <n>` / `--threads <n>` | Worker threads for ReplayGain analysis (default: auto). `MP3RGAIN_THREADS` env var also honored. `-j 1` reproduces mp3gain's serial behavior. See [docs/perf-parallel.md](perf-parallel.md). |
 | `--skip-errors` | Keep album analysis (`-a`) going past unreadable files; failed files are reported and excluded from the album gain |

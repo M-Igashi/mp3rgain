@@ -293,6 +293,26 @@ impl StoredGainTags {
         }
     }
 
+    /// `REPLAYGAIN_TRACK_GAIN` parsed to dB, if present and well-formed.
+    pub fn track_gain_db(&self) -> Option<f64> {
+        self.track_gain.as_deref().and_then(ape::parse_rg_gain)
+    }
+
+    /// `REPLAYGAIN_TRACK_PEAK` parsed to a linear peak.
+    pub fn track_peak_value(&self) -> Option<f64> {
+        self.track_peak.as_deref().and_then(ape::parse_rg_peak)
+    }
+
+    /// `REPLAYGAIN_ALBUM_GAIN` parsed to dB.
+    pub fn album_gain_db(&self) -> Option<f64> {
+        self.album_gain.as_deref().and_then(ape::parse_rg_gain)
+    }
+
+    /// `REPLAYGAIN_ALBUM_PEAK` parsed to a linear peak.
+    pub fn album_peak_value(&self) -> Option<f64> {
+        self.album_peak.as_deref().and_then(ape::parse_rg_peak)
+    }
+
     /// True if at least one gain tag is present.
     pub fn has_any(&self) -> bool {
         self.track_gain.is_some()

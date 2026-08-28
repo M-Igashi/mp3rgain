@@ -186,6 +186,29 @@ impl ReplayGainResult {
         }
     }
 
+    /// Build a result from stored `REPLAYGAIN_*` tags instead of analysis
+    /// (`-s R`, issue #298). Loudness is derived from the gain relative to
+    /// the mode's target; `sample_rate` is unknown and reported as 0.
+    pub fn from_stored_tags(
+        gain_db: f64,
+        peak: f64,
+        file_type: AudioFileType,
+        analysis_mode: AnalysisMode,
+    ) -> Self {
+        let target = analysis_mode
+            .target_lufs()
+            .unwrap_or(REPLAYGAIN_REFERENCE_DB);
+        Self {
+            loudness_db: target - gain_db,
+            gain_db,
+            peak,
+            sample_rate: 0,
+            file_type,
+            analysis_mode,
+            true_peak: false,
+        }
+    }
+
     /// Measured loudness: the RG1 histogram value in [`AnalysisMode::Rg1`],
     /// or the BS.1770 integrated loudness in LUFS in the other modes.
     pub fn loudness_db(&self) -> f64 {
@@ -265,6 +288,25 @@ impl AlbumGainResult {
         Self {
             tracks,
             album_loudness_db,
+            album_gain_db,
+            album_peak,
+        }
+    }
+
+    /// Build an album result from stored `REPLAYGAIN_ALBUM_*` tags instead of
+    /// analysis (`-s R`, issue #298). See [`ReplayGainResult::from_stored_tags`].
+    pub fn from_stored_tags(
+        tracks: Vec<ReplayGainResult>,
+        album_gain_db: f64,
+        album_peak: f64,
+        analysis_mode: AnalysisMode,
+    ) -> Self {
+        let target = analysis_mode
+            .target_lufs()
+            .unwrap_or(REPLAYGAIN_REFERENCE_DB);
+        Self {
+            tracks,
+            album_loudness_db: target - album_gain_db,
             album_gain_db,
             album_peak,
         }

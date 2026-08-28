@@ -34,9 +34,12 @@ pub struct Options {
     // *where* they live (-s i: all ID3v2, -s a: all APEv2, default: split).
     pub stored_tag_mode: StoredTagMode,
     pub tag_layout: TagLayout, // -s i / -s a
-    pub force_recalc: bool,    // -s r: accepted for compatibility (always recalculates)
-    pub track_gain: bool,      // -r (apply track gain)
-    pub album_gain: bool,      // -a (apply album gain)
+    pub force_recalc: bool,    // -s r: accepted for compatibility (recalculation is the default)
+    // -s R: reuse stored REPLAYGAIN_* tags instead of re-analyzing, rescanning
+    // only files whose tags are missing (mp3gain's default behavior, issue #298).
+    pub use_stored_tags: bool,
+    pub track_gain: bool, // -r (apply track gain)
+    pub album_gain: bool, // -a (apply album gain)
     // --rg2 / --r128: opt-in BS.1770 loudness modes (issue #269).
     // Default Rg1 keeps mp3gain-identical values.
     pub analysis_mode: AnalysisMode,
@@ -75,6 +78,17 @@ impl Options {
         } else {
             ""
         }
+    }
+
+    /// Whether `-s R` may reuse stored tags at all. Stored values can't be
+    /// trusted when `-s r` forces recalculation, a `-d`/`-m` modifier shifts
+    /// the target, or a BS.1770 mode is selected (`REPLAYGAIN_ALGORITHM`
+    /// can't distinguish the RG2 and R128 targets), so those force a rescan.
+    pub fn stored_tags_usable(&self) -> bool {
+        self.use_stored_tags
+            && !self.force_recalc
+            && self.analysis_mode == AnalysisMode::Rg1
+            && self.gain_modifier_steps() == 0
     }
 
     /// Combined `-m` (steps) and `-d` (dB) modifier expressed as mp3 gain steps.

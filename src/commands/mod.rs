@@ -49,11 +49,28 @@ pub fn run(mut opts: Options) -> Result<()> {
         );
     }
 
-    // -s r warning: mp3rgain never reads stored tags as an analysis cache,
-    // so recalculation is always in effect (issue #253)
-    if opts.force_recalc && !opts.quiet && opts.output_format == OutputFormat::Text {
+    // -s r warning: recalculation is mp3rgain's default, so the flag only
+    // matters as an override of -s R (issues #253, #298)
+    if opts.force_recalc
+        && !opts.use_stored_tags
+        && !opts.quiet
+        && opts.output_format == OutputFormat::Text
+    {
         eprintln!(
-            "{}: -s r (force recalculation) is accepted for compatibility but has no effect (mp3rgain always recalculates)",
+            "{}: -s r (force recalculation) is accepted for compatibility but has no effect (recalculation is the default; use -s R to reuse stored tags)",
+            "note".cyan()
+        );
+    }
+
+    // -s R warning: tell the user up front when stored tags will be ignored
+    // (see Options::stored_tags_usable for the reasons)
+    if opts.use_stored_tags
+        && !opts.stored_tags_usable()
+        && !opts.quiet
+        && opts.output_format == OutputFormat::Text
+    {
+        eprintln!(
+            "{}: -s R is ignored with -s r, -d/-m modifiers, or --rg2/--r128; files will be re-analyzed",
             "note".cyan()
         );
     }
