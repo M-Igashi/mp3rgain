@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod panic_hook;
 mod startup;
 mod ui;
 mod worker;
@@ -8,6 +9,8 @@ mod worker;
 use app::Mp3rgainApp;
 
 fn main() {
+    panic_hook::install();
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([900.0, 650.0])
