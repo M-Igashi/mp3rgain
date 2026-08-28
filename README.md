@@ -12,35 +12,21 @@
 
 **Lossless MP3/AAC volume adjustment - a modern mp3gain / aacgain replacement written in Rust**
 
-🌐 **Website:** [mp3rgain.tyna.ninja](https://mp3rgain.tyna.ninja/)
+🌐 **Website:** [mp3rgain.tyna.ninja](https://mp3rgain.tyna.ninja/) - install guide, full [CLI reference](https://mp3rgain.tyna.ninja/docs/cli), [FAQ](https://mp3rgain.tyna.ninja/faq), and [tool comparison](https://mp3rgain.tyna.ninja/vs-mp3gain)
 
 mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global_gain` field in each frame. This preserves audio quality while achieving permanent volume changes.
 
-## Features
-
-- **CLI lossless AAC bitstream gain**: re-encode-free `global_gain` rewrite for AAC/M4A — replacing the long-abandoned aacgain, with `-u` undo (foobar2000's GUI equivalent has no undo path)
-- **Lossless & Reversible**: No re-encoding, all changes can be undone (MP3 and AAC)
-- **ReplayGain**: Track and album gain analysis for MP3 and AAC/M4A, with standard `REPLAYGAIN_*` tags written alongside the bitstream change (APEv2, ID3v2 TXXX, or MP4 freeform)
-- **Zero dependencies**: Single static binary (no ffmpeg, no mp3gain, no aacgain)
-- **Cross-platform**: macOS, Linux, Windows (x86_64 and ARM64)
-- **mp3gain / aacgain compatible**: Drop-in replacement with identical CLI
-- **GUI Application**: Native desktop app for drag-and-drop workflow
+- **Lossless & reversible**: no re-encoding; every change can be undone with `-u` (MP3 and AAC/M4A)
+- **ReplayGain**: track and album analysis, with standard `REPLAYGAIN_*` tags written alongside the bitstream change
+- **mp3gain / aacgain compatible**: drop-in replacement with identical CLI flags, TSV output, and undo tags
+- **Zero dependencies**: single static binary; macOS, Linux, Windows (x86_64 and ARM64)
+- **GUI application**: `mp3rgui`, a native desktop app for drag-and-drop workflows
 
 ## Installation
 
 ### Windows: download the installer
 
-No terminal needed. The installer registers a Start Menu entry and an uninstaller,
-covers both Intel and ARM machines, and needs no administrator rights.
-
-**[Download mp3rgui for Windows](https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgui-windows-setup.exe)**
-
-Both links always resolve to the current release, so they are safe to bookmark or share:
-
-- <https://mp3rgain.tyna.ninja/download/windows>
-- <https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgui-windows-setup.exe>
-
-Everything else — the CLI, other platforms, and package managers — is below.
+No terminal needed - Start Menu entry, uninstaller, Intel + ARM in one, no admin rights: **[Download mp3rgui for Windows](https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgui-windows-setup.exe)** (permanent link: <https://mp3rgain.tyna.ninja/download/windows>)
 
 ### CLI (`mp3rgain`)
 
@@ -49,8 +35,8 @@ Everything else — the CLI, other platforms, and package managers — is below.
 | macOS | `brew install M-Igashi/tap/mp3rgain` |
 | Windows | `winget install M-Igashi.mp3rgain` |
 | Arch Linux (AUR) | `yay -S mp3rgain-bin` |
-| Ubuntu 26.04 LTS (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgain` (amd64/arm64) |
-| Debian | `sudo apt install ./mp3rgain_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) (ARM64 also available) |
+| Ubuntu 26.04 LTS (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgain` |
+| Debian | `sudo apt install ./mp3rgain_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) |
 | Nix/NixOS | `nix profile install github:M-Igashi/mp3rgain` |
 | Docker | `docker pull ghcr.io/m-igashi/mp3rgain:latest` |
 | Cargo | `cargo install mp3rgain` |
@@ -60,201 +46,53 @@ Everything else — the CLI, other platforms, and package managers — is below.
 | Platform | Command |
 |----------|---------|
 | macOS | `brew install --cask M-Igashi/tap/mp3rgui` |
-| Windows | `winget install M-Igashi.mp3rgui` |
+| Windows | `winget install M-Igashi.mp3rgui` (portable; use the [installer](https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgui-windows-setup.exe) for a Start Menu entry) |
 | Arch Linux (AUR) | `yay -S mp3rgui` |
-| Ubuntu 26.04 LTS (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgui && sudo apt install mp3rgui` (amd64/arm64) |
-| Debian/Ubuntu | `sudo apt install ./mp3rgui_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) (ARM64 also available, requires Ubuntu 24.04+ / Debian trixie+) |
+| Ubuntu 26.04 LTS (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgui && sudo apt install mp3rgui` |
+| Debian/Ubuntu | `sudo apt install ./mp3rgui_*_amd64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) |
 
-On Windows, `winget` installs the GUI as a portable binary; use the
-[installer](https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgui-windows-setup.exe)
-above if you want a Start Menu entry and an uninstaller.
+Binaries for all platforms are on [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases). For checksum verification and troubleshooting (Windows Defender false positives, missing OpenGL, PPA on older Ubuntu), see the **[install guide](https://mp3rgain.tyna.ninja/install)**.
 
-Binaries for all platforms are also available from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases).
-
-> [!NOTE]
-> **Windows: Defender occasionally flags `mp3rgui.exe` as a false positive.**
-> The GUI is an unsigned, statically linked Rust binary, which sometimes trips
-> Microsoft Defender's cloud/ML heuristics. Any such detection is a false positive:
-> every release is built from public source by a
-> [public GitHub Actions workflow](.github/workflows/release.yml), and each release
-> ships `.sha256` files so you can verify what you downloaded. Detections are
-> reported to Microsoft when they appear — the v3.0.0 binaries were analysed and
-> confirmed **"Not malware"**. If you hit a detection on a newer release, please
-> [open an issue](https://github.com/M-Igashi/mp3rgain/issues) so it can be reported.
+> **macOS manual download:** if you see a "mp3rgui cannot be opened" warning, run `xattr -cr /path/to/mp3rgui.app` (not needed with Homebrew).
 
 ## Quick Start
 
 ```bash
-# Normalize a single track (ReplayGain)
-mp3rgain -r song.mp3
-
-# Normalize an album
-mp3rgain -a *.mp3
-
-# Manual gain adjustment (+3.0 dB)
-mp3rgain -g 2 song.mp3
-
-# Undo changes
-mp3rgain -u song.mp3
-
-# Show file info
-mp3rgain song.mp3
+mp3rgain -r song.mp3          # Normalize a single track (ReplayGain)
+mp3rgain -a *.mp3             # Normalize an album
+mp3rgain -s R -a -R /music    # Apply from stored tags, rescan only where missing (v3.4+)
+mp3rgain -g 2 song.mp3        # Manual gain (+3.0 dB; 1 step = 1.5 dB)
+mp3rgain -u song.mp3          # Undo
+mp3rgain song.mp3             # Show file info
 ```
+
+Run `mp3rgain -h` for all options, or see the **[full CLI reference](https://mp3rgain.tyna.ninja/docs/cli)** (analysis modes, tag handling, exit codes, recipes). Analysis runs in parallel by default; `-j 1` forces the serial path ([design and benchmarks](docs/perf-parallel.md)).
 
 ## Migrating from mp3gain?
 
-Already running `mp3gain` (or `aacgain`) in a script, Dockerfile, or CI pipeline? mp3rgain is a drop-in replacement — the CLI flags, the TSV output format, and the APEv2 `mp3gain_undo` tag are all mp3gain-compatible, so existing parsers (e.g. [beets](https://beets.io/)) keep working unchanged. For most setups, migration is a one-line substitution:
+mp3rgain is a drop-in replacement: CLI flags, TSV output, and the APEv2 `mp3gain_undo` tag are all mp3gain-compatible, so existing scripts and parsers (e.g. [beets](https://beets.io/)) keep working unchanged. For most setups migration is a one-line substitution:
 
 ```bash
 sed -i 's/\bmp3gain\b/mp3rgain/g' your_script.sh
 ```
 
-See **[docs/migrating-from-mp3gain.md](docs/migrating-from-mp3gain.md)** for the full flag equivalence table, Dockerfile/CI substitution patterns, tag interop notes, and the small set of intentional behaviour differences. Bit-level verification lives in [docs/compatibility-report.md](docs/compatibility-report.md).
+See **[docs/migrating-from-mp3gain.md](docs/migrating-from-mp3gain.md)** for the flag equivalence table, where the tags land (ID3v2 vs APEv2, and the `-s a` / `-s i` overrides), and the small set of intentional behaviour differences. Bit-level verification lives in [docs/compatibility-report.md](docs/compatibility-report.md).
 
 ## GUI Application
-
-A native GUI application (`mp3rgui`) is available for users who prefer a graphical interface.
 
 <p align="center">
   <img src="docs/branding/mp3rgui-screenshot-compact.png" alt="mp3rgui showing track and album ReplayGain analysis for a batch of files" width="820">
 </p>
 
-**Features:**
+`mp3rgui` covers the CLI's core workflow - track/album analysis and gain, undo, tag inspection, clipping prevention - with drag-and-drop loading and per-file progress. It shares the same apply pipeline as the CLI. Install via the table above.
 
-- Drag-and-drop file / folder loading (recurses subfolders)
-- Track and Album ReplayGain analysis (parallel, with Cancel)
-- Apply Track / Album Gain — shares the same `apply_with_options` pipeline as the CLI
-- **Options panel:** Prevent clipping (`-k`), Preserve mtime (`-p`), Wrap mode (`-w`), MP3 tag layout (`-s a` / `-s i`), Dry run (`-n`)
-- **Modify Gain menu:** Apply Track / Album / Manual (`-g`) / Channel (`-l`) Gain, Undo (`-u`), Delete Stored Tags (`-s d`)
-- **Analysis menu:** Track / Album Analysis, Find Max Amplitude (`-x`), Check Stored Tags (`-s c`)
-- **Stored RG** table column shows existing ReplayGain / undo tags (APE / ID3v2 / MP4 freeform) with a per-tag breakdown on hover
-- Responsive UI: all batch work runs on a worker thread with per-file progress and a Cancel button
+## Docker / CI
 
-**Install:** See [Installation](#installation) above for Homebrew, Winget, and AUR options. Binaries are also available from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases):
-- `mp3rgui-*-macos-universal.dmg` (macOS)
-- `mp3rgui-*-linux-x86_64.tar.gz` / `mp3rgui-*-linux-arm64.tar.gz` (Linux)
-- `mp3rgui-windows-setup.exe` (Windows installer, x64 + ARM64 in one)
-- `mp3rgui-*-windows-x86_64.zip` / `mp3rgui-*-windows-arm64.zip` (Windows, portable)
-- `mp3rgui_*_amd64.deb` / `mp3rgui_*_arm64.deb` (Debian/Ubuntu)
-
-> **macOS manual download:** If you see "mp3rgui cannot be opened" warning, run:
-> ```bash
-> xattr -cr /path/to/mp3rgui.app
-> ```
-> This is not needed when installing via Homebrew.
-
-## Command-Line Options
-
-| Option | Description |
-|--------|-------------|
-| `-r` | Apply Track gain (ReplayGain) |
-| `-a` | Apply Album gain (ReplayGain) |
-| `--rg2` | Use ReplayGain 2.0 analysis (BS.1770, −18 LUFS reference) |
-| `--r128` | Use EBU R128 analysis (BS.1770, −23 LUFS target) |
-| `--true-peak` | Measure true peak (BS.1770-4 Annex 2) for `REPLAYGAIN_*_PEAK` (with `--rg2` / `--r128`; default is sample peak) |
-| `-g <i>` | Apply gain of i steps (1 step = 1.5 dB) |
-| `-d <n>` | Modify suggested dB gain by n (mp3gain-compatible; applied with `-r` / `-a`) |
-| `-u` | Undo gain changes |
-| `-k` | Prevent clipping |
-| `-R` | Process directories recursively |
-| `-s R` | Reuse stored ReplayGain tags with `-r`/`-a`, rescanning only when tags are missing (mp3gain's default behavior) |
-| `--skip-errors` | Keep album analysis (`-a`) going past unreadable files |
-| `-n` | Dry-run mode |
-| `-j <n>` / `--threads <n>` | Worker threads for analysis (default: auto, 0=auto, 1=serial) |
-| `-o [fmt]` | Output format: `text`, `json`, `tsv` (default: tsv if no argument) |
-
-Run `mp3rgain -h` for the full list of options.
-
-ReplayGain analysis runs in parallel by default
-(`std::thread::available_parallelism()` worker threads). Use `-j 1` or
-`MP3RGAIN_THREADS=1` for the legacy serial path. See
-[docs/perf-parallel.md](docs/perf-parallel.md) for the design and
-real-corpus benchmark numbers.
-
-## Documentation
-
-- [Migration Guide](docs/migrating-from-mp3gain.md) - Drop-in replacement for mp3gain: flag equivalence, sed/Dockerfile/CI substitution patterns, beets config
-- [Parallel Performance](docs/perf-parallel.md) - `-j` / `--threads` design and real-corpus benchmark numbers
-- [Roadmap](docs/roadmap.md) - Development plans and upcoming features
-- [Security](docs/security.md) - Memory safety and CVE analysis
-- [Compatibility Report](docs/compatibility-report.md) - Verification against original mp3gain
-- [Technical Comparison](docs/COMPARISON.md) - Comparison with similar tools
-- [Use Cases](docs/use-cases.md) - Integration examples (beets, headroom, etc.)
-- [Download Stats](https://m-igashi.github.io/mp3rgain/) - Weekly download trends across all platforms
-
-## Why mp3rgain?
-
-The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained upstream since ~2015 (though distribution maintainers continue to apply security patches). [aacgain](http://aacgain.altosdesign.com/), its AAC counterpart, has been unmaintained since ~2009 and is effectively unbuildable on modern 64-bit systems. mp3rgain is a modern, memory-safe replacement written in Rust that covers both.
-
-These are all ReplayGain tools, mp3rgain included — it runs a ReplayGain analysis and writes the standard `REPLAYGAIN_*` tags like any tagger. What separates them is where the correction ends up. rsgain / loudgain / FFmpeg `-af replaygain` stop at the tags, which non-compliant players ignore; `ffmpeg loudnorm` re-encodes. The mp3gain lineage — mp3gain, aacgain, and now mp3rgain — writes the tags *and* bakes the gain into the bitstream, losslessly and reversibly.
-
-**AAC/M4A on the CLI is the differentiator.** That combination is what has no other maintained CLI implementation: [foobar2000](https://www.foobar2000.org/) offers an equivalent "Apply ReplayGain to file content" pass for AAC in MP4/MKA, but it is Windows GUI only, has no undo, and is not built for batch, headless, or container workflows. mp3rgain fills the cross-platform, scriptable, reversible niche.
-
-> [!TIP]
-> **Want the most standards-faithful ReplayGain, on Windows, in a GUI? Use [foobar2000](https://www.foobar2000.org/).**
-> It is the closest thing ReplayGain 2.0 has to a reference implementation — a full BS.1770 scanner
-> whose numbers other tools get checked against — it tags far more formats than mp3rgain does, and
-> it can bake gain into MP3 and AAC bitstreams too. mp3rgain is the better fit when you need a
-> command line, a non-Windows host, mp3gain-identical ReplayGain 1.0 values, or an undo path — and
-> the two coexist fine, since mp3rgain writes the same standard `REPLAYGAIN_*` tags foobar2000
-> reads — in ID3v2, where it looks for them — with `--rg2` deliberately matching its measurement.
-
-mp3rgain implements the **ReplayGain 1.0 algorithm** (89 dB reference level) by default for full compatibility with the original mp3gain / aacgain — an existing library re-scans to identical values. Modern BS.1770 loudness measurement is available as an opt-in: `--rg2` (ReplayGain 2.0, −18 LUFS reference) and `--r128` (EBU R128, −23 LUFS target) produce values consistent with foobar2000, loudgain, and ffmpeg loudnorm.
-
-Files scanned with `--rg2` / `--r128` also carry a `REPLAYGAIN_ALGORITHM` tag set to `ITU-R BS.1770`, so a player (or you, years later) can tell which measurement produced the stored values. The default RG1 mode writes no such tag — an absent one means the classic mp3gain measurement, which is what every pre-existing tagged file already implies.
-
-### Where the tags go (MP3)
-
-MP3 has two competing metadata containers, and the two tag families mp3rgain writes have different audiences. By default each goes where its readers are:
-
-| Tag | Container | Read by |
-|-----|-----------|---------|
-| `REPLAYGAIN_*` | ID3v2 `TXXX` | Players. ffmpeg — and everything built on it — does not read APEv2 on MP3 at all, and Rockbox only handles APE tags for WavPack/Musepack. foobar2000 writes ReplayGain to ID3v2 and expects it there. |
-| `MP3GAIN_UNDO`, `MP3GAIN_MINMAX` | APEv2 | Nothing but the mp3gain lineage, which looks in APEv2. Keeping them there is what makes `-u` work on a library mp3gain already processed. |
-
-Two flags override the split when you want everything in one place:
+Multi-arch images (`linux/amd64`, `linux/arm64`) are published to GHCR as `ghcr.io/m-igashi/mp3rgain` with tags `latest`, `v3`, and exact versions. The image is `FROM scratch` (~2 MB); the entrypoint is the binary itself, so all flags work as on the host:
 
 ```bash
-mp3rgain -r *.mp3          # default: ReplayGain in ID3v2, undo in APEv2
-mp3rgain -r -s a *.mp3     # everything in APEv2 — byte-for-byte mp3gain
-mp3rgain -r -s i *.mp3     # everything in ID3v2
+docker run --rm --user "$(id -u):$(id -g)" -v /path/to/music:/music ghcr.io/m-igashi/mp3rgain:latest -r -R /music
 ```
-
-`MP3GAIN_ALBUM_MINMAX` is APEv2-only in every mode. AAC/M4A is unaffected — it always uses MP4 freeform atoms.
-
-`-s c` reads both containers and merges them, and `-u` finds the undo tag in either, so files tagged by mp3gain or by an earlier `-s i` run still inspect and roll back correctly.
-
-> **Changed in 3.2.0.** Earlier versions put everything in APEv2. If you depend on the old layout, `-s a` restores it exactly. Re-running the default over an APEv2-tagged file moves the ReplayGain values to ID3v2 and clears the APEv2 copies so the two cannot disagree.
-
-## Use mp3rgain in Docker / CI
-
-Official multi-arch images (`linux/amd64`, `linux/arm64`) are published to GHCR:
-
-```
-ghcr.io/m-igashi/mp3rgain:latest
-ghcr.io/m-igashi/mp3rgain:v3          # latest 3.x
-ghcr.io/m-igashi/mp3rgain:v3.1.0      # exact version
-```
-
-The image is built `FROM scratch` with a fully static (musl) binary — no
-shell, no runtime deps, ~2 MB. Drop-in replacement for `mp3gain` in
-containerized batch / cron pipelines (e.g. Plex maintenance windows):
-
-```bash
-# Normalize a music library by mounting it into the container
-docker run --rm \
-  -v /path/to/music:/music \
-  ghcr.io/m-igashi/mp3rgain:latest -r -R /music
-
-# Run as your own user so written files keep correct ownership
-docker run --rm \
-  --user "$(id -u):$(id -g)" \
-  -v /path/to/music:/music \
-  ghcr.io/m-igashi/mp3rgain:latest -r -R /music
-```
-
-Because the entrypoint is the binary itself, all `mp3rgain` flags work
-exactly the same as the host CLI (`-r`, `-a`, `-R`, `-k`, `-u`, …).
 
 ## Library Usage
 
@@ -265,6 +103,25 @@ use std::path::Path;
 let frames = apply_gain(Path::new("song.mp3"), 2)?;  // +3.0 dB
 let info = analyze(Path::new("song.mp3"))?;
 ```
+
+API documentation: [docs.rs/mp3rgain](https://docs.rs/mp3rgain).
+
+## Why mp3rgain?
+
+The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained upstream since ~2015, and [aacgain](http://aacgain.altosdesign.com/) since ~2009. mp3rgain is a memory-safe Rust replacement covering both formats, and the only maintained CLI for lossless AAC/M4A bitstream gain. It defaults to mp3gain-identical ReplayGain 1.0 values, with BS.1770 loudness (`--rg2` / `--r128`) as an opt-in. How it compares to rsgain, loudgain, foobar2000, and ffmpeg - and when to use those instead - is covered in the **[tool comparison](https://mp3rgain.tyna.ninja/vs-mp3gain)** and [docs/COMPARISON.md](docs/COMPARISON.md).
+
+## Documentation
+
+- [CLI Reference](https://mp3rgain.tyna.ninja/docs/cli) - options, analysis modes, exit codes, output formats, recipes
+- [Install Guide](https://mp3rgain.tyna.ninja/install) - all platforms, verification, troubleshooting
+- [Migration Guide](docs/migrating-from-mp3gain.md) - flag equivalence, substitution patterns, tag layout, beets config
+- [Technical Comparison](docs/COMPARISON.md) - comparison with mp3gain, aacgain, and other ReplayGain tools
+- [Compatibility Report](docs/compatibility-report.md) - bit-level verification against original mp3gain
+- [Parallel Performance](docs/perf-parallel.md) - `-j` / `--threads` design and benchmarks
+- [Use Cases](docs/use-cases.md) - integration examples (beets, headroom, etc.)
+- [Security](docs/security.md) - memory safety and CVE analysis
+- [Roadmap](docs/roadmap.md) - development plans
+- [FAQ](https://mp3rgain.tyna.ninja/faq) · [Download Stats](https://m-igashi.github.io/mp3rgain/)
 
 ## Contributing
 
