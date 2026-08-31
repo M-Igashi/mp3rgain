@@ -38,7 +38,7 @@ pub fn print_usage() {
     println!("    -x          Only find max amplitude of file");
     println!("    -s <mode>   Stored tag handling:");
     println!("                  c = check/show stored tag info");
-    println!("                  d = delete stored tag info");
+    println!("                  d = delete stored tag info (with -u: undo gain first)");
     println!("                  s = skip (don't write) stored tag info");
     println!("                  r = force recalculation (default; kept for compatibility)");
     println!("                  R = reuse stored ReplayGain tags with -r/-a, re-analyzing");

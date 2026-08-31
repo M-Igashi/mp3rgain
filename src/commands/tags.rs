@@ -95,15 +95,17 @@ pub fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
     let dry_run_prefix = opts.dry_run_prefix();
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
+        let action = match (opts.dry_run, opts.undo) {
+            (true, true) => "Would undo gain changes and delete",
+            (true, false) => "Would delete",
+            (false, true) => "Undoing gain changes and deleting",
+            (false, false) => "Deleting",
+        };
         println!(
             "{}{} {} ReplayGain tags from {} file(s)",
             dry_run_prefix,
             "mp3rgain".green().bold(),
-            if opts.dry_run {
-                "Would delete"
-            } else {
-                "Deleting"
-            },
+            action,
             files.len()
         );
         println!();
@@ -123,12 +125,12 @@ fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, S
 
     if opts.dry_run {
         if opts.output_format == OutputFormat::Text && !opts.quiet {
-            writeln!(
-                out,
-                "  {} [DRY RUN] {} (would delete tags)",
-                "~".cyan(),
-                filename
-            )?;
+            let action = if opts.undo {
+                "would undo gain changes, then delete tags"
+            } else {
+                "would delete tags"
+            };
+            writeln!(out, "  {} [DRY RUN] {} ({})", "~".cyan(), filename, action)?;
         }
         return Ok((
             JsonFileResult {
@@ -143,6 +145,22 @@ fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, S
 
     let original_mtime = save_original_mtime(file, opts);
 
+    // -u -s d (issue #305): undo the frame-level gain before the tags,
+    // including MP3GAIN_UNDO, are destroyed. A file with nothing to undo
+    // falls through to the plain delete; any other undo failure skips the
+    // delete so the undo info survives for another attempt.
+    let mut undone_frames: Option<usize> = None;
+    if opts.undo {
+        use mp3rgain::Error as GainError;
+        match mp3rgain::undo_gain_auto(file, opts.tag_layout) {
+            Ok(frames) => undone_frames = Some(frames),
+            Err(GainError::NoApeTag | GainError::NoUndoTag | GainError::NoId3v2UndoTag) => {
+                undone_frames = Some(0);
+            }
+            Err(e) => return Ok((report_file_error(file, filename, e, opts), out)),
+        }
+    }
+
     let delete_result = mp3rgain::delete_gain_tags_auto(file, opts.tag_layout);
 
     match delete_result {
@@ -152,12 +170,20 @@ fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, S
             }
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
-                writeln!(out, "  {} {} (tags deleted)", "v".green(), filename)?;
+                let note = match undone_frames {
+                    Some(frames) if frames > 0 => {
+                        format!("{} frames restored, tags deleted", frames)
+                    }
+                    Some(_) => "no changes to undo, tags deleted".to_string(),
+                    None => "tags deleted".to_string(),
+                };
+                writeln!(out, "  {} {} ({})", "v".green(), filename, note)?;
             }
             Ok((
                 JsonFileResult {
                     file: file.display().to_string(),
                     status: Some(FileStatus::Success),
+                    frames: undone_frames,
                     ..Default::default()
                 },
                 out,
