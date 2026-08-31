@@ -308,3 +308,57 @@ fn track_at_zero_steps_still_writes_replaygain_tags() {
         "an already-normalized track should keep its ReplayGain tags"
     );
 }
+
+/// Issue #305: `-u -s d` must undo the frame-level gain before deleting the
+/// tags. The old dispatch deleted first, destroying MP3GAIN_UNDO and making
+/// the applied gain permanently irreversible.
+#[test]
+fn undo_with_delete_tags_undoes_before_deleting() {
+    let album = TempAlbum::new(&["test_stereo.mp3"]);
+    let file = &album.files[0];
+    let original_avg = mp3rgain::analyze(file).unwrap().avg_gain();
+
+    // Apply -2 steps, which records MP3GAIN_UNDO. (Negative, because the
+    // fixture's global_gain values sit at the 255 ceiling, where a positive
+    // apply saturates into a no-op.)
+    let out = run(&["-g", "-2", file.to_str().unwrap()]);
+    assert!(out.status.success(), "apply failed: {:?}", out);
+    assert_ne!(
+        mp3rgain::analyze(file).unwrap().avg_gain(),
+        original_avg,
+        "setup: apply should have changed the gain"
+    );
+
+    let out = run(&["-u", "-s", "d", file.to_str().unwrap()]);
+    assert!(out.status.success(), "undo+delete failed: {:?}", out);
+
+    assert_eq!(
+        mp3rgain::analyze(file).unwrap().avg_gain(),
+        original_avg,
+        "-u -s d did not undo the frame-level gain"
+    );
+    assert!(
+        read_ape_tag_from_file(file).unwrap().is_none()
+            || read_ape_tag_from_file(file)
+                .unwrap()
+                .is_some_and(|t| t.get(TAG_MP3GAIN_UNDO).is_none()),
+        "tags were not deleted"
+    );
+}
+
+/// Issue #305: `-u -s d` on a file that has no undo info must still delete
+/// the tags instead of failing.
+#[test]
+fn undo_with_delete_tags_without_undo_info_still_deletes() {
+    let album = TempAlbum::new(&["test_mono.mp3"]);
+    let file = &album.files[0];
+
+    let out = run(&["-u", "-s", "d", file.to_str().unwrap()]);
+    assert!(out.status.success(), "undo+delete failed: {:?}", out);
+    let text = stdout_of(&out);
+    assert!(
+        text.contains("no changes to undo, tags deleted"),
+        "unexpected output: {}",
+        text
+    );
+}

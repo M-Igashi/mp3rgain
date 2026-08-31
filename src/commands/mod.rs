@@ -82,7 +82,9 @@ pub fn run(mut opts: Options) -> Result<()> {
     }
 
     if opts.stored_tag_mode == StoredTagMode::Delete {
-        // -s d: delete stored tag info
+        // -s d: delete stored tag info. With -u, cmd_delete_tags undoes the
+        // frame-level gain first: deleting first would destroy MP3GAIN_UNDO
+        // and make the applied gain permanently irreversible (issue #305).
         return cmd_delete_tags(&opts.files, &opts);
     }
 
