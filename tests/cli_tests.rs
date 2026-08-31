@@ -394,6 +394,15 @@ fn json_of(output: &Output) -> serde_json::Value {
     serde_json::from_str(&stdout_of(output)).expect("output should be JSON")
 }
 
+/// Run `args` against `file` in JSON mode and return the single file record.
+fn json_file_record(args: &[&str], file: &Path) -> serde_json::Value {
+    let mut argv = args.to_vec();
+    argv.extend_from_slice(&["-o", "json", file.to_str().unwrap()]);
+    let out = run(&argv);
+    assert!(out.status.success(), "run {:?} failed: {:?}", args, out);
+    json_of(&out)["files"][0].clone()
+}
+
 /// Issue #308: `--tags-only` writes the full ReplayGain value and leaves every
 /// audio frame alone, so the listener can still switch ReplayGain off in their
 /// player.
@@ -436,19 +445,19 @@ fn tags_only_writes_absolute_gain_without_touching_audio() {
         written,
         suggested
     );
-    let out = run(&["-r", "-c", applied_file.to_str().unwrap()]);
-    assert!(out.status.success(), "apply run failed: {:?}", out);
+
+    // The apply path tags what is left over after baking gain into the
+    // frames, so its value is the same measurement minus whatever it applied.
+    let record = json_file_record(&["-r", "-c"], applied_file);
+    let applied_db = record["gain_applied_db"].as_f64().expect("gain_applied_db");
     let residual = track_gain_db(applied_file).expect("residual gain");
-    assert_ne!(
-        gain_range(applied_file),
-        before,
-        "the apply path should have rewritten the frames"
-    );
     assert!(
-        residual.abs() < written.abs(),
-        "residual {} should be smaller than the absolute {}",
+        (residual - (suggested - applied_db)).abs() < 0.05,
+        "apply wrote {} but the residual of {} after {} dB is {}",
         residual,
-        written
+        suggested,
+        applied_db,
+        suggested - applied_db
     );
 
     // No gain change happened, so nothing describes one.
@@ -535,32 +544,36 @@ fn tags_only_d_modifier_shifts_written_value_exactly() {
 /// applying the tag cannot push the signal past unity.
 #[test]
 fn tags_only_k_caps_written_gain_at_headroom() {
-    // The stereo fixture's peak is far above unity, so any positive tag gain
-    // would clip on playback.
-    let album = TempAlbum::new(&["test_stereo.mp3"]);
+    let album = TempAlbum::new(&["test_mono.mp3"]);
     let file = &album.files[0];
 
-    let out = run(&[
-        "-r",
-        "--tags-only",
-        "-k",
-        "-o",
-        "json",
-        file.to_str().unwrap(),
-    ]);
-    assert!(out.status.success(), "-k run failed: {:?}", out);
-    let json = json_of(&out);
-    let entry = &json["files"][0];
-    let peak = entry["peak"].as_f64().expect("peak");
-    let tag_gain = entry["tag_gain_db"].as_f64().expect("tag_gain_db");
+    // +60 dB of pregain is past any real file's headroom, so the written value
+    // would clip on playback whatever the fixture happens to measure.
+    let uncapped = json_file_record(&["-r", "--tags-only", "-d", "60", "-c"], file);
+    let peak = uncapped["peak"].as_f64().expect("peak");
+    let wanted = uncapped["tag_gain_db"].as_f64().expect("tag_gain_db");
+    assert!(peak > 0.0, "fixture should not be digital silence");
+    assert!(
+        peak * 10f64.powf(wanted / 20.0) > 1.0,
+        "setup: the uncapped value should clip on playback"
+    );
 
-    assert!(peak > 1.0, "fixture should already clip for this test");
-    let played_peak = peak * 10f64.powf(tag_gain / 20.0);
+    let capped = json_file_record(&["-r", "--tags-only", "-d", "60", "-k"], file);
+    let got = capped["tag_gain_db"].as_f64().expect("tag_gain_db");
+    assert!(
+        got < wanted,
+        "-k left the written gain at {} instead of capping it",
+        got
+    );
+    let played_peak = peak * 10f64.powf(got / 20.0);
     assert!(
         played_peak <= 1.0 + 1e-9,
         "capped tag gain still clips: peak {} * gain {} dB = {}",
         peak,
-        tag_gain,
+        got,
         played_peak
     );
+    // The tag must actually carry the capped value, not just report it.
+    let written = track_gain_db(file).expect("REPLAYGAIN_TRACK_GAIN");
+    assert!((written - got).abs() < 0.01, "written {}", written);
 }
