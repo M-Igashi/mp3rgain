@@ -1,7 +1,7 @@
 use crate::analysis::{analyze_data, ChannelMode};
 use crate::ape::{
     parse_undo_values, parse_undo_wrap, read_ape_tag, replace_ape_tag, ApeReplayGain,
-    TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
+    TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
 };
 use crate::error::{Error, Result};
 use crate::frame::{apply_gain_to_data, scan_gain_range, GainMode, SaturationStats};
@@ -314,6 +314,11 @@ pub fn undo_gain(file_path: &Path) -> Result<usize> {
 
     tag.remove(TAG_MP3GAIN_UNDO);
     tag.remove(TAG_MP3GAIN_MINMAX);
+    // Issue #306: the album range and the REPLAYGAIN_* residuals described
+    // the gained audio; after the rollback they are simply wrong, so drop
+    // them in the same write.
+    tag.remove(TAG_MP3GAIN_ALBUM_MINMAX);
+    tag.remove_replaygain();
 
     let new_data = replace_ape_tag(&data, &tag);
     crate::apply::atomic_write(file_path, &new_data)?;

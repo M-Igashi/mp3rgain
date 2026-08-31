@@ -1426,7 +1426,11 @@ pub fn undo_aac_gain(file_path: &Path) -> Result<usize> {
     let analysis = analyze_aac_gains_from_data(&data)?;
     let modified = apply_aac_gain_to_data(&mut data, &analysis, -undo_gain);
 
-    let final_data = mp4meta::update_mp4_undo_metadata(&data, &mp4meta::UndoTags::default())?;
+    let no_undo = mp4meta::update_mp4_undo_metadata(&data, &mp4meta::UndoTags::default())?;
+    // Issue #306: the REPLAYGAIN_* freeform values were written as residuals
+    // of the gained audio, so after the rollback they are stale; drop them
+    // before the single atomic write.
+    let final_data = mp4meta::update_mp4_metadata(&no_undo, &mp4meta::ReplayGainTags::default())?;
     crate::apply::atomic_write(file_path, &final_data)?;
 
     Ok(modified)

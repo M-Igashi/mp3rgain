@@ -516,6 +516,24 @@ pub(crate) fn remove_ape_replaygain(file_path: &Path) -> Result<()> {
     rewrite_ape_tail(file_path, |tag| tag.remove_replaygain())
 }
 
+/// Post-undo cleanup for cross-container layouts (issue #306): drop the
+/// `REPLAYGAIN_*` items and `MP3GAIN_ALBUM_MINMAX`, all of which described
+/// the pre-undo audio, but keep any `MP3GAIN_UNDO` / `MP3GAIN_MINMAX`. Files
+/// carrying none of them are left untouched rather than rewritten.
+pub(crate) fn remove_ape_undone_gain_values(file_path: &Path) -> Result<()> {
+    let has_stale = read_ape_tag_from_file(file_path)?.is_some_and(|tag| {
+        REPLAYGAIN_KEYS.iter().any(|k| tag.get(k).is_some())
+            || tag.get(TAG_MP3GAIN_ALBUM_MINMAX).is_some()
+    });
+    if !has_stale {
+        return Ok(());
+    }
+    rewrite_ape_tail(file_path, |tag| {
+        tag.remove_replaygain();
+        tag.remove(TAG_MP3GAIN_ALBUM_MINMAX);
+    })
+}
+
 /// Add (or replace) the `MP3GAIN_ALBUM_MINMAX` item in `file_path`'s APEv2
 /// tag, preserving all other items. mp3gain writes this album-wide
 /// post-apply `global_gain` range (`min,max`) in album (`-a`) mode (issue
