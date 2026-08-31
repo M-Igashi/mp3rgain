@@ -4,7 +4,7 @@ use mp3rgain::replaygain::{
     self, AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult,
     REPLAYGAIN_REFERENCE_DB,
 };
-use mp3rgain::{steps_to_db, AacAlbumInfo};
+use mp3rgain::AacAlbumInfo;
 use rayon::prelude::*;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -16,7 +16,9 @@ use crate::commands::utils::{
     print_dry_run_notice, run_album_analysis, update_counters,
 };
 use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
-use crate::processors::replaygain::{process_apply_replaygain_with_album, process_track_gain};
+use crate::processors::replaygain::{
+    capped_tag_gain, process_apply_replaygain_with_album, process_track_gain,
+};
 use crate::processors::utils::stored_file_type;
 use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
 use crate::util::get_filename;
@@ -24,9 +26,10 @@ use crate::util::get_filename;
 fn print_target_with_modifier(opts: &Options) {
     let mode = opts.analysis_mode;
     let target = mode.target_lufs().unwrap_or(REPLAYGAIN_REFERENCE_DB);
-    let modifier_steps = opts.gain_modifier_steps();
-    if modifier_steps != 0 {
-        let modifier_db = steps_to_db(modifier_steps);
+    // `-d`/`-m` land on whole gain steps when frames are modified, but shift
+    // the tag value exactly in --tags-only mode (issue #308).
+    let modifier_db = opts.target_offset_db();
+    if modifier_db != 0.0 {
         println!(
             "  Target: {:.1} {} ({} {} {} {:+.1} dB modifier)",
             target + modifier_db,
@@ -58,17 +61,31 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     let dry_run_prefix = opts.dry_run_prefix();
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
-        println!(
-            "{}{} Analyzing and {} track gain to {} file(s)",
-            dry_run_prefix,
-            "mp3rgain".green().bold(),
-            if opts.dry_run {
-                "would apply"
-            } else {
-                "applying"
-            },
-            files.len()
-        );
+        if opts.tags_only {
+            println!(
+                "{}{} Analyzing and {} track ReplayGain tags for {} file(s) (audio unchanged)",
+                dry_run_prefix,
+                "mp3rgain".green().bold(),
+                if opts.dry_run {
+                    "would write"
+                } else {
+                    "writing"
+                },
+                files.len()
+            );
+        } else {
+            println!(
+                "{}{} Analyzing and {} track gain to {} file(s)",
+                dry_run_prefix,
+                "mp3rgain".green().bold(),
+                if opts.dry_run {
+                    "would apply"
+                } else {
+                    "applying"
+                },
+                files.len()
+            );
+        }
         print_target_with_modifier(opts);
         println!();
     }
@@ -134,10 +151,15 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         println!(
-            "{}{} Analyzing album gain for {} file(s)",
+            "{}{} Analyzing album gain for {} file(s){}",
             dry_run_prefix,
             "mp3rgain".green().bold(),
-            files.len()
+            files.len(),
+            if opts.tags_only {
+                " (tags only, audio unchanged)"
+            } else {
+                ""
+            }
         );
         print_target_with_modifier(opts);
         println!();
@@ -198,13 +220,30 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             let modifier_steps = opts.gain_modifier_steps();
             let modified_gain_steps = album_result.album_gain_steps() + modifier_steps;
 
+            // --tags-only writes the album gain into the tag instead of the
+            // frames, capped at the album peak's headroom under `-k` so every
+            // file in the set still carries the same value (issue #308).
+            let album_tag_gain_db = opts.tags_only.then(|| {
+                capped_tag_gain(
+                    album_result.album_gain_db() + opts.target_offset_db(),
+                    album_result.album_peak(),
+                    opts.prevent_clipping,
+                )
+            });
+
             let is_lufs = opts.analysis_mode.target_lufs().is_some();
             let json_album = JsonAlbumResult {
                 loudness_db: album_result.album_loudness_db(),
                 loudness_lufs: is_lufs.then(|| album_result.album_loudness_db()),
                 analysis_mode: Some(opts.analysis_mode.name()),
                 gain_db: album_result.album_gain_db(),
-                gain_steps: modified_gain_steps,
+                // Nothing is applied to the audio in --tags-only mode.
+                gain_steps: if opts.tags_only {
+                    0
+                } else {
+                    modified_gain_steps
+                },
+                tag_gain_db: album_tag_gain_db,
                 peak: album_result.album_peak(),
             };
 
@@ -220,16 +259,22 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                     album_result.album_loudness_db(),
                     opts.analysis_mode.unit()
                 );
-                println!(
-                    "  Album gain:     {:+.1} dB ({} steps{})",
-                    album_result.album_gain_db(),
-                    album_result.album_gain_steps(),
-                    if modifier_steps != 0 {
-                        format!(" + {} = {}", modifier_steps, modified_gain_steps)
-                    } else {
-                        String::new()
-                    }
-                );
+                match album_tag_gain_db {
+                    Some(tag_gain) => println!(
+                        "  Album gain:     {:+.2} dB (tag value, audio unchanged)",
+                        tag_gain
+                    ),
+                    None => println!(
+                        "  Album gain:     {:+.1} dB ({} steps{})",
+                        album_result.album_gain_db(),
+                        album_result.album_gain_steps(),
+                        if modifier_steps != 0 {
+                            format!(" + {} = {}", modifier_steps, modified_gain_steps)
+                        } else {
+                            String::new()
+                        }
+                    ),
+                }
                 println!("  Album peak:     {:.4}", album_result.album_peak());
                 println!();
             }
@@ -251,7 +296,8 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             let clip_prevention_applies =
                 opts.prevent_clipping && album_result.tracks().iter().any(|t| t.peak() > 1.0);
 
-            if steps == 0 && !writes_rg_tags && !clip_prevention_applies {
+            // --tags-only always has a tag to write (issue #308).
+            if !opts.tags_only && steps == 0 && !writes_rg_tags && !clip_prevention_applies {
                 if opts.output_format == OutputFormat::Json {
                     let json_results: Vec<JsonFileResult> = files
                         .iter()
@@ -407,7 +453,11 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             // MP3 file after all gain is applied (the range is only known once the
             // whole album is done). APEv2 only — mp3gain has no AAC, and `-s i`
             // uses ID3v2; best-effort, so a tag hiccup never fails the album.
+            // Skipped entirely in --tags-only mode: MP3GAIN_ALBUM_MINMAX
+            // describes a global_gain range that a gain apply produced, and
+            // no apply happened (issue #308).
             if !opts.dry_run
+                && !opts.tags_only
                 && opts.stored_tag_mode != StoredTagMode::Skip
                 && !opts.tag_layout.mp3gain_in_id3v2()
             {

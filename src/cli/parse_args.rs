@@ -56,6 +56,12 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
             continue;
         }
 
+        if arg == "--tags-only" {
+            opts.tags_only = true;
+            i += 1;
+            continue;
+        }
+
         if arg == "--help" {
             print_usage();
             std::process::exit(0);
@@ -320,6 +326,38 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
         anyhow::bail!("--true-peak requires --rg2 or --r128");
     }
 
+    // --tags-only (issue #308) writes ReplayGain metadata and nothing else, so
+    // it needs an analysis to write and must not be paired with a flag that
+    // would modify the audio or suppress the tag write. Rejected rather than
+    // silently ignored: a user who asked for both meant one of them, and
+    // guessing wrong here rewrites their files.
+    if opts.tags_only {
+        if !(opts.track_gain || opts.album_gain || opts.skip_album) {
+            anyhow::bail!("--tags-only requires -r, -a or -e (there is no analysis to write)");
+        }
+        let conflict = if opts.gain_steps.is_some() {
+            Some("-g")
+        } else if opts.channel_gain.is_some() {
+            Some("-l")
+        } else if opts.undo {
+            Some("-u")
+        } else if opts.wrap_gain {
+            Some("-w")
+        } else if opts.max_amplitude_only {
+            Some("-x")
+        } else {
+            match opts.stored_tag_mode {
+                StoredTagMode::Check => Some("-s c"),
+                StoredTagMode::Delete => Some("-s d"),
+                StoredTagMode::Skip => Some("-s s"),
+                StoredTagMode::None => None,
+            }
+        };
+        if let Some(flag) = conflict {
+            anyhow::bail!("--tags-only cannot be combined with {}", flag);
+        }
+    }
+
     // cmd.exe and PowerShell do not expand `*.mp3` for native programs.
     #[cfg(windows)]
     {
@@ -354,6 +392,81 @@ mod tests {
 
     fn args(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn tags_only_requires_an_analysis_flag() {
+        // Issue #308: --tags-only writes what an analysis produced, so on its
+        // own there is nothing to write.
+        assert!(parse_args(&args(&["--tags-only", "a.mp3"])).is_err());
+        for flag in ["-r", "-a", "-e"] {
+            let opts = parse_args(&args(&["--tags-only", flag, "a.mp3"])).unwrap();
+            assert!(opts.tags_only, "{} should enable tags-only", flag);
+        }
+    }
+
+    #[test]
+    fn tags_only_rejects_flags_that_would_modify_audio() {
+        // Rejected rather than silently ignored: guessing which half of the
+        // request the user meant would rewrite their files.
+        for conflicting in [
+            vec!["-r", "-g", "2"],
+            vec!["-r", "-l", "0", "2"],
+            vec!["-r", "-u"],
+            vec!["-r", "-w"],
+            vec!["-r", "-x"],
+            vec!["-r", "-s", "s"],
+            vec!["-r", "-s", "d"],
+            vec!["-r", "-s", "c"],
+        ] {
+            let mut argv = vec!["--tags-only"];
+            argv.extend_from_slice(&conflicting);
+            argv.push("a.mp3");
+            assert!(
+                parse_args(&args(&argv)).is_err(),
+                "--tags-only {:?} should be rejected",
+                conflicting
+            );
+        }
+    }
+
+    #[test]
+    fn tags_only_accepts_tag_layout_and_analysis_flags() {
+        for compatible in [
+            vec!["-s", "a"],
+            vec!["-s", "i"],
+            vec!["-s", "R"],
+            vec!["--rg2"],
+            vec!["-k"],
+            vec!["-d", "2"],
+            vec!["-m", "1"],
+            vec!["-p"],
+            vec!["-n"],
+        ] {
+            let mut argv = vec!["--tags-only", "-r"];
+            argv.extend_from_slice(&compatible);
+            argv.push("a.mp3");
+            assert!(
+                parse_args(&args(&argv)).is_ok(),
+                "--tags-only {:?} should be accepted",
+                compatible
+            );
+        }
+    }
+
+    #[test]
+    fn tags_only_target_offset_is_not_step_quantized() {
+        // The apply path has to land on a whole 1.5 dB step, so -d 0.4 rounds
+        // away; a tag holds a float, so it must survive (issue #308).
+        let applied = parse_args(&args(&["-r", "-d", "0.4", "a.mp3"])).unwrap();
+        assert_eq!(applied.target_offset_db(), 0.0);
+
+        let tagged = parse_args(&args(&["-r", "--tags-only", "-d", "0.4", "a.mp3"])).unwrap();
+        assert!((tagged.target_offset_db() - 0.4).abs() < f64::EPSILON);
+
+        // -m still contributes whole steps, converted to dB.
+        let steps = parse_args(&args(&["-r", "--tags-only", "-m", "2", "a.mp3"])).unwrap();
+        assert!((steps.target_offset_db() - mp3rgain::steps_to_db(2)).abs() < f64::EPSILON);
     }
 
     #[test]

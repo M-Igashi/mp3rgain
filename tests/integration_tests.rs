@@ -771,3 +771,46 @@ fn test_undo_removes_stale_replaygain_in_id3v2_layout() {
     );
     cleanup(&path);
 }
+
+/// Issue #308: the tags-only library entry point records ReplayGain metadata
+/// without touching a frame, and leaves any MP3GAIN_* items from a previous
+/// real apply alone: those still describe the audio as it currently is.
+#[test]
+fn write_replaygain_tags_only_preserves_audio_and_mp3gain_tags() {
+    use mp3rgain::apply::{write_replaygain_tags_only, TagsOnlyOptions};
+    use mp3rgain::replaygain::AnalysisMode;
+    use mp3rgain::{TagLayout, TAG_MP3GAIN_MINMAX, TAG_REPLAYGAIN_TRACK_GAIN};
+
+    let path = copy_test_file("test_stereo.mp3");
+    // A real apply first, so the file carries MP3GAIN_UNDO / MP3GAIN_MINMAX.
+    GainOptions::new(-2).undo(true).apply(&path).unwrap();
+    let before = analyze(&path).unwrap();
+
+    let mut opts = TagsOnlyOptions::new(-3.25, 0.75, AnalysisMode::Rg1);
+    opts.album = Some((-4.5, 0.9));
+    opts.tag_layout = TagLayout::Ape;
+    write_replaygain_tags_only(&path, &opts).unwrap();
+
+    let after = analyze(&path).unwrap();
+    assert_eq!(
+        (before.min_gain(), before.max_gain()),
+        (after.min_gain(), after.max_gain()),
+        "tags-only must not rewrite the audio frames"
+    );
+
+    let tag = read_ape_tag_from_file(&path).unwrap().expect("APE tag");
+    assert_eq!(
+        tag.get(TAG_REPLAYGAIN_TRACK_GAIN).map(str::to_string),
+        Some("-3.250000 dB".to_string())
+    );
+    // The earlier apply's bookkeeping still describes the current audio.
+    assert!(
+        tag.get(TAG_MP3GAIN_UNDO).is_some(),
+        "MP3GAIN_UNDO from the earlier apply was dropped"
+    );
+    assert!(
+        tag.get(TAG_MP3GAIN_MINMAX).is_some(),
+        "MP3GAIN_MINMAX from the earlier apply was dropped"
+    );
+    cleanup(&path);
+}

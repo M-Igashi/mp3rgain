@@ -86,6 +86,38 @@ but normalizes to the EBU R128 broadcast target of \-23 LUFS.
 Mutually exclusive with
 .BR \-\-rg2 .
 .TP
+.B \-\-tags\-only
+Write the analysis to \fBREPLAYGAIN_*\fR tags and leave the audio untouched, the way
+.BR loudgain (1)
+and
+.BR rsgain (1)
+work. The frame-level
+.I global_gain
+fields are not modified, so a listener can still turn ReplayGain off in their player.
+The tag holds the full gain rather than a residual, and no
+\fBMP3GAIN_UNDO\fR, \fBMP3GAIN_MINMAX\fR or \fBMP3GAIN_ALBUM_MINMAX\fR is written since
+there is no gain change to undo or describe.
+Requires
+.BR \-r ,
+.B \-a
+or
+.BR \-e ,
+and cannot be combined with
+.BR \-g ,
+.BR \-l ,
+.BR \-u ,
+.BR \-w ,
+.B \-x
+or
+.BR "\-s c" / "\-s d" / "\-s s" .
+.B \-d
+and
+.B \-m
+shift the written value instead of the applied gain, and apply exactly (no 1.5 dB
+step rounding, since a tag holds a float).
+.B \-k
+caps the written value at the file's headroom so a player applying the tag cannot clip.
+.TP
 .B \-e
 Skip album analysis even when processing multiple files.
 Apply track gain only.
@@ -198,6 +230,9 @@ Analyze and apply track gain (ReplayGain).
 .TP
 .B mp3rgain \-a *.mp3
 Analyze and apply album gain to all MP3 files.
+.TP
+.B mp3rgain \-a \-\-tags\-only *.mp3
+Write album and track ReplayGain tags without modifying the audio.
 .TP
 .B mp3rgain \-u song.mp3
 Undo previous gain changes.

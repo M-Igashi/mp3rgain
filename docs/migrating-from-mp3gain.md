@@ -88,6 +88,7 @@ are worth knowing:
 | `-s i` | Put *every* tag in ID3v2 `TXXX`, undo included. Since 3.2.0 the default already writes `REPLAYGAIN_*` to ID3v2, so this is only needed when you want `MP3GAIN_UNDO` there too |
 | `-j <n>` / `--threads <n>` | Worker threads for ReplayGain analysis (default: auto). `MP3RGAIN_THREADS` env var also honored. `-j 1` reproduces mp3gain's serial behavior. See [docs/perf-parallel.md](perf-parallel.md). |
 | `--skip-errors` | Keep album analysis (`-a`) going past unreadable files; failed files are reported and excluded from the album gain |
+| `--tags-only` | Write `REPLAYGAIN_*` tags and leave the audio untouched, the way `loudgain` / `rsgain` do, so the listener can still turn ReplayGain off in their player ([#308](https://github.com/M-Igashi/mp3rgain/issues/308)). The tag holds the full gain instead of mp3gain's residual, and no `MP3GAIN_UNDO` / `MP3GAIN_MINMAX` is written since there is no gain change to reverse. Requires `-r`/`-a`/`-e`; rejected with `-g`, `-l`, `-u`, `-w`, `-x` and `-s c`/`-s d`/`-s s`. Here `-d`/`-m` shift the written value (exactly, with no 1.5 dB step rounding) and `-k` caps it at the file's headroom |
 
 For the full list run `mp3rgain --help`.
 
