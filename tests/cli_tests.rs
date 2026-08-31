@@ -362,3 +362,205 @@ fn undo_with_delete_tags_without_undo_info_still_deletes() {
         text
     );
 }
+
+/// Track gain in dB parsed from wherever the tag was stored.
+fn track_gain_db(file: &Path) -> Option<f64> {
+    track_gain_tag(file).and_then(|s| mp3rgain::ape::parse_rg_gain(&s))
+}
+
+/// `(min_gain, max_gain)` global_gain range, the cheapest proof that the
+/// audio frames were or were not rewritten.
+fn gain_range(file: &Path) -> (u8, u8) {
+    let info = mp3rgain::analyze(file).expect("analyze should succeed");
+    (info.min_gain(), info.max_gain())
+}
+
+/// mp3gain-style suggested track gain in dB, from the TSV report.
+fn suggested_gain_db(file: &Path) -> f64 {
+    let out = run(&["-o", "tsv", file.to_str().unwrap()]);
+    let text = stdout_of(&out);
+    let row = text
+        .lines()
+        .nth(1)
+        .expect("TSV output should carry a data row");
+    row.split('\t')
+        .nth(2)
+        .expect("dB gain column")
+        .parse()
+        .expect("dB gain should parse")
+}
+
+fn json_of(output: &Output) -> serde_json::Value {
+    serde_json::from_str(&stdout_of(output)).expect("output should be JSON")
+}
+
+/// Issue #308: `--tags-only` writes the full ReplayGain value and leaves every
+/// audio frame alone, so the listener can still switch ReplayGain off in their
+/// player.
+#[test]
+fn tags_only_writes_absolute_gain_without_touching_audio() {
+    let album = TempAlbum::new(&["test_mono.mp3"]);
+    let file = &album.files[0];
+    let before = gain_range(file);
+
+    let out = run(&[
+        "-r",
+        "--tags-only",
+        "-c",
+        "-o",
+        "json",
+        file.to_str().unwrap(),
+    ]);
+    assert!(out.status.success(), "tags-only run failed: {:?}", out);
+    let json = json_of(&out);
+    let entry = &json["files"][0];
+
+    // Nothing was applied to the frames...
+    assert_eq!(entry["gain_applied_steps"].as_i64(), Some(0));
+    assert_eq!(gain_range(file), before, "audio frames were rewritten");
+
+    // ...so the tag holds the *full* suggested gain rather than the residual
+    // the apply path leaves behind. Contrast with a real -r run on an
+    // identical copy, which bakes the gain into the frames and tags only
+    // what is left over.
+    let tag_gain = entry["tag_gain_db"].as_f64().expect("tag_gain_db");
+    let written = track_gain_db(file).expect("REPLAYGAIN_TRACK_GAIN should be written");
+    assert!((written - tag_gain).abs() < 0.01, "written {}", written);
+
+    let applied = TempAlbum::new(&["test_mono.mp3"]);
+    let applied_file = &applied.files[0];
+    let suggested = suggested_gain_db(applied_file);
+    assert!(
+        (written - suggested).abs() < 0.01,
+        "tags-only wrote {} but the analysis suggests {}",
+        written,
+        suggested
+    );
+    let out = run(&["-r", "-c", applied_file.to_str().unwrap()]);
+    assert!(out.status.success(), "apply run failed: {:?}", out);
+    let residual = track_gain_db(applied_file).expect("residual gain");
+    assert_ne!(
+        gain_range(applied_file),
+        before,
+        "the apply path should have rewritten the frames"
+    );
+    assert!(
+        residual.abs() < written.abs(),
+        "residual {} should be smaller than the absolute {}",
+        residual,
+        written
+    );
+
+    // No gain change happened, so nothing describes one.
+    if let Some(tag) = read_ape_tag_from_file(file).unwrap() {
+        assert!(
+            tag.get(TAG_MP3GAIN_UNDO).is_none(),
+            "--tags-only wrote an undo tag"
+        );
+    }
+}
+
+/// Issue #308, album mode: every file gets the same album value, and no
+/// `MP3GAIN_ALBUM_MINMAX` is written since no apply produced a gain range.
+#[test]
+fn tags_only_album_writes_shared_album_tag_and_no_minmax() {
+    let album = TempAlbum::new(&["test_stereo.mp3", "test_mono.mp3"]);
+    let files = album.args();
+    let before: Vec<(u8, u8)> = album.files.iter().map(|f| gain_range(f)).collect();
+
+    let mut args = vec!["-a", "--tags-only", "-c"];
+    args.extend_from_slice(&files);
+    let out = run(&args);
+    assert!(
+        out.status.success(),
+        "album tags-only run failed: {:?}",
+        out
+    );
+
+    let mut album_gains = Vec::new();
+    for (file, before) in album.files.iter().zip(&before) {
+        assert_eq!(gain_range(file), *before, "audio frames were rewritten");
+        let rg = mp3rgain::read_id3v2_replaygain(file).expect("ID3v2 read");
+        album_gains.push(
+            rg.album_gain
+                .as_deref()
+                .and_then(mp3rgain::ape::parse_rg_gain)
+                .expect("REPLAYGAIN_ALBUM_GAIN should be written"),
+        );
+        // MP3GAIN_ALBUM_MINMAX is an APEv2 item describing a post-apply
+        // global_gain range; there was no apply, so nothing should have been
+        // appended at all.
+        assert!(
+            read_ape_tag_from_file(file).unwrap().is_none(),
+            "--tags-only appended an APEv2 tag in the default split layout"
+        );
+    }
+    assert_eq!(
+        album_gains[0], album_gains[1],
+        "album gain must be identical across the album"
+    );
+}
+
+/// Issue #308: `-d` shifts the written value exactly. A sub-step value like
+/// 0.4 dB rounds to zero steps in the apply path, but a tag holds a float, so
+/// here it has to land verbatim.
+#[test]
+fn tags_only_d_modifier_shifts_written_value_exactly() {
+    let album = TempAlbum::new(&["test_mono.mp3"]);
+    let file = &album.files[0];
+
+    let out = run(&["-r", "--tags-only", "-c", file.to_str().unwrap()]);
+    assert!(out.status.success(), "baseline run failed: {:?}", out);
+    let base = track_gain_db(file).expect("baseline gain");
+
+    let out = run(&[
+        "-r",
+        "--tags-only",
+        "-d",
+        "0.4",
+        "-c",
+        file.to_str().unwrap(),
+    ]);
+    assert!(out.status.success(), "-d run failed: {:?}", out);
+    let shifted = track_gain_db(file).expect("shifted gain");
+    assert!(
+        (shifted - (base + 0.4)).abs() < 0.001,
+        "expected {} + 0.4, got {}",
+        base,
+        shifted
+    );
+}
+
+/// Issue #308: `-k` caps the written value at the file's headroom so a player
+/// applying the tag cannot push the signal past unity.
+#[test]
+fn tags_only_k_caps_written_gain_at_headroom() {
+    // The stereo fixture's peak is far above unity, so any positive tag gain
+    // would clip on playback.
+    let album = TempAlbum::new(&["test_stereo.mp3"]);
+    let file = &album.files[0];
+
+    let out = run(&[
+        "-r",
+        "--tags-only",
+        "-k",
+        "-o",
+        "json",
+        file.to_str().unwrap(),
+    ]);
+    assert!(out.status.success(), "-k run failed: {:?}", out);
+    let json = json_of(&out);
+    let entry = &json["files"][0];
+    let peak = entry["peak"].as_f64().expect("peak");
+    let tag_gain = entry["tag_gain_db"].as_f64().expect("tag_gain_db");
+
+    assert!(peak > 1.0, "fixture should already clip for this test");
+    let played_peak = peak * 10f64.powf(tag_gain / 20.0);
+    assert!(
+        played_peak <= 1.0 + 1e-9,
+        "capped tag gain still clips: peak {} * gain {} dB = {}",
+        peak,
+        tag_gain,
+        played_peak
+    );
+}

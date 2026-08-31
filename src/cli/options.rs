@@ -46,6 +46,10 @@ pub struct Options {
     // --true-peak: BS.1770-4 Annex 2 true peak for REPLAYGAIN_*_PEAK in the
     // BS.1770 modes (issue #292). Requires --rg2 or --r128.
     pub true_peak: bool,
+    // --tags-only: analyze as usual but write absolute REPLAYGAIN_* values
+    // without modifying a single audio frame (issue #308), the loudgain /
+    // rsgain workflow. Requires -r / -a / -e.
+    pub tags_only: bool,
     pub skip_album: bool,         // -e: skip album analysis
     pub max_amplitude_only: bool, // -x: only find max amplitude
     pub track_index: Option<u32>, // -i <index>: track index for multi-track files
@@ -88,7 +92,7 @@ impl Options {
         self.use_stored_tags
             && !self.force_recalc
             && self.analysis_mode == AnalysisMode::Rg1
-            && self.gain_modifier_steps() == 0
+            && self.target_offset_db() == 0.0
     }
 
     /// Combined `-m` (steps) and `-d` (dB) modifier expressed as mp3 gain steps.
@@ -96,5 +100,20 @@ impl Options {
     /// round to zero, matching mp3gain's quantized step model.
     pub fn gain_modifier_steps(&self) -> i32 {
         self.gain_modifier + mp3rgain::db_to_steps(self.gain_modifier_db)
+    }
+
+    /// How far `-d` / `-m` shift the target, in dB.
+    ///
+    /// Normally this is [`Self::gain_modifier_steps`] converted back to dB,
+    /// because the shift has to land on a whole `global_gain` step. In
+    /// `--tags-only` mode nothing is quantized, since the shift only moves a
+    /// float in a tag, so `-d` applies exactly and `-m` contributes its steps
+    /// (issue #308).
+    pub fn target_offset_db(&self) -> f64 {
+        if self.tags_only {
+            self.gain_modifier_db + mp3rgain::steps_to_db(self.gain_modifier)
+        } else {
+            mp3rgain::steps_to_db(self.gain_modifier_steps())
+        }
     }
 }

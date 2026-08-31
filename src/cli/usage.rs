@@ -32,6 +32,9 @@ pub fn print_usage() {
     println!("    --r128      EBU R128 analysis (BS.1770, -23 LUFS target)");
     println!("    --true-peak Measure true peak (BS.1770-4 Annex 2) for REPLAYGAIN_*_PEAK");
     println!("                (requires --rg2 or --r128; default is sample peak)");
+    println!("    --tags-only Write REPLAYGAIN_* tags without changing the audio, so the");
+    println!("                listener can still turn ReplayGain off in their player.");
+    println!("                Needs -r/-a; no undo tag is written (nothing to undo)");
     println!("    -e          Skip album analysis (even with multiple files)");
     println!("    -i <n>      Specify which audio track to process (default: 0)");
     println!("    -u          Undo gain changes (restore from APEv2 tag)");
@@ -70,6 +73,8 @@ pub fn print_usage() {
     println!("    mp3rgain -r -d 4.5 song.mp3    Apply track gain, target +4.5 dB louder");
     println!("    mp3rgain -r song.mp3           Analyze and apply track gain");
     println!("    mp3rgain -a *.mp3              Analyze and apply album gain");
+    println!("    mp3rgain -r --tags-only *.mp3  Tag with track gain, leave audio alone");
+    println!("    mp3rgain -a --tags-only *.mp3  Tag with album+track gain (loudgain style)");
     println!("    mp3rgain -r --rg2 song.mp3     Track gain via ReplayGain 2.0 (BS.1770)");
     println!("    mp3rgain -a --r128 *.mp3       Album gain to the EBU R128 target");
     println!("    mp3rgain -r -m 2 *.mp3         Apply track gain + 2 steps");

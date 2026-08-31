@@ -1,9 +1,11 @@
 use anyhow::Result;
 use colored::*;
 use indicatif::ProgressBar;
-use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions};
+use mp3rgain::apply::{
+    apply_with_options, predict_apply, write_replaygain_tags_only, ApplyOptions, TagsOnlyOptions,
+};
 use mp3rgain::replaygain::{AudioFileType, ReplayGainResult};
-use mp3rgain::{apply_gain_to_peak, mp4meta, steps_to_db, AacAlbumInfo};
+use mp3rgain::{apply_gain_to_peak, mp4meta, peak_to_headroom_db, steps_to_db, AacAlbumInfo};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -67,20 +69,39 @@ fn process_track_gain_into(
             let modified_steps = base_steps + modifier_steps;
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
-                writeln!(
-                    out,
-                    "      Loudness: {:.1} {}, Gain: {:+.1} dB ({} steps{}), Peak: {:.4}",
-                    result.loudness_db(),
-                    result.analysis_mode().unit(),
-                    result.gain_db(),
-                    base_steps,
-                    if modifier_steps != 0 {
-                        format!(" + {} = {}", modifier_steps, modified_steps)
-                    } else {
-                        String::new()
-                    },
-                    result.peak()
-                )?;
+                if opts.tags_only {
+                    // No frames are touched, so there are no gain steps to
+                    // report, only the dB value headed for the tag.
+                    let offset_db = opts.target_offset_db();
+                    writeln!(
+                        out,
+                        "      Loudness: {:.1} {}, Tag gain: {:+.2} dB{}, Peak: {:.4}",
+                        result.loudness_db(),
+                        result.analysis_mode().unit(),
+                        result.gain_db(),
+                        if offset_db != 0.0 {
+                            format!(" {:+.2} = {:+.2}", offset_db, result.gain_db() + offset_db)
+                        } else {
+                            String::new()
+                        },
+                        result.peak()
+                    )?;
+                } else {
+                    writeln!(
+                        out,
+                        "      Loudness: {:.1} {}, Gain: {:+.1} dB ({} steps{}), Peak: {:.4}",
+                        result.loudness_db(),
+                        result.analysis_mode().unit(),
+                        result.gain_db(),
+                        base_steps,
+                        if modifier_steps != 0 {
+                            format!(" + {} = {}", modifier_steps, modified_steps)
+                        } else {
+                            String::new()
+                        },
+                        result.peak()
+                    )?;
+                }
             }
 
             // A net 0-step adjustment still has work to do when (issue #206):
@@ -97,7 +118,10 @@ fn process_track_gain_into(
             let writes_rg_tags = result.file_type() == AudioFileType::Aac
                 || opts.stored_tag_mode != StoredTagMode::Skip;
             let clip_prevention_applies = opts.prevent_clipping && result.peak() > 1.0;
-            if modified_steps == 0 && !writes_rg_tags && !clip_prevention_applies {
+            // --tags-only always has a tag to write, so it never takes the
+            // "nothing to do" shortcut (issue #308).
+            if !opts.tags_only && modified_steps == 0 && !writes_rg_tags && !clip_prevention_applies
+            {
                 if opts.output_format == OutputFormat::Text && !opts.quiet {
                     writeln!(out, "  {} {} (no adjustment needed)", ".".cyan(), filename)?;
                 }
@@ -145,6 +169,13 @@ fn apply_replaygain_with_album_into(
 ) -> Result<(JsonFileResult, Option<(u8, u8)>)> {
     let filename = get_filename(file);
     let is_aac = result.file_type() == AudioFileType::Aac;
+
+    // --tags-only: record the analysis and leave every frame alone
+    // (issue #308). `steps` is deliberately ignored: the target shift lives
+    // in the tag value instead.
+    if opts.tags_only {
+        return write_tags_only_into(file, result, opts, album_info, out).map(|r| (r, None));
+    }
 
     // Dry run: don't actually modify. Clipping prevention still needs to
     // be reflected in the "would apply N steps" message, so drive the same
@@ -232,6 +263,189 @@ fn apply_replaygain_with_album_into(
             ))
         }
         Err(e) => Ok((report_file_error(file, filename, e, opts), None)),
+    }
+}
+
+/// The gain a player should apply in `--tags-only` mode, capped at the file's
+/// exact headroom when `-k` is on so applying the tag cannot push playback
+/// past unity (issue #308). Pure, so the album summary can report the same
+/// number the per-file writer stores.
+pub fn capped_tag_gain(gain_db: f64, peak: f64, prevent_clipping: bool) -> f64 {
+    if !prevent_clipping || apply_gain_to_peak(peak, gain_db) <= 1.0 {
+        return gain_db;
+    }
+    // `None` only for a peak of 0 (digital silence), which cannot clip.
+    peak_to_headroom_db(peak).unwrap_or(gain_db)
+}
+
+/// Clipping check for `--tags-only` (issue #308).
+///
+/// No gain is baked into the audio, so nothing can clip on disk; the only
+/// risk is the *player* driving the file past unity when it applies the tag.
+/// `-k` therefore caps the written value at the file's exact headroom, with no
+/// 1.5 dB step rounding, because a tag holds a float, not a `global_gain`
+/// field. Without `-k` the usual warning is emitted unless `-c` / `-q`
+/// silence it.
+fn cap_tag_gain(
+    gain_db: f64,
+    peak: f64,
+    label: &str,
+    filename: &str,
+    opts: &Options,
+) -> (f64, Option<String>) {
+    let player_peak = apply_gain_to_peak(peak, gain_db);
+    if player_peak <= 1.0 {
+        return (gain_db, None);
+    }
+    let dry_run_prefix = opts.dry_run_prefix();
+
+    let capped = capped_tag_gain(gain_db, peak, opts.prevent_clipping);
+    if capped != gain_db {
+        let msg = format!(
+            "{} gain reduced from {:+.2} to {:+.2} dB to prevent clipping (peak: {:.4})",
+            label, gain_db, capped, peak
+        );
+        if opts.output_format == OutputFormat::Text && !opts.quiet {
+            eprintln!(
+                "  {} {}{} - {}",
+                "!".yellow(),
+                dry_run_prefix,
+                filename,
+                msg
+            );
+        }
+        return (capped, Some(msg));
+    }
+
+    if opts.ignore_clipping || opts.quiet {
+        return (gain_db, None);
+    }
+    let msg = format!(
+        "clipping warning: a player applying the {} gain of {:+.2} dB would peak at {:.2} (>1.00)",
+        label, gain_db, player_peak
+    );
+    if opts.output_format == OutputFormat::Text {
+        eprintln!(
+            "  {} {}{} - {}",
+            "!".yellow(),
+            dry_run_prefix,
+            filename,
+            msg
+        );
+        eprintln!("      Use -c to ignore clipping warnings or -k to cap the written gain");
+    }
+    (gain_db, Some(msg))
+}
+
+/// `--tags-only` (issue #308): write the absolute `REPLAYGAIN_*` values and
+/// leave the audio byte-identical, the way `loudgain` / `rsgain` work.
+///
+/// Unlike the apply path the tag is not a residual, so `-d` / `-m` shift the
+/// written value rather than the gain baked into the frames, and no
+/// `MP3GAIN_UNDO` / `MP3GAIN_MINMAX` is written, since there is nothing to undo.
+fn write_tags_only_into(
+    file: &Path,
+    result: &ReplayGainResult,
+    opts: &Options,
+    album_info: Option<&AacAlbumInfo>,
+    out: &mut String,
+) -> Result<JsonFileResult> {
+    let filename = get_filename(file);
+    let offset_db = opts.target_offset_db();
+
+    if result.file_type() == AudioFileType::Aac {
+        warn_aac_multi_track(file, filename, opts, opts.dry_run_prefix());
+    }
+
+    let mut warnings: Vec<String> = Vec::new();
+    let (track_gain_db, warning) = cap_tag_gain(
+        result.gain_db() + offset_db,
+        result.peak(),
+        "track",
+        filename,
+        opts,
+    );
+    warnings.extend(warning);
+
+    // The album peak is the loudest across the set, so capping against it
+    // keeps the album value identical on every file, which is the whole
+    // point of an album tag.
+    let album = album_info.map(|a| {
+        let (gain, warning) = cap_tag_gain(
+            a.album_gain_db + offset_db,
+            a.album_peak,
+            "album",
+            filename,
+            opts,
+        );
+        warnings.extend(warning);
+        (gain, a.album_peak)
+    });
+
+    let tag_type = if album.is_some() {
+        "track+album tags"
+    } else {
+        "tags"
+    };
+    let values = match album {
+        Some((album_gain, _)) => format!(
+            "track {:+.2} dB, album {:+.2} dB",
+            track_gain_db, album_gain
+        ),
+        None => format!("{:+.2} dB", track_gain_db),
+    };
+    let warning = (!warnings.is_empty()).then(|| warnings.join("; "));
+
+    let base = JsonFileResult {
+        // Nothing was applied to the audio; the gain lives in the tag.
+        gain_applied_steps: Some(0),
+        gain_applied_db: Some(0.0),
+        tag_gain_db: Some(track_gain_db),
+        warning,
+        ..JsonFileResult::from_analysis(file, result)
+    };
+
+    if opts.dry_run {
+        if opts.output_format == OutputFormat::Text && !opts.quiet {
+            writeln!(
+                out,
+                "  {} [DRY RUN] {} (would write {}, {})",
+                "~".cyan(),
+                filename,
+                tag_type,
+                values
+            )?;
+        }
+        return Ok(JsonFileResult {
+            status: Some(FileStatus::DryRun),
+            dry_run: Some(true),
+            ..base
+        });
+    }
+
+    let mut tag_opts = TagsOnlyOptions::new(track_gain_db, result.peak(), result.analysis_mode());
+    tag_opts.album = album;
+    tag_opts.tag_layout = opts.tag_layout;
+    tag_opts.preserve_timestamp = opts.preserve_timestamp;
+
+    match write_replaygain_tags_only(file, &tag_opts) {
+        Ok(()) => {
+            if opts.output_format == OutputFormat::Text && !opts.quiet {
+                writeln!(
+                    out,
+                    "  {} {} ({} written, {})",
+                    "v".green(),
+                    filename,
+                    tag_type,
+                    values
+                )?;
+            }
+            Ok(JsonFileResult {
+                status: Some(FileStatus::Success),
+                ..base
+            })
+        }
+        Err(e) => Ok(report_file_error(file, filename, e, opts)),
     }
 }
 

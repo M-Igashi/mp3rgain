@@ -742,6 +742,94 @@ pub fn read_mtime(path: &Path) -> Option<SystemTime> {
     std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
 }
 
+/// Values written by [`write_replaygain_tags_only`].
+///
+/// Unlike the apply path these are *absolute*: no gain is baked into the
+/// audio, so the tag carries the full gain a player should apply.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct TagsOnlyOptions {
+    /// `REPLAYGAIN_TRACK_GAIN` in dB.
+    pub track_gain_db: f64,
+    /// `REPLAYGAIN_TRACK_PEAK` as a linear peak.
+    pub track_peak: f64,
+    /// `(gain_db, peak)` for the `REPLAYGAIN_ALBUM_*` pair, when the caller
+    /// analyzed an album.
+    pub album: Option<(f64, f64)>,
+    /// Measurement mode, recorded as `REPLAYGAIN_ALGORITHM` in the BS.1770
+    /// modes.
+    pub mode: crate::replaygain::AnalysisMode,
+    /// MP3 only: which container the values go in.
+    pub tag_layout: TagLayout,
+    /// Restore the file's mtime after writing.
+    pub preserve_timestamp: bool,
+}
+
+impl TagsOnlyOptions {
+    /// Construct with the track values; album stays unset and the layout
+    /// defaults to [`TagLayout::Split`].
+    pub fn new(track_gain_db: f64, track_peak: f64, mode: crate::replaygain::AnalysisMode) -> Self {
+        Self {
+            track_gain_db,
+            track_peak,
+            album: None,
+            mode,
+            tag_layout: TagLayout::default(),
+            preserve_timestamp: false,
+        }
+    }
+}
+
+/// Tags-only mode (issue #308): record ReplayGain metadata without touching a
+/// single audio frame, the way `loudgain` / `rsgain` work.
+///
+/// The audio is left byte-identical, so the listener keeps the choice of
+/// enabling or disabling ReplayGain in their player. Nothing that describes a
+/// gain change is written: no `MP3GAIN_UNDO`, no `MP3GAIN_MINMAX`, no
+/// `MP3GAIN_ALBUM_MINMAX`. Any that a previous real apply left behind stay
+/// untouched: they still describe the audio as it currently is.
+pub fn write_replaygain_tags_only(file_path: &Path, opts: &TagsOnlyOptions) -> Result<()> {
+    let original_mtime = if opts.preserve_timestamp {
+        read_mtime(file_path)
+    } else {
+        None
+    };
+
+    let values = RgResidual {
+        track_gain_db: opts.track_gain_db,
+        track_peak: opts.track_peak,
+        album: opts.album,
+        mode: opts.mode,
+    };
+
+    if mp4meta::is_aac_file(file_path) {
+        let mut tags = mp4meta::ReplayGainTags::default();
+        tags.set_track(values.track_gain_db, values.track_peak);
+        if let Some((album_gain, album_peak)) = values.album {
+            tags.set_album(album_gain, album_peak);
+        }
+        tags.set_algorithm(values.mode);
+        mp4meta::write_replaygain_tags(file_path, &tags)?;
+    } else {
+        match opts.tag_layout {
+            // Split keeps the authoritative values in ID3v2, so an APEv2 copy
+            // from mp3gain or an earlier `-s a` run has to go, the same rule
+            // the apply path follows.
+            TagLayout::Split => {
+                ape::remove_ape_replaygain(file_path)?;
+                id3v2::write_id3v2_replaygain(file_path, &values.to_id3v2())?;
+            }
+            TagLayout::Id3v2 => id3v2::write_id3v2_replaygain(file_path, &values.to_id3v2())?,
+            TagLayout::Ape => ape::write_ape_replaygain(file_path, &values.to_ape())?,
+        }
+    }
+
+    if let Some(mtime) = original_mtime {
+        restore_timestamp(file_path, mtime);
+    }
+    Ok(())
+}
+
 /// Aggregate the post-apply `global_gain` range across an album's MP3 files
 /// and write `MP3GAIN_ALBUM_MINMAX` (`min,max`) to each, matching mp3gain's
 /// album (`-a`) mode (issue #210).

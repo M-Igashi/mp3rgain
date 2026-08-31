@@ -294,6 +294,16 @@ Note that this is not an either/or for mp3rgain users: applying gain also writes
 so a tag-aware player and a tag-blind one converge on the same loudness. `-s s` skips the tags if
 you want the bitstream change alone.
 
+The other end of that trade-off is available too: `--tags-only` runs the same analysis
+but writes full `REPLAYGAIN_*` values without modifying a single frame, matching what `loudgain` and
+`rsgain` produce. Use it when the listener should keep the choice of switching ReplayGain off in
+their player; use the default apply when the playback device ignores tags entirely.
+
+```bash
+mp3rgain -a --tags-only *.mp3   # tags only, audio byte-identical
+mp3rgain -a *.mp3               # gain baked into global_gain, plus residual tags
+```
+
 ## Security
 
 See [Security Documentation](security.md) for detailed CVE analysis.

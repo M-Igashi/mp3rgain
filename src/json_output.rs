@@ -48,6 +48,11 @@ pub struct JsonFileResult {
     pub gain_applied_steps: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gain_applied_db: Option<f64>,
+    /// `--tags-only` (issue #308): the absolute `REPLAYGAIN_TRACK_GAIN` value
+    /// written, which `-k` may have capped below the measured gain. Absent in
+    /// every other mode, where the tag holds a residual instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag_gain_db: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub loudness_db: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,6 +107,9 @@ pub struct JsonAlbumResult {
     pub analysis_mode: Option<&'static str>,
     pub gain_db: f64,
     pub gain_steps: i32,
+    /// `--tags-only`: the absolute `REPLAYGAIN_ALBUM_GAIN` value written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag_gain_db: Option<f64>,
     pub peak: f64,
 }
 
