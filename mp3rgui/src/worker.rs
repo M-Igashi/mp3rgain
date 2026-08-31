@@ -31,6 +31,10 @@ pub struct StoredTagsView {
     pub track_peak: Option<String>,
     pub album_gain: Option<String>,
     pub album_peak: Option<String>,
+    /// `REPLAYGAIN_ALGORITHM`; only written by the BS.1770 modes. Not shown
+    /// in the table, but its presence disqualifies the tags from `-s R`-style
+    /// reuse in RG1 mode (issue #302).
+    pub algorithm: Option<String>,
     pub undo: Option<String>,
     pub minmax: Option<String>,
 }
@@ -79,6 +83,9 @@ pub enum WorkerEvent {
     FileApplied {
         idx: usize,
         actual_steps: i32,
+        /// The applied gain came from stored tags rather than a fresh
+        /// analysis (issue #302); the row status says so.
+        from_stored: bool,
     },
     /// Dry-run analog of `FileApplied`: predict_apply succeeded, no bytes
     /// changed. UI shows "Would apply N steps" in the row status.
@@ -160,6 +167,9 @@ pub struct ApplyJob {
     pub album_info: Option<AacAlbumInfo>,
     /// Per-channel gain (`-l`). `None` means the gain hits all channels.
     pub channel: Option<Channel>,
+    /// The gain was taken from stored REPLAYGAIN_* tags instead of a fresh
+    /// analysis (issue #302). Echoed back in `FileApplied`.
+    pub from_stored: bool,
 }
 
 /// A single undo job.
@@ -510,6 +520,7 @@ pub fn spawn_apply(
                                 WorkerEvent::FileApplied {
                                     idx: job.idx,
                                     actual_steps: report.actual_steps,
+                                    from_stored: job.from_stored,
                                 },
                             );
                         }
@@ -729,6 +740,7 @@ pub fn spawn_delete_tags(
                             WorkerEvent::FileApplied {
                                 idx: job.idx,
                                 actual_steps: 0,
+                                from_stored: false,
                             },
                         );
                     }
@@ -897,6 +909,7 @@ fn read_stored_tags(path: &Path, layout: TagLayout) -> StoredTagsView {
             track_peak: tags.track_peak,
             album_gain: tags.album_gain,
             album_peak: tags.album_peak,
+            algorithm: tags.algorithm,
             undo: tags.undo,
             minmax: tags.minmax,
         },

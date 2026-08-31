@@ -3,7 +3,9 @@ use crate::worker::{
     WorkerEvent, WorkerHandle,
 };
 use mp3rgain::ape::{parse_rg_gain, parse_rg_peak};
-use mp3rgain::replaygain::{self, AnalysisMode, ReplayGainResult, REPLAYGAIN_REFERENCE_DB};
+use mp3rgain::replaygain::{
+    self, AnalysisMode, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB,
+};
 use mp3rgain::{apply_gain_to_peak, db_to_steps, would_clip, AacAlbumInfo, Channel};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -18,6 +20,9 @@ pub enum FileStatus {
     Applying,
     Undoing,
     Done,
+    /// Apply succeeded with the gain taken from stored REPLAYGAIN_* tags
+    /// instead of a fresh analysis (issue #302).
+    DoneFromTags,
     NoChangesToUndo,
     /// Dry-run apply finished without touching the file. `steps` is what
     /// would have been applied; `clipping_prevented` indicates the cap.
@@ -39,6 +44,7 @@ impl FileStatus {
             FileStatus::Applying => "Applying...".into(),
             FileStatus::Undoing => "Undoing...".into(),
             FileStatus::Done => "Done".into(),
+            FileStatus::DoneFromTags => "Done (from tags)".into(),
             FileStatus::NoChangesToUndo => "Nothing to undo".into(),
             FileStatus::DryRunPredicted {
                 steps,
@@ -154,6 +160,15 @@ enum WorkerKind {
     ImportScan,
 }
 
+/// Apply action queued behind a stored-tag rescan phase (issue #302). With
+/// "Use stored tags" on, Apply first analyzes the files (or albums) that lack
+/// a usable gain source, then chains into the apply once that worker exits.
+#[derive(Clone, Copy)]
+enum PendingApply {
+    Track,
+    Album,
+}
+
 /// Settings persisted across launches (issue #202). Window geometry and egui
 /// memory (e.g. table column widths) are persisted by eframe automatically;
 /// this only carries the app-specific toggles.
@@ -169,6 +184,8 @@ struct PersistedSettings {
     single_album: bool,
     #[serde(default)]
     analysis_mode: AnalysisMode,
+    #[serde(default)]
+    use_stored_tags: bool,
 }
 
 impl Default for PersistedSettings {
@@ -179,6 +196,7 @@ impl Default for PersistedSettings {
             show_filename_only: false,
             single_album: false,
             analysis_mode: AnalysisMode::default(),
+            use_stored_tags: false,
         }
     }
 }
@@ -268,6 +286,16 @@ pub struct Mp3rgainApp {
     /// RG 1.0 (mp3gain-compatible) by default; the BS.1770 modes normalize
     /// to their fixed LUFS targets and show loudness in LUFS.
     pub analysis_mode: AnalysisMode,
+
+    /// When true, Apply Track / Album Gain reuses stored REPLAYGAIN_* tags
+    /// instead of re-analyzing, rescanning only files without a usable set:
+    /// the GUI counterpart of the CLI's -s R (issue #302). RG 1.0 mode only.
+    pub use_stored_tags: bool,
+
+    /// Apply action waiting behind an in-flight stored-tag rescan phase
+    /// (issue #302). Consumed by `pump_worker_events` when the analysis
+    /// worker exits; cleared on cancel.
+    pending_apply: Option<PendingApply>,
 }
 
 impl Mp3rgainApp {
@@ -303,6 +331,8 @@ impl Mp3rgainApp {
             show_filename_only: settings.show_filename_only,
             single_album: settings.single_album,
             analysis_mode: settings.analysis_mode,
+            use_stored_tags: settings.use_stored_tags,
+            pending_apply: None,
         }
     }
 
@@ -682,39 +712,7 @@ impl Mp3rgainApp {
             }
         }
 
-        let group_jobs: Vec<Vec<(usize, PathBuf)>> = if self.single_album {
-            // Issue #224: treat every target as one album regardless of
-            // directory, so multi-disc sets in subfolders share one album
-            // gain. A single group produces one album_info for the batch.
-            let jobs: Vec<(usize, PathBuf)> = targets
-                .iter()
-                .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f.path.clone())))
-                .collect();
-            if jobs.is_empty() {
-                Vec::new()
-            } else {
-                vec![jobs]
-            }
-        } else {
-            // Issue #159: group by parent directory so each folder is its
-            // own album.
-            let mut groups: std::collections::BTreeMap<PathBuf, Vec<(usize, PathBuf)>> =
-                std::collections::BTreeMap::new();
-            for &idx in &targets {
-                if let Some(f) = self.files.get(idx) {
-                    let parent = f
-                        .path
-                        .parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(PathBuf::new);
-                    groups
-                        .entry(parent)
-                        .or_default()
-                        .push((idx, f.path.clone()));
-                }
-            }
-            groups.into_values().collect()
-        };
+        let group_jobs = self.album_groups(&targets);
         let total: usize = group_jobs.iter().map(|g| g.len()).sum();
 
         self.begin_worker(
@@ -729,6 +727,45 @@ impl Mp3rgainApp {
             return;
         }
 
+        // Issue #302: with stored-tag reuse on, first analyze only the files
+        // that carry neither a fresh analysis nor trusted stored tags, then
+        // chain into the apply via `pending_apply`.
+        if self.stored_reuse_active() {
+            let missing: Vec<(usize, PathBuf)> = self
+                .target_indices()
+                .iter()
+                .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
+                .filter(|(_, f)| f.track_result.is_none() && trusted_track_tags(f).is_none())
+                .map(|(idx, f)| (idx, f.path.clone()))
+                .collect();
+            if !missing.is_empty() {
+                for &(idx, _) in &missing {
+                    self.files[idx].status = FileStatus::Pending;
+                }
+                let count = missing.len();
+                self.pending_apply = Some(PendingApply::Track);
+                self.begin_worker(
+                    WorkerKind::TrackAnalysis,
+                    count,
+                    worker::spawn_track_analysis(ctx.clone(), missing, self.analysis_mode),
+                );
+                self.status_message = format!("Analyzing {} file(s) without stored tags...", count);
+                return;
+            }
+        }
+        self.apply_track_gain_now(ctx);
+    }
+
+    /// Apply phase of Apply Track Gain: build jobs from the current row state
+    /// and spawn the apply worker. With stored-tag reuse on (issue #302),
+    /// rows without a fresh analysis fall back to a result built from their
+    /// stored tags (the same `ReplayGainResult::from_stored_tags` the CLI's
+    /// -s R path uses), so apply gets the real peak for its clipping check
+    /// and writes correct residual RG tags.
+    fn apply_track_gain_now(&mut self, ctx: &egui::Context) {
+        let reuse = self.stored_reuse_active();
+        let target_offset = self.target_volume - REPLAYGAIN_REFERENCE_DB;
+
         // Issue #161: act on the current selection (or all files when none
         // selected).
         let targets = self.target_indices();
@@ -736,13 +773,31 @@ impl Mp3rgainApp {
             .iter()
             .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
             .filter_map(|(idx, f)| {
-                f.track_gain.map(|gain_db| ApplyJob {
+                if f.track_result.is_some() || !reuse {
+                    return f.track_gain.map(|gain_db| ApplyJob {
+                        idx,
+                        path: f.path.clone(),
+                        steps: db_to_steps(gain_db),
+                        track_result: f.track_result.clone(),
+                        album_info: None,
+                        channel: None,
+                        from_stored: false,
+                    });
+                }
+                let (gain_db, peak) = trusted_track_tags(f)?;
+                Some(ApplyJob {
                     idx,
                     path: f.path.clone(),
-                    steps: db_to_steps(gain_db),
-                    track_result: f.track_result.clone(),
+                    steps: db_to_steps(target_offset + gain_db),
+                    track_result: Some(ReplayGainResult::from_stored_tags(
+                        gain_db,
+                        peak,
+                        stored_file_type(&f.path),
+                        AnalysisMode::Rg1,
+                    )),
                     album_info: None,
                     channel: None,
+                    from_stored: true,
                 })
             })
             .collect();
@@ -762,6 +817,71 @@ impl Mp3rgainApp {
             count,
             worker::spawn_apply(ctx.clone(), jobs, "track gain", ui_opts, false),
         );
+    }
+
+    /// Album grouping shared by Album Analysis and Apply Album Gain: one
+    /// group per parent directory (issue #159), or a single group covering
+    /// every target in single-album mode (issue #224).
+    fn album_groups(&self, targets: &[usize]) -> Vec<Vec<(usize, PathBuf)>> {
+        if self.single_album {
+            let jobs: Vec<(usize, PathBuf)> = targets
+                .iter()
+                .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f.path.clone())))
+                .collect();
+            if jobs.is_empty() {
+                Vec::new()
+            } else {
+                vec![jobs]
+            }
+        } else {
+            let mut groups: std::collections::BTreeMap<PathBuf, Vec<(usize, PathBuf)>> =
+                std::collections::BTreeMap::new();
+            for &idx in targets {
+                if let Some(f) = self.files.get(idx) {
+                    let parent = f
+                        .path
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(PathBuf::new);
+                    groups
+                        .entry(parent)
+                        .or_default()
+                        .push((idx, f.path.clone()));
+                }
+            }
+            groups.into_values().collect()
+        }
+    }
+
+    /// Stored-tag reuse (issue #302) is only trusted in RG 1.0 mode, the
+    /// same restriction the CLI's -s R has with --rg2 / --r128, since
+    /// REPLAYGAIN_ALGORITHM cannot distinguish the BS.1770 targets.
+    fn stored_reuse_active(&self) -> bool {
+        self.use_stored_tags && self.analysis_mode == AnalysisMode::Rg1
+    }
+
+    /// Group-level `-s R` check (issue #302), mirroring the CLI's
+    /// `stored_album_report`: every file must carry trusted, parseable track
+    /// and album tags and the album gains must agree within 0.05 dB. Stored
+    /// values are residuals of each file's current loudness, so a partial or
+    /// inconsistent set cannot be mixed with fresh analysis. Returns the
+    /// shared album gain and the max album peak.
+    fn trusted_album_group(&self, group: &[(usize, PathBuf)]) -> Option<AacAlbumInfo> {
+        let mut album_gain: Option<f64> = None;
+        let mut album_peak: f64 = 0.0;
+        for &(idx, _) in group {
+            let tags = trusted_album_tags(self.files.get(idx)?)?;
+            album_peak = album_peak.max(tags.album_peak);
+            match album_gain {
+                Some(g) if (g - tags.album_gain).abs() > 0.05 => return None,
+                Some(_) => {}
+                None => album_gain = Some(tags.album_gain),
+            }
+        }
+        Some(AacAlbumInfo {
+            album_gain_db: album_gain?,
+            album_peak,
+        })
     }
 
     /// Selected files, or all loaded files when nothing is selected.
@@ -919,6 +1039,7 @@ impl Mp3rgainApp {
                     track_result: None,
                     album_info: None,
                     channel: None,
+                    from_stored: false,
                 })
             })
             .collect();
@@ -957,6 +1078,7 @@ impl Mp3rgainApp {
                 track_result: None,
                 album_info: None,
                 channel: Some(channel),
+                from_stored: false,
             })
             .collect();
         if jobs.is_empty() {
@@ -1016,25 +1138,129 @@ impl Mp3rgainApp {
             return;
         }
 
+        // Issue #302: with stored-tag reuse on, albums whose files carry
+        // neither a full fresh analysis nor a consistent stored set are
+        // re-analyzed whole (all-or-nothing, like the CLI), then the apply
+        // phase chains in via `pending_apply`.
+        if self.stored_reuse_active() {
+            let targets = self.target_indices();
+            let rescan: Vec<Vec<(usize, PathBuf)>> = self
+                .album_groups(&targets)
+                .into_iter()
+                .filter(|g| {
+                    let all_fresh = g.iter().all(|&(idx, _)| {
+                        self.files.get(idx).is_some_and(|f| f.album_info.is_some())
+                    });
+                    !all_fresh && self.trusted_album_group(g).is_none()
+                })
+                .collect();
+            if !rescan.is_empty() {
+                for &(idx, _) in rescan.iter().flatten() {
+                    if let Some(f) = self.files.get_mut(idx) {
+                        f.status = FileStatus::Pending;
+                        f.album_info = None;
+                    }
+                }
+                let total: usize = rescan.iter().map(|g| g.len()).sum();
+                self.pending_apply = Some(PendingApply::Album);
+                self.begin_worker(
+                    WorkerKind::AlbumAnalysis,
+                    total,
+                    worker::spawn_album_analysis(ctx.clone(), rescan, self.analysis_mode),
+                );
+                self.status_message = format!(
+                    "Analyzing {} file(s) without consistent stored album tags...",
+                    total
+                );
+                return;
+            }
+        }
+        self.apply_album_gain_now(ctx);
+    }
+
+    /// Apply phase of Apply Album Gain. With stored-tag reuse on (issue
+    /// #302), an album whose files were not all freshly analyzed applies from
+    /// its stored tags when the whole set is trusted and consistent;
+    /// otherwise each row falls back to its displayed values, exactly like
+    /// the reuse-off path.
+    fn apply_album_gain_now(&mut self, ctx: &egui::Context) {
         // Issue #161: act on the current selection (or all files when none
         // selected). Issue #159: use each file's per-folder album_info so
         // tracks from different folders get the album RG tags for their own
         // album.
         let targets = self.target_indices();
-        let jobs: Vec<ApplyJob> = targets
-            .iter()
-            .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
-            .filter_map(|(idx, f)| {
-                f.album_gain.map(|gain_db| ApplyJob {
-                    idx,
-                    path: f.path.clone(),
-                    steps: db_to_steps(gain_db),
-                    track_result: f.track_result.clone(),
-                    album_info: f.album_info,
-                    channel: None,
+        let mut jobs: Vec<ApplyJob> = Vec::new();
+        if self.stored_reuse_active() {
+            let target_offset = self.target_volume - REPLAYGAIN_REFERENCE_DB;
+            for group in self.album_groups(&targets) {
+                let all_fresh = group
+                    .iter()
+                    .all(|&(idx, _)| self.files.get(idx).is_some_and(|f| f.album_info.is_some()));
+                if !all_fresh {
+                    if let Some(info) = self.trusted_album_group(&group) {
+                        let steps = db_to_steps(target_offset + info.album_gain_db);
+                        for &(idx, _) in &group {
+                            let Some(f) = self.files.get(idx) else {
+                                continue;
+                            };
+                            let Some(tags) = trusted_album_tags(f) else {
+                                continue;
+                            };
+                            jobs.push(ApplyJob {
+                                idx,
+                                path: f.path.clone(),
+                                steps,
+                                track_result: Some(ReplayGainResult::from_stored_tags(
+                                    tags.track_gain,
+                                    tags.track_peak,
+                                    stored_file_type(&f.path),
+                                    AnalysisMode::Rg1,
+                                )),
+                                album_info: Some(info),
+                                channel: None,
+                                from_stored: true,
+                            });
+                        }
+                        continue;
+                    }
+                }
+                // Fully analyzed group, or one whose rescan partly failed:
+                // apply each row from its displayed values; rows without a
+                // gain (e.g. analysis errors) are skipped.
+                for &(idx, _) in &group {
+                    let Some(f) = self.files.get(idx) else {
+                        continue;
+                    };
+                    if let Some(gain_db) = f.album_gain {
+                        jobs.push(ApplyJob {
+                            idx,
+                            path: f.path.clone(),
+                            steps: db_to_steps(gain_db),
+                            track_result: f.track_result.clone(),
+                            album_info: f.album_info,
+                            channel: None,
+                            from_stored: false,
+                        });
+                    }
+                }
+            }
+        } else {
+            jobs = targets
+                .iter()
+                .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
+                .filter_map(|(idx, f)| {
+                    f.album_gain.map(|gain_db| ApplyJob {
+                        idx,
+                        path: f.path.clone(),
+                        steps: db_to_steps(gain_db),
+                        track_result: f.track_result.clone(),
+                        album_info: f.album_info,
+                        channel: None,
+                        from_stored: false,
+                    })
                 })
-            })
-            .collect();
+                .collect();
+        }
 
         if jobs.is_empty() {
             self.status_message = "No album gain values — run Album Analysis first".to_string();
@@ -1084,7 +1310,7 @@ impl Mp3rgainApp {
     }
 
     /// Drain pending worker events into UI state. Called from `update()`.
-    pub fn pump_worker_events(&mut self) {
+    pub fn pump_worker_events(&mut self, ctx: &egui::Context) {
         // Drain into a local Vec first so we can hand `&mut self` to
         // `apply_event` without conflicting with the receiver borrow.
         let mut events = Vec::new();
@@ -1111,6 +1337,15 @@ impl Mp3rgainApp {
         }
         if worker_finished {
             self.worker = None;
+            // Issue #302: a rescan phase queued by Apply with stored-tag
+            // reuse chains into its apply phase once the analysis worker
+            // exits. `add_files` re-queues pending drops if this spawns a
+            // new worker.
+            match self.pending_apply.take() {
+                Some(PendingApply::Track) => self.apply_track_gain_now(ctx),
+                Some(PendingApply::Album) => self.apply_album_gain_now(ctx),
+                None => {}
+            }
             if !self.pending_drops.is_empty() {
                 let paths = std::mem::take(&mut self.pending_drops);
                 self.add_files(paths);
@@ -1190,9 +1425,19 @@ impl Mp3rgainApp {
             WorkerEvent::AlbumAnalysisFailed(msg) => {
                 self.status_message = format!("Album analysis failed: {}", msg);
             }
-            WorkerEvent::FileApplied { idx, actual_steps } => {
+            WorkerEvent::FileApplied {
+                idx,
+                actual_steps,
+                from_stored,
+            } => {
                 if let Some(file) = self.files.get_mut(idx) {
-                    file.status = FileStatus::Done;
+                    // Issue #302: make it visible which rows were applied
+                    // from stored tags and which were (re)analyzed.
+                    file.status = if from_stored {
+                        FileStatus::DoneFromTags
+                    } else {
+                        FileStatus::Done
+                    };
                     // File contents changed; cached tag snapshot is stale.
                     file.stored_tags = None;
                     // Shift the displayed volume / gain columns by the gain
@@ -1281,6 +1526,9 @@ impl Mp3rgainApp {
             WorkerEvent::Cancelled => {
                 self.status_message = "Cancelled".to_string();
                 self.total_progress = 0.0;
+                // Cancelling a stored-tag rescan phase also drops the apply
+                // that was queued behind it (issue #302).
+                self.pending_apply = None;
             }
             WorkerEvent::Done { message } => {
                 self.status_message = message;
@@ -1430,6 +1678,51 @@ impl Mp3rgainApp {
     }
 }
 
+/// Stored track tags parsed for `-s R`-style reuse (issue #302): gain and
+/// peak, or `None` when absent, malformed, not yet scanned, or marked with a
+/// `REPLAYGAIN_ALGORITHM` tag: that marker means BS.1770 values, which don't
+/// match the RG1 target this path trusts (same rule as the CLI).
+fn trusted_track_tags(file: &FileEntry) -> Option<(f64, f64)> {
+    let view = file.stored_tags.as_ref()?;
+    if view.algorithm.is_some() {
+        return None;
+    }
+    let gain = view.track_gain.as_deref().and_then(parse_rg_gain)?;
+    let peak = view.track_peak.as_deref().and_then(parse_rg_peak)?;
+    Some((gain, peak))
+}
+
+/// One file's parsed stored tags for album-mode reuse (issue #302).
+struct StoredAlbumTags {
+    track_gain: f64,
+    track_peak: f64,
+    album_gain: f64,
+    album_peak: f64,
+}
+
+/// Album variant of [`trusted_track_tags`]: additionally requires the album
+/// gain/peak pair, mirroring the CLI's `stored_album_report` requirements.
+fn trusted_album_tags(file: &FileEntry) -> Option<StoredAlbumTags> {
+    let (track_gain, track_peak) = trusted_track_tags(file)?;
+    let view = file.stored_tags.as_ref()?;
+    Some(StoredAlbumTags {
+        track_gain,
+        track_peak,
+        album_gain: view.album_gain.as_deref().and_then(parse_rg_gain)?,
+        album_peak: view.album_peak.as_deref().and_then(parse_rg_peak)?,
+    })
+}
+
+/// File type for a tag-derived result, mirroring the dispatch in
+/// `mp3rgain::read_gain_tags_auto` (same as the CLI's -s R path).
+fn stored_file_type(path: &Path) -> AudioFileType {
+    if mp3rgain::mp4meta::is_aac_file(path) {
+        AudioFileType::Aac
+    } else {
+        AudioFileType::Mp3
+    }
+}
+
 /// Display pair for a ReplayGain value, mode-aware (issue #272).
 ///
 /// RG1: volume relative to the 89 dB reference, and the gain re-targeted to
@@ -1522,7 +1815,7 @@ fn open_in_file_manager(path: &Path) -> Result<(), String> {
 
 impl eframe::App for Mp3rgainApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.pump_worker_events();
+        self.pump_worker_events(ctx);
         // Kick off an automatic stored-tag read for freshly imported files
         // once any prior worker has finished (issue #203).
         self.start_import_scan(ctx);
@@ -1542,6 +1835,7 @@ impl eframe::App for Mp3rgainApp {
             show_filename_only: self.show_filename_only,
             single_album: self.single_album,
             analysis_mode: self.analysis_mode,
+            use_stored_tags: self.use_stored_tags,
         };
         eframe::set_value(storage, SETTINGS_KEY, &settings);
     }
