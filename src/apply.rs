@@ -753,16 +753,25 @@ pub fn read_mtime(path: &Path) -> Option<SystemTime> {
 ///
 /// Each file is paired with the `(max, min)` range from
 /// [`ApplyReport::gain_range`] so the apply pass's scan is reused instead of
-/// re-analyzing every file (issue #232); files without one (AAC members,
-/// zero-frame applies, failed applies) fall back to a fresh `analyze()`.
+/// re-analyzing every file (issue #232); files without one (zero-frame
+/// applies, failed applies) fall back to a fresh `analyze()`.
 ///
-/// AAC members are skipped — the MP3 analyzer rejects them and mp3gain has no
-/// AAC. Best-effort: a failed scan or tag write on one file is ignored so a
+/// AAC members are filtered out up front (issue #307): `MP3GAIN_ALBUM_MINMAX`
+/// is an MP3/APEv2 concept, and the `analyze()` fallback is the raw MP3 frame
+/// scanner, which can false-sync on MP4 bytes and "succeed" with garbage
+/// values, skewing the album range and appending an APEv2 tag after the MP4
+/// data. Best-effort: a failed scan or tag write on one file is ignored so a
 /// metadata hiccup never fails the album operation. Intended for the default
 /// APEv2 path; skip the call when writing ID3v2 (`-s i`) or when stored-tag
 /// writing is disabled.
 pub fn write_album_minmax(files: &[(&Path, Option<(u8, u8)>)]) {
     use rayon::prelude::*;
+
+    let files: Vec<(&Path, Option<(u8, u8)>)> = files
+        .iter()
+        .copied()
+        .filter(|&(file, _)| !mp4meta::is_aac_file(file))
+        .collect();
 
     // The fallback analyze() is a full-file frame walk, so run the range
     // collection in parallel like the apply pass that precedes it (#252).
