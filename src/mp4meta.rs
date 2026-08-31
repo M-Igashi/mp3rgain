@@ -654,7 +654,7 @@ pub fn write_replaygain_tags(file_path: &Path, tags: &ReplayGainTags) -> Result<
 }
 
 /// Update MP4 metadata with new ReplayGain tags
-fn update_mp4_metadata(data: &[u8], tags: &ReplayGainTags) -> Result<Vec<u8>> {
+pub(crate) fn update_mp4_metadata(data: &[u8], tags: &ReplayGainTags) -> Result<Vec<u8>> {
     let make_ilst = |existing: &[u8]| create_ilst_box(tags, existing);
     rebuild_mp4_with_ilst(data, make_ilst)
 }

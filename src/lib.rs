@@ -210,16 +210,31 @@ pub fn undo_gain_auto(file_path: &Path, layout: TagLayout) -> Result<usize> {
             .is_some_and(|rg| rg.undo.is_some())
     };
 
-    if layout.mp3gain_in_id3v2() {
-        if id3v2_has_undo() || !ape_has_undo() {
-            return id3v2::undo_gain_id3v2(file_path);
+    let use_id3v2 = if layout.mp3gain_in_id3v2() {
+        id3v2_has_undo() || !ape_has_undo()
+    } else {
+        !ape_has_undo() && id3v2_has_undo()
+    };
+
+    let frames = if use_id3v2 {
+        id3v2::undo_gain_id3v2(file_path)?
+    } else {
+        gain::undo_gain(file_path)?
+    };
+
+    // Issue #306: under the split layout the REPLAYGAIN_* values live in the
+    // container that did not hold the undo tag, and they described the
+    // pre-undo audio. Strip stale copies there too. Best-effort: the rollback
+    // already succeeded, so a metadata hiccup here must not turn the undo
+    // into an error.
+    if frames > 0 {
+        if use_id3v2 {
+            let _ = ape::remove_ape_undone_gain_values(file_path);
+        } else {
+            let _ = id3v2::remove_id3v2_rg_values(file_path);
         }
-        return gain::undo_gain(file_path);
     }
-    if ape_has_undo() || !id3v2_has_undo() {
-        return gain::undo_gain(file_path);
-    }
-    id3v2::undo_gain_id3v2(file_path)
+    Ok(frames)
 }
 
 /// Delete ReplayGain / undo tags, auto-dispatching by file format and tag mode.

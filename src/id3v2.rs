@@ -28,6 +28,15 @@ const ALL_RG_DESCRIPTIONS: &[&str] = &[
     TAG_REPLAYGAIN_ALGORITHM,
 ];
 
+/// The `REPLAYGAIN_*` value descriptions only (no undo/minmax).
+const RG_VALUE_DESCRIPTIONS: &[&str] = &[
+    TAG_REPLAYGAIN_TRACK_GAIN,
+    TAG_REPLAYGAIN_TRACK_PEAK,
+    TAG_REPLAYGAIN_ALBUM_GAIN,
+    TAG_REPLAYGAIN_ALBUM_PEAK,
+    TAG_REPLAYGAIN_ALGORITHM,
+];
+
 /// ReplayGain and undo data stored in ID3v2 TXXX frames
 #[derive(Debug, Clone, Default)]
 pub struct Id3v2ReplayGain {
@@ -212,11 +221,35 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
     crate::apply::with_temp_file(path, |original, temp| {
         std::fs::write(temp, &data).map_err(|e| Error::io_write(original, e))?;
         let mut tag = read_tag(temp)?;
-        remove_txxx_ci(&mut tag, TAG_MP3GAIN_UNDO);
-        remove_txxx_ci(&mut tag, TAG_MP3GAIN_MINMAX);
+        // Issue #306: everything mp3rgain stored (undo, minmax, and the
+        // REPLAYGAIN_* residuals) described the gained audio, so strip it
+        // all in the same write.
+        for desc in ALL_RG_DESCRIPTIONS {
+            remove_txxx_ci(&mut tag, desc);
+        }
         write_tag_direct(temp, &mut tag)
     })?;
     Ok(frames)
+}
+
+/// Post-undo cleanup for cross-container layouts (issue #306): drop only the
+/// `REPLAYGAIN_*` TXXX frames, leaving any `MP3GAIN_UNDO` / `MP3GAIN_MINMAX`
+/// alone. Files without ReplayGain frames are left untouched rather than
+/// rewritten.
+pub(crate) fn remove_id3v2_rg_values(path: &Path) -> Result<()> {
+    let mut tag = read_tag(path)?;
+    let has_rg = tag.extended_texts().any(|t| {
+        RG_VALUE_DESCRIPTIONS
+            .iter()
+            .any(|d| t.description.eq_ignore_ascii_case(d))
+    });
+    if !has_rg {
+        return Ok(());
+    }
+    for desc in RG_VALUE_DESCRIPTIONS {
+        remove_txxx_ci(&mut tag, desc);
+    }
+    write_tag(path, &mut tag)
 }
 
 #[cfg(test)]

@@ -667,3 +667,107 @@ fn test_apply_album_gain_writes_ape_album_replaygain_tags() {
 
     cleanup(&path);
 }
+
+/// Issue #306: undoing must also drop `MP3GAIN_ALBUM_MINMAX` and the
+/// `REPLAYGAIN_*` residuals from the APEv2 tag; they described the gained
+/// audio and are wrong once it is rolled back.
+#[test]
+fn test_undo_removes_album_minmax_and_replaygain_ape() {
+    use mp3rgain::apply::{apply_with_options, ApplyOptions};
+    use mp3rgain::{
+        ape, replaygain, TagLayout, TAG_MP3GAIN_ALBUM_MINMAX, TAG_REPLAYGAIN_TRACK_GAIN,
+        TAG_REPLAYGAIN_TRACK_PEAK,
+    };
+
+    let path = copy_test_file("test_stereo.mp3");
+    let result = replaygain::analyze_track_with_index(&path, None).unwrap();
+    let mut opts = ApplyOptions::new(2);
+    opts.track_result = Some(result);
+    opts.write_replaygain_tags = true;
+    opts.tag_layout = TagLayout::Ape;
+    apply_with_options(&path, &opts).unwrap();
+    ape::write_ape_album_minmax(&path, 10, 200).unwrap();
+
+    let frames = undo_gain(&path).unwrap();
+    assert!(frames > 0, "undo should have modified frames");
+
+    if let Some(tag) = read_ape_tag_from_file(&path).unwrap() {
+        assert!(tag.get(TAG_MP3GAIN_UNDO).is_none(), "undo tag left behind");
+        assert!(
+            tag.get(TAG_MP3GAIN_ALBUM_MINMAX).is_none(),
+            "MP3GAIN_ALBUM_MINMAX left behind"
+        );
+        assert!(
+            tag.get(TAG_REPLAYGAIN_TRACK_GAIN).is_none(),
+            "stale REPLAYGAIN_TRACK_GAIN left behind"
+        );
+        assert!(
+            tag.get(TAG_REPLAYGAIN_TRACK_PEAK).is_none(),
+            "stale REPLAYGAIN_TRACK_PEAK left behind"
+        );
+    }
+    cleanup(&path);
+}
+
+/// Issue #306, split layout: the `REPLAYGAIN_*` values live in ID3v2 while
+/// the undo tag lives in APEv2. Undoing via the APE path must also strip the
+/// now-stale ID3v2 values.
+#[test]
+fn test_undo_auto_removes_stale_id3v2_replaygain_in_split_layout() {
+    use mp3rgain::apply::{apply_with_options, ApplyOptions};
+    use mp3rgain::{read_id3v2_replaygain, replaygain, undo_gain_auto, TagLayout};
+
+    let path = copy_test_file("test_stereo.mp3");
+    let result = replaygain::analyze_track_with_index(&path, None).unwrap();
+    let mut opts = ApplyOptions::new(2);
+    opts.track_result = Some(result);
+    opts.write_replaygain_tags = true;
+    opts.tag_layout = TagLayout::Split;
+    apply_with_options(&path, &opts).unwrap();
+
+    let rg = read_id3v2_replaygain(&path).unwrap();
+    assert!(rg.track_gain.is_some(), "setup: ID3v2 RG values expected");
+
+    let frames = undo_gain_auto(&path, TagLayout::Split).unwrap();
+    assert!(frames > 0, "undo should have modified frames");
+
+    let rg = read_id3v2_replaygain(&path).unwrap();
+    assert!(
+        rg.track_gain.is_none() && rg.track_peak.is_none(),
+        "stale ID3v2 REPLAYGAIN_* left behind"
+    );
+    if let Some(tag) = read_ape_tag_from_file(&path).unwrap() {
+        assert!(tag.get(TAG_MP3GAIN_UNDO).is_none(), "undo tag left behind");
+    }
+    cleanup(&path);
+}
+
+/// Issue #306, all-ID3v2 layout: the ID3v2 undo path must strip the
+/// `REPLAYGAIN_*` TXXX frames along with undo/minmax.
+#[test]
+fn test_undo_removes_stale_replaygain_in_id3v2_layout() {
+    use mp3rgain::apply::{apply_with_options, ApplyOptions};
+    use mp3rgain::{read_id3v2_replaygain, replaygain, undo_gain_auto, TagLayout};
+
+    let path = copy_test_file("test_stereo.mp3");
+    let result = replaygain::analyze_track_with_index(&path, None).unwrap();
+    let mut opts = ApplyOptions::new(2);
+    opts.track_result = Some(result);
+    opts.write_replaygain_tags = true;
+    opts.tag_layout = TagLayout::Id3v2;
+    apply_with_options(&path, &opts).unwrap();
+
+    let frames = undo_gain_auto(&path, TagLayout::Id3v2).unwrap();
+    assert!(frames > 0, "undo should have modified frames");
+
+    let rg = read_id3v2_replaygain(&path).unwrap();
+    assert!(
+        rg.undo.is_none() && rg.minmax.is_none(),
+        "ID3v2 undo/minmax left behind"
+    );
+    assert!(
+        rg.track_gain.is_none() && rg.track_peak.is_none(),
+        "stale ID3v2 REPLAYGAIN_* left behind"
+    );
+    cleanup(&path);
+}
