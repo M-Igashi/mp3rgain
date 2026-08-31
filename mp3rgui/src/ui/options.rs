@@ -69,6 +69,22 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
                          CLI -n.",
                     );
 
+                // Issue #302: GUI counterpart of the CLI's -s R. Reuse is
+                // only trusted in RG 1.0 mode, so the checkbox greys out in
+                // the BS.1770 modes (mirroring -s R being ignored with
+                // --rg2 / --r128).
+                ui.add_enabled(
+                    app.analysis_mode == AnalysisMode::Rg1,
+                    egui::Checkbox::new(&mut app.use_stored_tags, "Use stored tags"),
+                )
+                .on_hover_text(
+                    "Apply Track / Album Gain from stored REPLAYGAIN_* tags instead \
+                     of re-analyzing; only files without usable tags are rescanned. \
+                     Album Gain reuses tags only when every file in the album \
+                     carries a consistent set; any gap rescans the whole album. \
+                     CLI -s R. RG 1.0 mode only.",
+                );
+
                 ui.separator();
 
                 ui.checkbox(&mut app.single_album, "Single album")
