@@ -1230,10 +1230,18 @@ pub fn is_mp4_file(file_path: &Path) -> bool {
         Ok(n) => n,
         Err(_) => return false,
     };
+    is_mp4_header(&buf[..bytes_read])
+}
+
+/// [`is_mp4_file`] on the first bytes of a file already in memory. Only the
+/// leading 128 bytes are inspected.
+fn is_mp4_header(head: &[u8]) -> bool {
+    let buf = &head[..head.len().min(128)];
+    let bytes_read = buf.len();
     if bytes_read < 12 {
         return false;
     }
-    let size = read_u32_be(&buf, 0) as usize;
+    let size = read_u32_be(buf, 0) as usize;
     if &buf[4..8] != b"ftyp" || size < 12 {
         return false;
     }
@@ -1405,8 +1413,12 @@ pub(crate) fn find_trak_sample_info(
 /// Navigates moov → trak → mdia → minf → stbl → stsd to find the codec.
 pub fn detect_mp4_audio_codec(file_path: &Path) -> Option<Mp4AudioCodec> {
     let moov = read_moov_content(file_path)?;
-    traks(&moov, 0, moov.len())
-        .find_map(|(trak_start, trak_size)| detect_codec_in_trak(&moov, trak_start, trak_size))
+    detect_codec_in_moov(&moov, 0, moov.len())
+}
+
+fn detect_codec_in_moov(data: &[u8], moov_start: usize, moov_size: usize) -> Option<Mp4AudioCodec> {
+    traks(data, moov_start, moov_size)
+        .find_map(|(trak_start, trak_size)| detect_codec_in_trak(data, trak_start, trak_size))
 }
 
 fn detect_codec_in_trak(data: &[u8], trak_start: usize, trak_size: usize) -> Option<Mp4AudioCodec> {
@@ -1428,6 +1440,23 @@ pub fn is_aac_file(file_path: &Path) -> bool {
         detect_mp4_audio_codec(file_path),
         Some(Mp4AudioCodec::Aac) | None
     )
+}
+
+/// [`is_aac_file`] on a whole file already in memory, so a caller holding
+/// the bytes doesn't reopen the file to classify it. Same rule: MP4 brand
+/// plus an `mp4a` (or undetectable) codec.
+pub fn is_aac_data(data: &[u8]) -> bool {
+    if !is_mp4_header(data) {
+        return false;
+    }
+    let codec = find_box(data, MOOV).and_then(|(moov_pos, moov_header)| {
+        detect_codec_in_moov(
+            data,
+            moov_pos + moov_header.header_size as usize,
+            moov_header.content_size() as usize,
+        )
+    });
+    matches!(codec, Some(Mp4AudioCodec::Aac) | None)
 }
 
 /// Count the number of audio tracks in an MP4 file.
@@ -1599,6 +1628,7 @@ mod tests {
             );
             assert_eq!(count_audio_tracks(&path), 2, "{name}");
             assert!(is_aac_file(&path), "{name}");
+            assert!(is_aac_data(&std::fs::read(&path).unwrap()), "{name}");
         }
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -1709,6 +1739,7 @@ mod tests {
         f.write_all(b"ID3\x04\x00\x00\x00\x00\x00\x00").unwrap();
         drop(f);
         assert!(!is_mp4_file(&path));
+        assert!(!is_aac_data(b"ID3\x04\x00\x00\x00\x00\x00\x00"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -19,13 +19,15 @@ use crate::util::get_filename;
 /// Run one album analysis over `paths`, driving the shared album progress
 /// bar. Serial runs get the byte-level bar via `on_progress`; parallel runs
 /// tick per file via `on_complete`. Shared by `cmd_info` and `cmd_album_gain`.
+/// The thread count follows `-j` (see [`effective_threads`]); only
+/// `skip_errors` varies between callers.
 pub fn run_album_analysis(
     paths: &[&Path],
     opts: &Options,
-    threads: usize,
-    parallel: bool,
     skip_errors: bool,
 ) -> mp3rgain::error::Result<AlbumAnalysisReport> {
+    let threads = effective_threads(opts);
+    let parallel = threads > 1 && paths.len() > 1;
     let show_progress = !opts.quiet && opts.output_format == OutputFormat::Text;
     let mp = MultiProgress::new();
     let pb = if show_progress {

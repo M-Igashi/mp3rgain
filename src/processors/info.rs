@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::*;
 use indicatif::ProgressBar;
 use mp3rgain::replaygain::{self, ReplayGainResult};
-use mp3rgain::{analyze, mp4meta, peak_to_pcm_sample, steps_to_db};
+use mp3rgain::{analyze, mp4meta, peak_to_pcm_sample};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -37,11 +37,9 @@ pub fn format_rg_row(
     let max_amp = rg_result.peak();
     let (max_gain, min_gain) = gain_range;
 
-    // Calculate gain with modifier, matching the apply paths (-m steps + -d dB,
-    // combined into steps via gain_modifier_steps)
-    let modifier_steps = opts.gain_modifier_steps();
-    let gain_steps = rg_result.gain_steps() + modifier_steps;
-    let gain_db = rg_result.gain_db() + steps_to_db(modifier_steps);
+    // Gain with the -m / -d modifiers folded in, the same way the apply
+    // paths report it.
+    let (gain_steps, gain_db) = opts.modified_gain(rg_result.gain_steps(), rg_result.gain_db());
 
     // Max Amplitude scaled to 32768 (mp3gain format for beets)
     // beets divides by 32768, so we output peak * 32768

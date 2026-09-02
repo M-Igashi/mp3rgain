@@ -363,6 +363,14 @@ fn next_frame(
     None
 }
 
+/// Header of the first accepted (non-Xing) frame, or `None` when `data`
+/// holds no MP3 frame. Cheap: stops at the first hit instead of walking the
+/// file, for callers that only need the stream's channel mode or version.
+pub(crate) fn first_frame_header(data: &[u8]) -> Option<FrameHeader> {
+    let audio_end = find_audio_end(data);
+    next_frame(data, skip_id3v2(data), audio_end, None).map(|(_, header, _)| header)
+}
+
 /// Internal function to iterate over frames
 pub(crate) fn iterate_frames<F>(data: &[u8], mut callback: F) -> Result<usize>
 where

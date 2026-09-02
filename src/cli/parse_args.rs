@@ -75,8 +75,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
         if arg == "--threads" {
             i += 1;
             if i >= args.len() {
-                eprintln!("{}: --threads requires an argument", "error".red().bold());
-                std::process::exit(1);
+                anyhow::bail!("--threads requires an argument");
             }
             opts.threads = Some(parse_thread_count(&args[i], "--threads")?);
             i += 1;
@@ -96,8 +95,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                 "g" => {
                     i += 1;
                     if i >= args.len() {
-                        eprintln!("{}: -g requires an argument", "error".red().bold());
-                        std::process::exit(1);
+                        anyhow::bail!("-g requires an argument");
                     }
                     opts.gain_steps = Some(
                         args[i]
@@ -110,8 +108,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                     // (adjusts target level relative to 89 dB reference)
                     i += 1;
                     if i >= args.len() {
-                        eprintln!("{}: -d requires an argument", "error".red().bold());
-                        std::process::exit(1);
+                        anyhow::bail!("-d requires an argument");
                     }
                     opts.gain_modifier_db = args[i]
                         .parse()
@@ -120,8 +117,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                 "m" => {
                     i += 1;
                     if i >= args.len() {
-                        eprintln!("{}: -m requires an argument", "error".red().bold());
-                        std::process::exit(1);
+                        anyhow::bail!("-m requires an argument");
                     }
                     opts.gain_modifier = args[i]
                         .parse()
@@ -130,8 +126,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                 "s" => {
                     i += 1;
                     if i >= args.len() {
-                        eprintln!("{}: -s requires an argument", "error".red().bold());
-                        std::process::exit(1);
+                        anyhow::bail!("-s requires an argument");
                     }
                     match args[i].as_str() {
                         "c" => opts.stored_tag_mode = StoredTagMode::Check,
@@ -146,12 +141,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                         "i" => opts.tag_layout = TagLayout::Id3v2,
                         "a" => opts.tag_layout = TagLayout::Ape,
                         other => {
-                            eprintln!(
-                                "{}: unknown -s mode '{}', use c/d/s/r/R/i/a",
-                                "error".red().bold(),
-                                other
-                            );
-                            std::process::exit(1);
+                            anyhow::bail!("unknown -s mode '{}', use c/d/s/r/R/i/a", other);
                         }
                     }
                 }
@@ -184,11 +174,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                     // -l <channel> <gain> : apply gain to specific channel
                     i += 1;
                     if i >= args.len() {
-                        eprintln!(
-                            "{}: -l requires two arguments: <channel> <gain>",
-                            "error".red().bold()
-                        );
-                        std::process::exit(1);
+                        anyhow::bail!("-l requires two arguments: <channel> <gain>");
                     }
                     let channel_arg: usize = args[i].parse().map_err(|_| {
                         anyhow::anyhow!(
@@ -205,11 +191,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
 
                     i += 1;
                     if i >= args.len() {
-                        eprintln!(
-                            "{}: -l requires two arguments: <channel> <gain>",
-                            "error".red().bold()
-                        );
-                        std::process::exit(1);
+                        anyhow::bail!("-l requires two arguments: <channel> <gain>");
                     }
                     let gain: i32 = args[i]
                         .parse()
@@ -220,8 +202,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                 "i" => {
                     i += 1;
                     if i >= args.len() {
-                        eprintln!("{}: -i requires an argument", "error".red().bold());
-                        std::process::exit(1);
+                        anyhow::bail!("-i requires an argument");
                     }
                     opts.track_index = Some(
                         args[i]
@@ -232,8 +213,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                 "j" => {
                     i += 1;
                     if i >= args.len() {
-                        eprintln!("{}: -j requires an argument", "error".red().bold());
-                        std::process::exit(1);
+                        anyhow::bail!("-j requires an argument");
                     }
                     opts.threads = Some(parse_thread_count(&args[i], "-j")?);
                 }
@@ -368,16 +348,7 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
 }
 
 pub fn expand_files_recursive(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
-    let mut result = Vec::new();
-
-    for path in paths {
-        if path.is_dir() {
-            result.extend(mp3rgain::collect_audio_files(path, true)?);
-        } else {
-            result.push(path.clone());
-        }
-    }
-
+    let mut result = mp3rgain::expand_audio_paths(paths)?;
     result.sort();
     // Overlapping roots (e.g. `-R music music/album`) yield duplicates,
     // which would apply gain twice to the same file.
@@ -855,5 +826,32 @@ mod tests {
         assert_eq!(opts.gain_steps, Some(2));
         assert!(opts.preserve_timestamp);
         assert_eq!(opts.files.len(), 2);
+    }
+
+    /// A flag missing its argument is an error like an invalid value, not a
+    /// `process::exit` from inside the parser.
+    #[test]
+    fn missing_argument_is_an_error() {
+        for argv in [
+            vec!["-g"],
+            vec!["-d"],
+            vec!["-m"],
+            vec!["-s"],
+            vec!["-i"],
+            vec!["-j"],
+            vec!["--threads"],
+            vec!["-l"],
+            vec!["-l", "0"],
+            vec!["-s", "z"],
+        ] {
+            let err = match parse_args(&args(&argv)) {
+                Err(e) => e.to_string(),
+                Ok(_) => panic!("{argv:?} should be rejected"),
+            };
+            assert!(
+                err.contains("requires") || err.contains("unknown -s mode"),
+                "{argv:?}: {err}"
+            );
+        }
     }
 }

@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::frame::{iterate_frames, read_gain_at, scan_gain_range};
+use crate::frame::{first_frame_header, iterate_frames, read_gain_at, scan_gain_range, skip_id3v2};
 use crate::gain::{steps_to_db, MAX_GAIN};
 
 use std::fs;
@@ -250,14 +250,18 @@ pub fn analyze_data(data: &[u8]) -> Result<Mp3Analysis> {
 /// `global_gain` headroom (MP3 only) — AAC inputs return an error in
 /// that build.
 ///
+/// The file is read from disk once: the same buffer feeds the gain-range
+/// scan and the decoder (previously each did its own full read).
+///
 /// Note: The max_amplitude is normalized (0.0 to 1.0+), where values > 1.0 indicate clipping.
 /// To get the value in 16-bit PCM scale (like mp3gain), multiply by 32768.
 #[cfg(feature = "replaygain")]
 pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
     use crate::replaygain;
 
-    let peak_result = replaygain::find_peak_amplitude(file_path)?;
-    let (min_gain, max_gain) = read_gain_range(file_path)?;
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    let (min_gain, max_gain) = gain_range_of(&data)?;
+    let peak_result = replaygain::find_peak_amplitude_in_data(file_path, data)?;
 
     Ok(MaxAmplitudeResult::new(
         peak_result.peak(),
@@ -269,7 +273,8 @@ pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
 /// Find maximum amplitude in an MP3 file (fallback without replaygain feature)
 #[cfg(not(feature = "replaygain"))]
 pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
-    let (min_gain, max_gain) = read_gain_range(file_path)?;
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    let (min_gain, max_gain) = gain_range_of(&data)?;
 
     let headroom_steps = (MAX_GAIN - max_gain) as i32;
     let headroom_db = steps_to_db(headroom_steps);
@@ -278,14 +283,14 @@ pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
     Ok(MaxAmplitudeResult::new(max_amplitude, max_gain, min_gain))
 }
 
-/// Read the min/max gain values from a file, dispatching by format.
-/// MP3 uses the frame scanner; AAC uses the per-frame `global_gain` scan
-/// from [`crate::aac::analyze_aac_gains`].
-fn read_gain_range(file_path: &Path) -> Result<(u8, u8)> {
-    if crate::mp4meta::is_aac_file(file_path) {
+/// Min/max `global_gain` of a file already in memory, dispatching by
+/// container. MP3 uses the frame scanner; AAC uses the per-frame scan from
+/// [`crate::aac::analyze_aac_gains`].
+fn gain_range_of(data: &[u8]) -> Result<(u8, u8)> {
+    if crate::mp4meta::is_aac_data(data) {
         #[cfg(feature = "aac")]
         {
-            let analysis = crate::aac::analyze_aac_gains(file_path)?;
+            let analysis = crate::aac::analyze_aac_gains_from_data(data)?;
             return Ok((analysis.min_gain(), analysis.max_gain()));
         }
         #[cfg(not(feature = "aac"))]
@@ -296,12 +301,49 @@ fn read_gain_range(file_path: &Path) -> Result<(u8, u8)> {
             });
         }
     }
-    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-    scan_gain_range(&data)
+    scan_gain_range(data)
+}
+
+/// Channel mode of the first MP3 frame, reading only the head of the file.
+///
+/// [`analyze`] walks every frame to compute gain statistics, but a mono
+/// check or a Joint Stereo warning needs one header. The ID3v2 tag is
+/// skipped by its declared size (cover art can run to megabytes) and a
+/// 64 KiB window read after it, which holds the first frame plus the sync
+/// check on the one following. The rare stream that starts later than that
+/// falls back to a full read.
+pub fn read_channel_mode(file_path: &Path) -> Result<ChannelMode> {
+    use std::io::{Read, Seek, SeekFrom};
+    const WINDOW: usize = 64 * 1024;
+
+    let read_err = |e| Error::io_read(file_path, e);
+    let mut file = fs::File::open(file_path).map_err(|e| Error::io_open(file_path, e))?;
+    let mut head = [0u8; 10];
+    let n = file.read(&mut head).map_err(read_err)?;
+    let start = skip_id3v2(&head[..n]) as u64;
+    file.seek(SeekFrom::Start(start)).map_err(read_err)?;
+
+    let mut window = vec![0u8; WINDOW];
+    let mut filled = 0;
+    while filled < window.len() {
+        let n = file.read(&mut window[filled..]).map_err(read_err)?;
+        if n == 0 {
+            break;
+        }
+        filled += n;
+    }
+    window.truncate(filled);
+    if let Some(header) = first_frame_header(&window) {
+        return Ok(header.channel_mode);
+    }
+
+    let data = fs::read(file_path).map_err(read_err)?;
+    first_frame_header(&data)
+        .map(|h| h.channel_mode)
+        .ok_or(Error::NoMp3Frames)
 }
 
 /// Check if an MP3 file is mono
 pub fn is_mono(file_path: &Path) -> Result<bool> {
-    let analysis = analyze(file_path)?;
-    Ok(analysis.channel_mode() == ChannelMode::Mono)
+    Ok(read_channel_mode(file_path)? == ChannelMode::Mono)
 }

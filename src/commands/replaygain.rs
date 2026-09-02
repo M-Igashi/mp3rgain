@@ -17,7 +17,7 @@ use crate::commands::utils::{
 };
 use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
 use crate::processors::replaygain::{
-    capped_tag_gain, process_apply_replaygain_with_album, process_track_gain,
+    apply_is_noop, capped_tag_gain, process_apply_replaygain_with_album, process_track_gain,
 };
 use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
 use crate::util::get_filename;
@@ -108,33 +108,23 @@ fn stored_album_report(files: &[PathBuf], opts: &Options) -> Option<AlbumAnalysi
         return None;
     }
     let mut tracks = Vec::with_capacity(files.len());
-    let mut album_gain: Option<f64> = None;
-    let mut album_peak: f64 = 0.0;
+    let mut album_values = Vec::with_capacity(files.len());
     for file in files {
         let tags = mp3rgain::read_gain_tags_auto(file, opts.tag_layout).ok()?;
-        if tags.algorithm.is_some() {
-            return None;
-        }
-        let gain_db = tags.track_gain_db()?;
-        let peak = tags.track_peak_value()?;
-        let file_album_gain = tags.album_gain_db()?;
-        album_peak = album_peak.max(tags.album_peak_value()?);
-        match album_gain {
-            Some(g) if (g - file_album_gain).abs() > 0.05 => return None,
-            Some(_) => {}
-            None => album_gain = Some(file_album_gain),
-        }
+        let values = tags.rg1_album_values()?;
+        album_values.push((values.album_gain_db, values.album_peak));
         tracks.push(ReplayGainResult::from_stored_tags(
-            gain_db,
-            peak,
+            values.track_gain_db,
+            values.track_peak,
             AudioFileType::from_path(file),
             opts.analysis_mode,
         ));
     }
+    let (album_gain, album_peak) = mp3rgain::consistent_album_gain(album_values)?;
     Some(AlbumAnalysisReport {
         album: AlbumGainResult::from_stored_tags(
             tracks,
-            album_gain?,
+            album_gain,
             album_peak,
             opts.analysis_mode,
         ),
@@ -182,7 +172,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 println!("  {} Analyzing tracks...", "->".cyan());
             }
-            run_album_analysis(&file_refs, opts, threads, parallel, opts.skip_errors)
+            run_album_analysis(&file_refs, opts, opts.skip_errors)
         }
     };
 
@@ -279,21 +269,21 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             let steps = modified_gain_steps;
 
             // A net 0-step album adjustment still has work to do when tags
-            // would be written or `-k` must attenuate a clipping track — the
+            // would be written or `-k` must attenuate a clipping track, the
             // same reasoning as the track path (issue #206). Skipping outright
             // loses the per-track REPLAYGAIN_* tags for an album that merely
             // happens to sit on target (reported on the Hydrogenaudio forum:
             // album gain -0.04 dB, yet track 3 wants +1.46 dB).
-            let writes_rg_tags = opts.stored_tag_mode != StoredTagMode::Skip
-                || album_result
-                    .tracks()
-                    .iter()
-                    .any(|t| t.file_type() == AudioFileType::Aac);
-            let clip_prevention_applies =
-                opts.prevent_clipping && album_result.tracks().iter().any(|t| t.peak() > 1.0);
-
-            // --tags-only always has a tag to write (issue #308).
-            if !opts.tags_only && steps == 0 && !writes_rg_tags && !clip_prevention_applies {
+            let any_aac = album_result
+                .tracks()
+                .iter()
+                .any(|t| t.file_type() == AudioFileType::Aac);
+            let max_peak = album_result
+                .tracks()
+                .iter()
+                .map(|t| t.peak())
+                .fold(0.0, f64::max);
+            if apply_is_noop(opts, steps, any_aac, max_peak) {
                 if opts.output_format == OutputFormat::Json {
                     let json_results: Vec<JsonFileResult> = files
                         .iter()

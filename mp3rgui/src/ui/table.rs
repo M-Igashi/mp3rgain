@@ -9,35 +9,42 @@ use crate::worker::StoredTagsView;
 fn render_stored_tags_cell(ui: &mut egui::Ui, tags: Option<&StoredTagsView>) {
     let Some(view) = tags else { return };
     if view.is_empty() {
-        ui.weak("none").on_hover_text(format!(
-            "No stored tags found ({} container)",
-            view.format.unwrap_or("?")
-        ));
+        ui.weak("none")
+            .on_hover_text(format!("No stored tags found ({} container)", view.format));
         return;
     }
-    let label = view.track_gain.as_deref().unwrap_or("—");
+    let tags = &view.tags;
+    let label = tags.track_gain.as_deref().unwrap_or("—");
     ui.label(label).on_hover_ui(|ui| {
-        ui.label(format!("Container: {}", view.format.unwrap_or("?")));
+        ui.label(format!("Container: {}", view.format));
         ui.separator();
         for (name, value) in [
             (
                 mp3rgain::TAG_REPLAYGAIN_TRACK_GAIN,
-                view.track_gain.as_deref(),
+                tags.track_gain.as_deref(),
             ),
             (
                 mp3rgain::TAG_REPLAYGAIN_TRACK_PEAK,
-                view.track_peak.as_deref(),
+                tags.track_peak.as_deref(),
             ),
             (
                 mp3rgain::TAG_REPLAYGAIN_ALBUM_GAIN,
-                view.album_gain.as_deref(),
+                tags.album_gain.as_deref(),
             ),
             (
                 mp3rgain::TAG_REPLAYGAIN_ALBUM_PEAK,
-                view.album_peak.as_deref(),
+                tags.album_peak.as_deref(),
             ),
-            (mp3rgain::TAG_MP3GAIN_UNDO, view.undo.as_deref()),
-            (mp3rgain::TAG_MP3GAIN_MINMAX, view.minmax.as_deref()),
+            (
+                mp3rgain::TAG_REPLAYGAIN_ALGORITHM,
+                tags.algorithm.as_deref(),
+            ),
+            (mp3rgain::TAG_MP3GAIN_UNDO, tags.undo.as_deref()),
+            (mp3rgain::TAG_MP3GAIN_MINMAX, tags.minmax.as_deref()),
+            (
+                mp3rgain::TAG_MP3GAIN_ALBUM_MINMAX,
+                tags.album_minmax.as_deref(),
+            ),
         ] {
             if let Some(v) = value {
                 ui.label(format!("{}: {}", name, v));

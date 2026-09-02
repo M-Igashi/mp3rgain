@@ -45,7 +45,7 @@ pub struct Id3v2ReplayGain {
     pub minmax: Option<String>,
 }
 
-fn read_tag(path: &Path) -> Result<id3::Tag> {
+pub(crate) fn read_tag(path: &Path) -> Result<id3::Tag> {
     match id3::Tag::read_from_path(path) {
         Ok(tag) => Ok(tag),
         Err(id3::Error {
@@ -124,7 +124,7 @@ fn write_tag(path: &Path, tag: &mut id3::Tag) -> Result<()> {
     })
 }
 
-fn get_txxx(tag: &id3::Tag, description: &str) -> Option<String> {
+pub(crate) fn get_txxx(tag: &id3::Tag, description: &str) -> Option<String> {
     let desc_upper = description.to_uppercase();
     tag.extended_texts()
         .find(|t| t.description.to_uppercase() == desc_upper)
@@ -195,8 +195,19 @@ pub fn write_id3v2_replaygain(path: &Path, rg: &Id3v2ReplayGain) -> Result<()> {
 /// are already writing onto a not-yet-visible temp file (issue #232).
 pub(crate) fn write_id3v2_replaygain_direct(path: &Path, rg: &Id3v2ReplayGain) -> Result<()> {
     let mut tag = read_tag(path)?;
-    add_rg_frames(&mut tag, rg);
-    write_tag_direct(path, &mut tag)
+    write_rg_frames_direct(path, &mut tag, rg)
+}
+
+/// [`write_id3v2_replaygain_direct`] on a tag the caller already parsed with
+/// [`read_tag`], so a caller that needs to inspect the existing frames first
+/// (the `-s i` apply reads the prior `MP3GAIN_UNDO`) parses the tag once.
+pub(crate) fn write_rg_frames_direct(
+    path: &Path,
+    tag: &mut id3::Tag,
+    rg: &Id3v2ReplayGain,
+) -> Result<()> {
+    add_rg_frames(tag, rg);
+    write_tag_direct(path, tag)
 }
 
 /// Delete all ReplayGain and undo TXXX frames from ID3v2 tag
@@ -239,7 +250,12 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
         for desc in ALL_RG_DESCRIPTIONS {
             remove_txxx_ci(&mut tag, desc);
         }
-        write_tag_direct(temp, &mut tag)
+        write_tag_direct(temp, &mut tag)?;
+        // The APEv2 copies (a stale `REPLAYGAIN_*` set from mp3gain or an
+        // earlier `-s a` run, and the album range) described the gained
+        // audio too. A tail rewrite on the temp folds their removal into the
+        // same rename instead of a second visible write after it.
+        crate::ape::remove_ape_undone_gain_values(temp)
     })?;
     Ok(frames)
 }
@@ -248,20 +264,39 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
 /// `REPLAYGAIN_*` TXXX frames, leaving any `MP3GAIN_UNDO` / `MP3GAIN_MINMAX`
 /// alone. Files without ReplayGain frames are left untouched rather than
 /// rewritten.
+#[allow(dead_code)]
 pub(crate) fn remove_id3v2_rg_values(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
+    if !strip_rg_values(&mut tag) {
+        return Ok(());
+    }
+    write_tag(path, &mut tag)
+}
+
+/// [`remove_id3v2_rg_values`] for a not-yet-visible temp file the caller is
+/// about to rename into place (the APEv2 undo path), so the ID3v2 cleanup
+/// rides along instead of costing a second full-file copy.
+pub(crate) fn remove_id3v2_rg_values_direct(path: &Path) -> Result<()> {
+    let mut tag = read_tag(path)?;
+    if !strip_rg_values(&mut tag) {
+        return Ok(());
+    }
+    write_tag_direct(path, &mut tag)
+}
+
+/// Remove the `REPLAYGAIN_*` frames from `tag`; `false` if there were none.
+fn strip_rg_values(tag: &mut id3::Tag) -> bool {
     let has_rg = tag.extended_texts().any(|t| {
         RG_VALUE_DESCRIPTIONS
             .iter()
             .any(|d| t.description.eq_ignore_ascii_case(d))
     });
-    if !has_rg {
-        return Ok(());
+    if has_rg {
+        for desc in RG_VALUE_DESCRIPTIONS {
+            remove_txxx_ci(tag, desc);
+        }
     }
-    for desc in RG_VALUE_DESCRIPTIONS {
-        remove_txxx_ci(&mut tag, desc);
-    }
-    write_tag(path, &mut tag)
+    has_rg
 }
 
 #[cfg(test)]

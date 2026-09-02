@@ -208,16 +208,7 @@ fn handle_dropped_files(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     // Expand directories recursively so dropping a folder behaves like
     // "Add Folder (with subfolders)". `add_files` itself only keeps regular
     // files, so directories would silently disappear without this.
-    let mut paths = Vec::new();
-    for path in dropped {
-        if path.is_dir() {
-            if let Ok(found) = mp3rgain::collect_audio_files(&path, true) {
-                paths.extend(found);
-            }
-        } else {
-            paths.push(path);
-        }
-    }
+    let paths = mp3rgain::expand_audio_paths(&dropped).unwrap_or_default();
     app.add_files(paths);
 }
 

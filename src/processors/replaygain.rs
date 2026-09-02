@@ -14,7 +14,7 @@ use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
 
 use super::utils::{
-    analyze_track, emit_clipping_warning, report_file_error, restore_timestamp,
+    analyze_track, emit_clipping_warning, emit_file_warning, report_file_error, restore_timestamp,
     save_original_mtime, stored_track_result, warn_aac_multi_track,
 };
 
@@ -104,24 +104,12 @@ fn process_track_gain_into(
                 }
             }
 
-            // A net 0-step adjustment still has work to do when (issue #206):
-            //   - ReplayGain analysis tags would be written (AAC always; MP3
-            //     in `-s i` mode), so an already-on-target track gets its
-            //     REPLAYGAIN_* tags (re)written rather than skipped, and/or
-            //   - `-k` must attenuate a track that is already at the
-            //     reference loudness yet already clips (peak > 1.0).
-            // Only the common already-normalized, non-clipping, no-tags case
-            // keeps the cheap "no adjustment needed" skip.
-            // RG analysis tags are written for AAC always, and for MP3 in any
-            // mode that keeps tags (APE default or `-s i` ID3v2) — only `-s s`
-            // skips them (issue #204).
-            let writes_rg_tags = result.file_type() == AudioFileType::Aac
-                || opts.stored_tag_mode != StoredTagMode::Skip;
-            let clip_prevention_applies = opts.prevent_clipping && result.peak() > 1.0;
-            // --tags-only always has a tag to write, so it never takes the
-            // "nothing to do" shortcut (issue #308).
-            if !opts.tags_only && modified_steps == 0 && !writes_rg_tags && !clip_prevention_applies
-            {
+            if apply_is_noop(
+                opts,
+                modified_steps,
+                result.file_type() == AudioFileType::Aac,
+                result.peak(),
+            ) {
                 if opts.output_format == OutputFormat::Text && !opts.quiet {
                     writeln!(out, "  {} {} (no adjustment needed)", ".".cyan(), filename)?;
                 }
@@ -138,6 +126,24 @@ fn process_track_gain_into(
         }
         Err(e) => Ok(report_file_error(file, filename, e, opts)),
     }
+}
+
+/// Whether a ReplayGain apply that nets `steps == 0` has genuinely nothing to
+/// do, so the file can take the cheap "no adjustment needed" skip. It still
+/// has work when (issue #206):
+///   - ReplayGain analysis tags would be written (AAC always, since mp3gain
+///     has no AAC to stay compatible with; MP3 in any mode that keeps tags,
+///     i.e. everything but `-s s`, issue #204), so an already-on-target
+///     track gets its REPLAYGAIN_* tags (re)written rather than skipped;
+///   - `-k` must attenuate a track that already sits at the reference
+///     loudness yet already clips (`peak > 1.0`);
+///   - `--tags-only` always has a tag to write (issue #308).
+///
+/// Album mode passes "any member is AAC" and the loudest member peak.
+pub fn apply_is_noop(opts: &Options, steps: i32, any_aac: bool, max_peak: f64) -> bool {
+    let writes_rg_tags = any_aac || opts.stored_tag_mode != StoredTagMode::Skip;
+    let clip_prevention_applies = opts.prevent_clipping && max_peak > 1.0;
+    !opts.tags_only && steps == 0 && !writes_rg_tags && !clip_prevention_applies
 }
 
 /// Per-file result, buffered text output, and the post-apply `(max, min)`
@@ -185,6 +191,7 @@ fn apply_replaygain_with_album_into(
         apply_opts.track_result = Some(result.clone());
         apply_opts.prevent_clipping = opts.prevent_clipping;
         apply_opts.wrap = opts.wrap_gain;
+        apply_opts.file_type = Some(result.file_type());
         let report = predict_apply(file, &apply_opts)?;
         let warning_msg =
             emit_clipping_warning(steps, &report, opts, filename, Some(result.peak()));
@@ -233,6 +240,7 @@ fn apply_replaygain_with_album_into(
     apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
     apply_opts.write_replaygain_tags = opts.stored_tag_mode != StoredTagMode::Skip;
     apply_opts.tag_layout = opts.tag_layout;
+    apply_opts.file_type = Some(AudioFileType::Mp3);
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {
@@ -297,23 +305,13 @@ fn cap_tag_gain(
     if player_peak <= 1.0 {
         return (gain_db, None);
     }
-    let dry_run_prefix = opts.dry_run_prefix();
-
     let capped = capped_tag_gain(gain_db, peak, opts.prevent_clipping);
     if capped != gain_db {
         let msg = format!(
             "{} gain reduced from {:+.2} to {:+.2} dB to prevent clipping (peak: {:.4})",
             label, gain_db, capped, peak
         );
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
-            eprintln!(
-                "  {} {}{} - {}",
-                "!".yellow(),
-                dry_run_prefix,
-                filename,
-                msg
-            );
-        }
+        emit_file_warning(opts, filename, &msg, None);
         return (capped, Some(msg));
     }
 
@@ -324,16 +322,12 @@ fn cap_tag_gain(
         "clipping warning: a player applying the {} gain of {:+.2} dB would peak at {:.2} (>1.00)",
         label, gain_db, player_peak
     );
-    if opts.output_format == OutputFormat::Text {
-        eprintln!(
-            "  {} {}{} - {}",
-            "!".yellow(),
-            dry_run_prefix,
-            filename,
-            msg
-        );
-        eprintln!("      Use -c to ignore clipping warnings or -k to cap the written gain");
-    }
+    emit_file_warning(
+        opts,
+        filename,
+        &msg,
+        Some("Use -c to ignore clipping warnings or -k to cap the written gain"),
+    );
     (gain_db, Some(msg))
 }
 
@@ -354,7 +348,7 @@ fn write_tags_only_into(
     let offset_db = opts.target_offset_db();
 
     if result.file_type() == AudioFileType::Aac {
-        warn_aac_multi_track(file, filename, opts, opts.dry_run_prefix());
+        warn_aac_multi_track(file, filename, opts);
     }
 
     let mut warnings: Vec<String> = Vec::new();
@@ -451,14 +445,18 @@ fn write_tags_only_into(
 
 /// Apply ReplayGain to AAC/M4A files with optional album info.
 ///
-/// Differs from the MP3 path in two ways the unified API can't model
-/// directly:
-///   - bitstream gain failures are logged and swallowed so we still
-///     write the ReplayGain tags (matches pre-issue-#153 behavior),
-///   - tag writing always runs (independent of `--stored-tag-mode`).
+/// Differs from the MP3 path in two ways:
+///   - the ReplayGain tags are always written (independent of
+///     `--stored-tag-mode`), since mp3gain has no AAC to stay compatible
+///     with;
+///   - bitstream gain failures are logged and swallowed, and the tags are
+///     still written, describing the unchanged audio (matches
+///     pre-issue-#153 behavior).
 ///
-/// We therefore drive the apply step with `write_replaygain_tags=false`
-/// and call `mp4meta::write_replaygain_tags` afterwards directly.
+/// The common case is one call: `apply_with_options` folds the ReplayGain
+/// freeform tags into the same container rewrite as the gain and undo tag.
+/// Only the fail-soft branch writes the tags in a separate pass, because
+/// there the apply produced no file to fold them into.
 fn apply_replaygain_aac_with_album_into(
     file: &Path,
     requested_steps: i32,
@@ -469,12 +467,10 @@ fn apply_replaygain_aac_with_album_into(
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
 
-    warn_aac_multi_track(file, filename, opts, "");
+    warn_aac_multi_track(file, filename, opts);
 
-    // mtime must be restored AFTER the ReplayGain tag write, not after the
-    // apply step alone — otherwise `mp4meta::write_replaygain_tags` below
-    // bumps the timestamp again. So we keep mtime handling on this side
-    // and tell apply_with_options to leave it alone.
+    // mtime is restored here, after whichever write happened last, so the
+    // fallback tag write cannot bump it again.
     let original_mtime = save_original_mtime(file, opts);
 
     let mut apply_opts = ApplyOptions::new(requested_steps);
@@ -483,103 +479,82 @@ fn apply_replaygain_aac_with_album_into(
     apply_opts.prevent_clipping = opts.prevent_clipping;
     apply_opts.wrap = opts.wrap_gain;
     apply_opts.preserve_timestamp = false;
-    // AAC tag writing is fail-soft, so we drive it ourselves below.
-    apply_opts.write_replaygain_tags = false;
+    apply_opts.write_replaygain_tags = true;
+    apply_opts.file_type = Some(AudioFileType::Aac);
 
-    let mut actual_steps = 0;
-    let mut warning_msg: Option<String> = None;
-    let mut gain_modified: usize = 0;
-
-    // apply_with_options handles temp file, mtime restore, and the
-    // clipping check. We only swallow bitstream errors so we can still
-    // record the ReplayGain tags afterwards.
-    match apply_with_options(file, &apply_opts) {
-        Ok(report) => {
-            actual_steps = report.actual_steps;
-            gain_modified = report.modified;
-            warning_msg = emit_clipping_warning(
+    let (actual_steps, gain_modified, warning_msg) = match apply_with_options(file, &apply_opts) {
+        Ok(report) => (
+            report.actual_steps,
+            report.modified,
+            emit_clipping_warning(
                 requested_steps,
                 &report,
                 opts,
                 filename,
                 Some(result.peak()),
-            );
-        }
+            ),
+        ),
         Err(e) => {
-            // No gain was baked into the bitstream, so actual_steps stays 0
-            // — otherwise the residual tags written below would claim a
-            // loudness shift that never happened.
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
-                eprintln!(
-                    "  {} {} - bitstream gain failed: {} (tags still written)",
-                    "!".yellow(),
-                    filename,
-                    e
-                );
+            emit_file_warning(
+                opts,
+                filename,
+                &format!("bitstream gain failed: {} (tags still written)", e),
+                None,
+            );
+            // No gain was baked into the bitstream, so the tags carry the
+            // full measured values rather than a residual that would claim
+            // a loudness shift that never happened.
+            let mut tags = mp4meta::ReplayGainTags::default();
+            tags.set_track(result.gain_db(), result.peak());
+            if let Some(album) = album_info {
+                tags.set_album(album.album_gain_db, album.album_peak);
             }
+            tags.set_algorithm(result.analysis_mode());
+            if let Err(e) = mp4meta::write_replaygain_tags(file, &tags) {
+                return Ok(report_file_error(file, filename, e, opts));
+            }
+            (0, 0, None)
+        }
+    };
+
+    if let Some(mtime) = original_mtime {
+        restore_timestamp(file, mtime);
+    }
+
+    let tag_type = if album_info.is_some() {
+        "track+album tags"
+    } else {
+        "tags"
+    };
+
+    if opts.output_format == OutputFormat::Text && !opts.quiet {
+        if gain_modified > 0 {
+            writeln!(
+                out,
+                "  {} {} ({} gains modified + {} written, {:+.1} dB)",
+                "v".green(),
+                filename,
+                gain_modified,
+                tag_type,
+                result.gain_db()
+            )?;
+        } else {
+            writeln!(
+                out,
+                "  {} {} ({} written, {:+.1} dB)",
+                "v".green(),
+                filename,
+                tag_type,
+                result.gain_db()
+            )?;
         }
     }
 
-    // Post-apply residual (issue #210), mirroring the MP3 path in
-    // apply_with_options. AAC clamps internally with no saturation tally, so
-    // the loudness shift is the arithmetic applied gain.
-    let applied_db = steps_to_db(actual_steps);
-    let mut tags = mp4meta::ReplayGainTags::default();
-    tags.set_track(
-        result.gain_db() - applied_db,
-        apply_gain_to_peak(result.peak(), applied_db),
-    );
-    if let Some(album) = album_info {
-        tags.set_album(
-            album.album_gain_db - applied_db,
-            apply_gain_to_peak(album.album_peak, applied_db),
-        );
-    }
-    tags.set_algorithm(result.analysis_mode());
-
-    match mp4meta::write_replaygain_tags(file, &tags) {
-        Ok(()) => {
-            if let Some(mtime) = original_mtime {
-                restore_timestamp(file, mtime);
-            }
-
-            let tag_type = if album_info.is_some() {
-                "track+album tags"
-            } else {
-                "tags"
-            };
-
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
-                if gain_modified > 0 {
-                    writeln!(
-                        out,
-                        "  {} {} ({} gains modified + {} written, {:+.1} dB)",
-                        "v".green(),
-                        filename,
-                        gain_modified,
-                        tag_type,
-                        result.gain_db()
-                    )?;
-                } else {
-                    writeln!(
-                        out,
-                        "  {} {} ({} written, {:+.1} dB)",
-                        "v".green(),
-                        filename,
-                        tag_type,
-                        result.gain_db()
-                    )?;
-                }
-            }
-
-            Ok(JsonFileResult {
-                status: Some(FileStatus::Success),
-                gain_applied_steps: Some(actual_steps),
-                gain_applied_db: Some(steps_to_db(actual_steps)),
-                warning: warning_msg,
-                ..JsonFileResult::from_analysis(file, result)
-            })
-        }
-        Err(e) => Ok(report_file_error(file, filename, e, opts)),
-    }
+    Ok(JsonFileResult {
+        status: Some(FileStatus::Success),
+        gain_applied_steps: Some(actual_steps),
+        gain_applied_db: Some(steps_to_db(actual_steps)),
+        warning: warning_msg,
+        ..JsonFileResult::from_analysis(file, result)
+    })
 }

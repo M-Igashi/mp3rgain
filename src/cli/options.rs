@@ -95,6 +95,19 @@ impl Options {
             && self.target_offset_db() == 0.0
     }
 
+    /// A measured gain shifted by the `-m` / `-d` modifiers, as the apply and
+    /// info paths report it: `(steps, dB)`, both quantized to whole
+    /// `global_gain` steps so the two columns always agree. Every caller used
+    /// to spell this out, and one carried a comment asking to be kept in sync
+    /// with the others.
+    pub fn modified_gain(&self, base_steps: i32, base_db: f64) -> (i32, f64) {
+        let modifier_steps = self.gain_modifier_steps();
+        (
+            base_steps + modifier_steps,
+            base_db + mp3rgain::steps_to_db(modifier_steps),
+        )
+    }
+
     /// Combined `-m` (steps) and `-d` (dB) modifier expressed as mp3 gain steps.
     /// `-d` is rounded to the nearest 1.5 dB step; sub-step values silently
     /// round to zero, matching mp3gain's quantized step model.

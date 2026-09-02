@@ -1,13 +1,12 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::replaygain::{self, AlbumAnalysisReport, ReplayGainResult};
-use mp3rgain::{mp4meta, peak_to_pcm_sample, steps_to_db};
+use mp3rgain::{mp4meta, peak_to_pcm_sample};
 use rayon::prelude::*;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::commands::threading::effective_threads;
 use crate::commands::utils::{
     finish_without_summary, for_each_file_with_analysis_bar, run_album_analysis, TSV_HEADER,
 };
@@ -40,9 +39,6 @@ enum Row {
 }
 
 fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
-    let threads = effective_threads(opts);
-    let parallel = threads > 1 && files.len() > 1;
-
     // Partition by container, keeping original indices so output stays in
     // input order. MP3 files are preferred for the album summary (mp3gain
     // parity when folders mix formats).
@@ -56,8 +52,8 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
         }
     }
 
-    let mp3_report = analyze_set(&mp3_set, opts, threads, parallel);
-    let mp4_report = analyze_set(&mp4_set, opts, threads, parallel);
+    let mp3_report = analyze_set(&mp3_set, opts);
+    let mp4_report = analyze_set(&mp4_set, opts);
 
     // Assemble per-file rows in input order.
     let mut rows: Vec<Option<Row>> = (0..files.len()).map(|_| None).collect();
@@ -133,10 +129,10 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
     if any_ok {
         if let Some(report) = summary_report {
-            // Match the apply path (-a): album_gain_steps() + gain_modifier_steps()
-            let modifier_steps = opts.gain_modifier_steps();
-            let album_gain_steps = report.album.album_gain_steps() + modifier_steps;
-            let album_gain_db = report.album.album_gain_db() + steps_to_db(modifier_steps);
+            let (album_gain_steps, album_gain_db) = opts.modified_gain(
+                report.album.album_gain_steps(),
+                report.album.album_gain_db(),
+            );
             let album_max_amp = peak_to_pcm_sample(report.album.album_peak());
 
             match opts.output_format {
@@ -173,17 +169,12 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
 /// Run one lenient album analysis over a partition, driving a progress bar.
 /// Returns `None` for an empty set or when every file in the set failed.
-fn analyze_set(
-    set: &[(usize, &Path)],
-    opts: &Options,
-    threads: usize,
-    parallel: bool,
-) -> Option<AlbumAnalysisReport> {
+fn analyze_set(set: &[(usize, &Path)], opts: &Options) -> Option<AlbumAnalysisReport> {
     if set.is_empty() {
         return None;
     }
     let paths: Vec<&Path> = set.iter().map(|&(_, p)| p).collect();
-    run_album_analysis(&paths, opts, threads, parallel, true).ok()
+    run_album_analysis(&paths, opts, true).ok()
 }
 
 /// Basic per-file info (JSON output or builds without the replaygain feature).

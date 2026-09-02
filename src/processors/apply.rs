@@ -1,7 +1,8 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions};
-use mp3rgain::{analyze, mp4meta, steps_to_db, Channel};
+use mp3rgain::replaygain::AudioFileType;
+use mp3rgain::{mp4meta, steps_to_db, Channel};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -9,7 +10,9 @@ use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
 
-use super::utils::{emit_clipping_warning, report_file_error, warn_aac_multi_track};
+use super::utils::{
+    emit_clipping_warning, emit_file_warning, report_file_error, warn_aac_multi_track,
+};
 
 pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<(JsonFileResult, String)> {
     let mut out = String::new();
@@ -24,11 +27,17 @@ fn process_apply_into(
     out: &mut String,
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
-    let dry_run_prefix = opts.dry_run_prefix();
 
+    // Detected once here and handed to the pipeline, which used to redo the
+    // MP4 probe (an open plus a `moov` parse) on its own.
     let is_aac = mp4meta::is_aac_file(file);
+    let file_type = Some(if is_aac {
+        AudioFileType::Aac
+    } else {
+        AudioFileType::Mp3
+    });
     if is_aac {
-        warn_aac_multi_track(file, filename, opts, dry_run_prefix);
+        warn_aac_multi_track(file, filename, opts);
     }
 
     // Dry run: don't touch the file. Headroom-based clipping prevention
@@ -47,6 +56,7 @@ fn process_apply_into(
                 let mut apply_opts = ApplyOptions::new(steps);
                 apply_opts.prevent_clipping = opts.prevent_clipping;
                 apply_opts.wrap = opts.wrap_gain;
+                apply_opts.file_type = file_type;
                 match predict_apply(file, &apply_opts) {
                     Ok(report) => {
                         let warning = emit_clipping_warning(steps, &report, opts, filename, None);
@@ -91,6 +101,7 @@ fn process_apply_into(
     // the headroom analyze inside check_clipping feeds nothing observable
     // (issue #232).
     apply_opts.skip_clipping_check = !opts.prevent_clipping && (opts.ignore_clipping || opts.quiet);
+    apply_opts.file_type = file_type;
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {
@@ -154,9 +165,7 @@ fn emit_saturation_warning(
         (l, h) => format!("{l} gain value(s) clamped at 0 (silence), {h} at 255 (distortion)"),
     };
     let msg = format!("{detail} - saturated gain is not losslessly reversible");
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
-        eprintln!("  {} {} - {}", "!".yellow(), filename, msg);
-    }
+    emit_file_warning(opts, filename, &msg, None);
     Some(msg)
 }
 
@@ -191,17 +200,17 @@ fn process_apply_channel_into(
     let channel_name = channel.name();
 
     // Warn if file is Joint Stereo (mp3gain only supports Stereo for -l).
-    // Check the output mode first: analyze() reads the whole file, which is
-    // wasted when the warning would not be printed anyway.
+    // One frame header answers that; the whole-file analyze() it replaced
+    // walked every frame for statistics that were then thrown away.
     if opts.output_format == OutputFormat::Text && !opts.quiet {
-        if let Ok(info) = analyze(file) {
-            if info.channel_mode() == mp3rgain::ChannelMode::JointStereo {
-                eprintln!(
-                    "  {} {} - Joint Stereo file: channel-specific gain may not work as expected",
-                    "!".yellow(),
-                    filename
-                );
-            }
+        if let Ok(mp3rgain::ChannelMode::JointStereo) = mp3rgain::analysis::read_channel_mode(file)
+        {
+            emit_file_warning(
+                opts,
+                filename,
+                "Joint Stereo file: channel-specific gain may not work as expected",
+                None,
+            );
         }
     }
 
@@ -235,6 +244,8 @@ fn process_apply_channel_into(
     // has no clipping prevention, so the headroom analyze inside
     // check_clipping is pure waste (issue #232).
     apply_opts.skip_clipping_check = true;
+    // -l is MP3-only (the pipeline rejects AAC), so skip the container probe.
+    apply_opts.file_type = Some(AudioFileType::Mp3);
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {
