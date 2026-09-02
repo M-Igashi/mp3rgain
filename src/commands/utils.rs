@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::threading::effective_threads;
-use crate::json_output::{FileStatus, JsonFileResult, JsonOutput, JsonSummary};
+use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput, JsonSummary};
 use crate::progress::{
     album_progress_callbacks, create_album_progress_pb_in, create_analysis_progress_bar,
     create_file_count_pb_in, create_progress_bar, progress_finish, progress_inc,
@@ -197,10 +197,23 @@ pub fn finish_with_summary(
     failed: usize,
     opts: &Options,
 ) -> Result<()> {
+    finish_with_album_summary(total_files, json_results, None, successful, failed, opts)
+}
+
+/// [`finish_with_summary`] carrying an album block, for the `-a` paths whose
+/// JSON output has one.
+pub fn finish_with_album_summary(
+    total_files: usize,
+    json_results: Vec<JsonFileResult>,
+    album: Option<JsonAlbumResult>,
+    successful: usize,
+    failed: usize,
+    opts: &Options,
+) -> Result<()> {
     if opts.output_format == OutputFormat::Json {
         let output = JsonOutput {
             files: Some(json_results),
-            album: None,
+            album,
             summary: Some(create_json_summary(
                 total_files,
                 successful,

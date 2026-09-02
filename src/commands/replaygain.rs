@@ -12,14 +12,13 @@ use std::path::{Path, PathBuf};
 use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::commands::threading::effective_threads;
 use crate::commands::utils::{
-    create_json_summary, exit_if_failed, finish_with_summary, for_each_file_with_analysis_bar,
-    print_dry_run_notice, run_album_analysis, update_counters,
+    create_json_summary, exit_if_failed, finish_with_album_summary, finish_with_summary,
+    for_each_file_with_analysis_bar, run_album_analysis, update_counters,
 };
 use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
 use crate::processors::replaygain::{
     capped_tag_gain, process_apply_replaygain_with_album, process_track_gain,
 };
-use crate::processors::utils::stored_file_type;
 use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
 use crate::util::get_filename;
 
@@ -128,7 +127,7 @@ fn stored_album_report(files: &[PathBuf], opts: &Options) -> Option<AlbumAnalysi
         tracks.push(ReplayGainResult::from_stored_tags(
             gain_db,
             peak,
-            stored_file_type(file),
+            AudioFileType::from_path(file),
             opts.analysis_mode,
         ));
     }
@@ -247,10 +246,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 peak: album_result.album_peak(),
             };
 
-            let album_info = AacAlbumInfo {
-                album_gain_db: album_result.album_gain_db(),
-                album_peak: album_result.album_peak(),
-            };
+            let album_info = AacAlbumInfo::from(&album_result);
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 println!();
@@ -318,19 +314,16 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                             ),
                         })
                         .collect();
-
-                    let output = JsonOutput {
-                        files: Some(json_results),
-                        album: Some(json_album),
-                        summary: Some(create_json_summary(
-                            files.len(),
-                            0,
-                            failure_count,
-                            opts.dry_run,
-                        )),
-                    };
-                    println!("{}", serde_json::to_string_pretty(&output)?);
-                } else if !opts.quiet {
+                    return finish_with_album_summary(
+                        files.len(),
+                        json_results,
+                        Some(json_album),
+                        0,
+                        failure_count,
+                        opts,
+                    );
+                }
+                if !opts.quiet {
                     println!("  {} No adjustment needed", ".".cyan());
                 }
                 exit_if_failed(failure_count);
@@ -468,22 +461,14 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 mp3rgain::write_album_minmax(&album_files);
             }
 
-            if opts.output_format == OutputFormat::Json {
-                let output = JsonOutput {
-                    files: Some(json_results),
-                    album: Some(json_album),
-                    summary: Some(create_json_summary(
-                        files.len(),
-                        successful,
-                        failed,
-                        opts.dry_run,
-                    )),
-                };
-                println!("{}", serde_json::to_string_pretty(&output)?);
-            } else {
-                print_dry_run_notice(opts);
-            }
-            exit_if_failed(failed);
+            finish_with_album_summary(
+                files.len(),
+                json_results,
+                Some(json_album),
+                successful,
+                failed,
+                opts,
+            )?;
         }
         Err(e) => {
             if opts.output_format == OutputFormat::Json {

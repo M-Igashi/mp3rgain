@@ -32,6 +32,16 @@ pub const RG_ALBUM_GAIN: &str = "replaygain_album_gain";
 pub const RG_ALBUM_PEAK: &str = "replaygain_album_peak";
 pub const RG_ALGORITHM: &str = "replaygain_algorithm";
 
+/// Every ReplayGain freeform name mp3rgain writes, for the paths that treat
+/// them as a set.
+const RG_FREEFORM_NAMES: [&str; 5] = [
+    RG_TRACK_GAIN,
+    RG_TRACK_PEAK,
+    RG_ALBUM_GAIN,
+    RG_ALBUM_PEAK,
+    RG_ALGORITHM,
+];
+
 /// Undo tag keys (iTunes freeform format, same namespace)
 pub const UNDO_TAG: &str = "mp3rgain_undo";
 pub const MINMAX_TAG: &str = "mp3rgain_minmax";
@@ -934,11 +944,9 @@ fn is_freeform_matching(
 /// Check if a box at the given position is a ReplayGain freeform tag
 fn is_replaygain_freeform(data: &[u8], pos: usize, header: &BoxHeader) -> bool {
     is_freeform_matching(data, pos, header, |name| {
-        name.eq_ignore_ascii_case(RG_TRACK_GAIN)
-            || name.eq_ignore_ascii_case(RG_TRACK_PEAK)
-            || name.eq_ignore_ascii_case(RG_ALBUM_GAIN)
-            || name.eq_ignore_ascii_case(RG_ALBUM_PEAK)
-            || name.eq_ignore_ascii_case(RG_ALGORITHM)
+        RG_FREEFORM_NAMES
+            .iter()
+            .any(|n| name.eq_ignore_ascii_case(n))
     })
 }
 

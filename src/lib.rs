@@ -430,30 +430,39 @@ pub fn read_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<Stored
     }
 }
 
-/// Read the left-channel undo step count without modifying the file.
+/// Read the cumulative *applied* left-channel gain, in steps, without
+/// modifying the file — i.e. how much louder the file currently is than its
+/// original, which an undo would roll back.
 ///
-/// Mirrors [`undo_gain_auto`]'s dispatch so the returned value matches what
-/// `undo_gain_auto` would roll back. Returns `None` if the tag is absent or
-/// unreadable.
+/// The on-disk sign convention differs by container (MP3 stores the undo
+/// delta, AAC the applied gain — see [`ape::format_undo_value`]), so the MP3
+/// values are negated here and the returned number means the same thing for
+/// every format. Mirrors [`undo_gain_auto`]'s container dispatch, so the value
+/// matches what `undo_gain_auto` would actually reverse. Returns `None` if the
+/// tag is absent or unreadable.
 pub fn read_undo_steps(file_path: &Path, layout: TagLayout) -> Option<i32> {
     #[cfg(feature = "aac")]
     {
         if mp4meta::is_aac_file(file_path) {
             let undo_tags = mp4meta::read_undo_tags(file_path).ok()?;
+            // AAC already stores the applied gain.
             return Some(ape::parse_undo_values(undo_tags.undo()).0);
         }
     }
+    // MP3 stores the undo delta (the value to re-add to restore the
+    // original), so the applied gain is its negation.
     let from_ape = || {
         ape::read_ape_tag_from_file(file_path)
             .ok()
             .flatten()
             .and_then(|t| t.get_undo_gain())
+            .map(i32::wrapping_neg)
     };
     let from_id3v2 = || {
         let rg = id3v2::read_id3v2_replaygain(file_path).ok()?;
         rg.undo
             .as_deref()
-            .map(|u| ape::parse_undo_values(Some(u)).0)
+            .map(|u| ape::parse_undo_values(Some(u)).0.wrapping_neg())
     };
     // Same fallback order as undo_gain_auto, so the reported value matches
     // what an undo would actually roll back.
@@ -479,6 +488,60 @@ fn collect_audio_files_into(dir: &Path, recursive: bool, result: &mut Vec<PathBu
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod undo_steps_tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_temp(name: &str, data: &[u8]) -> PathBuf {
+        let dir = std::env::temp_dir().join("mp3rgain_undo_steps_tests");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(name);
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(data)
+            .unwrap();
+        path
+    }
+
+    /// `read_undo_steps` must report the cumulative *applied* gain, whichever
+    /// container the tag came from. MP3 stores the undo delta (the negation of
+    /// the applied gain), so a file that had +4 steps applied carries
+    /// `-004,-004` and must read back as `+4`.
+    ///
+    /// The GUI reverses its displayed volume / gain columns by this value
+    /// after an undo, so a sign flip here silently doubled the error instead
+    /// of cancelling it, and left the cached peak wrong for the next
+    /// prevent-clipping check.
+    #[test]
+    fn read_undo_steps_reports_applied_gain_for_mp3() {
+        let mut tag = ape::ApeTag::new();
+        // What an apply of +4 steps records.
+        tag.set_undo_gain(-4, -4, false);
+        let data = ape::replace_ape_tag(&vec![0u8; 8_000], &tag);
+        let path = write_temp("applied_plus4.mp3", &data);
+
+        for layout in [TagLayout::Split, TagLayout::Ape] {
+            assert_eq!(
+                read_undo_steps(&path, layout),
+                Some(4),
+                "{layout:?} should report the applied gain, not the stored delta"
+            );
+        }
+
+        // An attenuating apply reads back negative.
+        let mut tag = ape::ApeTag::new();
+        tag.set_undo_gain(3, 3, false);
+        let data = ape::replace_ape_tag(&vec![0u8; 8_000], &tag);
+        let path = write_temp("applied_minus3.mp3", &data);
+        assert_eq!(read_undo_steps(&path, TagLayout::Split), Some(-3));
+
+        // No tag at all stays None rather than reading as 0.
+        let path = write_temp("untagged.mp3", &vec![0u8; 8_000]);
+        assert_eq!(read_undo_steps(&path, TagLayout::Split), None);
+    }
 }
 
 #[cfg(all(test, feature = "aac"))]

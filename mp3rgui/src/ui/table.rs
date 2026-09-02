@@ -20,12 +20,24 @@ fn render_stored_tags_cell(ui: &mut egui::Ui, tags: Option<&StoredTagsView>) {
         ui.label(format!("Container: {}", view.format.unwrap_or("?")));
         ui.separator();
         for (name, value) in [
-            ("REPLAYGAIN_TRACK_GAIN", view.track_gain.as_deref()),
-            ("REPLAYGAIN_TRACK_PEAK", view.track_peak.as_deref()),
-            ("REPLAYGAIN_ALBUM_GAIN", view.album_gain.as_deref()),
-            ("REPLAYGAIN_ALBUM_PEAK", view.album_peak.as_deref()),
-            ("MP3GAIN_UNDO", view.undo.as_deref()),
-            ("MP3GAIN_MINMAX", view.minmax.as_deref()),
+            (
+                mp3rgain::TAG_REPLAYGAIN_TRACK_GAIN,
+                view.track_gain.as_deref(),
+            ),
+            (
+                mp3rgain::TAG_REPLAYGAIN_TRACK_PEAK,
+                view.track_peak.as_deref(),
+            ),
+            (
+                mp3rgain::TAG_REPLAYGAIN_ALBUM_GAIN,
+                view.album_gain.as_deref(),
+            ),
+            (
+                mp3rgain::TAG_REPLAYGAIN_ALBUM_PEAK,
+                view.album_peak.as_deref(),
+            ),
+            (mp3rgain::TAG_MP3GAIN_UNDO, view.undo.as_deref()),
+            (mp3rgain::TAG_MP3GAIN_MINMAX, view.minmax.as_deref()),
         ] {
             if let Some(v) = value {
                 ui.label(format!("{}: {}", name, v));

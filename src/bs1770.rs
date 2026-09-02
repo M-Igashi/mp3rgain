@@ -230,8 +230,14 @@ pub struct TruePeakMeter {
     /// coefficients each. `phases[p][k]` multiplies the input from `k`
     /// samples ago.
     phases: Vec<Vec<f64>>,
-    /// Per-channel input history, most recent first.
+    /// Per-channel input history, as a ring buffer indexed through
+    /// [`Self::pos`].
     history: Vec<Vec<f64>>,
+    /// Ring write position; steps backwards per frame so the sample written
+    /// `k` frames ago lives at `(pos + k) % len`. Replaces the per-sample
+    /// `rotate_right(1)` memmove the history used to pay on every frame of
+    /// every channel, the same trick `EqualLoudnessFilter` uses (issue #255).
+    pos: usize,
     peak: f64,
 }
 
@@ -257,6 +263,7 @@ impl TruePeakMeter {
         Self {
             phases,
             history: vec![vec![0.0; history_len]; channels.max(1)],
+            pos: 0,
             peak: 0.0,
         }
     }
@@ -266,13 +273,24 @@ impl TruePeakMeter {
     /// ignored.
     #[inline]
     pub fn add_frame(&mut self, frame: &[f64]) {
+        let len = self.history.first().map_or(0, Vec::len);
+        if len == 0 {
+            return;
+        }
+        // Step the write position backwards so index `k` ahead of it is the
+        // sample from `k` frames ago, matching `phases[p][k]`'s meaning.
+        self.pos = (self.pos + len - 1) % len;
+        let pos = self.pos;
         for (history, &sample) in self.history.iter_mut().zip(frame) {
-            history.rotate_right(1);
-            history[0] = sample;
+            history[pos] = sample;
             for phase in &self.phases {
                 let mut acc = 0.0;
-                for (&c, &x) in phase.iter().zip(history.iter()) {
-                    acc += c * x;
+                for (k, &c) in phase.iter().enumerate() {
+                    // `phase.len() <= len`, so one conditional subtraction
+                    // wraps the index.
+                    let idx = pos + k;
+                    let idx = if idx >= len { idx - len } else { idx };
+                    acc += c * history[idx];
                 }
                 self.peak = self.peak.max(acc.abs());
             }
