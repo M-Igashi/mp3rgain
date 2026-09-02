@@ -2,11 +2,12 @@ use crate::worker::{
     self, ApplyJob, ApplyOptionsUi, CheckTagsJob, DeleteTagsJob, StoredTagsView, UndoJob,
     WorkerEvent, WorkerHandle,
 };
-use mp3rgain::ape::{parse_rg_gain, parse_rg_peak};
 use mp3rgain::replaygain::{
     self, AnalysisMode, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB,
 };
-use mp3rgain::{apply_gain_to_peak, db_to_steps, would_clip, AacAlbumInfo, Channel};
+use mp3rgain::{
+    apply_gain_to_peak, db_to_steps, would_clip, AacAlbumInfo, Channel, StoredAlbumValues,
+};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::TryRecvError;
@@ -860,26 +861,20 @@ impl Mp3rgainApp {
         self.use_stored_tags && self.analysis_mode == AnalysisMode::Rg1
     }
 
-    /// Group-level `-s R` check (issue #302), mirroring the CLI's
+    /// Group-level `-s R` check (issue #302), the same rule as the CLI's
     /// `stored_album_report`: every file must carry trusted, parseable track
-    /// and album tags and the album gains must agree within 0.05 dB. Stored
-    /// values are residuals of each file's current loudness, so a partial or
-    /// inconsistent set cannot be mixed with fresh analysis. Returns the
-    /// shared album gain and the max album peak.
+    /// and album tags, and the album gains must agree (see
+    /// `mp3rgain::consistent_album_gain`). Returns the shared album gain and
+    /// the max album peak.
     fn trusted_album_group(&self, group: &[(usize, PathBuf)]) -> Option<AacAlbumInfo> {
-        let mut album_gain: Option<f64> = None;
-        let mut album_peak: f64 = 0.0;
+        let mut values = Vec::with_capacity(group.len());
         for &(idx, _) in group {
             let tags = trusted_album_tags(self.files.get(idx)?)?;
-            album_peak = album_peak.max(tags.album_peak);
-            match album_gain {
-                Some(g) if (g - tags.album_gain).abs() > 0.05 => return None,
-                Some(_) => {}
-                None => album_gain = Some(tags.album_gain),
-            }
+            values.push((tags.album_gain_db, tags.album_peak));
         }
+        let (album_gain_db, album_peak) = mp3rgain::consistent_album_gain(values)?;
         Some(AacAlbumInfo {
-            album_gain_db: album_gain?,
+            album_gain_db,
             album_peak,
         })
     }
@@ -1211,7 +1206,7 @@ impl Mp3rgainApp {
                                 path: f.path.clone(),
                                 steps,
                                 track_result: Some(ReplayGainResult::from_stored_tags(
-                                    tags.track_gain,
+                                    tags.track_gain_db,
                                     tags.track_peak,
                                     AudioFileType::from_path(&f.path),
                                     AnalysisMode::Rg1,
@@ -1484,6 +1479,14 @@ impl Mp3rgainApp {
                     file.status = FileStatus::NoChangesToUndo;
                 }
             }
+            WorkerEvent::TagsDeleted { idx } => {
+                if let Some(file) = self.files.get_mut(idx) {
+                    file.status = FileStatus::Done;
+                    // Audio levels are unchanged, so the volume / gain columns
+                    // stay valid; only the tag snapshot is stale now.
+                    file.stored_tags = None;
+                }
+            }
             WorkerEvent::StoredTagsRead { idx, view } => {
                 let target = self.target_volume;
                 let mode = self.analysis_mode;
@@ -1593,22 +1596,22 @@ impl Mp3rgainApp {
             }
         };
         let mut found = false;
-        if let Some(track_gain_db) = view.track_gain.as_deref().and_then(parse_rg_gain) {
+        if let Some(track_gain_db) = view.tags.track_gain_db() {
             let (volume, gain) = display(track_gain_db);
             file.volume = volume;
             file.track_gain = Some(gain);
-            if let Some(peak) = view.track_peak.as_deref().and_then(parse_rg_peak) {
+            if let Some(peak) = view.tags.track_peak_value() {
                 file.clipping = peak >= 1.0;
                 file.track_clip = would_clip(peak, gain);
                 file.stored_track_peak = Some(peak);
             }
             found = true;
         }
-        if let Some(album_gain_db) = view.album_gain.as_deref().and_then(parse_rg_gain) {
+        if let Some(album_gain_db) = view.tags.album_gain_db() {
             let (album_volume, album_gain) = display(album_gain_db);
             file.album_volume = album_volume;
             file.album_gain = Some(album_gain);
-            if let Some(peak) = view.album_peak.as_deref().and_then(parse_rg_peak) {
+            if let Some(peak) = view.tags.album_peak_value() {
                 file.album_clip = would_clip(peak, album_gain);
                 file.stored_album_peak = Some(peak);
             }
@@ -1678,39 +1681,17 @@ impl Mp3rgainApp {
     }
 }
 
-/// Stored track tags parsed for `-s R`-style reuse (issue #302): gain and
-/// peak, or `None` when absent, malformed, not yet scanned, or marked with a
-/// `REPLAYGAIN_ALGORITHM` tag: that marker means BS.1770 values, which don't
-/// match the RG1 target this path trusts (same rule as the CLI).
+/// Stored track tags usable for `-s R`-style reuse (issue #302), or `None`
+/// when not yet scanned or the library's RG1 trust rule rejects them (absent,
+/// malformed, or marked with `REPLAYGAIN_ALGORITHM`). Same rule as the CLI.
 fn trusted_track_tags(file: &FileEntry) -> Option<(f64, f64)> {
-    let view = file.stored_tags.as_ref()?;
-    if view.algorithm.is_some() {
-        return None;
-    }
-    let gain = view.track_gain.as_deref().and_then(parse_rg_gain)?;
-    let peak = view.track_peak.as_deref().and_then(parse_rg_peak)?;
-    Some((gain, peak))
-}
-
-/// One file's parsed stored tags for album-mode reuse (issue #302).
-struct StoredAlbumTags {
-    track_gain: f64,
-    track_peak: f64,
-    album_gain: f64,
-    album_peak: f64,
+    file.stored_tags.as_ref()?.tags.rg1_track_values()
 }
 
 /// Album variant of [`trusted_track_tags`]: additionally requires the album
-/// gain/peak pair, mirroring the CLI's `stored_album_report` requirements.
-fn trusted_album_tags(file: &FileEntry) -> Option<StoredAlbumTags> {
-    let (track_gain, track_peak) = trusted_track_tags(file)?;
-    let view = file.stored_tags.as_ref()?;
-    Some(StoredAlbumTags {
-        track_gain,
-        track_peak,
-        album_gain: view.album_gain.as_deref().and_then(parse_rg_gain)?,
-        album_peak: view.album_peak.as_deref().and_then(parse_rg_peak)?,
-    })
+/// gain/peak pair, the CLI's `stored_album_report` requirements.
+fn trusted_album_tags(file: &FileEntry) -> Option<StoredAlbumValues> {
+    file.stored_tags.as_ref()?.tags.rg1_album_values()
 }
 
 /// Display pair for a ReplayGain value, mode-aware (issue #272).

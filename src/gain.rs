@@ -1,10 +1,12 @@
-use crate::analysis::{analyze_data, ChannelMode};
+use crate::analysis::ChannelMode;
 use crate::ape::{
     parse_undo_values, parse_undo_wrap, read_ape_tag, replace_ape_tag, ApeReplayGain,
     TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
 };
 use crate::error::{Error, Result};
-use crate::frame::{apply_gain_to_data, scan_gain_range, GainMode, SaturationStats};
+use crate::frame::{
+    apply_gain_to_data, first_frame_header, scan_gain_range, GainMode, SaturationStats,
+};
 
 use std::fs;
 use std::path::Path;
@@ -321,7 +323,14 @@ pub fn undo_gain(file_path: &Path) -> Result<usize> {
     tag.remove_replaygain();
 
     let new_data = replace_ape_tag(&data, &tag);
-    crate::apply::atomic_write(file_path, &new_data)?;
+    // Under the split layout the REPLAYGAIN_* residuals live in ID3v2 and
+    // described the gained audio too (issue #306). Strip them on the temp
+    // file so the rollback and both containers' cleanup land in one rename,
+    // where a separate pass afterwards cost a second full-file copy.
+    crate::apply::with_temp_file(file_path, |original, temp| {
+        fs::write(temp, &new_data).map_err(|e| Error::io_write(original, e))?;
+        crate::id3v2::remove_id3v2_rg_values_direct(temp)
+    })?;
 
     Ok(frames)
 }
@@ -446,6 +455,17 @@ fn apply_gain_with_undo_impl_to_path(
     Ok(stats)
 }
 
+/// Channel-specific gain needs two channels; one frame header answers that,
+/// where the previous `analyze_data` walked every frame and computed gain
+/// statistics that were then discarded.
+fn ensure_not_mono(data: &[u8]) -> Result<()> {
+    let header = first_frame_header(data).ok_or(Error::NoMp3Frames)?;
+    if header.channel_mode == ChannelMode::Mono {
+        return Err(Error::ChannelGainOnMono);
+    }
+    Ok(())
+}
+
 /// Apply gain to a specific channel (no undo)
 fn apply_gain_channel_impl(
     mut data: Vec<u8>,
@@ -453,10 +473,7 @@ fn apply_gain_channel_impl(
     channel: Channel,
     gain_steps: i32,
 ) -> Result<SaturationStats> {
-    let analysis = analyze_data(&data)?;
-    if analysis.channel_mode() == ChannelMode::Mono {
-        return Err(Error::ChannelGainOnMono);
-    }
+    ensure_not_mono(&data)?;
 
     let stats = apply_gain_to_data(
         &mut data,
@@ -477,10 +494,7 @@ fn apply_gain_channel_with_undo(
     channel: Channel,
     gain_steps: i32,
 ) -> Result<SaturationStats> {
-    let analysis = analyze_data(&data)?;
-    if analysis.channel_mode() == ChannelMode::Mono {
-        return Err(Error::ChannelGainOnMono);
-    }
+    ensure_not_mono(&data)?;
 
     let mut tag = read_ape_tag(&data).unwrap_or_default();
 

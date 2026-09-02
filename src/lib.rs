@@ -216,25 +216,16 @@ pub fn undo_gain_auto(file_path: &Path, layout: TagLayout) -> Result<usize> {
         !ape_has_undo() && id3v2_has_undo()
     };
 
-    let frames = if use_id3v2 {
-        id3v2::undo_gain_id3v2(file_path)?
-    } else {
-        gain::undo_gain(file_path)?
-    };
-
     // Issue #306: under the split layout the REPLAYGAIN_* values live in the
     // container that did not hold the undo tag, and they described the
-    // pre-undo audio. Strip stale copies there too. Best-effort: the rollback
-    // already succeeded, so a metadata hiccup here must not turn the undo
-    // into an error.
-    if frames > 0 {
-        if use_id3v2 {
-            let _ = ape::remove_ape_undone_gain_values(file_path);
-        } else {
-            let _ = id3v2::remove_id3v2_rg_values(file_path);
-        }
+    // pre-undo audio. Both undo paths strip those stale copies inside their
+    // own temp-file write, so the rollback and the cleanup of both
+    // containers land in one rename.
+    if use_id3v2 {
+        id3v2::undo_gain_id3v2(file_path)
+    } else {
+        gain::undo_gain(file_path)
     }
-    Ok(frames)
 }
 
 /// Delete ReplayGain / undo tags, auto-dispatching by file format and tag mode.
@@ -294,7 +285,8 @@ pub struct StoredGainTags {
 }
 
 impl StoredGainTags {
-    fn empty(source: GainTagSource) -> Self {
+    /// A snapshot with every tag absent, attributed to `source`.
+    pub fn empty(source: GainTagSource) -> Self {
         Self {
             source,
             track_gain: None,
@@ -326,6 +318,30 @@ impl StoredGainTags {
     /// `REPLAYGAIN_ALBUM_PEAK` parsed to a linear peak.
     pub fn album_peak_value(&self) -> Option<f64> {
         self.album_peak.as_deref().and_then(ape::parse_rg_peak)
+    }
+
+    /// `(gain_db, peak)` from `REPLAYGAIN_TRACK_*` when the stored values can
+    /// stand in for a ReplayGain 1.0 analysis (`-s R`, issue #298): both tags
+    /// present and parseable, and no `REPLAYGAIN_ALGORITHM` marker, which
+    /// would mean BS.1770 values that don't match the RG1 target. The CLI's
+    /// `-s R` and the GUI's "Use stored tags" share this rule.
+    pub fn rg1_track_values(&self) -> Option<(f64, f64)> {
+        if self.algorithm.is_some() {
+            return None;
+        }
+        Some((self.track_gain_db()?, self.track_peak_value()?))
+    }
+
+    /// Album variant of [`Self::rg1_track_values`]: additionally requires the
+    /// `REPLAYGAIN_ALBUM_*` pair.
+    pub fn rg1_album_values(&self) -> Option<StoredAlbumValues> {
+        let (track_gain_db, track_peak) = self.rg1_track_values()?;
+        Some(StoredAlbumValues {
+            track_gain_db,
+            track_peak,
+            album_gain_db: self.album_gain_db()?,
+            album_peak: self.album_peak_value()?,
+        })
     }
 
     /// True if at least one gain tag is present.
@@ -428,6 +444,58 @@ pub fn read_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<Stored
             tag_present: false,
         })),
     }
+}
+
+/// One file's stored RG1 values in album mode, from
+/// [`StoredGainTags::rg1_album_values`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StoredAlbumValues {
+    pub track_gain_db: f64,
+    pub track_peak: f64,
+    pub album_gain_db: f64,
+    pub album_peak: f64,
+}
+
+/// Two stored `REPLAYGAIN_ALBUM_GAIN` values are "the same album" within this
+/// many dB: the 6-decimal tag format and mp3gain's own rounding both stay
+/// well inside it.
+pub const ALBUM_GAIN_TOLERANCE_DB: f64 = 0.05;
+
+/// The shared album gain and the loudest album peak across the members of
+/// one album, from each file's stored `(album_gain_db, album_peak)`, or
+/// `None` if the set is empty or the gains disagree by more than
+/// [`ALBUM_GAIN_TOLERANCE_DB`]. Stored values are residuals of each file's
+/// current loudness, so a partial or inconsistent set cannot be mixed with a
+/// fresh analysis: any gap means the whole album gets rescanned (`-s R`,
+/// issue #298; GUI issue #302).
+pub fn consistent_album_gain(values: impl IntoIterator<Item = (f64, f64)>) -> Option<(f64, f64)> {
+    let mut album_gain: Option<f64> = None;
+    let mut album_peak: f64 = 0.0;
+    for (gain, peak) in values {
+        album_peak = album_peak.max(peak);
+        match album_gain {
+            Some(g) if (g - gain).abs() > ALBUM_GAIN_TOLERANCE_DB => return None,
+            Some(_) => {}
+            None => album_gain = Some(gain),
+        }
+    }
+    Some((album_gain?, album_peak))
+}
+
+/// Expand directories in `paths` into the supported audio files they contain
+/// (recursively), keeping plain file paths as they are and preserving input
+/// order. Shared by the CLI's `-R` and the GUI's folder drop / Add Folder, so
+/// the two agree on what a directory expands to.
+pub fn expand_audio_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let mut result = Vec::with_capacity(paths.len());
+    for path in paths {
+        if path.is_dir() {
+            result.extend(collect_audio_files(path, true)?);
+        } else {
+            result.push(path.clone());
+        }
+    }
+    Ok(result)
 }
 
 /// Read the cumulative *applied* left-channel gain, in steps, without
@@ -541,6 +609,71 @@ mod undo_steps_tests {
         // No tag at all stays None rather than reading as 0.
         let path = write_temp("untagged.mp3", &vec![0u8; 8_000]);
         assert_eq!(read_undo_steps(&path, TagLayout::Split), None);
+    }
+}
+
+#[cfg(test)]
+mod stored_tag_tests {
+    use super::*;
+
+    fn tags(track: Option<&str>, peak: Option<&str>, algorithm: Option<&str>) -> StoredGainTags {
+        StoredGainTags {
+            track_gain: track.map(str::to_string),
+            track_peak: peak.map(str::to_string),
+            algorithm: algorithm.map(str::to_string),
+            ..StoredGainTags::empty(GainTagSource::Split)
+        }
+    }
+
+    /// The `-s R` trust rule shared by the CLI and GUI: both track values
+    /// parse, and no BS.1770 marker.
+    #[test]
+    fn rg1_track_values_requires_both_values_and_no_algorithm_marker() {
+        let (gain, peak) = tags(Some("+1.500000 dB"), Some("0.912345"), None)
+            .rg1_track_values()
+            .unwrap();
+        assert!((gain - 1.5).abs() < 1e-9);
+        assert!((peak - 0.912345).abs() < 1e-9);
+
+        assert!(tags(Some("+1.5 dB"), None, None)
+            .rg1_track_values()
+            .is_none());
+        assert!(tags(None, Some("0.9"), None).rg1_track_values().is_none());
+        assert!(tags(Some("junk"), Some("0.9"), None)
+            .rg1_track_values()
+            .is_none());
+        assert!(tags(Some("+1.5 dB"), Some("0.9"), Some("ITU-R BS.1770"))
+            .rg1_track_values()
+            .is_none());
+    }
+
+    #[test]
+    fn rg1_album_values_needs_the_album_pair_too() {
+        let mut t = tags(Some("+1.5 dB"), Some("0.9"), None);
+        assert!(t.rg1_album_values().is_none());
+        t.album_gain = Some("-2.000000 dB".into());
+        t.album_peak = Some("0.999".into());
+        let v = t.rg1_album_values().unwrap();
+        assert!((v.album_gain_db - -2.0).abs() < 1e-9);
+        assert!((v.album_peak - 0.999).abs() < 1e-9);
+        assert!((v.track_gain_db - 1.5).abs() < 1e-9);
+    }
+
+    /// Members must agree on the album gain (within the tolerance) and the
+    /// album peak is the loudest member's. A gap or a disagreement means the
+    /// whole album gets rescanned.
+    #[test]
+    fn consistent_album_gain_agrees_within_tolerance_and_takes_max_peak() {
+        let (gain, peak) =
+            consistent_album_gain([(-3.0, 0.8), (-3.04, 0.95), (-2.97, 0.5)]).unwrap();
+        assert!(
+            (gain - -3.0).abs() < 1e-9,
+            "first member's gain is reported"
+        );
+        assert!((peak - 0.95).abs() < 1e-9);
+
+        assert!(consistent_album_gain([(-3.0, 0.8), (-3.2, 0.9)]).is_none());
+        assert!(consistent_album_gain(std::iter::empty()).is_none());
     }
 }
 

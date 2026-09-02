@@ -2034,8 +2034,23 @@ impl std::fmt::Display for PeakAmplitudeResult {
 #[cfg(feature = "replaygain")]
 pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
     let file = std::fs::File::open(file_path).map_err(|e| Error::io_open(file_path, e))?;
+    find_peak_amplitude_from_source(file_path, Box::new(file))
+}
 
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+/// [`find_peak_amplitude`] over bytes already in memory, for callers that
+/// read the file for another scan and shouldn't pay a second disk read.
+/// `file_path` is only used for the format hint and error messages.
+#[cfg(feature = "replaygain")]
+pub fn find_peak_amplitude_in_data(file_path: &Path, data: Vec<u8>) -> Result<PeakAmplitudeResult> {
+    find_peak_amplitude_from_source(file_path, Box::new(std::io::Cursor::new(data)))
+}
+
+#[cfg(feature = "replaygain")]
+fn find_peak_amplitude_from_source(
+    file_path: &Path,
+    source: Box<dyn MediaSource>,
+) -> Result<PeakAmplitudeResult> {
+    let mss = MediaSourceStream::new(source, Default::default());
 
     let mut hint = Hint::new();
     if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
@@ -2148,6 +2163,17 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
 
 #[cfg(not(feature = "replaygain"))]
 pub fn find_peak_amplitude(_file_path: &Path) -> Result<PeakAmplitudeResult> {
+    Err(Error::FeatureNotAvailable {
+        feature: "Peak amplitude analysis",
+        feature_flag: "replaygain",
+    })
+}
+
+#[cfg(not(feature = "replaygain"))]
+pub fn find_peak_amplitude_in_data(
+    _file_path: &Path,
+    _data: Vec<u8>,
+) -> Result<PeakAmplitudeResult> {
     Err(Error::FeatureNotAvailable {
         feature: "Peak amplitude analysis",
         feature_flag: "replaygain",

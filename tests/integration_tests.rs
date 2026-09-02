@@ -814,3 +814,31 @@ fn write_replaygain_tags_only_preserves_audio_and_mp3gain_tags() {
     );
     cleanup(&path);
 }
+
+// =============================================================================
+// Header-only channel mode
+// =============================================================================
+
+/// `read_channel_mode` reads one frame header instead of walking the file;
+/// it must agree with the full analysis on every fixture, including the
+/// joint-stereo one the `-l` warning exists for.
+#[test]
+fn read_channel_mode_matches_full_analysis() {
+    for name in [
+        "test_stereo.mp3",
+        "test_mono.mp3",
+        "test_joint_stereo.mp3",
+        "test_vbr.mp3",
+    ] {
+        let path = Path::new("tests/fixtures").join(name);
+        let expected = analyze(&path).unwrap().channel_mode();
+        assert_eq!(
+            mp3rgain::analysis::read_channel_mode(&path).unwrap(),
+            expected,
+            "{name}"
+        );
+    }
+    assert!(
+        mp3rgain::analysis::read_channel_mode(Path::new("tests/fixtures/missing.mp3")).is_err()
+    );
+}

@@ -1092,13 +1092,22 @@ fn parse_ics(
 // Element parsers
 // =============================================================================
 
-fn parse_sce(reader: &mut BitReader, sample_rate: u32) -> Result<Vec<AacGainLocation>> {
+fn parse_sce(
+    reader: &mut BitReader,
+    sample_rate: u32,
+    out: &mut Vec<AacGainLocation>,
+) -> Result<()> {
     let _tag = reader.read_bits(4)?;
     let (loc, _) = parse_ics(reader, 0, false, None, sample_rate)?;
-    Ok(vec![loc])
+    out.push(loc);
+    Ok(())
 }
 
-fn parse_cpe(reader: &mut BitReader, sample_rate: u32) -> Result<Vec<AacGainLocation>> {
+fn parse_cpe(
+    reader: &mut BitReader,
+    sample_rate: u32,
+    out: &mut Vec<AacGainLocation>,
+) -> Result<()> {
     let _tag = reader.read_bits(4)?;
     let common_window = reader.read_bit()?;
 
@@ -1116,8 +1125,9 @@ fn parse_cpe(reader: &mut BitReader, sample_rate: u32) -> Result<Vec<AacGainLoca
 
     let (loc1, _) = parse_ics(reader, 0, common_window, shared_info.as_ref(), sample_rate)?;
     let (loc2, _) = parse_ics(reader, 1, common_window, shared_info.as_ref(), sample_rate)?;
-
-    Ok(vec![loc1, loc2])
+    out.push(loc1);
+    out.push(loc2);
+    Ok(())
 }
 
 fn skip_dse(reader: &mut BitReader) -> Result<()> {
@@ -1201,9 +1211,15 @@ fn skip_pce(reader: &mut BitReader) -> Result<()> {
     Ok(())
 }
 
-fn parse_raw_data_block(reader: &mut BitReader, sample_rate: u32) -> Result<Vec<AacGainLocation>> {
-    let mut locations = Vec::new();
-
+/// Parse one raw_data_block, appending its `global_gain` locations to
+/// `locations`. The caller owns and reuses the buffer: at ~43 samples per
+/// second of audio, allocating a fresh `Vec` per sample (and per element)
+/// was ~8k heap allocations per minute in the analyzer's hottest loop.
+fn parse_raw_data_block(
+    reader: &mut BitReader,
+    sample_rate: u32,
+    locations: &mut Vec<AacGainLocation>,
+) -> Result<()> {
     loop {
         if reader.bits_remaining() < 3 {
             break;
@@ -1211,14 +1227,8 @@ fn parse_raw_data_block(reader: &mut BitReader, sample_rate: u32) -> Result<Vec<
         let id = reader.read_bits(3)?;
 
         match id {
-            ID_SCE | ID_LFE => {
-                let locs = parse_sce(reader, sample_rate)?;
-                locations.extend(locs);
-            }
-            ID_CPE => {
-                let locs = parse_cpe(reader, sample_rate)?;
-                locations.extend(locs);
-            }
+            ID_SCE | ID_LFE => parse_sce(reader, sample_rate, locations)?,
+            ID_CPE => parse_cpe(reader, sample_rate, locations)?,
             ID_CCE => {
                 // Coupling channel — complex interactions with other channels,
                 // skip this sample to avoid unintended effects
@@ -1238,7 +1248,7 @@ fn parse_raw_data_block(reader: &mut BitReader, sample_rate: u32) -> Result<Vec<
         }
     }
 
-    Ok(locations)
+    Ok(())
 }
 
 // =============================================================================
@@ -1295,7 +1305,19 @@ fn apply_aac_gain_to_data(data: &mut [u8], analysis: &AacAnalysis, gain_steps: i
 ///
 /// Returns the number of modified gain locations.
 pub fn apply_aac_gain_to_path(read_from: &Path, write_to: &Path, gain_steps: i32) -> Result<usize> {
-    apply_aac_gain_to_path_with_analysis(read_from, write_to, gain_steps, None)
+    apply_aac_gain_to_path_with_analysis(read_from, write_to, gain_steps, None, None)
+}
+
+/// Write the finished container. When the caller reads and writes the same
+/// path it gets the temp + rename treatment; a distinct `write_to` is already
+/// the caller's temp file (`apply_with_options`), so a plain write avoids a
+/// pointless temp-of-a-temp.
+fn write_container(read_from: &Path, write_to: &Path, data: &[u8]) -> Result<()> {
+    if read_from == write_to {
+        crate::apply::atomic_write(write_to, data)
+    } else {
+        std::fs::write(write_to, data).map_err(|e| Error::io_write(write_to, e))
+    }
 }
 
 /// [`apply_aac_gain_to_path`] with an optional pre-computed analysis of
@@ -1303,13 +1325,18 @@ pub fn apply_aac_gain_to_path(read_from: &Path, write_to: &Path, gain_steps: i32
 /// check in `apply_with_options`) don't pay for a second bitstream walk
 /// (issue #188). The caller guarantees the file is unchanged since the
 /// analysis — same contract as the MP3 `mp3_analysis` cache from #135.
+///
+/// `replaygain`, when given, is folded into the same container rewrite. A
+/// separate `write_replaygain_tags` afterwards re-read the file, rebuilt the
+/// whole container a second time, and wrote it again.
 pub(crate) fn apply_aac_gain_to_path_with_analysis(
     read_from: &Path,
     write_to: &Path,
     gain_steps: i32,
     analysis: Option<AacAnalysis>,
+    replaygain: Option<&mp4meta::ReplayGainTags>,
 ) -> Result<usize> {
-    if gain_steps == 0 {
+    if gain_steps == 0 && replaygain.is_none() {
         if read_from != write_to {
             std::fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
         }
@@ -1318,14 +1345,20 @@ pub(crate) fn apply_aac_gain_to_path_with_analysis(
 
     let mut data = std::fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
 
-    let analysis = match analysis {
-        Some(a) => a,
-        None => analyze_aac_gains_from_data(&data)?,
+    let modified = if gain_steps == 0 {
+        0
+    } else {
+        let analysis = match analysis {
+            Some(a) => a,
+            None => analyze_aac_gains_from_data(&data)?,
+        };
+        apply_aac_gain_to_data(&mut data, &analysis, gain_steps)
     };
 
-    let modified = apply_aac_gain_to_data(&mut data, &analysis, gain_steps);
-
-    std::fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
+    if let Some(rg) = replaygain {
+        data = mp4meta::update_mp4_metadata(&data, rg)?;
+    }
+    write_container(read_from, write_to, &data)?;
 
     Ok(modified)
 }
@@ -1349,12 +1382,12 @@ pub(crate) fn apply_aac_gain_with_undo_to_path_with_analysis(
     write_to: &Path,
     gain_steps: i32,
     analysis: Option<AacAnalysis>,
+    replaygain: Option<&mp4meta::ReplayGainTags>,
 ) -> Result<usize> {
     if gain_steps == 0 {
-        if read_from != write_to {
-            std::fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
-        }
-        return Ok(0);
+        // Nothing to undo, so no undo tag; the ReplayGain tags (if any) are
+        // the only write left.
+        return apply_aac_gain_to_path_with_analysis(read_from, write_to, 0, None, replaygain);
     }
 
     let mut data = std::fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
@@ -1391,8 +1424,11 @@ pub(crate) fn apply_aac_gain_with_undo_to_path_with_analysis(
         minmax,
     );
 
-    let final_data = mp4meta::update_mp4_undo_metadata(&data, &undo_tags)?;
-    crate::apply::atomic_write(write_to, &final_data)?;
+    let mut final_data = mp4meta::update_mp4_undo_metadata(&data, &undo_tags)?;
+    if let Some(rg) = replaygain {
+        final_data = mp4meta::update_mp4_metadata(&final_data, rg)?;
+    }
+    write_container(read_from, write_to, &final_data)?;
 
     Ok(modified)
 }
@@ -1458,6 +1494,7 @@ pub(crate) fn analyze_aac_gains_from_data(data: &[u8]) -> Result<AacAnalysis> {
 
     let sample_count = sample_table.len() as u32;
     let mut all_locations = Vec::new();
+    let mut sample_locations = Vec::with_capacity(8);
     let mut parse_warnings = 0u32;
     let mut min_gain = 255u8;
     let mut max_gain = 0u8;
@@ -1475,9 +1512,10 @@ pub(crate) fn analyze_aac_gains_from_data(data: &[u8]) -> Result<AacAnalysis> {
         let sample_data = &data[sample_start..sample_end];
         let mut reader = BitReader::new(sample_data);
 
-        match parse_raw_data_block(&mut reader, sample_rate) {
-            Ok(locations) => {
-                for mut loc in locations {
+        sample_locations.clear();
+        match parse_raw_data_block(&mut reader, sample_rate, &mut sample_locations) {
+            Ok(()) => {
+                for mut loc in sample_locations.drain(..) {
                     loc.sample_index = idx as u32;
                     loc.file_offset = entry.file_offset + loc.sample_byte_offset as u64;
                     min_gain = min_gain.min(loc.original_gain);

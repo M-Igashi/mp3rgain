@@ -486,7 +486,7 @@ mod tests {
     fn absolute_gate_excludes_silence() {
         let mut samples = vec![0.0; 5 * 48000];
         append_sine(&mut samples, -23.0, 20.0, 48000);
-        samples.extend(std::iter::repeat(0.0).take(5 * 48000));
+        samples.extend(std::iter::repeat_n(0.0, 5 * 48000));
         let lufs = integrated_stereo(&samples, 48000);
         assert!((lufs - -23.0).abs() < TOLERANCE, "got {:.3}", lufs);
     }

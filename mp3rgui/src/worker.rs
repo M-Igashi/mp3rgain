@@ -9,11 +9,13 @@
 //! `ctx.request_repaint()` so egui actually redraws.
 
 use mp3rgain::apply::{
-    apply_with_options, predict_apply, read_mtime, restore_timestamp, write_album_minmax,
+    apply_with_options, predict_apply, read_mtime_if, restore_timestamp, write_album_minmax,
     ApplyOptions,
 };
 use mp3rgain::replaygain::{self, AnalysisMode, ReplayGainResult};
-use mp3rgain::{read_gain_tags_auto, AacAlbumInfo, Channel, GainTagSource, TagLayout};
+use mp3rgain::{
+    read_gain_tags_auto, AacAlbumInfo, Channel, GainTagSource, StoredGainTags, TagLayout,
+};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -21,32 +23,18 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-/// Stored-tag snapshot for one file, populated by `spawn_check_stored_tags`.
-/// All fields are pre-formatted strings so the UI can render them verbatim.
-/// `None` means the tag was absent (not an error).
-#[derive(Default, Clone)]
+/// Stored-tag snapshot for one file, populated by `spawn_check_stored_tags`:
+/// the library's [`StoredGainTags`] (raw tag strings, `None` = absent) plus
+/// the container label the table shows.
+#[derive(Clone)]
 pub struct StoredTagsView {
-    pub format: Option<&'static str>,
-    pub track_gain: Option<String>,
-    pub track_peak: Option<String>,
-    pub album_gain: Option<String>,
-    pub album_peak: Option<String>,
-    /// `REPLAYGAIN_ALGORITHM`; only written by the BS.1770 modes. Not shown
-    /// in the table, but its presence disqualifies the tags from `-s R`-style
-    /// reuse in RG1 mode (issue #302).
-    pub algorithm: Option<String>,
-    pub undo: Option<String>,
-    pub minmax: Option<String>,
+    pub format: &'static str,
+    pub tags: StoredGainTags,
 }
 
 impl StoredTagsView {
     pub fn is_empty(&self) -> bool {
-        self.track_gain.is_none()
-            && self.track_peak.is_none()
-            && self.album_gain.is_none()
-            && self.album_peak.is_none()
-            && self.undo.is_none()
-            && self.minmax.is_none()
+        !self.tags.has_any()
     }
 }
 
@@ -99,12 +87,17 @@ pub enum WorkerEvent {
         message: String,
     },
 
-    /// Stored-tag scan completed for `idx`. `view` carries pre-formatted
-    /// strings; `view.is_empty()` distinguishes "no tags" from "all tags
-    /// read successfully and present".
+    /// Stored-tag scan completed for `idx`. `view.is_empty()` distinguishes
+    /// "no tags" from "all tags read successfully and present".
     StoredTagsRead {
         idx: usize,
         view: StoredTagsView,
+    },
+
+    /// Stored tags were deleted from `idx`. The audio is untouched, so the
+    /// row keeps its volume / gain columns; only the tag snapshot is stale.
+    TagsDeleted {
+        idx: usize,
     },
 
     /// `-x` Find Max Amplitude result for `idx`. Lighter than
@@ -619,7 +612,7 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
             run_job_pool(jobs, &cancel_w, move |job: UndoJob| {
                 send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
-                let original_mtime = saved_mtime(&job.path, ui_opts.preserve_timestamp);
+                let original_mtime = read_mtime_if(&job.path, ui_opts.preserve_timestamp);
 
                 // Peek at the undo tag before running undo, so we can tell the
                 // UI how many steps to reverse on the display. We can't read
@@ -718,7 +711,7 @@ pub fn spawn_delete_tags(
             run_job_pool(jobs, &cancel_w, move |job: DeleteTagsJob| {
                 send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
-                let original_mtime = saved_mtime(&job.path, preserve_timestamp);
+                let original_mtime = read_mtime_if(&job.path, preserve_timestamp);
 
                 let result = mp3rgain::delete_gain_tags_auto(&job.path, layout);
 
@@ -728,18 +721,7 @@ pub fn spawn_delete_tags(
                             restore_timestamp(&job.path, m);
                         }
                         deleted.fetch_add(1, Ordering::Relaxed);
-                        // Tag deletion doesn't change audio levels, so the row's
-                        // volume/gain columns stay valid — pass 0 steps so the UI
-                        // doesn't shift them.
-                        send(
-                            &tx,
-                            &ctx,
-                            WorkerEvent::FileApplied {
-                                idx: job.idx,
-                                actual_steps: 0,
-                                from_stored: false,
-                            },
-                        );
+                        send(&tx, &ctx, WorkerEvent::TagsDeleted { idx: job.idx });
                     }
                     Err(e) => {
                         errors.fetch_add(1, Ordering::Relaxed);
@@ -903,34 +885,23 @@ pub fn spawn_check_stored_tags(
 }
 
 fn read_stored_tags(path: &Path, layout: TagLayout) -> StoredTagsView {
-    match read_gain_tags_auto(path, layout) {
-        Ok(tags) => StoredTagsView {
-            format: Some(match tags.source {
-                GainTagSource::Aac => "MP4",
-                GainTagSource::Id3v2 => "ID3v2",
-                GainTagSource::Ape { .. } => "APE",
-                GainTagSource::Split => "ID3v2+APE",
-            }),
-            track_gain: tags.track_gain,
-            track_peak: tags.track_peak,
-            album_gain: tags.album_gain,
-            album_peak: tags.album_peak,
-            algorithm: tags.algorithm,
-            undo: tags.undo,
-            minmax: tags.minmax,
-        },
-        // Read error: render as an empty tag set, like the pre-unification
-        // fail-soft branches did. The AAC branch never errors, so the label
-        // follows the MP3 tag mode.
-        Err(_) => StoredTagsView {
-            format: Some(match layout {
-                TagLayout::Id3v2 => "ID3v2",
-                TagLayout::Ape => "APE",
-                TagLayout::Split => "ID3v2+APE",
-            }),
-            ..Default::default()
-        },
-    }
+    // A read error renders as an empty tag set, like the pre-unification
+    // fail-soft branches did. The AAC branch never errors, so the fallback
+    // source follows the MP3 tag layout.
+    let tags = read_gain_tags_auto(path, layout).unwrap_or_else(|_| {
+        StoredGainTags::empty(match layout {
+            TagLayout::Id3v2 => GainTagSource::Id3v2,
+            TagLayout::Ape => GainTagSource::Ape { tag_present: false },
+            TagLayout::Split => GainTagSource::Split,
+        })
+    });
+    let format = match tags.source {
+        GainTagSource::Aac => "MP4",
+        GainTagSource::Id3v2 => "ID3v2",
+        GainTagSource::Ape { .. } => "APE",
+        GainTagSource::Split => "ID3v2+APE",
+    };
+    StoredTagsView { format, tags }
 }
 
 /// Build the final `ApplyOptions` by combining always-on safety rails
@@ -963,15 +934,6 @@ fn available_threads() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
-}
-
-/// mtime snapshot to restore after a write when "preserve timestamp" is on.
-fn saved_mtime(path: &Path, preserve: bool) -> Option<std::time::SystemTime> {
-    if preserve {
-        read_mtime(path)
-    } else {
-        None
-    }
 }
 
 /// Drain `jobs` through a pool of `available_parallelism` scoped worker

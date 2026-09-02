@@ -26,7 +26,7 @@ use crate::gain::{
     apply_gain_to_peak, peak_to_headroom_db, steps_to_db, Channel, GainOptions, GAIN_STEP_DB,
     MAX_GAIN,
 };
-use crate::replaygain::ReplayGainResult;
+use crate::replaygain::{AudioFileType, ReplayGainResult};
 use crate::{ape, id3v2, mp4meta, TagLayout};
 
 /// Per-process counter for `.mp3rgain_temp_*` filenames so parallel
@@ -116,6 +116,12 @@ pub struct ApplyOptions {
     /// since issue #251). Ignored when [`Self::prevent_clipping`] is on —
     /// `-k` needs the check to cap the gain.
     pub skip_clipping_check: bool,
+
+    /// Container of the file, when the caller already knows it (a
+    /// [`ReplayGainResult::file_type`], or its own detection). `None` makes
+    /// the pipeline detect it, which for an MP4 means reopening the file and
+    /// parsing `moov`; the CLI used to pay that two to four times per file.
+    pub file_type: Option<AudioFileType>,
 }
 
 impl ApplyOptions {
@@ -134,6 +140,17 @@ impl ApplyOptions {
             tag_layout: TagLayout::default(),
             channel: None,
             skip_clipping_check: false,
+            file_type: None,
+        }
+    }
+}
+
+impl ApplyOptions {
+    /// Whether the file is AAC, from the caller's hint or by detection.
+    fn is_aac(&self, file_path: &Path) -> bool {
+        match self.file_type {
+            Some(kind) => kind == AudioFileType::Aac,
+            None => mp4meta::is_aac_file(file_path),
         }
     }
 }
@@ -188,25 +205,20 @@ pub enum ClippingDetection {
 /// Does, in order:
 /// 1. Optional clipping check (headroom-based for `-g`/`-l`, peak-based
 ///    when [`ApplyOptions::track_result`] is set).
-/// 2. Gain application — MP3 APE / MP3 ID3v2 / AAC, via temp file +
-///    atomic rename. The MP3 undo and ReplayGain tags (container chosen by
-///    [`ApplyOptions::tag_layout`] — issue #204) are folded into the same
-///    write (issues #227, #232).
-/// 3. Remaining ReplayGain tag writes: AAC mp4 metadata, and the APEv2
-///    re-write for wrap/saturated or channel applies.
-/// 4. Mtime restoration when [`ApplyOptions::preserve_timestamp`] is on.
+/// 2. Gain application — MP3 APE / MP3 ID3v2 / AAC — plus every tag write,
+///    all onto one temp file that is then renamed over the original. The
+///    undo, `MP3GAIN_MINMAX` and ReplayGain tags land in whichever
+///    container [`ApplyOptions::tag_layout`] selects (issue #204), and a
+///    failure anywhere leaves the original untouched (issues #227, #232).
+/// 3. Mtime restoration when [`ApplyOptions::preserve_timestamp`] is on.
 pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
-    let is_aac = mp4meta::is_aac_file(file_path);
+    let is_aac = opts.is_aac(file_path);
 
     if is_aac && opts.channel.is_some() {
         return Err(Error::ChannelGainOnAac);
     }
 
-    let original_mtime = if opts.preserve_timestamp {
-        read_mtime(file_path)
-    } else {
-        None
-    };
+    let original_mtime = read_mtime_if(file_path, opts.preserve_timestamp);
 
     // 1) Clipping check + cap.
     //
@@ -222,80 +234,37 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
     let (actual_steps, clipping_prevented, clipping_detected) =
         check_clipping(file_path, opts, is_aac, &mut aac_analysis, &mut mp3_data)?;
 
-    // 2) Apply gain to bytes. MP3 reports global_gain saturation (issue
-    // #207); AAC clamps in its own path and isn't tallied here.
+    // 2) Apply gain to bytes and write every tag, in one visible write.
+    // MP3 reports global_gain saturation (issue #207); AAC clamps in its own
+    // path and isn't tallied here.
     //
-    // The MP3 paths fold the tag writes into the same visible write as the
-    // gain apply (issue #232): ID3v2 writes undo + minmax + ReplayGain TXXX
-    // frames onto the temp file before the rename, and the APE path embeds
-    // the arithmetic `REPLAYGAIN_*` items in the tag the gain apply already
-    // rewrites. Wrap mode and channel applies keep the separate APE
-    // ReplayGain write in step 3 below.
+    // Each path folds its tag writes into the temp file the gain apply
+    // produces, before the rename (issue #232): a failure anywhere leaves the
+    // original untouched, and no path pays a second full-file rewrite after
+    // the rename. AAC chains the ReplayGain freeform tags onto the same
+    // container rebuild as the undo tag (always arithmetic — AAC clamps
+    // internally, and mp3gain has no AAC, so it is interop-neutral).
+    // `tag_layout` selects a *container for MP3 tags* and must not gate the
+    // AAC write: doing so once skipped the mp4 ReplayGain tags for an `.m4a`
+    // processed under `-s i`, leaving stale values for players to
+    // double-apply.
     let mut saturation = SaturationStats::default();
-    let mut ape_rg_folded = false;
     let modified = if is_aac {
-        apply_aac_bytes(file_path, actual_steps, opts, aac_analysis)?
+        let rg = opts
+            .write_replaygain_tags
+            .then(|| compute_rg_residual(file_path, opts, actual_steps, false))
+            .flatten()
+            .map(|res| res.to_mp4());
+        apply_aac_bytes(file_path, actual_steps, opts, aac_analysis, rg.as_ref())?
     } else if opts.tag_layout.mp3gain_in_id3v2() {
         saturation = apply_mp3_id3v2_bytes(file_path, actual_steps, opts, mp3_data.take())?;
         saturation.frames
     } else {
-        // Under Split the ReplayGain values belong in ID3v2, so nothing is
-        // folded into the APE write here — step 3 handles them.
-        let folded_rg = if opts.write_replaygain_tags
-            && opts.tag_layout == TagLayout::Ape
-            && opts.channel.is_none()
-            && !opts.wrap
-        {
-            compute_rg_residual(file_path, opts, actual_steps, false).map(|r| r.to_ape())
-        } else {
-            None
-        };
-        ape_rg_folded = folded_rg.is_some();
-        saturation =
-            apply_mp3_ape_bytes(file_path, actual_steps, opts, folded_rg, mp3_data.take())?;
+        saturation = apply_mp3_ape_bytes(file_path, actual_steps, opts, mp3_data.take())?;
         saturation.frames
     };
 
-    // 3) Remaining ReplayGain tag writes.
-    //
-    // AAC writes to mp4 freeform metadata (always arithmetic — AAC clamps
-    // internally, and mp3gain has no AAC, so it is interop-neutral).
-    // `tag_layout` selects a *container for MP3 tags*, so it must not gate
-    // the AAC branch — doing so silently skipped the mp4 ReplayGain tags for
-    // an `.m4a` processed under `-s i`, leaving stale values for players to
-    // double-apply. MP3 under `-s i` was already handled in step 2; the other
-    // MP3 layouts land below, where saturation or `-w` wrap means the loudness
-    // shift is not uniform, so the modified file is re-analyzed for the true
-    // post-apply residual and the APE items rewritten. Channel applies keep
-    // the legacy separate write.
-    if opts.write_replaygain_tags {
-        let needs_reanalysis =
-            !is_aac && (opts.wrap || saturation.saturated_low > 0 || saturation.saturated_high > 0);
-        if is_aac {
-            if let Some(res) = compute_rg_residual(file_path, opts, actual_steps, false) {
-                mp4meta::write_replaygain_tags(file_path, &res.to_mp4())?;
-            }
-        } else if opts.tag_layout.mp3gain_in_id3v2() {
-            // Folded into the step-2 temp file by apply_mp3_id3v2_bytes.
-        } else if opts.tag_layout == TagLayout::Split {
-            // Write the authoritative ID3v2 values *before* dropping the
-            // APEv2 copies mp3gain or an earlier `-s a` run may have left:
-            // removing them first means a failed ID3v2 write (ENOSPC, a
-            // locked file) leaves the file with no ReplayGain values at all.
-            if let Some(res) = compute_rg_residual(file_path, opts, actual_steps, needs_reanalysis)
-            {
-                id3v2::write_id3v2_replaygain(file_path, &res.to_id3v2())?;
-            }
-            ape::remove_ape_replaygain(file_path)?;
-        } else if !ape_rg_folded || needs_reanalysis {
-            if let Some(res) = compute_rg_residual(file_path, opts, actual_steps, needs_reanalysis)
-            {
-                ape::write_ape_replaygain(file_path, &res.to_ape())?;
-            }
-        }
-    }
-
-    // 4) Restore mtime.
+    // 3) Restore mtime.
     if let Some(mtime) = original_mtime {
         restore_timestamp(file_path, mtime);
     }
@@ -322,7 +291,7 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
 /// "would apply N steps" message lines up with what a real apply
 /// would do.
 pub fn predict_apply(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
-    let is_aac = mp4meta::is_aac_file(file_path);
+    let is_aac = opts.is_aac(file_path);
     let mut aac_analysis: AacAnalysisCache = None;
     let (actual_steps, clipping_prevented, clipping_detected) =
         check_clipping(file_path, opts, is_aac, &mut aac_analysis, &mut None)?;
@@ -438,12 +407,13 @@ fn apply_aac_bytes(
     steps: i32,
     opts: &ApplyOptions,
     analysis: AacAnalysisCache,
+    replaygain: Option<&mp4meta::ReplayGainTags>,
 ) -> Result<usize> {
     with_temp_file(file_path, |r, w| {
         if opts.write_undo {
-            aac::apply_aac_gain_with_undo_to_path_with_analysis(r, w, steps, analysis)
+            aac::apply_aac_gain_with_undo_to_path_with_analysis(r, w, steps, analysis, replaygain)
         } else {
-            aac::apply_aac_gain_to_path_with_analysis(r, w, steps, analysis)
+            aac::apply_aac_gain_to_path_with_analysis(r, w, steps, analysis, replaygain)
         }
     })
 }
@@ -454,6 +424,7 @@ fn apply_aac_bytes(
     _steps: i32,
     _opts: &ApplyOptions,
     _analysis: AacAnalysisCache,
+    _replaygain: Option<&mp4meta::ReplayGainTags>,
 ) -> Result<usize> {
     Err(Error::FeatureNotAvailable {
         feature: "AAC support",
@@ -568,13 +539,39 @@ fn compute_rg_residual(
     })
 }
 
+/// MP3 apply for the APEv2-undo layouts ([`TagLayout::Split`] and
+/// [`TagLayout::Ape`]). The undo and `MP3GAIN_MINMAX` items go into the
+/// APEv2 tag the gain apply rewrites anyway; the `REPLAYGAIN_*` values go
+/// wherever the layout puts them, still on the same temp file:
+///
+/// - `Ape`: embedded in that same APEv2 write when the residual is
+///   arithmetic. Under `-w` wrap or saturation the loudness shift is not
+///   uniform, so the modified temp is re-analyzed for the true post-apply
+///   residual and the items rewritten (a tail-only rewrite). Channel applies
+///   take the same second write.
+/// - `Split`: ID3v2 TXXX frames written onto the temp, then any APEv2
+///   `REPLAYGAIN_*` copies mp3gain or an earlier `-s a` run left behind are
+///   dropped, in that order, so a failed ID3v2 write never leaves the file
+///   with no ReplayGain values in either container.
+///
+/// Doing all of this before the rename (as the `-s i` path already did)
+/// replaces the two visible rewrites the default layout used to pay after
+/// it: a full-file copy for the ID3v2 write plus the APEv2 tail rewrite.
 fn apply_mp3_ape_bytes(
     file_path: &Path,
     steps: i32,
     opts: &ApplyOptions,
-    replaygain: Option<ape::ApeReplayGain>,
     preread: Option<Vec<u8>>,
 ) -> Result<SaturationStats> {
+    let write_rg = opts.write_replaygain_tags && opts.track_result.is_some();
+    let folded_rg =
+        if write_rg && opts.tag_layout == TagLayout::Ape && opts.channel.is_none() && !opts.wrap {
+            compute_rg_residual(file_path, opts, steps, false).map(|r| r.to_ape())
+        } else {
+            None
+        };
+    let ape_rg_folded = folded_rg.is_some();
+
     with_temp_file(file_path, |r, w| {
         let mut gain = GainOptions::new(steps)
             .wrap(opts.wrap)
@@ -582,10 +579,25 @@ fn apply_mp3_ape_bytes(
         if let Some(ch) = opts.channel {
             gain = gain.channel(ch);
         }
-        if let Some(rg) = replaygain {
+        if let Some(rg) = folded_rg {
             gain = gain.replaygain(rg);
         }
-        gain.apply_to_path_with_stats_preread(r, w, preread)
+        let stats = gain.apply_to_path_with_stats_preread(r, w, preread)?;
+
+        if write_rg {
+            let reanalyze = opts.wrap || stats.saturated_low > 0 || stats.saturated_high > 0;
+            if opts.tag_layout == TagLayout::Split {
+                if let Some(res) = compute_rg_residual(w, opts, steps, reanalyze) {
+                    id3v2::write_id3v2_replaygain_direct(w, &res.to_id3v2())?;
+                }
+                ape::remove_ape_replaygain(w)?;
+            } else if !ape_rg_folded || reanalyze {
+                if let Some(res) = compute_rg_residual(w, opts, steps, reanalyze) {
+                    ape::write_ape_replaygain(w, &res.to_ape())?;
+                }
+            }
+        }
+        Ok(stats)
     })
 }
 
@@ -607,6 +619,9 @@ fn apply_mp3_id3v2_bytes(
         }
         let stats = gain.apply_to_path_with_stats_preread(r, w, preread)?;
 
+        // Parsed once: the undo read below and the frame write at the end
+        // both work on this tag, where they used to parse the temp twice.
+        let mut tag = id3v2::read_tag(w)?;
         let mut rg = id3v2::Id3v2ReplayGain::default();
 
         if opts.write_undo {
@@ -615,8 +630,8 @@ fn apply_mp3_id3v2_bytes(
                 Some(Channel::Right) => (0, steps),
                 None => (steps, steps),
             };
-            let existing = id3v2::read_id3v2_replaygain(w).unwrap_or_default();
-            let (existing_left, existing_right) = ape::parse_undo_values(existing.undo.as_deref());
+            let existing_undo = id3v2::get_txxx(&tag, ape::TAG_MP3GAIN_UNDO);
+            let (existing_left, existing_right) = ape::parse_undo_values(existing_undo.as_deref());
 
             // MP3GAIN_UNDO stores the *undo* delta (mp3gain convention, issue
             // #210): applying `+delta` makes the stored undo `-delta`,
@@ -629,7 +644,7 @@ fn apply_mp3_id3v2_bytes(
             // without removing anything, so it can never be cleaned up again.
             // Only keep a 0,0 value when one is already stored, so an
             // existing tag is still updated rather than left stale.
-            if (undo_left, undo_right) != (0, 0) || existing.undo.is_some() {
+            if (undo_left, undo_right) != (0, 0) || existing_undo.is_some() {
                 rg.undo = Some(ape::format_undo_value(undo_left, undo_right, opts.wrap));
 
                 // MP3GAIN_MINMAX is the *post-apply* global_gain range
@@ -661,7 +676,7 @@ fn apply_mp3_id3v2_bytes(
         }
 
         if rg.undo.is_some() || rg.track_gain.is_some() {
-            id3v2::write_id3v2_replaygain_direct(w, &rg)?;
+            id3v2::write_rg_frames_direct(w, &mut tag, &rg)?;
         }
         Ok(stats)
     })
@@ -770,6 +785,16 @@ pub fn read_mtime(path: &Path) -> Option<SystemTime> {
     std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
 }
 
+/// [`read_mtime`] when `preserve` is set, `None` otherwise: the snapshot a
+/// caller takes before a write it will later [`restore_timestamp`] from.
+pub fn read_mtime_if(path: &Path, preserve: bool) -> Option<SystemTime> {
+    if preserve {
+        read_mtime(path)
+    } else {
+        None
+    }
+}
+
 /// Values written by [`write_replaygain_tags_only`].
 ///
 /// Unlike the apply path these are *absolute*: no gain is baked into the
@@ -817,11 +842,7 @@ impl TagsOnlyOptions {
 /// `MP3GAIN_ALBUM_MINMAX`. Any that a previous real apply left behind stay
 /// untouched: they still describe the audio as it currently is.
 pub fn write_replaygain_tags_only(file_path: &Path, opts: &TagsOnlyOptions) -> Result<()> {
-    let original_mtime = if opts.preserve_timestamp {
-        read_mtime(file_path)
-    } else {
-        None
-    };
+    let original_mtime = read_mtime_if(file_path, opts.preserve_timestamp);
 
     let values = RgResidual {
         track_gain_db: opts.track_gain_db,

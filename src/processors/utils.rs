@@ -11,6 +11,27 @@ pub use mp3rgain::apply::restore_timestamp;
 use crate::cli::options::{Options, OutputFormat};
 use crate::json_output::JsonFileResult;
 
+/// One yellow `!` warning line for `filename` in text mode (never under
+/// `-q`), with an optional indented hint beneath it. Every per-file warning
+/// (clipping, saturation, tags-only cap, multi-track AAC) goes through here
+/// so the stderr shape stays uniform instead of each emitter re-spelling
+/// the format string.
+pub fn emit_file_warning(opts: &Options, filename: &str, msg: &str, hint: Option<&str>) {
+    if opts.output_format != OutputFormat::Text || opts.quiet {
+        return;
+    }
+    eprintln!(
+        "  {} {}{} - {}",
+        "!".yellow(),
+        opts.dry_run_prefix(),
+        filename,
+        msg
+    );
+    if let Some(hint) = hint {
+        eprintln!("      {}", hint);
+    }
+}
+
 /// Shared error arm for the per-file processors: red stderr line in text
 /// mode, plus the JSON error record.
 pub fn report_file_error(
@@ -59,11 +80,7 @@ pub fn stored_track_result(file: &Path, opts: &Options) -> Option<ReplayGainResu
         return None;
     }
     let tags = mp3rgain::read_gain_tags_auto(file, opts.tag_layout).ok()?;
-    if tags.algorithm.is_some() {
-        return None;
-    }
-    let gain_db = tags.track_gain_db()?;
-    let peak = tags.track_peak_value()?;
+    let (gain_db, peak) = tags.rg1_track_values()?;
     Some(ReplayGainResult::from_stored_tags(
         gain_db,
         peak,
@@ -73,11 +90,7 @@ pub fn stored_track_result(file: &Path, opts: &Options) -> Option<ReplayGainResu
 }
 
 pub fn save_original_mtime(file: &Path, opts: &Options) -> Option<SystemTime> {
-    if opts.preserve_timestamp && !opts.dry_run {
-        mp3rgain::apply::read_mtime(file)
-    } else {
-        None
-    }
+    mp3rgain::apply::read_mtime_if(file, opts.preserve_timestamp && !opts.dry_run)
 }
 
 /// Render the user-visible clipping warning after a real or predicted apply.
@@ -92,7 +105,6 @@ pub fn emit_clipping_warning(
     filename: &str,
     track_peak: Option<f64>,
 ) -> Option<String> {
-    let dry_run_prefix = opts.dry_run_prefix();
     let (prevented_detail, warn_msg) = match report.clipping_detected {
         Some(ClippingDetection::Headroom(headroom_steps)) => (
             String::new(),
@@ -115,45 +127,35 @@ pub fn emit_clipping_warning(
             "gain reduced from {} to {} steps to prevent clipping{}",
             requested_steps, report.actual_steps, prevented_detail
         );
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
-            eprintln!(
-                "  {} {}{} - {}",
-                "!".yellow(),
-                dry_run_prefix,
-                filename,
-                msg
-            );
-        }
+        emit_file_warning(opts, filename, &msg, None);
         return Some(msg);
     }
     if opts.ignore_clipping || opts.quiet {
         return None;
     }
-    if opts.output_format == OutputFormat::Text {
-        eprintln!(
-            "  {} {}{} - {}",
-            "!".yellow(),
-            dry_run_prefix,
-            filename,
-            warn_msg
-        );
-        eprintln!("      Use -c to ignore clipping warnings or -k to prevent clipping");
-    }
+    emit_file_warning(
+        opts,
+        filename,
+        &warn_msg,
+        Some("Use -c to ignore clipping warnings or -k to prevent clipping"),
+    );
     Some(warn_msg)
 }
 
-pub fn warn_aac_multi_track(file: &Path, filename: &str, opts: &Options, dry_run_prefix: &str) {
+pub fn warn_aac_multi_track(file: &Path, filename: &str, opts: &Options) {
     if opts.output_format != OutputFormat::Text || opts.quiet {
         return;
     }
     let track_count = mp4meta::count_audio_tracks(file);
     if track_count > 1 {
-        eprintln!(
-            "  {} {}{} - {} audio tracks detected, processing first track only",
-            "!".yellow(),
-            dry_run_prefix,
+        emit_file_warning(
+            opts,
             filename,
-            track_count
+            &format!(
+                "{} audio tracks detected, processing first track only",
+                track_count
+            ),
+            None,
         );
     }
 }
