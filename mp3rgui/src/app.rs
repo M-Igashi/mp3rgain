@@ -792,7 +792,7 @@ impl Mp3rgainApp {
                     track_result: Some(ReplayGainResult::from_stored_tags(
                         gain_db,
                         peak,
-                        stored_file_type(&f.path),
+                        AudioFileType::from_path(&f.path),
                         AnalysisMode::Rg1,
                     )),
                     album_info: None,
@@ -1213,7 +1213,7 @@ impl Mp3rgainApp {
                                 track_result: Some(ReplayGainResult::from_stored_tags(
                                     tags.track_gain,
                                     tags.track_peak,
-                                    stored_file_type(&f.path),
+                                    AudioFileType::from_path(&f.path),
                                     AnalysisMode::Rg1,
                                 )),
                                 album_info: Some(info),
@@ -1711,16 +1711,6 @@ fn trusted_album_tags(file: &FileEntry) -> Option<StoredAlbumTags> {
         album_gain: view.album_gain.as_deref().and_then(parse_rg_gain)?,
         album_peak: view.album_peak.as_deref().and_then(parse_rg_peak)?,
     })
-}
-
-/// File type for a tag-derived result, mirroring the dispatch in
-/// `mp3rgain::read_gain_tags_auto` (same as the CLI's -s R path).
-fn stored_file_type(path: &Path) -> AudioFileType {
-    if mp3rgain::mp4meta::is_aac_file(path) {
-        AudioFileType::Aac
-    } else {
-        AudioFileType::Mp3
-    }
 }
 
 /// Display pair for a ReplayGain value, mode-aware (issue #272).

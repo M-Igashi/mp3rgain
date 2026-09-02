@@ -5,7 +5,7 @@
 //! subsumed by a broader rewrite of this module.
 
 use crate::ape::{
-    parse_undo_values, parse_undo_wrap, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
+    parse_undo_values, parse_undo_wrap, REPLAYGAIN_KEYS, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
     TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_ALGORITHM,
     TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
@@ -17,19 +17,14 @@ use std::path::Path;
 
 const TARGET_VERSION: id3::Version = id3::Version::Id3v24;
 
-/// All known mp3gain/ReplayGain TXXX descriptions
+/// The `REPLAYGAIN_*` value descriptions only (no undo/minmax). Same set as
+/// the APEv2 keys — the two containers store identical names.
+const RG_VALUE_DESCRIPTIONS: &[&str] = &REPLAYGAIN_KEYS;
+
+/// All known mp3gain/ReplayGain TXXX descriptions.
 const ALL_RG_DESCRIPTIONS: &[&str] = &[
     TAG_MP3GAIN_UNDO,
     TAG_MP3GAIN_MINMAX,
-    TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK,
-    TAG_REPLAYGAIN_ALBUM_GAIN,
-    TAG_REPLAYGAIN_ALBUM_PEAK,
-    TAG_REPLAYGAIN_ALGORITHM,
-];
-
-/// The `REPLAYGAIN_*` value descriptions only (no undo/minmax).
-const RG_VALUE_DESCRIPTIONS: &[&str] = &[
     TAG_REPLAYGAIN_TRACK_GAIN,
     TAG_REPLAYGAIN_TRACK_PEAK,
     TAG_REPLAYGAIN_ALBUM_GAIN,
@@ -95,12 +90,29 @@ fn is_frame_encodable(frame: &id3::Frame) -> bool {
 ///
 /// Takes `&mut` so the unencodable frames can be filtered in place: cloning the
 /// tag first would copy every frame, including multi-megabyte embedded art.
+///
+/// The whole tag is probed once first, and the per-frame filter only runs when
+/// that fails. `is_frame_encodable` clones each frame it inspects, so screening
+/// every frame up front made a tag with embedded cover art clone and encode
+/// those megabytes on every write — for the rare malformed frame the filter
+/// actually exists to catch.
 fn write_tag_direct(path: &Path, tag: &mut id3::Tag) -> Result<()> {
-    tag.frames_vec_mut().retain(is_frame_encodable);
+    if !is_tag_encodable(tag) {
+        tag.frames_vec_mut().retain(is_frame_encodable);
+    }
     tag.write_to_path(path, TARGET_VERSION)
         .map_err(|e| Error::Id3v2Error {
             message: e.to_string(),
         })
+}
+
+/// Whether `tag` encodes cleanly as [`TARGET_VERSION`] as a whole.
+fn is_tag_encodable(tag: &id3::Tag) -> bool {
+    let mut buf: Vec<u8> = Vec::new();
+    id3::Encoder::new()
+        .version(TARGET_VERSION)
+        .encode(tag, &mut buf)
+        .is_ok()
 }
 
 /// Rewrite the tag atomically: copy the file to a sibling temp, write the tag

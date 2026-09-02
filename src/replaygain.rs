@@ -16,8 +16,6 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
 #[cfg(feature = "replaygain")]
-use crate::mp4meta;
-#[cfg(feature = "replaygain")]
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(feature = "replaygain")]
 use std::sync::Arc;
@@ -136,6 +134,18 @@ pub enum AudioFileType {
     Mp3,
     /// AAC/M4A file
     Aac,
+}
+
+impl AudioFileType {
+    /// Classify `path` by container, matching the dispatch every apply / tag
+    /// path uses (AAC for an MP4 carrying AAC audio, MP3 otherwise).
+    pub fn from_path(path: &Path) -> Self {
+        if crate::mp4meta::is_aac_file(path) {
+            AudioFileType::Aac
+        } else {
+            AudioFileType::Mp3
+        }
+    }
 }
 
 impl std::fmt::Display for AudioFileType {
@@ -1064,11 +1074,7 @@ impl ReplayGainAnalyzer {
 /// Detect file type from path
 #[cfg(feature = "replaygain")]
 fn detect_file_type(file_path: &Path) -> AudioFileType {
-    if mp4meta::is_aac_file(file_path) {
-        AudioFileType::Aac
-    } else {
-        AudioFileType::Mp3
-    }
+    AudioFileType::from_path(file_path)
 }
 
 // =============================================================================

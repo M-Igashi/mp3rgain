@@ -2,7 +2,7 @@ use colored::*;
 use indicatif::ProgressBar;
 use mp3rgain::apply::ClippingDetection;
 use mp3rgain::mp4meta;
-use mp3rgain::replaygain::{self, ReplayGainResult};
+use mp3rgain::replaygain::{self, AudioFileType, ReplayGainResult};
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -67,19 +67,9 @@ pub fn stored_track_result(file: &Path, opts: &Options) -> Option<ReplayGainResu
     Some(ReplayGainResult::from_stored_tags(
         gain_db,
         peak,
-        stored_file_type(file),
+        AudioFileType::from_path(file),
         opts.analysis_mode,
     ))
-}
-
-/// File type for a tag-derived result, mirroring the dispatch in
-/// [`mp3rgain::read_gain_tags_auto`].
-pub fn stored_file_type(file: &Path) -> mp3rgain::replaygain::AudioFileType {
-    if mp4meta::is_aac_file(file) {
-        mp3rgain::replaygain::AudioFileType::Aac
-    } else {
-        mp3rgain::replaygain::AudioFileType::Mp3
-    }
 }
 
 pub fn save_original_mtime(file: &Path, opts: &Options) -> Option<SystemTime> {

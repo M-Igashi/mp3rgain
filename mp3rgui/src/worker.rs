@@ -377,10 +377,7 @@ pub fn spawn_album_analysis(
                         .iter()
                         .map(|(pos, msg)| (original_indices[*pos], msg.clone()))
                         .collect();
-                    let album_info = AacAlbumInfo {
-                        album_gain_db: report.album.album_gain_db(),
-                        album_peak: report.album.album_peak(),
-                    };
+                    let album_info = AacAlbumInfo::from(&report.album);
                     analyzed_total += successful.len();
                     skipped_total += failures.len();
 
@@ -852,8 +849,11 @@ pub fn spawn_find_max_amplitude(ctx: egui::Context, files: Vec<(usize, PathBuf)>
     WorkerHandle { rx, cancel }
 }
 
-/// Spawn the stored-tag scanner. Iterates files serially (tag reads are
-/// I/O-light) and emits `StoredTagsRead` for each.
+/// Spawn the stored-tag scanner, emitting `StoredTagsRead` per file.
+///
+/// Runs through [`run_job_pool`] like the other workers: an MP3 tag read is
+/// I/O-light, but an AAC one parses the whole `moov` box, so importing a large
+/// library from network storage was noticeably serial.
 ///
 /// Dispatch is shared with the CLI via `mp3rgain::read_gain_tags_auto`:
 ///   - AAC: MP4 freeform RG + undo
@@ -870,18 +870,24 @@ pub fn spawn_check_stored_tags(
 
     thread::spawn(move || {
         let total = jobs.len();
-        for job in jobs {
-            if cancel_w.load(Ordering::Relaxed) {
-                send(&tx, &ctx, WorkerEvent::Cancelled);
-                return;
-            }
-            send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
-            let view = read_stored_tags(&job.path, layout);
-            send(
-                &tx,
-                &ctx,
-                WorkerEvent::StoredTagsRead { idx: job.idx, view },
-            );
+
+        {
+            let tx = tx.clone();
+            let ctx = ctx.clone();
+            run_job_pool(jobs, &cancel_w, move |job: CheckTagsJob| {
+                send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
+                let view = read_stored_tags(&job.path, layout);
+                send(
+                    &tx,
+                    &ctx,
+                    WorkerEvent::StoredTagsRead { idx: job.idx, view },
+                );
+            });
+        }
+
+        if cancel_w.load(Ordering::Relaxed) {
+            send(&tx, &ctx, WorkerEvent::Cancelled);
+            return;
         }
 
         send(

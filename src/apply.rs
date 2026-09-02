@@ -52,6 +52,15 @@ pub struct AacAlbumInfo {
     pub album_peak: f64,
 }
 
+impl From<&crate::replaygain::AlbumGainResult> for AacAlbumInfo {
+    fn from(album: &crate::replaygain::AlbumGainResult) -> Self {
+        Self {
+            album_gain_db: album.album_gain_db(),
+            album_peak: album.album_peak(),
+        }
+    }
+}
+
 /// Driver configuration for [`apply_with_options`].
 ///
 /// Construct via [`ApplyOptions::new`] and tweak fields directly — this
@@ -250,33 +259,34 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
     // 3) Remaining ReplayGain tag writes.
     //
     // AAC writes to mp4 freeform metadata (always arithmetic — AAC clamps
-    // internally, and mp3gain has no AAC, so it is interop-neutral). The MP3
-    // paths were handled in step 2, except: under saturation or `-w` wrap the
-    // loudness shift is not uniform, so the modified file is re-analyzed for
-    // the true post-apply residual and the APE items rewritten; channel
-    // applies keep the legacy separate write.
-    if opts.write_replaygain_tags && !opts.tag_layout.mp3gain_in_id3v2() {
+    // internally, and mp3gain has no AAC, so it is interop-neutral).
+    // `tag_layout` selects a *container for MP3 tags*, so it must not gate
+    // the AAC branch — doing so silently skipped the mp4 ReplayGain tags for
+    // an `.m4a` processed under `-s i`, leaving stale values for players to
+    // double-apply. MP3 under `-s i` was already handled in step 2; the other
+    // MP3 layouts land below, where saturation or `-w` wrap means the loudness
+    // shift is not uniform, so the modified file is re-analyzed for the true
+    // post-apply residual and the APE items rewritten. Channel applies keep
+    // the legacy separate write.
+    if opts.write_replaygain_tags {
         let needs_reanalysis =
             !is_aac && (opts.wrap || saturation.saturated_low > 0 || saturation.saturated_high > 0);
         if is_aac {
             if let Some(res) = compute_rg_residual(file_path, opts, actual_steps, false) {
-                let mut tags = mp4meta::ReplayGainTags::default();
-                tags.set_track(res.track_gain_db, res.track_peak);
-                if let Some((album_gain, album_peak)) = res.album {
-                    tags.set_album(album_gain, album_peak);
-                }
-                tags.set_algorithm(res.mode);
-                mp4meta::write_replaygain_tags(file_path, &tags)?;
+                mp4meta::write_replaygain_tags(file_path, &res.to_mp4())?;
             }
+        } else if opts.tag_layout.mp3gain_in_id3v2() {
+            // Folded into the step-2 temp file by apply_mp3_id3v2_bytes.
         } else if opts.tag_layout == TagLayout::Split {
-            // Clear any APEv2 ReplayGain first: mp3gain or an earlier `-s a`
-            // run may have left values there, and they would now disagree
-            // with the authoritative ID3v2 ones.
-            ape::remove_ape_replaygain(file_path)?;
+            // Write the authoritative ID3v2 values *before* dropping the
+            // APEv2 copies mp3gain or an earlier `-s a` run may have left:
+            // removing them first means a failed ID3v2 write (ENOSPC, a
+            // locked file) leaves the file with no ReplayGain values at all.
             if let Some(res) = compute_rg_residual(file_path, opts, actual_steps, needs_reanalysis)
             {
                 id3v2::write_id3v2_replaygain(file_path, &res.to_id3v2())?;
             }
+            ape::remove_ape_replaygain(file_path)?;
         } else if !ape_rg_folded || needs_reanalysis {
             if let Some(res) = compute_rg_residual(file_path, opts, actual_steps, needs_reanalysis)
             {
@@ -483,6 +493,16 @@ impl RgResidual {
             ..Default::default()
         }
     }
+
+    fn to_mp4(&self) -> mp4meta::ReplayGainTags {
+        let mut tags = mp4meta::ReplayGainTags::default();
+        tags.set_track(self.track_gain_db, self.track_peak);
+        if let Some((album_gain, album_peak)) = self.album {
+            tags.set_album(album_gain, album_peak);
+        }
+        tags.set_algorithm(self.mode);
+        tags
+    }
 }
 
 /// Compute the residual track/album ReplayGain after applying `actual_steps`.
@@ -601,23 +621,31 @@ fn apply_mp3_id3v2_bytes(
             // MP3GAIN_UNDO stores the *undo* delta (mp3gain convention, issue
             // #210): applying `+delta` makes the stored undo `-delta`,
             // accumulating by subtraction onto any prior undo value.
-            rg.undo = Some(ape::format_undo_value(
-                existing_left - delta_left,
-                existing_right - delta_right,
-                opts.wrap,
-            ));
+            let (undo_left, undo_right) =
+                (existing_left - delta_left, existing_right - delta_right);
+            // A zero undo delta describes nothing to roll back. Writing it
+            // anyway (as an already-on-target `-r -s i` track would) leaves a
+            // permanent `+000,+000` tag: both undo paths early-return on 0,0
+            // without removing anything, so it can never be cleaned up again.
+            // Only keep a 0,0 value when one is already stored, so an
+            // existing tag is still updated rather than left stale.
+            if (undo_left, undo_right) != (0, 0) || existing.undo.is_some() {
+                rg.undo = Some(ape::format_undo_value(undo_left, undo_right, opts.wrap));
 
-            // MP3GAIN_MINMAX is the *post-apply* global_gain range (mp3gain
-            // convention). A full apply already tracked it in the saturation
-            // stats (issue #231); channel and zero-step applies only touch a
-            // subset (or nothing), so scan the modified temp file instead.
-            let (min, max) = if opts.channel.is_none() && stats.frames > 0 {
-                (stats.min_gain, stats.max_gain)
-            } else {
-                let post = crate::analyze(w)?;
-                (post.min_gain(), post.max_gain())
-            };
-            rg.minmax = Some(ape::format_minmax(min, max));
+                // MP3GAIN_MINMAX is the *post-apply* global_gain range
+                // (mp3gain convention). A full apply already tracked it in the
+                // saturation stats (issue #231); channel applies only touch a
+                // subset, so scan the modified temp file instead. Written
+                // alongside the undo value, never on its own: on a file with
+                // no gain applied it would claim an apply that never happened.
+                let (min, max) = if opts.channel.is_none() && stats.frames > 0 {
+                    (stats.min_gain, stats.max_gain)
+                } else {
+                    let post = crate::analyze(w)?;
+                    (post.min_gain(), post.max_gain())
+                };
+                rg.minmax = Some(ape::format_minmax(min, max));
+            }
         }
 
         if opts.write_replaygain_tags {
@@ -803,21 +831,17 @@ pub fn write_replaygain_tags_only(file_path: &Path, opts: &TagsOnlyOptions) -> R
     };
 
     if mp4meta::is_aac_file(file_path) {
-        let mut tags = mp4meta::ReplayGainTags::default();
-        tags.set_track(values.track_gain_db, values.track_peak);
-        if let Some((album_gain, album_peak)) = values.album {
-            tags.set_album(album_gain, album_peak);
-        }
-        tags.set_algorithm(values.mode);
-        mp4meta::write_replaygain_tags(file_path, &tags)?;
+        mp4meta::write_replaygain_tags(file_path, &values.to_mp4())?;
     } else {
         match opts.tag_layout {
             // Split keeps the authoritative values in ID3v2, so an APEv2 copy
             // from mp3gain or an earlier `-s a` run has to go, the same rule
-            // the apply path follows.
+            // the apply path follows — and in the same order, writing the new
+            // values before dropping the old ones so a failed write cannot
+            // leave the file with no ReplayGain tags at all.
             TagLayout::Split => {
-                ape::remove_ape_replaygain(file_path)?;
                 id3v2::write_id3v2_replaygain(file_path, &values.to_id3v2())?;
+                ape::remove_ape_replaygain(file_path)?;
             }
             TagLayout::Id3v2 => id3v2::write_id3v2_replaygain(file_path, &values.to_id3v2())?,
             TagLayout::Ape => ape::write_ape_replaygain(file_path, &values.to_ape())?,
