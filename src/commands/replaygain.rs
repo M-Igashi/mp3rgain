@@ -4,7 +4,7 @@ use mp3rgain::replaygain::{
     self, AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult,
     REPLAYGAIN_REFERENCE_DB,
 };
-use mp3rgain::AacAlbumInfo;
+use mp3rgain::{peak_to_pcm_sample, AacAlbumInfo};
 use rayon::prelude::*;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -13,9 +13,10 @@ use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::commands::threading::effective_threads;
 use crate::commands::utils::{
     create_json_summary, exit_if_failed, finish_with_album_summary, finish_with_summary,
-    for_each_file_with_analysis_bar, run_album_analysis, update_counters,
+    for_each_file_with_analysis_bar, run_album_analysis, update_counters, TSV_HEADER,
 };
 use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
+use crate::processors::info::{scan_gain_range_for_row, tsv_rg_row};
 use crate::processors::replaygain::{
     apply_is_noop, capped_tag_gain, process_apply_replaygain_with_album, process_track_gain,
 };
@@ -58,6 +59,10 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     require_replaygain_feature();
 
     let dry_run_prefix = opts.dry_run_prefix();
+
+    if opts.output_format == OutputFormat::Tsv {
+        println!("{}", TSV_HEADER);
+    }
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         if opts.tags_only {
@@ -137,6 +142,10 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     require_replaygain_feature();
 
     let dry_run_prefix = opts.dry_run_prefix();
+
+    if opts.output_format == OutputFormat::Tsv {
+        println!("{}", TSV_HEADER);
+    }
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         println!(
@@ -237,6 +246,12 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             };
 
             let album_info = AacAlbumInfo::from(&album_result);
+
+            // mp3gain-compatible TSV rows, emitted before the apply so the
+            // global_gain columns describe the files as they were scanned.
+            if opts.output_format == OutputFormat::Tsv {
+                emit_album_tsv_rows(files, &album_result, &file_to_track, opts)?;
+            }
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 println!();
@@ -478,6 +493,59 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
             }
             std::process::exit(1);
         }
+    }
+
+    Ok(())
+}
+
+/// Per-file rows plus the `"Album"` summary row for `-a -o tsv`, matching what
+/// `-o tsv` alone prints for the same set of files.
+fn emit_album_tsv_rows(
+    files: &[PathBuf],
+    album_result: &AlbumGainResult,
+    file_to_track: &[Option<usize>],
+    opts: &Options,
+) -> Result<()> {
+    // The frame scan re-reads each file, so run it in parallel the way
+    // cmd_info does rather than serializing it inside the emit loop.
+    let gain_ranges: Vec<(u8, u8)> = files
+        .par_iter()
+        .enumerate()
+        .map(|(i, file)| match file_to_track[i] {
+            Some(_) => scan_gain_range_for_row(file),
+            None => (255, 0),
+        })
+        .collect();
+
+    let mut album_max_gain: Option<u8> = None;
+    let mut album_min_gain: Option<u8> = None;
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    for (i, file) in files.iter().enumerate() {
+        let Some(track_idx) = file_to_track[i] else {
+            continue;
+        };
+        let track = &album_result.tracks()[track_idx];
+        handle.write_all(tsv_rg_row(file, opts, track, gain_ranges[i]).as_bytes())?;
+        let (max_gain, min_gain) = gain_ranges[i];
+        album_max_gain = album_max_gain.max(Some(max_gain));
+        album_min_gain = Some(album_min_gain.map_or(min_gain, |m: u8| m.min(min_gain)));
+    }
+
+    if album_max_gain.is_some() {
+        let (album_gain_steps, album_gain_db) = opts.modified_gain(
+            album_result.album_gain_steps(),
+            album_result.album_gain_db(),
+        );
+        writeln!(
+            handle,
+            "\"Album\"\t{}\t{:.6}\t{:.6}\t{}\t{}",
+            album_gain_steps,
+            album_gain_db,
+            peak_to_pcm_sample(album_result.album_peak()),
+            album_max_gain.unwrap_or(255),
+            album_min_gain.unwrap_or(0)
+        )?;
     }
 
     Ok(())

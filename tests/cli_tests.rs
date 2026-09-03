@@ -577,3 +577,101 @@ fn tags_only_k_caps_written_gain_at_headroom() {
     let written = track_gain_db(file).expect("REPLAYGAIN_TRACK_GAIN");
     assert!((written - got).abs() < 0.01, "written {}", written);
 }
+
+/// Reported on the Hydrogenaudio forum: TSV rows printed the bare filename,
+/// which collides as soon as more than one album is scanned in a single run.
+#[test]
+fn tsv_rows_carry_the_path_as_given() {
+    let album = TempAlbum::new(&["test_mono.mp3"]);
+    let file = &album.files[0];
+    let path = file.to_str().unwrap();
+
+    let text = stdout_of(&run(&["-o", "tsv", path]));
+    let row = text.lines().nth(1).expect("TSV data row");
+    assert_eq!(row.split('\t').next(), Some(path), "row: {}", row);
+}
+
+/// Reported on the Hydrogenaudio forum: `-o tsv` only produced rows for the
+/// bare analysis command. Combined with `-r` or `-a` it printed nothing at all.
+#[test]
+fn tsv_rows_are_emitted_by_the_gain_applying_commands() {
+    for args in [
+        vec!["-r", "-n"],
+        vec!["-a", "-n"],
+        vec!["-e", "-n"],
+        vec!["-g", "1", "-n"],
+    ] {
+        let album = TempAlbum::new(&["test_mono.mp3"]);
+        let path = album.files[0].to_str().unwrap();
+
+        let mut argv = args.clone();
+        argv.extend_from_slice(&["-o", "tsv", path]);
+        let text = stdout_of(&run(&argv));
+
+        assert!(
+            text.starts_with("File\tMP3 gain\t"),
+            "{:?} lost the TSV header: {:?}",
+            args,
+            text
+        );
+        let row = text
+            .lines()
+            .nth(1)
+            .unwrap_or_else(|| panic!("{:?} emitted no TSV row", args));
+        assert_eq!(row.split('\t').next(), Some(path), "row: {}", row);
+    }
+}
+
+/// `-a -o tsv` reports the same recommended gain as `-o tsv` alone, including
+/// the trailing `"Album"` summary row.
+#[test]
+fn tsv_album_mode_matches_the_analysis_only_rows() {
+    let album = TempAlbum::new(&["test_mono.mp3", "test_stereo.mp3"]);
+    let mut analysis = vec!["-o", "tsv"];
+    analysis.extend(album.args());
+    let expected = stdout_of(&run(&analysis));
+
+    let mut applied = vec!["-o", "tsv", "-a", "-n"];
+    applied.extend(album.args());
+    assert_eq!(stdout_of(&run(&applied)), expected);
+    assert!(expected.contains("\"Album\"\t"), "{}", expected);
+}
+
+/// Issue #228 gave the writing commands a non-zero exit on failure but left
+/// the read-only ones (info, `-s c`, `-x`) reporting success for a file they
+/// could not even open, in every output format.
+#[test]
+fn read_only_commands_exit_non_zero_on_an_unreadable_file() {
+    let album = TempAlbum::new(&["test_mono.mp3"]);
+    let good = album.files[0].to_str().unwrap().to_string();
+    let missing = album
+        .dir
+        .join("no_such_file.mp3")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    for command in [vec![], vec!["-s", "c"], vec!["-x"]] {
+        for format in [vec![], vec!["-o", "tsv"], vec!["-o", "json"]] {
+            let base: Vec<&str> = command.iter().chain(format.iter()).copied().collect();
+
+            let mut ok = base.clone();
+            ok.push(&good);
+            assert!(
+                run(&ok).status.success(),
+                "{:?} failed on a readable file",
+                ok
+            );
+
+            for files in [vec![&missing], vec![&good, &missing]] {
+                let mut argv = base.clone();
+                argv.extend(files.iter().map(|f| f.as_str()));
+                assert!(
+                    !run(&argv).status.success(),
+                    "{:?} exited 0 despite an unreadable file",
+                    argv
+                );
+            }
+        }
+    }
+}

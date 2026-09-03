@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::utils::{finish_with_summary, for_each_file, report_zero_steps, TSV_HEADER};
 use crate::processors::apply::{process_apply, process_apply_channel};
-use crate::util::get_filename;
+use crate::util::get_path;
 
 pub fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
     if steps == 0 {
@@ -49,7 +49,7 @@ pub fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
             writeln!(
                 text,
                 "{}\t{}\t{:.6}\t-\t{}\t{}",
-                get_filename(file),
+                get_path(file),
                 steps,
                 db_value,
                 result.max_gain.unwrap_or(255),
@@ -76,6 +76,10 @@ pub fn cmd_apply_channel(
     let dry_run_prefix = opts.dry_run_prefix();
     let channel_name = channel.name();
 
+    if opts.output_format == OutputFormat::Tsv {
+        println!("{}", TSV_HEADER);
+    }
+
     if opts.output_format == OutputFormat::Text && !opts.quiet {
         println!(
             "{}{} {} {} step(s) ({:+.1} dB) to {} channel of {} file(s)",
@@ -95,7 +99,19 @@ pub fn cmd_apply_channel(
     }
 
     let (json_results, successful, failed) = for_each_file(files, opts, |file| {
-        let (result, text) = process_apply_channel(file, channel, steps, opts)?;
+        let (result, mut text) = process_apply_channel(file, channel, steps, opts)?;
+        if opts.output_format == OutputFormat::Tsv {
+            // Max Amplitude needs a full decode, and per-channel gain moves
+            // scalefactors rather than global_gain, so the last three columns
+            // have no value to report here.
+            writeln!(
+                text,
+                "{}\t{}\t{:.6}\t-\t-\t-",
+                get_path(file),
+                steps,
+                db_value
+            )?;
+        }
         Ok((Some(result), text))
     })?;
 

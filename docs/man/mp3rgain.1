@@ -208,6 +208,12 @@ Output format:
 .BR text " (default),"
 .BR json ", or"
 .BR tsv " (tab-separated values)."
+.BR tsv
+prints the mp3gain-compatible header and one row per file, with the
+.B File
+column holding the path as given on the command line. The rows are also
+emitted while applying gain
+.RB ( \-r ", " \-a ", " \-e ", " \-g ", " \-l ).
 .TP
 .BR \-v ", " \-\-version
 Show version information and exit.
@@ -321,7 +327,10 @@ Original minimum and maximum gain values.
 Success.
 .TP
 .B 1
-Error occurred (invalid arguments, file not found, etc.).
+Error occurred (invalid arguments, file not found, etc.). A batch in which any
+single file failed exits 1, including the read-only commands (plain analysis,
+.BR \-s " c and " \-x ),
+so a scripted scan cannot mistake an unreadable file for a clean run.
 .SH SECURITY
 .B mp3rgain
 is written in Rust, providing memory safety guarantees.

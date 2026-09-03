@@ -13,6 +13,7 @@ use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
 
+use super::info::{scan_gain_range_for_row, tsv_rg_row};
 use super::utils::{
     analyze_track, emit_clipping_warning, emit_file_warning, report_file_error, restore_timestamp,
     save_original_mtime, stored_track_result, warn_aac_multi_track,
@@ -63,6 +64,18 @@ fn process_track_gain_into(
 
     match analysis {
         Ok(result) => {
+            // mp3gain-compatible TSV row for the recommended change. Emitted
+            // before the apply, so the global_gain range describes the file as
+            // it was scanned, the same values `-o tsv` alone reports.
+            if opts.output_format == OutputFormat::Tsv {
+                out.push_str(&tsv_rg_row(
+                    file,
+                    opts,
+                    &result,
+                    scan_gain_range_for_row(file),
+                ));
+            }
+
             // Apply gain modifier (-m steps + -d dB, combined into steps)
             let base_steps = result.gain_steps();
             let modifier_steps = opts.gain_modifier_steps();

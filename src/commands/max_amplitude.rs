@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::utils::{finish_without_summary, for_each_file};
 use crate::json_output::JsonFileResult;
-use crate::util::get_filename;
+use crate::util::{get_filename, get_path};
 
 pub fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
     if opts.output_format == OutputFormat::Text && !opts.quiet {
@@ -19,10 +19,10 @@ pub fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
         println!();
     }
 
-    let (json_results, _, _) =
+    let (json_results, _, failed) =
         for_each_file(files, opts, |file| Ok(process_max_amplitude(file, opts)))?;
 
-    finish_without_summary(json_results, opts)
+    finish_without_summary(json_results, failed, opts)
 }
 
 fn process_max_amplitude(file: &Path, opts: &Options) -> (Option<JsonFileResult>, String) {
@@ -65,7 +65,11 @@ fn process_max_amplitude(file: &Path, opts: &Options) -> (Option<JsonFileResult>
                     writeln!(
                         out,
                         "{}\t{:.6}\t{}\t{}\t{}",
-                        filename, max_pcm_sample, headroom_text, max_gain, min_gain
+                        get_path(file),
+                        max_pcm_sample,
+                        headroom_text,
+                        max_gain,
+                        min_gain
                     )
                     .ok();
                     (None, out)
@@ -84,14 +88,12 @@ fn process_max_amplitude(file: &Path, opts: &Options) -> (Option<JsonFileResult>
             }
         }
         Err(e) => {
-            if opts.output_format == OutputFormat::Json {
-                (Some(JsonFileResult::error(file, e)), out)
-            } else {
-                if !opts.quiet {
-                    eprintln!("{} - {}", filename.red(), e);
-                }
-                (None, out)
+            if opts.output_format != OutputFormat::Json && !opts.quiet {
+                eprintln!("{} - {}", filename.red(), e);
             }
+            // The record is only printed in JSON mode, but it is what makes
+            // the failure countable, so it is built in every mode.
+            (Some(JsonFileResult::error(file, e)), out)
         }
     }
 }

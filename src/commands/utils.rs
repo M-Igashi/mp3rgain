@@ -239,9 +239,15 @@ pub fn exit_if_failed(failed: usize) {
     }
 }
 
-/// Epilogue for read-only commands (check tags, max amplitude): JSON output
-/// without a summary block, nothing otherwise.
-pub fn finish_without_summary(json_results: Vec<JsonFileResult>, opts: &Options) -> Result<()> {
+/// Epilogue for read-only commands (info, check tags, max amplitude): JSON
+/// output without a summary block, nothing otherwise. Still exits non-zero on
+/// a failed file, so `mp3rgain -o tsv typo.mp3` in a script is not mistaken
+/// for a successful scan (issue #228 covered the writing commands only).
+pub fn finish_without_summary(
+    json_results: Vec<JsonFileResult>,
+    failed: usize,
+    opts: &Options,
+) -> Result<()> {
     if opts.output_format == OutputFormat::Json {
         let output = JsonOutput {
             files: Some(json_results),
@@ -250,6 +256,7 @@ pub fn finish_without_summary(json_results: Vec<JsonFileResult>, opts: &Options)
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
+    exit_if_failed(failed);
     Ok(())
 }
 
