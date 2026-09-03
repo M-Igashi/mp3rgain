@@ -99,8 +99,12 @@ format with the canonical header:
 
 ```
 File	MP3 gain	dB gain	Max Amplitude	Max global_gain	Min global_gain
-song.mp3	0	0.0	17234	148	100
+Albums/Foo/01.mp3	0	0.0	17234	148	100
 ```
+
+The `File` column carries the path exactly as it was given on the command line, the way mp3gain prints it. Up to 3.5.1 mp3rgain printed the bare filename instead, which was ambiguous when scanning several directories in one run.
+
+TSV rows are emitted by the gain-applying commands too, not just the bare analysis command: `-r`, `-a` and `-e` print the recommended change for every file (plus the `"Album"` summary row under `-a`) before the frames are rewritten, so `mp3rgain -o tsv -a */*.mp3` reports the same numbers `mp3rgain -o tsv */*.mp3` would.
 
 This means existing parsers that consume mp3gain output — most notably the
 [beets](https://beets.io/) replaygain plugin's command backend — work

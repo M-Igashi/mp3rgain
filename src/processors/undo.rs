@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::json_output::{FileStatus, JsonFileResult};
-use crate::util::get_filename;
+use crate::util::{get_filename, get_path};
 
 use super::utils::{report_file_error, restore_timestamp, save_original_mtime};
 
@@ -25,6 +25,9 @@ fn process_undo_into(file: &Path, opts: &Options, out: &mut String) -> Result<Js
     if opts.dry_run {
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             writeln!(out, "  {} [DRY RUN] {} (would undo)", "~".cyan(), filename)?;
+        }
+        if opts.output_format == OutputFormat::Tsv {
+            writeln!(out, "{}\t-\tdry-run", get_path(file))?;
         }
         return Ok(JsonFileResult {
             file: file.display().to_string(),
@@ -48,6 +51,9 @@ fn process_undo_into(file: &Path, opts: &Options, out: &mut String) -> Result<Js
                         filename
                     )?;
                 }
+                if opts.output_format == OutputFormat::Tsv {
+                    writeln!(out, "{}\t0\tno-change", get_path(file))?;
+                }
 
                 Ok(JsonFileResult {
                     file: file.display().to_string(),
@@ -69,6 +75,9 @@ fn process_undo_into(file: &Path, opts: &Options, out: &mut String) -> Result<Js
                         filename,
                         frames
                     )?;
+                }
+                if opts.output_format == OutputFormat::Tsv {
+                    writeln!(out, "{}\t{}\trestored", get_path(file), frames)?;
                 }
 
                 Ok(JsonFileResult {

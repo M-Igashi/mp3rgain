@@ -12,7 +12,7 @@ use crate::cli::options::{Options, OutputFormat};
 use crate::commands::utils::{finish_with_summary, finish_without_summary, for_each_file};
 use crate::json_output::{FileStatus, JsonFileResult};
 use crate::processors::utils::{report_file_error, restore_timestamp, save_original_mtime};
-use crate::util::get_filename;
+use crate::util::{get_filename, get_path};
 
 /// Tags plus per-container labels for display in cmd_check_tags
 struct CheckTagInfo<'a> {
@@ -65,7 +65,7 @@ impl CheckTagInfo<'_> {
                     // The algorithm column is appended last so existing
                     // column indices stay stable for scripts.
                     "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                    filename,
+                    get_path(file_path),
                     tags.undo.as_deref().unwrap_or("-"),
                     tags.minmax.as_deref().unwrap_or("-"),
                     tags.track_gain.as_deref().unwrap_or("-"),
@@ -132,6 +132,9 @@ fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, S
             };
             writeln!(out, "  {} [DRY RUN] {} ({})", "~".cyan(), filename, action)?;
         }
+        if opts.output_format == OutputFormat::Tsv {
+            writeln!(out, "{}\t-\tdry-run", get_path(file))?;
+        }
         return Ok((
             JsonFileResult {
                 file: file.display().to_string(),
@@ -179,6 +182,14 @@ fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, S
                 };
                 writeln!(out, "  {} {} ({})", "v".green(), filename, note)?;
             }
+            if opts.output_format == OutputFormat::Tsv {
+                writeln!(
+                    out,
+                    "{}\t{}\tdeleted",
+                    get_path(file),
+                    undone_frames.map_or("-".to_string(), |f| f.to_string())
+                )?;
+            }
             Ok((
                 JsonFileResult {
                     file: file.display().to_string(),
@@ -203,26 +214,26 @@ pub fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
         println!();
     }
 
-    let (json_results, _, _) =
+    let (json_results, _, failed) =
         for_each_file(files, opts, |file| Ok(process_check_tags(file, opts)))?;
 
-    finish_without_summary(json_results, opts)
+    finish_without_summary(json_results, failed, opts)
 }
 
 /// Shared error arm for the tag-read branches of `process_check_tags`:
-/// stderr line in text/TSV mode, error record in JSON mode.
+/// stderr line in text/TSV mode, plus the error record. The record is only
+/// printed in JSON mode, but it is what makes the failure countable, so it is
+/// built in every mode.
 fn tag_read_error(
     file: &Path,
     filename: &str,
     e: impl std::fmt::Display,
     opts: &Options,
-) -> Option<JsonFileResult> {
+) -> JsonFileResult {
     if opts.output_format != OutputFormat::Json {
         eprintln!("{} - {}", filename.red(), e);
-        None
-    } else {
-        Some(JsonFileResult::error(file, e))
     }
+    JsonFileResult::error(file, e)
 }
 
 fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, String) {
@@ -231,7 +242,7 @@ fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, S
 
     let tags = match read_gain_tags_auto(file, opts.tag_layout) {
         Ok(tags) => tags,
-        Err(e) => return (tag_read_error(file, filename, e, opts), out),
+        Err(e) => return (Some(tag_read_error(file, filename, e, opts)), out),
     };
 
     let (undo_label, minmax_label, no_tag_msg) = match tags.source {

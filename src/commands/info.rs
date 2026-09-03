@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::utils::{
-    finish_without_summary, for_each_file_with_analysis_bar, run_album_analysis, TSV_HEADER,
+    exit_if_failed, finish_without_summary, for_each_file_with_analysis_bar, run_album_analysis,
+    TSV_HEADER,
 };
 use crate::processors::info::{format_rg_row, process_info, scan_gain_range_for_row};
 use crate::util::get_filename;
@@ -95,6 +96,7 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
     // Emit rows in input order and collect the album-level gain bounds.
     let mut any_ok = false;
+    let mut failed = 0;
     let mut album_max_gain: Option<u8> = None;
     let mut album_min_gain: Option<u8> = None;
     {
@@ -116,6 +118,7 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 }
                 Some(Row::Failed(msg)) => {
                     eprintln!("{} - {}", get_filename(file).red(), msg);
+                    failed += 1;
                 }
                 None => {}
             }
@@ -164,6 +167,7 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
         }
     }
 
+    exit_if_failed(failed);
     Ok(())
 }
 
@@ -179,10 +183,10 @@ fn analyze_set(set: &[(usize, &Path)], opts: &Options) -> Option<AlbumAnalysisRe
 
 /// Basic per-file info (JSON output or builds without the replaygain feature).
 fn cmd_info_basic(files: &[PathBuf], opts: &Options) -> Result<()> {
-    let (json_results, _, _) =
+    let (json_results, _, failed) =
         for_each_file_with_analysis_bar(files, opts, |file, analysis_pb| {
             process_info(file, opts, analysis_pb).map(|(r, t)| (Some(r), t))
         })?;
 
-    finish_without_summary(json_results, opts)
+    finish_without_summary(json_results, failed, opts)
 }

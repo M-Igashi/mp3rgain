@@ -32,15 +32,17 @@ pub fn emit_file_warning(opts: &Options, filename: &str, msg: &str, hint: Option
     }
 }
 
-/// Shared error arm for the per-file processors: red stderr line in text
-/// mode, plus the JSON error record.
+/// Shared error arm for the per-file processors: red stderr line in text and
+/// TSV mode, plus the JSON error record. TSV rows go to stdout, so the stderr
+/// line cannot corrupt the stream, and staying silent left a failing file with
+/// no explanation at all.
 pub fn report_file_error(
     file: &Path,
     filename: &str,
     e: impl std::fmt::Display,
     opts: &Options,
 ) -> JsonFileResult {
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
+    if opts.output_format != OutputFormat::Json && !opts.quiet {
         eprintln!("  {} {} - {}", "x".red(), filename, e);
     }
     JsonFileResult::error(file, e)

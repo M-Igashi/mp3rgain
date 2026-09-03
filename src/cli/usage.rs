@@ -95,6 +95,7 @@ pub fn print_usage() {
     println!("    mp3rgain -n -g 2 *.mp3         Dry-run (preview changes)");
     println!("    mp3rgain -o json song.mp3      Output in JSON format");
     println!("    mp3rgain -o tsv *.mp3          Output in tab-separated format");
+    println!("    mp3rgain -o tsv -a */*.mp3     TSV rows while applying album gain");
     println!("    mp3rgain -l 0 3 song.mp3       Apply +3 steps to left channel");
     println!("    mp3rgain -l 1 -2 song.mp3      Apply -2 steps to right channel");
     println!();

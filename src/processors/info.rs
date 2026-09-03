@@ -9,7 +9,7 @@ use std::path::Path;
 use crate::cli::options::{Options, OutputFormat};
 use crate::json_output::{FileStatus, JsonFileResult};
 use crate::processors::utils::analyze_track;
-use crate::util::get_filename;
+use crate::util::{get_filename, get_path};
 
 /// Scan the file's global_gain range for an info row. MP3-only: AAC files
 /// fail the frame scan and get the (255, 0) placeholder mp3gain also prints.
@@ -17,6 +17,28 @@ pub fn scan_gain_range_for_row(file: &Path) -> (u8, u8) {
     analyze(file)
         .map(|info| (info.max_gain(), info.min_gain()))
         .unwrap_or((255, 0))
+}
+
+/// One mp3gain-compatible TSV row from a ReplayGain analysis result.
+/// Shared by the info command and the gain-applying commands (`-r`, `-a`),
+/// which emit the recommended change before touching the frames.
+pub fn tsv_rg_row(
+    file: &Path,
+    opts: &Options,
+    rg_result: &ReplayGainResult,
+    gain_range: (u8, u8),
+) -> String {
+    let (gain_steps, gain_db) = opts.modified_gain(rg_result.gain_steps(), rg_result.gain_db());
+    let (max_gain, min_gain) = gain_range;
+    format!(
+        "{}\t{}\t{:.6}\t{:.6}\t{}\t{}\n",
+        get_path(file),
+        gain_steps,
+        gain_db,
+        peak_to_pcm_sample(rg_result.peak()),
+        max_gain,
+        min_gain
+    )
 }
 
 /// Format one mp3gain-compatible per-file row from a ReplayGain analysis
@@ -47,11 +69,7 @@ pub fn format_rg_row(
 
     match opts.output_format {
         OutputFormat::Tsv => {
-            writeln!(
-                out,
-                "{}\t{}\t{:.6}\t{:.6}\t{}\t{}",
-                filename, gain_steps, gain_db, max_amplitude_scaled, max_gain, min_gain
-            )?;
+            out.push_str(&tsv_rg_row(file, opts, rg_result, gain_range));
         }
         OutputFormat::Text => {
             if !opts.quiet {
@@ -154,7 +172,7 @@ fn process_info_into(
                 }
             }
             OutputFormat::Tsv => {
-                writeln!(out, "{}\t-\t-\t-\t-\t-", filename)?;
+                writeln!(out, "{}\t-\t-\t-\t-\t-", get_path(file))?;
             }
             OutputFormat::Json => {}
         }
@@ -214,7 +232,7 @@ fn process_info_into(
                     writeln!(
                         out,
                         "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
-                        filename,
+                        get_path(file),
                         info.headroom_steps(),
                         info.headroom_db(),
                         1.0,
