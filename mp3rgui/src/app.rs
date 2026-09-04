@@ -62,10 +62,30 @@ impl FileStatus {
     }
 }
 
-#[derive(Default, Clone)]
-pub struct FileEntry {
-    pub path: PathBuf,
-    pub filename: String,
+/// What is known about a row's audio, from whichever source last measured it
+/// (issue #317). The table columns are derived from this plus
+/// `FileEntry::applied_db` on render instead of being cached and shifted.
+#[derive(Clone)]
+pub enum Measurement {
+    /// Fresh Track / Album Analysis.
+    Analyzed(ReplayGainResult),
+    /// Import scan: gain and peak parsed from `REPLAYGAIN_*` tags (issue
+    /// #203). Either pair may be absent; peaks are optional (issue #233).
+    Stored {
+        track_gain_db: Option<f64>,
+        track_peak: Option<f64>,
+        album_gain_db: Option<f64>,
+        album_peak: Option<f64>,
+    },
+    /// Find Max Amplitude: peak only, no loudness (issue #254).
+    Headroom { peak: f64 },
+}
+
+/// Table columns for one row, computed by [`FileEntry::display`].
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct RowDisplay {
+    /// Loudness (89 dB-relative in RG1, LUFS otherwise), or the headroom in
+    /// dB after Find Max Amplitude.
     pub volume: Option<f64>,
     pub clipping: bool,
     pub track_gain: Option<f64>,
@@ -73,11 +93,16 @@ pub struct FileEntry {
     pub album_volume: Option<f64>,
     pub album_gain: Option<f64>,
     pub album_clip: bool,
+}
+
+#[derive(Default, Clone)]
+pub struct FileEntry {
+    pub path: PathBuf,
+    pub filename: String,
     pub status: FileStatus,
-    /// Cached per-track ReplayGain analysis. Required by `apply_with_options`
-    /// for the peak-based clipping check and for writing
-    /// `replaygain_track_*` tags on apply.
-    pub track_result: Option<ReplayGainResult>,
+    /// What we know about the audio, from analysis or stored tags. `None`
+    /// leaves every numeric column empty.
+    pub measurement: Option<Measurement>,
     /// Album-level ReplayGain summary for the folder this file belongs to,
     /// populated by Album Analysis. Used to write `replaygain_album_*` tags
     /// on Apply Album Gain. Per-file (not global) so adding multiple folders
@@ -86,10 +111,129 @@ pub struct FileEntry {
     /// Pre-existing ReplayGain / undo tags read from the file, populated by
     /// the "Check Stored Tags" action. `None` = not scanned yet.
     pub stored_tags: Option<StoredTagsView>,
-    /// Peaks parsed from stored ReplayGain tags on import (issue #233).
-    /// Fallback for clip recomputation when `track_result` is None.
-    pub stored_track_peak: Option<f64>,
-    pub stored_album_peak: Option<f64>,
+    /// Gain baked into the file since `measurement` was taken, in dB. Apply
+    /// adds what it actually wrote, undo subtracts what it rolled back, and a
+    /// fresh measurement resets it to 0 (issues #160, #171, #172).
+    pub applied_db: f64,
+}
+
+impl FileEntry {
+    /// Whether the row carries a fresh ReplayGain analysis (as opposed to
+    /// values imported from tags, a headroom scan, or nothing).
+    pub fn is_analyzed(&self) -> bool {
+        matches!(self.measurement, Some(Measurement::Analyzed(_)))
+    }
+
+    /// Peak of the file as it is now: the measured peak scaled by the gain
+    /// applied since. Track peak when one is known.
+    fn current_track_peak(&self) -> Option<f64> {
+        let peak = match self.measurement.as_ref()? {
+            Measurement::Analyzed(r) => r.peak(),
+            Measurement::Stored { track_peak, .. } => (*track_peak)?,
+            Measurement::Headroom { peak } => *peak,
+        };
+        Some(apply_gain_to_peak(peak, self.applied_db))
+    }
+
+    /// Peak used for the album clip flag. The analysis and headroom cases
+    /// use this file's own peak; the stored case falls back to the tagged
+    /// album peak when no track peak was tagged.
+    fn current_album_peak(&self) -> Option<f64> {
+        match self.measurement.as_ref()? {
+            Measurement::Stored {
+                track_peak: None,
+                album_peak: Some(peak),
+                ..
+            } => Some(apply_gain_to_peak(*peak, self.applied_db)),
+            _ => self.current_track_peak(),
+        }
+    }
+
+    /// Stored gain on the tag scale (relative to the 89 dB reference, or to
+    /// the LUFS target in BS.1770 modes), before any later apply.
+    fn measured_track_gain_db(&self) -> Option<f64> {
+        match self.measurement.as_ref()? {
+            Measurement::Analyzed(r) => Some(r.gain_db()),
+            Measurement::Stored { track_gain_db, .. } => *track_gain_db,
+            Measurement::Headroom { .. } => None,
+        }
+    }
+
+    /// Album gain from Album Analysis, or from stored tags on import.
+    fn measured_album_gain_db(&self) -> Option<f64> {
+        if let Some(info) = self.album_info {
+            return Some(info.album_gain_db);
+        }
+        match self.measurement.as_ref()? {
+            Measurement::Stored { album_gain_db, .. } => *album_gain_db,
+            _ => None,
+        }
+    }
+
+    /// The table columns for this row, given the current Target and
+    /// analysis mode. Pure: the Target is just an input, and apply / undo
+    /// only move `applied_db`, so every column stays consistent with the
+    /// file as it is now.
+    pub fn display(&self, target_volume: f64, mode: AnalysisMode) -> RowDisplay {
+        let stored = matches!(self.measurement, Some(Measurement::Stored { .. }));
+        // `(volume, gain)` for one measured gain, shifted by the gain applied
+        // since: the file got louder by `applied_db`, so it needs that much
+        // less. Stored tags outside RG1 carry no LUFS loudness, so the gain
+        // is shown as-is with an empty Volume column (issue #272).
+        let columns = |gain_db: f64| -> (Option<f64>, f64) {
+            if stored && mode != AnalysisMode::Rg1 {
+                (None, gain_db - self.applied_db)
+            } else {
+                let (volume, gain) = volume_and_gain(gain_db, target_volume, mode);
+                (Some(volume + self.applied_db), gain - self.applied_db)
+            }
+        };
+
+        let mut d = RowDisplay::default();
+        let track_peak = self.current_track_peak();
+        d.clipping = track_peak.is_some_and(|p| p >= 1.0);
+        match self.measurement {
+            Some(Measurement::Headroom { .. }) => {
+                d.volume = track_peak.and_then(mp3rgain::peak_to_headroom_db);
+            }
+            _ => {
+                if let Some(gain_db) = self.measured_track_gain_db() {
+                    let (volume, gain) = columns(gain_db);
+                    d.volume = volume;
+                    d.track_gain = Some(gain);
+                    d.track_clip = track_peak.is_some_and(|p| would_clip(p, gain));
+                }
+            }
+        }
+        if let Some(gain_db) = self.measured_album_gain_db() {
+            let (volume, gain) = columns(gain_db);
+            d.album_volume = volume;
+            d.album_gain = Some(gain);
+            d.album_clip = self
+                .current_album_peak()
+                .is_some_and(|p| would_clip(p, gain));
+        }
+        d
+    }
+
+    /// The `ReplayGainResult` handed to `ApplyJob`, with its peak moved to
+    /// the file's current level so prevent-clipping judges the file as it
+    /// is now (issue #172). `None` unless a fresh analysis exists: rows
+    /// imported from tags or scanned for headroom fall back to the
+    /// headroom-based clipping check, like manual gain.
+    pub fn apply_track_result(&self) -> Option<ReplayGainResult> {
+        match (&self.measurement, self.current_track_peak()) {
+            (Some(Measurement::Analyzed(r)), Some(peak)) => Some(r.clone().with_peak(peak)),
+            _ => None,
+        }
+    }
+
+    /// Replace the measurement. A fresh measurement describes the file as it
+    /// is, so the applied offset restarts at zero.
+    fn set_measurement(&mut self, measurement: Option<Measurement>) {
+        self.measurement = measurement;
+        self.applied_db = 0.0;
+    }
 }
 
 /// State for the "Apply Manual Gain" modal. `open` toggles visibility;
@@ -241,11 +385,6 @@ pub struct Mp3rgainApp {
     /// progress bar).
     total_files_in_job: usize,
 
-    /// Last `target_volume` we propagated into the file rows. Used by
-    /// `recompute_targets_if_changed` to detect Target edits and refresh
-    /// the gain columns without rerunning analysis (issue #161 item 1).
-    last_target_volume: f64,
-
     /// Active sort column, or `None` for insertion order (issue #167).
     pub sort_column: Option<SortColumn>,
     /// Direction of the active sort. Ignored when `sort_column` is `None`.
@@ -321,7 +460,6 @@ impl Mp3rgainApp {
             worker: None,
             started_files: 0,
             total_files_in_job: 0,
-            last_target_volume: settings.target_volume,
             sort_column: None,
             sort_descending: false,
             display_order_cache: Vec::new(),
@@ -343,17 +481,16 @@ impl Mp3rgainApp {
     /// snapshot is kept — it reflects the file, not the analysis.
     pub fn invalidate_analysis_results(&mut self) {
         for file in &mut self.files {
-            file.volume = None;
-            file.clipping = false;
-            file.track_gain = None;
-            file.track_clip = false;
-            file.album_volume = None;
-            file.album_gain = None;
-            file.album_clip = false;
-            file.track_result = None;
+            file.set_measurement(None);
             file.album_info = None;
             file.status = FileStatus::Pending;
         }
+        self.display_order_dirty = true;
+    }
+
+    /// Mark the cached display order stale. The table calls this when the
+    /// Target changes, since the gain columns are derived from it.
+    pub fn mark_display_dirty(&mut self) {
         self.display_order_dirty = true;
     }
 
@@ -429,53 +566,27 @@ impl Mp3rgainApp {
                     .collect();
                 order.sort_by(|&a, &b| cmp_str(&keys[a], &keys[b], desc));
             }
-            SortColumn::Volume => order
-                .sort_by(|&a, &b| cmp_opt_f64(self.files[a].volume, self.files[b].volume, desc)),
-            SortColumn::TrackGain => order.sort_by(|&a, &b| {
-                cmp_opt_f64(self.files[a].track_gain, self.files[b].track_gain, desc)
-            }),
-            SortColumn::AlbumVolume => order.sort_by(|&a, &b| {
-                cmp_opt_f64(self.files[a].album_volume, self.files[b].album_volume, desc)
-            }),
-            SortColumn::AlbumGain => order.sort_by(|&a, &b| {
-                cmp_opt_f64(self.files[a].album_gain, self.files[b].album_gain, desc)
-            }),
+            SortColumn::Volume
+            | SortColumn::TrackGain
+            | SortColumn::AlbumVolume
+            | SortColumn::AlbumGain => {
+                let keys: Vec<Option<f64>> = self
+                    .files
+                    .iter()
+                    .map(|f| {
+                        let d = f.display(self.target_volume, self.analysis_mode);
+                        match col {
+                            SortColumn::Volume => d.volume,
+                            SortColumn::TrackGain => d.track_gain,
+                            SortColumn::AlbumVolume => d.album_volume,
+                            _ => d.album_gain,
+                        }
+                    })
+                    .collect();
+                order.sort_by(|&a, &b| cmp_opt_f64(keys[a], keys[b], desc));
+            }
         }
         order
-    }
-
-    /// Detect Target edits and shift each row's track_gain / album_gain by
-    /// the delta. Cheap (just arithmetic on cached values), so it can run
-    /// every frame (issue #161 item 1). Clipping flags are recomputed
-    /// against the cached pre-apply peak.
-    pub fn recompute_targets_if_changed(&mut self) {
-        if (self.target_volume - self.last_target_volume).abs() < f64::EPSILON {
-            return;
-        }
-        self.display_order_dirty = true;
-        let delta = self.target_volume - self.last_target_volume;
-        for file in &mut self.files {
-            if let Some(g) = file.track_gain {
-                file.track_gain = Some(g + delta);
-            }
-            if let Some(g) = file.album_gain {
-                file.album_gain = Some(g + delta);
-            }
-            let analyzed_peak = file.track_result.as_ref().map(|t| t.peak());
-            if let Some(peak) = analyzed_peak.or(file.stored_track_peak) {
-                file.track_clip = file
-                    .track_gain
-                    .map(|g| would_clip(peak, g))
-                    .unwrap_or(false);
-            }
-            if let Some(peak) = analyzed_peak.or(file.stored_album_peak) {
-                file.album_clip = file
-                    .album_gain
-                    .map(|g| would_clip(peak, g))
-                    .unwrap_or(false);
-            }
-        }
-        self.last_target_volume = self.target_volume;
     }
 
     pub fn add_files(&mut self, paths: Vec<PathBuf>) {
@@ -736,7 +847,7 @@ impl Mp3rgainApp {
                 .target_indices()
                 .iter()
                 .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
-                .filter(|(_, f)| f.track_result.is_none() && trusted_track_tags(f).is_none())
+                .filter(|(_, f)| !f.is_analyzed() && trusted_track_tags(f).is_none())
                 .map(|(idx, f)| (idx, f.path.clone()))
                 .collect();
             if !missing.is_empty() {
@@ -765,7 +876,9 @@ impl Mp3rgainApp {
     /// and writes correct residual RG tags.
     fn apply_track_gain_now(&mut self, ctx: &egui::Context) {
         let reuse = self.stored_reuse_active();
-        let target_offset = self.target_volume - REPLAYGAIN_REFERENCE_DB;
+        let target = self.target_volume;
+        let mode = self.analysis_mode;
+        let target_offset = target - REPLAYGAIN_REFERENCE_DB;
 
         // Issue #161: act on the current selection (or all files when none
         // selected).
@@ -774,12 +887,12 @@ impl Mp3rgainApp {
             .iter()
             .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
             .filter_map(|(idx, f)| {
-                if f.track_result.is_some() || !reuse {
-                    return f.track_gain.map(|gain_db| ApplyJob {
+                if f.is_analyzed() || !reuse {
+                    return f.display(target, mode).track_gain.map(|gain_db| ApplyJob {
                         idx,
                         path: f.path.clone(),
                         steps: db_to_steps(gain_db),
-                        track_result: f.track_result.clone(),
+                        track_result: f.apply_track_result(),
                         album_info: None,
                         channel: None,
                         from_stored: false,
@@ -1184,9 +1297,11 @@ impl Mp3rgainApp {
         // tracks from different folders get the album RG tags for their own
         // album.
         let targets = self.target_indices();
+        let target = self.target_volume;
+        let mode = self.analysis_mode;
         let mut jobs: Vec<ApplyJob> = Vec::new();
         if self.stored_reuse_active() {
-            let target_offset = self.target_volume - REPLAYGAIN_REFERENCE_DB;
+            let target_offset = target - REPLAYGAIN_REFERENCE_DB;
             for group in self.album_groups(&targets) {
                 let all_fresh = group
                     .iter()
@@ -1226,12 +1341,12 @@ impl Mp3rgainApp {
                     let Some(f) = self.files.get(idx) else {
                         continue;
                     };
-                    if let Some(gain_db) = f.album_gain {
+                    if let Some(gain_db) = f.display(target, mode).album_gain {
                         jobs.push(ApplyJob {
                             idx,
                             path: f.path.clone(),
                             steps: db_to_steps(gain_db),
-                            track_result: f.track_result.clone(),
+                            track_result: f.apply_track_result(),
                             album_info: f.album_info,
                             channel: None,
                             from_stored: false,
@@ -1244,11 +1359,11 @@ impl Mp3rgainApp {
                 .iter()
                 .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
                 .filter_map(|(idx, f)| {
-                    f.album_gain.map(|gain_db| ApplyJob {
+                    f.display(target, mode).album_gain.map(|gain_db| ApplyJob {
                         idx,
                         path: f.path.clone(),
                         steps: db_to_steps(gain_db),
-                        track_result: f.track_result.clone(),
+                        track_result: f.apply_track_result(),
                         album_info: f.album_info,
                         channel: None,
                         from_stored: false,
@@ -1376,16 +1491,14 @@ impl Mp3rgainApp {
                 self.bump_progress();
             }
             WorkerEvent::TrackAnalyzed { idx, result } => {
-                let target = self.target_volume;
                 if let Some(file) = self.files.get_mut(idx) {
-                    Self::populate_track_analysis(file, &result, target);
-                    file.track_result = Some(result);
+                    file.set_measurement(Some(Measurement::Analyzed(result)));
                     file.status = FileStatus::Analyzed;
                 }
             }
             WorkerEvent::TrackAnalysisFailed { idx, message } => {
                 if let Some(file) = self.files.get_mut(idx) {
-                    file.track_result = None;
+                    file.set_measurement(None);
                     file.status = FileStatus::Error(message);
                 }
             }
@@ -1394,25 +1507,16 @@ impl Mp3rgainApp {
                 failures,
                 album_info,
             } => {
-                let target = self.target_volume;
-                let (album_volume, album_gain) =
-                    volume_and_gain(album_info.album_gain_db, target, self.analysis_mode);
-                let album_clip = would_clip(album_info.album_peak, album_gain);
-
                 for (idx, track_result) in successful {
                     if let Some(file) = self.files.get_mut(idx) {
-                        Self::populate_track_analysis(file, &track_result, target);
-                        file.track_result = Some(track_result);
-                        file.album_volume = Some(album_volume);
-                        file.album_gain = Some(album_gain);
-                        file.album_clip = album_clip;
+                        file.set_measurement(Some(Measurement::Analyzed(track_result)));
                         file.album_info = Some(album_info);
                         file.status = FileStatus::Analyzed;
                     }
                 }
                 for (idx, msg) in failures {
                     if let Some(file) = self.files.get_mut(idx) {
-                        file.track_result = None;
+                        file.set_measurement(None);
                         file.status = FileStatus::Error(msg);
                     }
                 }
@@ -1435,12 +1539,10 @@ impl Mp3rgainApp {
                     };
                     // File contents changed; cached tag snapshot is stale.
                     file.stored_tags = None;
-                    // Shift the displayed volume / gain columns by the gain
-                    // that was actually written so the user sees the
-                    // post-apply state without rescanning (issue #160).
-                    if actual_steps != 0 {
-                        Self::shift_displayed_values(file, actual_steps);
-                    }
+                    // The columns are derived from `applied_db`, so this one
+                    // line shows the post-apply state without rescanning
+                    // (issue #160).
+                    file.applied_db += mp3rgain::steps_to_db(actual_steps);
                 }
             }
             WorkerEvent::FileApplyDryRun {
@@ -1464,14 +1566,12 @@ impl Mp3rgainApp {
                 if let Some(file) = self.files.get_mut(idx) {
                     file.status = FileStatus::Done;
                     file.stored_tags = None;
-                    // Reverse the post-apply display shift so the row
-                    // returns to its pre-apply numbers (issue #171). The
-                    // file's bytes are back to the original state, so a
-                    // shift of `-steps_undone` lines the display up with
-                    // reality.
-                    if steps_undone != 0 {
-                        Self::shift_displayed_values(file, -steps_undone);
-                    }
+                    // `steps_undone` is the cumulative gain the undo rolled
+                    // back (issue #315), so subtracting it lines the row up
+                    // with the file again (issue #171). Subtract rather than
+                    // reset: the measurement may predate an earlier apply
+                    // that the undo also reverted.
+                    file.applied_db -= mp3rgain::steps_to_db(steps_undone);
                 }
             }
             WorkerEvent::FileUndoSkipped { idx } => {
@@ -1488,36 +1588,22 @@ impl Mp3rgainApp {
                 }
             }
             WorkerEvent::StoredTagsRead { idx, view } => {
-                let target = self.target_volume;
-                let mode = self.analysis_mode;
                 let is_import = self.worker_kind() == Some(WorkerKind::ImportScan);
                 if let Some(file) = self.files.get_mut(idx) {
                     if is_import {
-                        Self::populate_from_stored_tags(file, &view, target, mode);
+                        Self::populate_from_stored_tags(file, &view);
                     }
                     file.stored_tags = Some(view);
                 }
             }
-            WorkerEvent::MaxAmplitudeFound {
-                idx,
-                peak,
-                headroom_db,
-            } => {
+            WorkerEvent::MaxAmplitudeFound { idx, peak } => {
                 if let Some(file) = self.files.get_mut(idx) {
-                    // Reuse the existing Volume column to show headroom.
-                    // ReplayGain volume and max-amp headroom are different
-                    // measures but both express "loudness ceiling"; the
-                    // Volume column header tooltip explains both.
-                    file.volume = headroom_db;
-                    file.clipping = peak >= 1.0;
-                    // Max amplitude is not a ReplayGain analysis — clear
-                    // any prior RG-derived gain so the row doesn't claim
-                    // an out-of-date target.
-                    file.track_gain = None;
-                    file.track_clip = false;
-                    file.track_result = None;
-                    file.stored_track_peak = None;
-                    file.stored_album_peak = None;
+                    // The Volume column shows the headroom derived from this
+                    // peak. Max amplitude is not a ReplayGain analysis, so
+                    // any prior RG-derived gain (track and album) goes with
+                    // it rather than claiming an out-of-date target.
+                    file.set_measurement(Some(Measurement::Headroom { peak }));
+                    file.album_info = None;
                     file.status = FileStatus::Analyzed;
                 }
             }
@@ -1547,137 +1633,27 @@ impl Mp3rgainApp {
         self.total_progress = (self.started_files as f32) / (self.total_files_in_job as f32);
     }
 
-    /// Populate a file entry with track-level analysis results.
-    /// In RG1 mode volume is displayed relative to the 89 dB reference for
-    /// mp3gain compatibility; in the BS.1770 modes it is the LUFS loudness.
-    fn populate_track_analysis(
-        file: &mut FileEntry,
-        result: &ReplayGainResult,
-        target_volume: f64,
-    ) {
-        let (volume, gain) =
-            volume_and_gain(result.gain_db(), target_volume, result.analysis_mode());
-        file.volume = Some(volume);
-        file.clipping = result.peak() >= 1.0;
-        file.track_gain = Some(gain);
-        file.track_clip = would_clip(result.peak(), gain);
-    }
-
-    /// Fill a freshly-imported row's Volume / Gain columns from any existing
-    /// ReplayGain tags read off the file (issue #203). The stored
-    /// `REPLAYGAIN_*_GAIN` values are relative to the 89 dB reference, the
-    /// same convention `populate_track_analysis` uses, so the displayed gain
-    /// re-targets to the current Target. Only touches rows still Pending so a
-    /// real analysis is never overwritten. Leaves `track_result` None — the
-    /// tags carry no full analysis — so applying gain afterwards falls back to
-    /// the headroom-based clipping check, exactly like manual gain.
-    ///
-    /// In the BS.1770 modes the tag carries no loudness on the LUFS scale
-    /// (and no record of which algorithm wrote it), so the gain is shown
-    /// as-is and the Volume column is left empty (issue #272).
-    fn populate_from_stored_tags(
-        file: &mut FileEntry,
-        view: &StoredTagsView,
-        target_volume: f64,
-        mode: AnalysisMode,
-    ) {
+    /// Fill a freshly-imported row from any existing ReplayGain tags read
+    /// off the file (issue #203). Only touches rows still Pending so a real
+    /// analysis is never overwritten. The result is a `Measurement::Stored`,
+    /// not an analysis, so applying gain afterwards falls back to the
+    /// headroom-based clipping check, exactly like manual gain.
+    fn populate_from_stored_tags(file: &mut FileEntry, view: &StoredTagsView) {
         if file.status != FileStatus::Pending {
             return;
         }
-        // `(volume column, gain column)` for one stored gain value: the RG1
-        // display pair, or — outside RG1, where the tag carries no LUFS
-        // loudness — the tag gain as-is with an empty Volume column.
-        let display = |gain_db: f64| -> (Option<f64>, f64) {
-            if mode == AnalysisMode::Rg1 {
-                let (volume, gain) = volume_and_gain(gain_db, target_volume, AnalysisMode::Rg1);
-                (Some(volume), gain)
-            } else {
-                (None, gain_db)
-            }
-        };
-        let mut found = false;
-        if let Some(track_gain_db) = view.tags.track_gain_db() {
-            let (volume, gain) = display(track_gain_db);
-            file.volume = volume;
-            file.track_gain = Some(gain);
-            if let Some(peak) = view.tags.track_peak_value() {
-                file.clipping = peak >= 1.0;
-                file.track_clip = would_clip(peak, gain);
-                file.stored_track_peak = Some(peak);
-            }
-            found = true;
+        let track_gain_db = view.tags.track_gain_db();
+        let album_gain_db = view.tags.album_gain_db();
+        if track_gain_db.is_none() && album_gain_db.is_none() {
+            return;
         }
-        if let Some(album_gain_db) = view.tags.album_gain_db() {
-            let (album_volume, album_gain) = display(album_gain_db);
-            file.album_volume = album_volume;
-            file.album_gain = Some(album_gain);
-            if let Some(peak) = view.tags.album_peak_value() {
-                file.album_clip = would_clip(peak, album_gain);
-                file.stored_album_peak = Some(peak);
-            }
-            found = true;
-        }
-        if found {
-            file.status = FileStatus::Analyzed;
-        }
-    }
-
-    /// Shift the row's cached display values by the dB that was actually
-    /// applied (or, for undo, the negative of what was rolled back).
-    /// Lets the user see the post-apply / post-undo state without
-    /// rerunning analysis (issues #160, #171). The cached
-    /// `track_result.peak()` is also rewritten so subsequent
-    /// prevent-clipping checks see the file's current peak (issue #172).
-    fn shift_displayed_values(file: &mut FileEntry, actual_steps: i32) {
-        let db_applied = mp3rgain::steps_to_db(actual_steps);
-
-        if let Some(v) = file.volume {
-            file.volume = Some(v + db_applied);
-        }
-        if let Some(g) = file.track_gain {
-            file.track_gain = Some(g - db_applied);
-        }
-        if let Some(v) = file.album_volume {
-            file.album_volume = Some(v + db_applied);
-        }
-        if let Some(g) = file.album_gain {
-            file.album_gain = Some(g - db_applied);
-        }
-        if let Some(track) = file.track_result.take() {
-            let new_peak = apply_gain_to_peak(track.peak(), db_applied);
-            file.clipping = new_peak >= 1.0;
-            file.track_clip = file
-                .track_gain
-                .map(|g| would_clip(new_peak, g))
-                .unwrap_or(false);
-            file.album_clip = file
-                .album_gain
-                .map(|g| would_clip(new_peak, g))
-                .unwrap_or(false);
-            file.track_result = Some(track.with_peak(new_peak));
-        } else {
-            if let Some(new_peak) = file
-                .stored_track_peak
-                .map(|p| apply_gain_to_peak(p, db_applied))
-            {
-                file.stored_track_peak = Some(new_peak);
-                file.clipping = new_peak >= 1.0;
-                file.track_clip = file
-                    .track_gain
-                    .map(|g| would_clip(new_peak, g))
-                    .unwrap_or(false);
-            }
-            if let Some(new_peak) = file
-                .stored_album_peak
-                .map(|p| apply_gain_to_peak(p, db_applied))
-            {
-                file.stored_album_peak = Some(new_peak);
-                file.album_clip = file
-                    .album_gain
-                    .map(|g| would_clip(new_peak, g))
-                    .unwrap_or(false);
-            }
-        }
+        file.set_measurement(Some(Measurement::Stored {
+            track_gain_db,
+            track_peak: view.tags.track_peak_value(),
+            album_gain_db,
+            album_peak: view.tags.album_peak_value(),
+        }));
+        file.status = FileStatus::Analyzed;
     }
 }
 
@@ -1790,10 +1766,6 @@ impl eframe::App for Mp3rgainApp {
         // Kick off an automatic stored-tag read for freshly imported files
         // once any prior worker has finished (issue #203).
         self.start_import_scan(ctx);
-        // Run after the user's toolbar input is already in self.target_volume
-        // (which is mutated by the DragValue in toolbar.rs from the previous
-        // frame), and before this frame's render reads track_gain.
-        self.recompute_targets_if_changed();
         crate::ui::render(self, ctx);
     }
 
@@ -1809,5 +1781,134 @@ impl eframe::App for Mp3rgainApp {
             use_stored_tags: self.use_stored_tags,
         };
         eframe::set_value(storage, SETTINGS_KEY, &settings);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mp3rgain::steps_to_db;
+
+    fn analyzed(gain_db: f64, peak: f64) -> FileEntry {
+        FileEntry {
+            measurement: Some(Measurement::Analyzed(ReplayGainResult::from_stored_tags(
+                gain_db,
+                peak,
+                AudioFileType::Mp3,
+                AnalysisMode::Rg1,
+            ))),
+            ..Default::default()
+        }
+    }
+
+    fn close(a: Option<f64>, b: Option<f64>) -> bool {
+        match (a, b) {
+            (Some(a), Some(b)) => (a - b).abs() < 1e-9,
+            (None, None) => true,
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn apply_then_undo_restores_every_column() {
+        let mut file = analyzed(-6.0, 0.5);
+        file.album_info = Some(AacAlbumInfo {
+            album_gain_db: -4.0,
+            album_peak: 0.7,
+        });
+        let before = file.display(89.0, AnalysisMode::Rg1);
+        assert!(close(before.volume, Some(95.0)));
+        assert!(close(before.track_gain, Some(-6.0)));
+        assert!(close(before.album_volume, Some(93.0)));
+        assert!(close(before.album_gain, Some(-4.0)));
+
+        file.applied_db += steps_to_db(-4);
+        let after = file.display(89.0, AnalysisMode::Rg1);
+        assert!(close(after.volume, Some(95.0 + steps_to_db(-4))));
+        assert!(close(after.track_gain, Some(-6.0 - steps_to_db(-4))));
+        assert!(close(after.album_gain, Some(-4.0 - steps_to_db(-4))));
+
+        file.applied_db -= steps_to_db(-4);
+        let restored = file.display(89.0, AnalysisMode::Rg1);
+        assert!(close(restored.volume, before.volume));
+        assert!(close(restored.track_gain, before.track_gain));
+        assert!(close(restored.album_volume, before.album_volume));
+        assert!(close(restored.album_gain, before.album_gain));
+        assert_eq!(restored.clipping, before.clipping);
+        assert_eq!(restored.track_clip, before.track_clip);
+        assert_eq!(restored.album_clip, before.album_clip);
+    }
+
+    #[test]
+    fn target_change_moves_only_the_gain_columns() {
+        let mut file = analyzed(2.0, 0.5);
+        file.album_info = Some(AacAlbumInfo {
+            album_gain_db: 1.0,
+            album_peak: 0.5,
+        });
+        let at_89 = file.display(89.0, AnalysisMode::Rg1);
+        let at_92 = file.display(92.0, AnalysisMode::Rg1);
+        assert!(close(at_89.volume, at_92.volume));
+        assert!(close(at_89.album_volume, at_92.album_volume));
+        assert!(close(at_92.track_gain, Some(5.0)));
+        assert!(close(at_92.album_gain, Some(4.0)));
+    }
+
+    #[test]
+    fn clipping_after_apply_flags_and_shrinks_the_apply_peak() {
+        let mut file = analyzed(3.0, 0.9);
+        let before = file.display(89.0, AnalysisMode::Rg1);
+        assert!(!before.clipping);
+        assert!(before.track_clip, "0.9 * +3 dB exceeds full scale");
+        assert!((file.apply_track_result().unwrap().peak() - 0.9).abs() < 1e-9);
+
+        file.applied_db += steps_to_db(1);
+        let after = file.display(89.0, AnalysisMode::Rg1);
+        assert!(after.clipping, "0.9 * +1.5 dB is past full scale");
+        let peak = file.apply_track_result().unwrap().peak();
+        assert!(peak > 1.0);
+        assert!((peak - apply_gain_to_peak(0.9, steps_to_db(1))).abs() < 1e-9);
+    }
+
+    #[test]
+    fn stored_tags_outside_rg1_show_gain_as_is_without_volume() {
+        let file = FileEntry {
+            measurement: Some(Measurement::Stored {
+                track_gain_db: Some(-2.5),
+                track_peak: Some(0.8),
+                album_gain_db: Some(-1.0),
+                album_peak: None,
+            }),
+            ..Default::default()
+        };
+        let rg2 = file.display(89.0, AnalysisMode::Rg2);
+        assert_eq!(rg2.volume, None);
+        assert!(close(rg2.track_gain, Some(-2.5)));
+        assert_eq!(rg2.album_volume, None);
+        assert!(close(rg2.album_gain, Some(-1.0)));
+
+        let rg1 = file.display(91.0, AnalysisMode::Rg1);
+        assert!(close(rg1.volume, Some(91.5)));
+        assert!(close(rg1.track_gain, Some(-0.5)));
+        assert!(file.apply_track_result().is_none());
+    }
+
+    #[test]
+    fn headroom_row_tracks_applied_gain() {
+        let mut file = FileEntry {
+            measurement: Some(Measurement::Headroom { peak: 0.5 }),
+            ..Default::default()
+        };
+        let before = file.display(89.0, AnalysisMode::Rg1);
+        assert!(close(before.volume, Some(-20.0 * 0.5f64.log10())));
+        assert_eq!(before.track_gain, None);
+
+        file.applied_db += steps_to_db(4);
+        let after = file.display(89.0, AnalysisMode::Rg1);
+        assert!(close(
+            after.volume,
+            Some(-20.0 * 0.5f64.log10() - steps_to_db(4))
+        ));
+        assert!(after.clipping);
     }
 }

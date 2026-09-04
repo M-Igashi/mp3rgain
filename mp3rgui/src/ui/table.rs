@@ -175,6 +175,8 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
         // borrowed instead of cloned per frame.
         let display_order = app.display_order();
         let selected = &app.selection_set;
+        let target = app.target_volume;
+        let mode = app.analysis_mode;
         table.body(|body| {
             // `rows` (vs per-row `body.row`) lays out only the rows
             // inside the viewport; fixed 18.0 height makes it a drop-in.
@@ -222,19 +224,20 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                         }
                     });
                 });
+                let d = file.display(target, mode);
                 row.col(|ui| {
-                    if let Some(v) = file.volume {
+                    if let Some(v) = d.volume {
                         ui.label(format!("{:.1}", v));
                     }
                 });
                 row.col(|ui| {
-                    if file.clipping {
+                    if d.clipping {
                         ui.colored_label(egui::Color32::RED, "Y");
                     }
                 });
                 row.col(|ui| {
-                    if let Some(g) = file.track_gain {
-                        let color = if file.track_clip {
+                    if let Some(g) = d.track_gain {
+                        let color = if d.track_clip {
                             egui::Color32::RED
                         } else {
                             ui.style().visuals.text_color()
@@ -243,18 +246,18 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                     }
                 });
                 row.col(|ui| {
-                    if file.track_clip {
+                    if d.track_clip {
                         ui.colored_label(egui::Color32::RED, "Y");
                     }
                 });
                 row.col(|ui| {
-                    if let Some(v) = file.album_volume {
+                    if let Some(v) = d.album_volume {
                         ui.label(format!("{:.1}", v));
                     }
                 });
                 row.col(|ui| {
-                    if let Some(g) = file.album_gain {
-                        let color = if file.album_clip {
+                    if let Some(g) = d.album_gain {
+                        let color = if d.album_clip {
                             egui::Color32::RED
                         } else {
                             ui.style().visuals.text_color()
@@ -263,7 +266,7 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                     }
                 });
                 row.col(|ui| {
-                    if file.album_clip {
+                    if d.album_clip {
                         ui.colored_label(egui::Color32::RED, "Y");
                     }
                 });

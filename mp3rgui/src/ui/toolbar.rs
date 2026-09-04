@@ -89,13 +89,18 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
                     );
                 }
                 None => {
-                    ui.add_enabled(
+                    let resp = ui.add_enabled(
                         !app.is_processing(),
                         egui::DragValue::new(&mut app.target_volume)
                             .speed(0.1)
                             .range(75.0..=100.0)
                             .suffix(" dB"),
                     );
+                    // The gain columns are derived from the Target, so a
+                    // sort on them must be redone (issue #161 item 1).
+                    if resp.changed() {
+                        app.mark_display_dirty();
+                    }
                 }
             }
         });
