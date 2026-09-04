@@ -102,11 +102,10 @@ pub enum WorkerEvent {
 
     /// `-x` Find Max Amplitude result for `idx`. Lighter than
     /// `TrackAnalyzed`: decodes for the true peak but skips the loudness
-    /// analysis.
+    /// analysis. The UI derives the headroom from `peak`.
     MaxAmplitudeFound {
         idx: usize,
         peak: f64,
-        headroom_db: Option<f64>,
     },
     MaxAmplitudeFailed {
         idx: usize,
@@ -784,16 +783,7 @@ pub fn spawn_find_max_amplitude(ctx: egui::Context, files: Vec<(usize, PathBuf)>
                     Ok(amp) => {
                         found.fetch_add(1, Ordering::Relaxed);
                         let peak = amp.max_amplitude();
-                        let headroom_db = mp3rgain::peak_to_headroom_db(peak);
-                        send(
-                            &tx,
-                            &ctx,
-                            WorkerEvent::MaxAmplitudeFound {
-                                idx,
-                                peak,
-                                headroom_db,
-                            },
-                        );
+                        send(&tx, &ctx, WorkerEvent::MaxAmplitudeFound { idx, peak });
                     }
                     Err(e) => {
                         errors.fetch_add(1, Ordering::Relaxed);
