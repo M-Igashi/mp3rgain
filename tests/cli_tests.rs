@@ -591,6 +591,38 @@ fn tsv_rows_carry_the_path_as_given() {
     assert_eq!(row.split('\t').next(), Some(path), "row: {}", row);
 }
 
+/// Reported on the Hydrogenaudio forum (issue #323): `-o tsv` printed the
+/// peak on mp3gain's 16-bit sample scale while `-o json` printed the
+/// ReplayGain float. RG1 keeps the mp3gain scale for compatibility; the
+/// BS.1770 modes report the same float the tags and JSON carry.
+#[test]
+fn tsv_peak_matches_json_in_rg2_mode_and_mp3gain_scale_in_rg1() {
+    let album = TempAlbum::new(&["test_mono.mp3"]);
+    let path = album.files[0].to_str().unwrap();
+
+    let tsv_peak = |mode: &[&str]| -> f64 {
+        let mut argv = mode.to_vec();
+        argv.extend_from_slice(&["-r", "-n", "-o", "tsv", path]);
+        let text = stdout_of(&run(&argv));
+        let row = text.lines().nth(1).expect("TSV data row");
+        row.split('\t').nth(3).unwrap().parse().unwrap()
+    };
+    let json_peak = |mode: &[&str]| -> f64 {
+        let mut argv = mode.to_vec();
+        argv.extend_from_slice(&["-r", "-n", "-o", "json", path]);
+        json_of(&run(&argv))["files"][0]["peak"]
+            .as_f64()
+            .expect("json peak")
+    };
+
+    let rg1_json = json_peak(&[]);
+    assert!((tsv_peak(&[]) - rg1_json * 32768.0).abs() < 0.01);
+
+    let rg2_json = json_peak(&["--rg2"]);
+    assert!((tsv_peak(&["--rg2"]) - rg2_json).abs() < 1e-6);
+    assert!(rg2_json < 2.0, "float peak, not a sample value: {rg2_json}");
+}
+
 /// Reported on the Hydrogenaudio forum: `-o tsv` only produced rows for the
 /// bare analysis command. Combined with `-r` or `-a` it printed nothing at all.
 #[test]

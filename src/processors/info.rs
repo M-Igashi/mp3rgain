@@ -35,7 +35,7 @@ pub fn tsv_rg_row(
         get_path(file),
         gain_steps,
         gain_db,
-        peak_to_pcm_sample(rg_result.peak()),
+        opts.tsv_peak(rg_result.peak()),
         max_gain,
         min_gain
     )
