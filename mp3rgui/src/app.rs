@@ -440,6 +440,7 @@ pub struct Mp3rgainApp {
 
 impl Mp3rgainApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        crate::fonts::install(&cc.egui_ctx);
         // Restore the user's checkboxes / target from the previous session
         // (issue #202). Window geometry + column widths are handled by eframe.
         let settings: PersistedSettings = cc

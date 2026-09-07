@@ -84,7 +84,7 @@ See **[docs/migrating-from-mp3gain.md](docs/migrating-from-mp3gain.md)** for the
   <img src="docs/branding/mp3rgui-screenshot-compact.png" alt="mp3rgui showing track and album ReplayGain analysis for a batch of files" width="820">
 </p>
 
-`mp3rgui` covers the CLI's core workflow - track/album analysis and gain, undo, tag inspection, clipping prevention - with drag-and-drop loading and per-file progress. It shares the same apply pipeline as the CLI. Install via the table above.
+`mp3rgui` covers the CLI's core workflow - track/album analysis and gain, undo, tag inspection, clipping prevention - with drag-and-drop loading and per-file progress. It shares the same apply pipeline as the CLI. Install via the table above. File names in Japanese, Chinese or Korean are rendered with a CJK font already installed on your system; set `MP3RGUI_FONT` to a font file path to pick a different one.
 
 ## Docker / CI
 
