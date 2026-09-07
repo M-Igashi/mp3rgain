@@ -32,6 +32,12 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
             continue;
         }
 
+        if arg == "--per-directory" {
+            opts.per_directory = true;
+            i += 1;
+            continue;
+        }
+
         if arg == "--rg2" {
             if opts.analysis_mode == AnalysisMode::R128 {
                 anyhow::bail!("--rg2 and --r128 are mutually exclusive");
@@ -304,6 +310,11 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
     // (issue #292). Checked after the loop so flag order doesn't matter.
     if opts.true_peak && opts.analysis_mode == AnalysisMode::Rg1 {
         anyhow::bail!("--true-peak requires --rg2 or --r128");
+    }
+
+    // --per-directory only changes how -a groups files (issue #324).
+    if opts.per_directory && !(opts.album_gain && !opts.skip_album) {
+        anyhow::bail!("--per-directory requires -a");
     }
 
     // --tags-only (issue #308) writes ReplayGain metadata and nothing else, so

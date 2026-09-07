@@ -64,6 +64,19 @@ Each file is normalized individually to the 89 dB reference level.
 Analyze and apply Album gain using the ReplayGain 1.0 algorithm.
 All files are treated as an album and normalized together.
 .TP
+.B \-\-per\-directory
+With
+.BR \-a ,
+treat each directory as its own album instead of pooling every file into
+one. Files are grouped by their parent directory as given on the command
+line, so
+.B \-a \-\-per\-directory \-R /music
+computes and applies one album gain per folder in a single run. A
+directory that fails analysis is reported and the run continues with the
+next one. In JSON output the per-directory results appear in an
+.B albums
+array.
+.TP
 .B \-\-rg2
 Measure loudness with the ReplayGain 2.0 algorithm (ITU-R BS.1770
 integrated loudness, gated) against the \-18 LUFS reference instead of

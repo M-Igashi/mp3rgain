@@ -623,6 +623,74 @@ fn tsv_peak_matches_json_in_rg2_mode_and_mp3gain_scale_in_rg1() {
     assert!(rg2_json < 2.0, "float peak, not a sample value: {rg2_json}");
 }
 
+/// Requested on the Hydrogenaudio forum (issue #324): `-a --per-directory`
+/// computes one album gain per folder, so a library can be tagged in one
+/// run. Each directory must get the same album gain it would get alone.
+#[test]
+fn per_directory_album_gain_matches_each_directory_run_alone() {
+    let root = TempAlbum::new(&[]);
+    let mut dirs = Vec::new();
+    for (name, fixtures) in [
+        ("A", vec!["test_mono.mp3", "test_vbr.mp3"]),
+        ("B", vec!["test_stereo.mp3", "test_joint_stereo.mp3"]),
+    ] {
+        let dir = root.dir.join(name);
+        fs::create_dir(&dir).unwrap();
+        for f in fixtures {
+            fs::copy(Path::new("tests/fixtures").join(f), dir.join(f)).unwrap();
+        }
+        dirs.push(dir);
+    }
+    let root_arg = root.dir.to_str().unwrap();
+
+    let out = run(&["-a", "--per-directory", "-n", "-R", "-o", "json", root_arg]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json = json_of(&out);
+    let albums = json["albums"].as_array().expect("albums array");
+    assert_eq!(albums.len(), 2);
+    assert_eq!(json["files"].as_array().unwrap().len(), 4);
+    assert_eq!(json["summary"]["total_files"], 4);
+
+    for (dir, album) in dirs.iter().zip(albums) {
+        assert_eq!(album["directory"], dir.to_str().unwrap());
+        assert_eq!(album["files"], 2);
+        let alone = json_of(&run(&[
+            "-a",
+            "-n",
+            "-R",
+            "-o",
+            "json",
+            dir.to_str().unwrap(),
+        ]));
+        assert_eq!(
+            album["gain_db"],
+            alone["album"]["gain_db"],
+            "{}",
+            dir.display()
+        );
+    }
+    assert_ne!(
+        albums[0]["gain_db"], albums[1]["gain_db"],
+        "the two directories should not share one album gain"
+    );
+
+    // Without the flag everything is still one album.
+    let pooled = json_of(&run(&["-a", "-n", "-R", "-o", "json", root_arg]));
+    assert!(pooled["albums"].is_null());
+    assert!(pooled["album"]["gain_db"].is_number());
+}
+
+#[test]
+fn per_directory_requires_album_mode() {
+    let out = run(&["--per-directory", "-r", "tests/fixtures/test_mono.mp3"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--per-directory requires -a"));
+}
+
 /// Reported on the Hydrogenaudio forum: `-o tsv` only produced rows for the
 /// bare analysis command. Combined with `-r` or `-a` it printed nothing at all.
 #[test]

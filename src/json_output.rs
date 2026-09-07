@@ -19,8 +19,19 @@ pub struct JsonOutput {
     pub files: Option<Vec<JsonFileResult>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub album: Option<JsonAlbumResult>,
+    /// `-a --per-directory`: one entry per directory (issue #324).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub albums: Option<Vec<JsonDirectoryAlbum>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<JsonSummary>,
+}
+
+#[derive(Serialize)]
+pub struct JsonDirectoryAlbum {
+    pub directory: String,
+    pub files: usize,
+    #[serde(flatten)]
+    pub album: JsonAlbumResult,
 }
 
 #[derive(Serialize, Clone, Default)]
