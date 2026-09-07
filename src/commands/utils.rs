@@ -181,6 +181,7 @@ pub fn report_zero_steps(files: &[PathBuf], opts: &Options) -> Result<()> {
         let output = JsonOutput {
             files: Some(vec![]),
             album: None,
+            albums: None,
             summary: Some(create_json_summary(files.len(), 0, 0, opts.dry_run)),
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
@@ -216,6 +217,7 @@ pub fn finish_with_album_summary(
         let output = JsonOutput {
             files: Some(json_results),
             album,
+            albums: None,
             summary: Some(create_json_summary(
                 total_files,
                 successful,
@@ -252,6 +254,7 @@ pub fn finish_without_summary(
         let output = JsonOutput {
             files: Some(json_results),
             album: None,
+            albums: None,
             summary: None,
         };
         println!("{}", serde_json::to_string_pretty(&output)?);

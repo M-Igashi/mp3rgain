@@ -50,7 +50,9 @@ pub struct Options {
     // without modifying a single audio frame (issue #308), the loudgain /
     // rsgain workflow. Requires -r / -a / -e.
     pub tags_only: bool,
-    pub skip_album: bool,         // -e: skip album analysis
+    pub skip_album: bool, // -e: skip album analysis
+    // --per-directory: with -a, one album per parent directory (issue #324).
+    pub per_directory: bool,
     pub max_amplitude_only: bool, // -x: only find max amplitude
     pub track_index: Option<u32>, // -i <index>: track index for multi-track files
 

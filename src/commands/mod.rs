@@ -16,7 +16,7 @@ use crate::cli::parse_args::expand_files_recursive;
 use apply::{cmd_apply, cmd_apply_channel};
 use info::cmd_info;
 use max_amplitude::cmd_max_amplitude;
-use replaygain::{cmd_album_gain, cmd_track_gain};
+use replaygain::{cmd_album_gain, cmd_album_gain_per_directory, cmd_track_gain};
 use tags::{cmd_check_tags, cmd_delete_tags};
 use undo::cmd_undo;
 
@@ -99,7 +99,10 @@ pub fn run(mut opts: Options) -> Result<()> {
     }
 
     if opts.album_gain && !opts.skip_album {
-        // -a: apply album gain (ReplayGain)
+        // -a: apply album gain (ReplayGain), per directory with --per-directory
+        if opts.per_directory {
+            return cmd_album_gain_per_directory(&opts.files, &opts);
+        }
         return cmd_album_gain(&opts.files, &opts);
     }
 

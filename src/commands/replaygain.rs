@@ -6,6 +6,7 @@ use mp3rgain::replaygain::{
 };
 use mp3rgain::AacAlbumInfo;
 use rayon::prelude::*;
+use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -13,9 +14,12 @@ use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::commands::threading::effective_threads;
 use crate::commands::utils::{
     create_json_summary, exit_if_failed, finish_with_album_summary, finish_with_summary,
-    for_each_file_with_analysis_bar, run_album_analysis, update_counters, TSV_HEADER,
+    for_each_file_with_analysis_bar, print_dry_run_notice, run_album_analysis, update_counters,
+    TSV_HEADER,
 };
-use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput};
+use crate::json_output::{
+    FileStatus, JsonAlbumResult, JsonDirectoryAlbum, JsonFileResult, JsonOutput,
+};
 use crate::processors::info::{scan_gain_range_for_row, tsv_rg_row};
 use crate::processors::replaygain::{
     apply_is_noop, capped_tag_gain, process_apply_replaygain_with_album, process_track_gain,
@@ -138,21 +142,30 @@ fn stored_album_report(files: &[PathBuf], opts: &Options) -> Option<AlbumAnalysi
     })
 }
 
-pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
-    require_replaygain_feature();
+/// Outcome of one album run, before the JSON / exit-code epilogue.
+struct AlbumRun {
+    json_results: Vec<JsonFileResult>,
+    album: Option<JsonAlbumResult>,
+    successful: usize,
+    failed: usize,
+}
 
-    let dry_run_prefix = opts.dry_run_prefix();
-
+/// TSV header plus the text-mode banner shared by both album commands.
+fn print_album_intro(file_count: usize, directories: Option<usize>, opts: &Options) {
     if opts.output_format == OutputFormat::Tsv {
         println!("{}", TSV_HEADER);
     }
-
     if opts.output_format == OutputFormat::Text && !opts.quiet {
+        let scope = match directories {
+            Some(n) => format!(" in {} directory(ies)", n),
+            None => String::new(),
+        };
         println!(
-            "{}{} Analyzing album gain for {} file(s){}",
-            dry_run_prefix,
+            "{}{} Analyzing album gain for {} file(s){}{}",
+            opts.dry_run_prefix(),
             "mp3rgain".green().bold(),
-            files.len(),
+            file_count,
+            scope,
             if opts.tags_only {
                 " (tags only, audio unchanged)"
             } else {
@@ -162,7 +175,99 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         print_target_with_modifier(opts);
         println!();
     }
+}
 
+pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
+    require_replaygain_feature();
+    print_album_intro(files.len(), None, opts);
+    let run = run_album(files, opts)?;
+    finish_with_album_summary(
+        files.len(),
+        run.json_results,
+        run.album,
+        run.successful,
+        run.failed,
+        opts,
+    )
+}
+
+/// `-a --per-directory`: one album per parent directory (issue #324), the
+/// grouping the GUI has used since #159. Directories are processed in path
+/// order; one that fails analysis is counted and the run moves on to the
+/// next, so a whole library can be tagged in a single invocation.
+pub fn cmd_album_gain_per_directory(files: &[PathBuf], opts: &Options) -> Result<()> {
+    require_replaygain_feature();
+    let groups = group_by_parent(files);
+    print_album_intro(files.len(), Some(groups.len()), opts);
+
+    let mut json_results = Vec::with_capacity(files.len());
+    let mut albums = Vec::with_capacity(groups.len());
+    let (mut successful, mut failed) = (0, 0);
+    for (i, (dir, group)) in groups.iter().enumerate() {
+        if opts.output_format == OutputFormat::Text && !opts.quiet {
+            if i > 0 {
+                println!();
+            }
+            println!(
+                "{} ({} file(s))",
+                dir.display().to_string().bold(),
+                group.len()
+            );
+        }
+        let run = run_album(group, opts)?;
+        if let Some(album) = run.album {
+            albums.push(JsonDirectoryAlbum {
+                directory: dir.display().to_string(),
+                files: group.len(),
+                album,
+            });
+        }
+        json_results.extend(run.json_results);
+        successful += run.successful;
+        failed += run.failed;
+    }
+
+    if opts.output_format == OutputFormat::Json {
+        let output = JsonOutput {
+            files: Some(json_results),
+            album: None,
+            albums: Some(albums),
+            summary: Some(create_json_summary(
+                files.len(),
+                successful,
+                failed,
+                opts.dry_run,
+            )),
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        print_dry_run_notice(opts);
+    }
+    exit_if_failed(failed);
+    Ok(())
+}
+
+/// Group files by their immediate parent directory, as given on the command
+/// line. Bare file names land in `.`.
+fn group_by_parent(files: &[PathBuf]) -> BTreeMap<PathBuf, Vec<PathBuf>> {
+    let mut groups: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
+    for file in files {
+        let dir = file
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        groups
+            .entry(dir.to_path_buf())
+            .or_default()
+            .push(file.clone());
+    }
+    groups
+}
+
+/// Analyze and apply album gain to `files` as one album, returning what the
+/// epilogue needs instead of printing JSON or exiting, so the per-directory
+/// driver can aggregate several albums (issue #324).
+fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
     let file_refs: Vec<&Path> = files.iter().map(|p| p.as_path()).collect();
 
     let threads = effective_threads(opts);
@@ -299,8 +404,9 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 .map(|t| t.peak())
                 .fold(0.0, f64::max);
             if apply_is_noop(opts, steps, any_aac, max_peak) {
-                if opts.output_format == OutputFormat::Json {
-                    let json_results: Vec<JsonFileResult> = files
+                let json_results: Vec<JsonFileResult> = if opts.output_format == OutputFormat::Json
+                {
+                    files
                         .iter()
                         .enumerate()
                         .map(|(i, file)| match file_to_track[i] {
@@ -318,21 +424,19 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                                 failure_msgs[i].as_deref().unwrap_or("analysis failed"),
                             ),
                         })
-                        .collect();
-                    return finish_with_album_summary(
-                        files.len(),
-                        json_results,
-                        Some(json_album),
-                        0,
-                        failure_count,
-                        opts,
-                    );
-                }
-                if !opts.quiet {
-                    println!("  {} No adjustment needed", ".".cyan());
-                }
-                exit_if_failed(failure_count);
-                return Ok(());
+                        .collect()
+                } else {
+                    if !opts.quiet {
+                        println!("  {} No adjustment needed", ".".cyan());
+                    }
+                    Vec::new()
+                };
+                return Ok(AlbumRun {
+                    json_results,
+                    album: Some(json_album),
+                    successful: 0,
+                    failed: failure_count,
+                });
             }
 
             let pb = create_progress_bar(files.len(), opts);
@@ -466,36 +570,33 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 mp3rgain::write_album_minmax(&album_files);
             }
 
-            finish_with_album_summary(
-                files.len(),
+            Ok(AlbumRun {
                 json_results,
-                Some(json_album),
+                album: Some(json_album),
                 successful,
                 failed,
-                opts,
-            )?;
+            })
         }
         Err(e) => {
-            if opts.output_format == OutputFormat::Json {
-                let output = JsonOutput {
-                    files: None,
-                    album: None,
-                    summary: Some(create_json_summary(
-                        files.len(),
-                        0,
-                        files.len(),
-                        opts.dry_run,
-                    )),
-                };
-                println!("{}", serde_json::to_string_pretty(&output)?);
+            // Every file counts as failed. JSON gets one error entry per file
+            // so the caller can see which album broke; text goes to stderr.
+            let json_results = if opts.output_format == OutputFormat::Json {
+                files
+                    .iter()
+                    .map(|f| JsonFileResult::error(f, e.to_string()))
+                    .collect()
             } else {
                 eprintln!("{}: Failed to analyze album: {}", "error".red().bold(), e);
-            }
-            std::process::exit(1);
+                Vec::new()
+            };
+            Ok(AlbumRun {
+                json_results,
+                album: None,
+                successful: 0,
+                failed: files.len(),
+            })
         }
     }
-
-    Ok(())
 }
 
 /// Per-file rows plus the `"Album"` summary row for `-a -o tsv`, matching what
