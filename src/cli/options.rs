@@ -95,6 +95,20 @@ impl Options {
             && self.target_offset_db() == 0.0
     }
 
+    /// The TSV `Max Amplitude` column for a normalized peak. RG1 keeps
+    /// mp3gain's 16-bit sample scale (`peak * 32768`) so scripts written for
+    /// mp3gain keep working. The BS.1770 modes are outside mp3gain's world
+    /// anyway (and a true peak above 1.0 makes no sense as a sample value),
+    /// so they print the ReplayGain float peak: the number written to
+    /// `REPLAYGAIN_*_PEAK` and reported by `-o json` (issue #323).
+    pub fn tsv_peak(&self, peak: f64) -> f64 {
+        if self.analysis_mode == AnalysisMode::Rg1 {
+            mp3rgain::peak_to_pcm_sample(peak)
+        } else {
+            peak
+        }
+    }
+
     /// A measured gain shifted by the `-m` / `-d` modifiers, as the apply and
     /// info paths report it: `(steps, dB)`, both quantized to whole
     /// `global_gain` steps so the two columns always agree. Every caller used

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::*;
+use mp3rgain::mp4meta;
 use mp3rgain::replaygain::{self, AlbumAnalysisReport, ReplayGainResult};
-use mp3rgain::{mp4meta, peak_to_pcm_sample};
 use rayon::prelude::*;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -136,7 +136,6 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 report.album.album_gain_steps(),
                 report.album.album_gain_db(),
             );
-            let album_max_amp = peak_to_pcm_sample(report.album.album_peak());
 
             match opts.output_format {
                 OutputFormat::Tsv => {
@@ -144,7 +143,7 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
                         "\"Album\"\t{}\t{:.6}\t{:.6}\t{}\t{}",
                         album_gain_steps,
                         album_gain_db,
-                        album_max_amp,
+                        opts.tsv_peak(report.album.album_peak()),
                         album_max_gain.unwrap_or(255),
                         album_min_gain.unwrap_or(0)
                     );

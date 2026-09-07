@@ -104,6 +104,8 @@ Albums/Foo/01.mp3	0	0.0	17234	148	100
 
 The `File` column carries the path exactly as it was given on the command line, the way mp3gain prints it. Up to 3.5.1 mp3rgain printed the bare filename instead, which was ambiguous when scanning several directories in one run.
 
+The `Max Amplitude` column is on mp3gain's 16-bit sample scale (peak × 32768) in the default ReplayGain 1.0 mode. Under `--rg2` / `--r128` the rows are no longer mp3gain-compatible anyway, so the column carries the ReplayGain float peak instead, the same value written to `REPLAYGAIN_*_PEAK` and reported by `-o json`.
+
 TSV rows are emitted by the gain-applying commands too, not just the bare analysis command: `-r`, `-a` and `-e` print the recommended change for every file (plus the `"Album"` summary row under `-a`) before the frames are rewritten, so `mp3rgain -o tsv -a */*.mp3` reports the same numbers `mp3rgain -o tsv */*.mp3` would.
 
 This means existing parsers that consume mp3gain output — most notably the

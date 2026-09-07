@@ -214,6 +214,12 @@ prints the mp3gain-compatible header and one row per file, with the
 column holding the path as given on the command line. The rows are also
 emitted while applying gain
 .RB ( \-r ", " \-a ", " \-e ", " \-g ", " \-l ).
+The
+.B Max Amplitude
+column uses mp3gain's 16-bit sample scale (peak multiplied by 32768) in the
+default ReplayGain 1.0 mode, and the ReplayGain float peak (the value written
+to REPLAYGAIN_*_PEAK) under
+.BR \-\-rg2 " and " \-\-r128 .
 .TP
 .BR \-v ", " \-\-version
 Show version information and exit.

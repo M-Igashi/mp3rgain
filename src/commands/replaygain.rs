@@ -4,7 +4,7 @@ use mp3rgain::replaygain::{
     self, AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult,
     REPLAYGAIN_REFERENCE_DB,
 };
-use mp3rgain::{peak_to_pcm_sample, AacAlbumInfo};
+use mp3rgain::AacAlbumInfo;
 use rayon::prelude::*;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -542,7 +542,7 @@ fn emit_album_tsv_rows(
             "\"Album\"\t{}\t{:.6}\t{:.6}\t{}\t{}",
             album_gain_steps,
             album_gain_db,
-            peak_to_pcm_sample(album_result.album_peak()),
+            opts.tsv_peak(album_result.album_peak()),
             album_max_gain.unwrap_or(255),
             album_min_gain.unwrap_or(0)
         )?;
