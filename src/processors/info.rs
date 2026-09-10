@@ -14,14 +14,26 @@ use crate::util::{get_filename, get_path};
 /// Scan the file's global_gain range for an info row, as `(max, min)`.
 ///
 /// `mp3rgain::gain_range` dispatches on the container, so AAC files report the
-/// same values `-x` does (issue #329: the MP3-only scanner failed on AAC, and
-/// the (255, 0) fallback got printed as if it were measured). A file that
-/// cannot be scanned at all still falls back to (255, 0), the placeholder
-/// mp3gain prints.
-pub fn scan_gain_range_for_row(file: &Path) -> (u8, u8) {
-    mp3rgain::gain_range(file)
-        .map(|(min, max)| (max, min))
-        .unwrap_or((255, 0))
+/// same values `-x` does (issue #329: the MP3-only scanner failed on AAC, so
+/// every AAC file took the fallback branch).
+///
+/// `None` means the file could not be scanned at all, which is currently the
+/// case for raw ADTS `.aac` streams: neither scanner handles them, and the
+/// apply paths reject them too. The fallback used to be (255, 0), the pair
+/// `analyze_data` starts its accumulators at, which prints as a real
+/// full-range measurement.
+pub fn scan_gain_range_for_row(file: &Path) -> Option<(u8, u8)> {
+    mp3rgain::gain_range(file).ok().map(|(min, max)| (max, min))
+}
+
+/// The two global_gain columns as they are printed: the measured values, or
+/// `-` for a file that could not be scanned, the same way the M4A rows below
+/// mark a column that does not apply.
+pub fn gain_range_fields(gain_range: Option<(u8, u8)>) -> (String, String) {
+    match gain_range {
+        Some((max, min)) => (max.to_string(), min.to_string()),
+        None => ("-".to_string(), "-".to_string()),
+    }
 }
 
 /// One mp3gain-compatible TSV row from a ReplayGain analysis result.
@@ -31,10 +43,10 @@ pub fn tsv_rg_row(
     file: &Path,
     opts: &Options,
     rg_result: &ReplayGainResult,
-    gain_range: (u8, u8),
+    gain_range: Option<(u8, u8)>,
 ) -> String {
     let (gain_steps, gain_db) = opts.modified_gain(rg_result.gain_steps(), rg_result.gain_db());
-    let (max_gain, min_gain) = gain_range;
+    let (max_gain, min_gain) = gain_range_fields(gain_range);
     format!(
         "{}\t{}\t{:.6}\t{:.6}\t{}\t{}\n",
         get_path(file),
@@ -54,7 +66,7 @@ pub fn format_rg_row(
     file: &Path,
     opts: &Options,
     rg_result: &ReplayGainResult,
-    gain_range: (u8, u8),
+    gain_range: Option<(u8, u8)>,
 ) -> Result<(JsonFileResult, String)> {
     let mut out = String::new();
     let filename = get_filename(file);
@@ -62,7 +74,7 @@ pub fn format_rg_row(
     // Reuse the ReplayGain peak instead of re-decoding the audio
     // via find_max_amplitude (issue #135).
     let max_amp = rg_result.peak();
-    let (max_gain, min_gain) = gain_range;
+    let (max_gain_field, min_gain_field) = gain_range_fields(gain_range);
 
     // Gain with the -m / -d modifiers folded in, the same way the apply
     // paths report it.
@@ -90,8 +102,8 @@ pub fn format_rg_row(
                     "  Max PCM sample at current gain: {:.6}",
                     max_amplitude_scaled
                 )?;
-                writeln!(out, "  Max mp3 global gain field: {}", max_gain)?;
-                writeln!(out, "  Min mp3 global gain field: {}", min_gain)?;
+                writeln!(out, "  Max mp3 global gain field: {}", max_gain_field)?;
+                writeln!(out, "  Min mp3 global gain field: {}", min_gain_field)?;
                 writeln!(out)?;
             }
         }
@@ -103,8 +115,8 @@ pub fn format_rg_row(
             gain_applied_db: Some(gain_db),
             gain_applied_steps: Some(gain_steps),
             max_amplitude: Some(max_amp),
-            max_gain: Some(max_gain),
-            min_gain: Some(min_gain),
+            max_gain: gain_range.map(|(max, _)| max),
+            min_gain: gain_range.map(|(_, min)| min),
             ..JsonFileResult::from_analysis(file, rg_result)
         },
         out,

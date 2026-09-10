@@ -11,7 +11,9 @@ use crate::commands::utils::{
     exit_if_failed, finish_without_summary, for_each_file_with_analysis_bar, run_album_analysis,
     TSV_HEADER,
 };
-use crate::processors::info::{format_rg_row, process_info, scan_gain_range_for_row};
+use crate::processors::info::{
+    format_rg_row, gain_range_fields, process_info, scan_gain_range_for_row,
+};
 use crate::util::get_filename;
 
 pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
@@ -85,12 +87,12 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
     // Scan gain ranges in parallel before emitting: the frame scan re-reads
     // each file, which the sequential emit loop below would serialize.
-    let gain_ranges: Vec<(u8, u8)> = files
+    let gain_ranges: Vec<Option<(u8, u8)>> = files
         .par_iter()
         .enumerate()
         .map(|(i, file)| match rows[i] {
             Some(Row::Analyzed(_)) => scan_gain_range_for_row(file),
-            _ => (255, 0),
+            _ => None,
         })
         .collect();
 
@@ -139,13 +141,15 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
             match opts.output_format {
                 OutputFormat::Tsv => {
+                    let (max_gain, min_gain) =
+                        gain_range_fields(album_max_gain.zip(album_min_gain));
                     println!(
                         "\"Album\"\t{}\t{:.6}\t{:.6}\t{}\t{}",
                         album_gain_steps,
                         album_gain_db,
                         opts.tsv_peak(report.album.album_peak()),
-                        album_max_gain.unwrap_or(255),
-                        album_min_gain.unwrap_or(0)
+                        max_gain,
+                        min_gain
                     );
                 }
                 OutputFormat::Text => {

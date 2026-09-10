@@ -842,3 +842,32 @@ fn read_channel_mode_matches_full_analysis() {
         mp3rgain::analysis::read_channel_mode(Path::new("tests/fixtures/missing.mp3")).is_err()
     );
 }
+
+/// Issue #329: `analyze` only understands MP3 frames, so callers that need
+/// just the global_gain range of a possibly-AAC file have to go through
+/// `gain_range`, which dispatches on the container the way
+/// `find_max_amplitude` does.
+#[test]
+fn test_gain_range_dispatches_on_the_container_for_aac() {
+    let path = Path::new("tests/fixtures/test_aac.m4a");
+
+    assert!(
+        analyze(path).is_err(),
+        "the MP3-only analyzer should still reject AAC"
+    );
+
+    let (min, max) = mp3rgain::gain_range(path).expect("AAC gain range should scan");
+    assert!(
+        min < max,
+        "fixture should span a range, got {}..{}",
+        min,
+        max
+    );
+
+    let amplitude = mp3rgain::find_max_amplitude(path).expect("-x path should scan the same file");
+    assert_eq!(
+        (min, max),
+        (amplitude.min_global_gain(), amplitude.max_global_gain()),
+        "gain_range and find_max_amplitude must agree"
+    );
+}

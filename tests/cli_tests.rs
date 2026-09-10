@@ -775,3 +775,79 @@ fn read_only_commands_exit_non_zero_on_an_unreadable_file() {
         }
     }
 }
+
+/// The value printed after `label`, e.g. `Max global_gain:` in the `-x` report
+/// or `Max mp3 global gain field:` in the default info output.
+fn labeled_value(text: &str, label: &str) -> String {
+    text.lines()
+        .find_map(|line| line.trim().strip_prefix(label))
+        .unwrap_or_else(|| panic!("{:?} not found in:\n{}", label, text))
+        .trim()
+        .to_string()
+}
+
+/// The `Max global_gain` / `Min global_gain` columns of the first TSV data row.
+fn tsv_gain_columns(text: &str) -> (String, String) {
+    let row = text
+        .lines()
+        .nth(1)
+        .unwrap_or_else(|| panic!("TSV output should carry a data row:\n{}", text));
+    let columns: Vec<&str> = row.split('\t').collect();
+    assert_eq!(columns.len(), 6, "unexpected TSV row: {:?}", row);
+    (columns[4].to_string(), columns[5].to_string())
+}
+
+/// Issue #329: the info row scanned the global_gain range with the MP3-only
+/// analyzer, which fails on AAC, so every AAC file fell back to the (255, 0)
+/// accumulator seed and printed it as if it were measured. The info paths must
+/// agree with `-x`, which has always dispatched on the container.
+#[test]
+fn aac_info_row_reports_the_same_global_gain_range_as_max_amplitude() {
+    let album = TempAlbum::new(&["test_aac.m4a"]);
+    let file = album.files[0].to_str().unwrap();
+
+    let x_report = stdout_of(&run(&["-x", file]));
+    let max = labeled_value(&x_report, "Max global_gain:");
+    let min = labeled_value(&x_report, "Min global_gain:");
+    assert_ne!(
+        (max.as_str(), min.as_str()),
+        ("255", "0"),
+        "the fixture should have a real gain range to compare against"
+    );
+
+    assert_eq!(
+        tsv_gain_columns(&stdout_of(&run(&["-o", "tsv", file]))),
+        (max.clone(), min.clone()),
+        "-o tsv disagrees with -x"
+    );
+
+    let info = stdout_of(&run(&[file]));
+    assert_eq!(labeled_value(&info, "Max mp3 global gain field:"), max);
+    assert_eq!(labeled_value(&info, "Min mp3 global gain field:"), min);
+}
+
+/// A file whose global_gain cannot be scanned at all prints `-` rather than
+/// (255, 0), which reads as a real full-range measurement (issue #329). Raw
+/// ADTS is the case in practice: no scanner handles it and the apply paths
+/// reject it, but ReplayGain analysis still succeeds, so a row is emitted.
+#[test]
+fn an_unscannable_file_prints_a_dash_for_the_global_gain_columns() {
+    let album = TempAlbum::new(&["test_adts.aac"]);
+    let file = album.files[0].to_str().unwrap();
+
+    let tsv = stdout_of(&run(&["-o", "tsv", file]));
+    assert_eq!(
+        tsv_gain_columns(&tsv),
+        ("-".to_string(), "-".to_string()),
+        "unscannable file should not report a measured range"
+    );
+    assert!(
+        tsv.lines().any(|line| line.starts_with("\"Album\"")),
+        "the album summary row should still be emitted:\n{}",
+        tsv
+    );
+
+    let info = stdout_of(&run(&[file]));
+    assert_eq!(labeled_value(&info, "Max mp3 global gain field:"), "-");
+    assert_eq!(labeled_value(&info, "Min mp3 global gain field:"), "-");
+}

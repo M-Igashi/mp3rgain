@@ -20,7 +20,7 @@ use crate::commands::utils::{
 use crate::json_output::{
     FileStatus, JsonAlbumResult, JsonDirectoryAlbum, JsonFileResult, JsonOutput,
 };
-use crate::processors::info::{scan_gain_range_for_row, tsv_rg_row};
+use crate::processors::info::{gain_range_fields, scan_gain_range_for_row, tsv_rg_row};
 use crate::processors::replaygain::{
     apply_is_noop, capped_tag_gain, process_apply_replaygain_with_album, process_track_gain,
 };
@@ -609,15 +609,16 @@ fn emit_album_tsv_rows(
 ) -> Result<()> {
     // The frame scan re-reads each file, so run it in parallel the way
     // cmd_info does rather than serializing it inside the emit loop.
-    let gain_ranges: Vec<(u8, u8)> = files
+    let gain_ranges: Vec<Option<(u8, u8)>> = files
         .par_iter()
         .enumerate()
         .map(|(i, file)| match file_to_track[i] {
             Some(_) => scan_gain_range_for_row(file),
-            None => (255, 0),
+            None => None,
         })
         .collect();
 
+    let mut any_row = false;
     let mut album_max_gain: Option<u8> = None;
     let mut album_min_gain: Option<u8> = None;
     let stdout = io::stdout();
@@ -628,24 +629,27 @@ fn emit_album_tsv_rows(
         };
         let track = &album_result.tracks()[track_idx];
         handle.write_all(tsv_rg_row(file, opts, track, gain_ranges[i]).as_bytes())?;
-        let (max_gain, min_gain) = gain_ranges[i];
-        album_max_gain = album_max_gain.max(Some(max_gain));
-        album_min_gain = Some(album_min_gain.map_or(min_gain, |m: u8| m.min(min_gain)));
+        any_row = true;
+        if let Some((max_gain, min_gain)) = gain_ranges[i] {
+            album_max_gain = album_max_gain.max(Some(max_gain));
+            album_min_gain = Some(album_min_gain.map_or(min_gain, |m: u8| m.min(min_gain)));
+        }
     }
 
-    if album_max_gain.is_some() {
+    if any_row {
         let (album_gain_steps, album_gain_db) = opts.modified_gain(
             album_result.album_gain_steps(),
             album_result.album_gain_db(),
         );
+        let (max_gain, min_gain) = gain_range_fields(album_max_gain.zip(album_min_gain));
         writeln!(
             handle,
             "\"Album\"\t{}\t{:.6}\t{:.6}\t{}\t{}",
             album_gain_steps,
             album_gain_db,
             opts.tsv_peak(album_result.album_peak()),
-            album_max_gain.unwrap_or(255),
-            album_min_gain.unwrap_or(0)
+            max_gain,
+            min_gain
         )?;
     }
 
