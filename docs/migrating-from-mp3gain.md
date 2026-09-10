@@ -132,6 +132,7 @@ For new integrations, prefer `-o json`, which is structured and stable.
 | APEv2 ReplayGain (`mp3gain_album_*`, `replaygain_*`) | Written | Written with `-s a` | Since 3.2.0 the default puts `REPLAYGAIN_*` in ID3v2 instead, and clears stale APEv2 copies so the two cannot disagree. `-s a` restores mp3gain's layout exactly |
 | ID3v2 TXXX ReplayGain | Not written | Written by default since 3.2.0 | Where standard ReplayGain readers look. ffmpeg does not read APEv2 on MP3 at all, and Rockbox only handles APE tags for WavPack/Musepack |
 | MP4 freeform metadata (AAC/M4A) | N/A | Written | mp3gain has no AAC support; mp3rgain stores AAC undo and ReplayGain in `com.apple.metadata.mdta:ReplayGain_*` and a `mp3gain_undo` freeform atom |
+| ID3v2 TXXX (raw ADTS `.aac`) | N/A | Written since 3.7.0 | A raw stream has no container for freeform atoms, so both families go into ID3v2 and the `-s a` / `-s i` layout choice does not apply ([#330](https://github.com/M-Igashi/mp3rgain/issues/330)) |
 
 For more on the choice between bitstream `global_gain` rewriting and
 ReplayGain *tags*, see [docs/COMPARISON.md](COMPARISON.md).
@@ -243,7 +244,11 @@ mp3rgain -r -k *.m4a
 ```
 
 Undo information is stored in MP4 freeform metadata rather than APEv2
-(AAC files do not natively support APEv2). See
+(AAC files do not natively support APEv2). Raw ADTS `.aac` streams, the kind
+`ffmpeg -f adts`, DVB/HLS captures and some rippers produce, are also handled
+since 3.7.0; they have no container for freeform atoms, so their undo and
+`REPLAYGAIN_*` values go into an ID3v2 tag instead
+([#330](https://github.com/M-Igashi/mp3rgain/issues/330)). See
 [docs/COMPARISON.md](COMPARISON.md) for a detailed feature matrix.
 
 ## When *not* to migrate
@@ -252,8 +257,10 @@ mp3rgain is not the right tool if you need any of the following:
 
 - **EBU R128 / LUFS** loudness — mp3rgain implements ReplayGain 1.0 (89 dB
   reference). For R128 use loudgain, ffmpeg `loudnorm`, or rsgain.
-- **FLAC / OGG / Opus / WAV** — mp3rgain only handles MP3 and AAC.
-  loudgain or rsgain cover lossless containers.
+- **FLAC / OGG / Opus / WAV / ALAC** — mp3rgain only handles MP3 and AAC.
+  loudgain or rsgain cover lossless containers. An ALAC or DRM-protected M4P
+  file in a scanned library is reported as skipped and left alone, without
+  failing the run ([#330](https://github.com/M-Igashi/mp3rgain/issues/330)).
 - **Tag-only ReplayGain on AAC** — if all your players honour ReplayGain
   tags, rsgain is lighter-weight. mp3rgain's value is the lossless
   bitstream rewrite for players that ignore tags (DJ hardware, smart

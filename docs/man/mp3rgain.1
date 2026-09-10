@@ -1,7 +1,7 @@
 .\" mp3rgain - Lossless MP3 volume adjustment
 .\" Copyright (c) 2025 M-Igashi
 .\" Licensed under MIT License
-.TH MP3RGAIN 1 "August 2026" "mp3rgain 3.0.0" "User Commands"
+.TH MP3RGAIN 1 "September 2026" "mp3rgain 3.7.0" "User Commands"
 .SH NAME
 mp3rgain \- lossless MP3/AAC volume adjustment (modern mp3gain replacement)
 .SH SYNOPSIS
@@ -15,13 +15,16 @@ field in each frame.
 This preserves audio quality while achieving permanent volume changes.
 .PP
 All changes are lossless and reversible. For MP3, undo data is stored in APEv2 tags.
-For AAC/M4A, undo data is stored in iTunes freeform metadata tags.
+For AAC in an MP4/M4A container, it is stored in iTunes freeform metadata tags.
+For a raw ADTS
+.I .aac
+stream, which has no container to hold them, it is stored in an ID3v2 tag.
 .PP
 .B mp3rgain
 is a modern, memory-safe replacement for the classic
 .BR mp3gain (1)
 tool, written in Rust. It provides full command-line compatibility with the
-original mp3gain while adding lossless AAC/M4A gain adjustment and ReplayGain analysis.
+original mp3gain while adding lossless AAC gain adjustment and ReplayGain analysis.
 .SH OPTIONS
 .SS "Gain Options"
 .TP
@@ -312,6 +315,17 @@ Full support for reading, analyzing, and modifying gain.
 .TP
 .B AAC/M4A/MP4
 Full lossless bitstream gain adjustment and undo. HE-AAC/SBR supported (base layer).
+The audio track of a video MP4 is adjusted as well.
+.TP
+.B AAC (raw ADTS, .aac)
+Full lossless bitstream gain adjustment and undo, as for AAC in MP4. Undo and
+.B REPLAYGAIN_*
+go into an ID3v2 tag, since a raw stream has no container for them, so
+.BR \-s " a and " \-s " i do not apply."
+.TP
+.B ALAC, DRM-protected M4P
+Recognized but not adjustable. Reported as skipped, without affecting the exit
+status of a batch.
 .SH ENVIRONMENT
 .TP
 .B MP3RGAIN_THREADS
@@ -321,7 +335,16 @@ The explicit
 .B \-j
 flag takes precedence. A value of 0 means auto (number of available CPUs).
 .SH FILES
-Gain changes and undo information are stored in APEv2 tags appended to MP3 files:
+For MP3 the
+.B REPLAYGAIN_*
+values are stored in ID3v2
+.B TXXX
+frames and the
+.B MP3GAIN_*
+values in an APEv2 tag, which is where each family's readers look; see
+.BR \-s " a and " \-s " i to put both in one container."
+For AAC in MP4 both families go into iTunes freeform atoms, and for raw ADTS
+into ID3v2. The values written are:
 .TP
 .B REPLAYGAIN_TRACK_GAIN
 Track gain value in dB.

@@ -14,7 +14,7 @@
 
 🌐 **Website:** [mp3rgain.tyna.ninja](https://mp3rgain.tyna.ninja/) - install guide, full [CLI reference](https://mp3rgain.tyna.ninja/docs/cli), [FAQ](https://mp3rgain.tyna.ninja/faq), and [tool comparison](https://mp3rgain.tyna.ninja/vs-mp3gain)
 
-mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global_gain` field in each frame. This preserves audio quality while achieving permanent volume changes.
+mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global_gain` field in each frame. This preserves audio quality while achieving permanent volume changes. AAC is handled in an M4A/MP4 container (including the audio track of a video MP4) and as a raw ADTS `.aac` stream.
 
 - **Lossless & reversible**: no re-encoding; every change can be undone with `-u` (MP3, AAC in M4A/MP4, and raw ADTS `.aac`)
 - **ReplayGain**: track and album analysis, with standard `REPLAYGAIN_*` tags written alongside the bitstream change
@@ -61,7 +61,7 @@ Binaries for all platforms are on [GitHub Releases](https://github.com/M-Igashi/
 mp3rgain -r song.mp3          # Normalize a single track (ReplayGain)
 mp3rgain -a *.mp3             # Normalize an album
 mp3rgain -s R -a -R /music    # Apply from stored tags, rescan only where missing (v3.4+)
-mp3rgain -a --per-directory -R /music  # One album per folder, whole library in one run (v3.7+)
+mp3rgain -a --per-directory -R /music  # One album per folder, whole library in one run (v3.6.1+)
 mp3rgain -g 2 song.mp3        # Manual gain (+3.0 dB; 1 step = 1.5 dB)
 mp3rgain -u song.mp3          # Undo
 mp3rgain song.mp3             # Show file info

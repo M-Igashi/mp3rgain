@@ -213,6 +213,56 @@ All core functionality complete:
 - [x] GUI explains startup failures (missing GPU/display drivers) instead of dumping the raw error (#285)
 - [x] Packaging metadata and documentation updates (#283, #284, #286)
 
+### v3.1.1 - Windows Wildcard Expansion
+
+- [x] Expand `*` and `?` in the final path component on Windows, where cmd.exe and PowerShell hand patterns through unexpanded (#288)
+
+### v3.2.0 - Split Tag Layout (ReplayGain to ID3v2)
+
+- [x] `REPLAYGAIN_*` goes to ID3v2 `TXXX` by default, where players actually read it; `MP3GAIN_UNDO` / `MP3GAIN_MINMAX` stay in APEv2 for the mp3gain lineage
+- [x] `-s a` (everything in APEv2, byte-for-byte mp3gain) and `-s i` (everything in ID3v2) override the split
+- [x] Album gain at 0 steps no longer discards the per-track ReplayGain tags it just measured
+
+### v3.3.0 - True Peak, Windows Installer & wgpu
+
+- [x] `--true-peak` for `--rg2` / `--r128`, using a polyphase FIR meter (49-tap Hann-windowed sinc)
+- [x] Windows GUI renders through wgpu (D3D12 / Vulkan / WARP), so it starts without an OpenGL driver; `MP3RGUI_RENDERER=glow` forces the old backend
+- [x] Windows Inno installer for mp3rgui: per-user, Start Menu entry, uninstaller, one file for x86_64 and ARM64
+- [x] Exact gain step constant `20*log10(2)/4`, so repeated runs no longer drift the ReplayGain tags (#291)
+
+### v3.4.0 - Apply From Stored Tags
+
+- [x] `-s R`: reuse stored `REPLAYGAIN_*` values and rescan only the files that lack them (#298, #300)
+- [x] GUI installs a log-first panic hook writing `panic.log`, instead of the window vanishing silently (#297, #301)
+
+### v3.5.0 - Tags-Only Mode & Tag-Writing Fixes
+
+- [x] `--tags-only`: write the absolute `REPLAYGAIN_*` values and leave every audio frame untouched, the way loudgain / rsgain work (#308, #313)
+- [x] Undo runs before `-s d` deletes the tags, and strips the stale `REPLAYGAIN_*` residuals it leaves behind (#305, #306, #311, #312)
+- [x] `-s i` on an `.m4a` refreshes the mp4 ReplayGain tags; the split layout writes before deleting; the GUI's undo shifts the columns the right way (#315)
+- [x] `MP3GAIN_ALBUM_MINMAX` skips AAC album members instead of scanning MP4 bytes for MP3 sync words (#307, #310)
+- [x] Temp-file operations retry on Windows sharing violations (#303, #304)
+- [x] mp3rgui: "Use stored tags", the GUI counterpart of `-s R` (#302, #309)
+
+### v3.6.0 - TSV Everywhere & GUI Column Derivation
+
+- [x] `-o tsv` works with every command, and the `File` column carries the path as given (#318)
+- [x] Read-only commands exit 1 on an unreadable file (#318)
+- [x] mp3rgui derives its table columns from one applied-gain offset instead of shifting nine fields by hand (#317, #320)
+
+### v3.6.1 - Per-Directory Albums & CJK File Names
+
+- [x] `-a --per-directory` computes one album gain per folder, with an `albums` array in JSON output (#324, #326)
+- [x] `-o tsv` prints the ReplayGain float peak under `--rg2` / `--r128` (#323, #325)
+- [x] mp3rgui loads a system CJK font so Japanese, Chinese and Korean file names render (#321, #322)
+
+### v3.7.0 - Raw ADTS Support & Unadjustable-Format Skips
+
+- [x] Detect AAC audio in video MP4 files: codec detection skipped non-`soun` traks, so a video MP4 was processed as an MP3 and had bytes overwritten inside its H.264 payload (#327, #328)
+- [x] Raw ADTS `.aac` streams get full lossless bitstream gain adjustment and undo, with the tags in ID3v2 since a raw stream has no container for freeform atoms (#330)
+- [x] ALAC and DRM-protected M4P are reported as skipped rather than failed, so one such file no longer sets the exit code of a library scan (#330)
+- [x] The `global_gain` range in info / `-o tsv` is scanned per container, and prints `-` when it cannot be scanned instead of the (255, 0) accumulator seed (#329)
+
 ## Upcoming Goals
 
 ### Future Enhancements
