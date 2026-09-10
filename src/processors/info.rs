@@ -11,11 +11,16 @@ use crate::json_output::{FileStatus, JsonFileResult};
 use crate::processors::utils::analyze_track;
 use crate::util::{get_filename, get_path};
 
-/// Scan the file's global_gain range for an info row. MP3-only: AAC files
-/// fail the frame scan and get the (255, 0) placeholder mp3gain also prints.
+/// Scan the file's global_gain range for an info row, as `(max, min)`.
+///
+/// `mp3rgain::gain_range` dispatches on the container, so AAC files report the
+/// same values `-x` does (issue #329: the MP3-only scanner failed on AAC, and
+/// the (255, 0) fallback got printed as if it were measured). A file that
+/// cannot be scanned at all still falls back to (255, 0), the placeholder
+/// mp3gain prints.
 pub fn scan_gain_range_for_row(file: &Path) -> (u8, u8) {
-    analyze(file)
-        .map(|info| (info.max_gain(), info.min_gain()))
+    mp3rgain::gain_range(file)
+        .map(|(min, max)| (max, min))
         .unwrap_or((255, 0))
 }
 

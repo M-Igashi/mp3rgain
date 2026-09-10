@@ -283,6 +283,17 @@ pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
     Ok(MaxAmplitudeResult::new(max_amplitude, max_gain, min_gain))
 }
 
+/// Min/max `global_gain` of a file, dispatching by container the same way
+/// [`find_max_amplitude`] does, without decoding the audio for the peak.
+///
+/// [`analyze`] is MP3-only and returns [`Error::NoMp3Frames`] for AAC input,
+/// so callers that only need the gain range of a possibly-AAC file should use
+/// this instead (issue #329).
+pub fn gain_range(file_path: &Path) -> Result<(u8, u8)> {
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    gain_range_of(&data)
+}
+
 /// Min/max `global_gain` of a file already in memory, dispatching by
 /// container. MP3 uses the frame scanner; AAC uses the per-frame scan from
 /// [`crate::aac::analyze_aac_gains`].
