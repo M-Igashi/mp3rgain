@@ -1261,6 +1261,9 @@ fn is_mp4_header(head: &[u8]) -> bool {
 pub(crate) const MP4A: u32 = u32::from_be_bytes(*b"mp4a");
 const ALAC: u32 = u32::from_be_bytes(*b"alac");
 pub(crate) const STSD: u32 = u32::from_be_bytes(*b"stsd");
+const HDLR: u32 = u32::from_be_bytes(*b"hdlr");
+/// `hdlr` handler_type marking a trak as audio (ISO 14496-12).
+const SOUN: u32 = u32::from_be_bytes(*b"soun");
 
 /// Audio codec detected in an MP4 file
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1421,7 +1424,27 @@ fn detect_codec_in_moov(data: &[u8], moov_start: usize, moov_size: usize) -> Opt
         .find_map(|(trak_start, trak_size)| detect_codec_in_trak(data, trak_start, trak_size))
 }
 
+/// Read a trak's `hdlr` handler_type (`trak` -> `mdia` -> `hdlr`), e.g. `soun`
+/// for audio or `vide` for video. `None` when the box is absent or truncated.
+fn trak_handler_type(data: &[u8], trak_start: usize, trak_size: usize) -> Option<u32> {
+    let (mdia_pos, mdia_header) = find_box_in_container(data, trak_start, trak_size, MDIA)?;
+    let mdia_start = mdia_pos + mdia_header.header_size as usize;
+    let mdia_size = mdia_header.content_size() as usize;
+
+    let (hdlr_pos, hdlr_header) = find_box_in_container(data, mdia_start, mdia_size, HDLR)?;
+    // hdlr: version/flags(4) + pre_defined(4) + handler_type(4)
+    let handler_pos = hdlr_pos + hdlr_header.header_size as usize + 8;
+    (handler_pos + 4 <= data.len()).then(|| read_u32_be(data, handler_pos))
+}
+
 fn detect_codec_in_trak(data: &[u8], trak_start: usize, trak_size: usize) -> Option<Mp4AudioCodec> {
+    // Skip traks that are not audio. A video MP4 lists its video trak first, so
+    // reporting that trak's codec here made `is_aac_file` reject MP4 files whose
+    // audio is plain AAC, sending them down the MP3 path (issue #327). A missing
+    // hdlr is treated as "might be audio" and left to the stsd check below.
+    if matches!(trak_handler_type(data, trak_start, trak_size), Some(h) if h != SOUN) {
+        return None;
+    }
     let info = find_trak_sample_info(data, trak_start, trak_size)?;
     match info.entry_type {
         MP4A => Some(Mp4AudioCodec::Aac),
@@ -1632,6 +1655,63 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A video MP4 lists its video trak before the audio trak. Codec detection
+    /// must skip non-`soun` traks instead of reporting the first trak it finds,
+    /// or an MP4 carrying plain AAC audio gets classified as non-AAC and falls
+    /// through to the MP3 path (issue #327).
+    #[test]
+    fn test_detect_codec_skips_video_trak() {
+        fn trak(handler: &[u8; 4], codec: &[u8; 4]) -> Vec<u8> {
+            let entry = mp4_box(codec, &[]);
+            let mut stsd_content = vec![0u8; 4]; // version + flags
+            stsd_content.extend_from_slice(&1u32.to_be_bytes()); // entry count
+            stsd_content.extend_from_slice(&entry);
+            let stsd = mp4_box(b"stsd", &stsd_content);
+            let stbl = mp4_box(b"stbl", &stsd);
+            let minf = mp4_box(b"minf", &stbl);
+
+            // hdlr: version/flags(4) + pre_defined(4) + handler_type(4) + reserved(12)
+            let mut hdlr_content = vec![0u8; 8];
+            hdlr_content.extend_from_slice(handler);
+            hdlr_content.extend_from_slice(&[0u8; 13]); // reserved + empty name
+            let hdlr = mp4_box(b"hdlr", &hdlr_content);
+
+            let mut mdia_content = hdlr;
+            mdia_content.extend_from_slice(&minf);
+            mp4_box(b"trak", &mp4_box(b"mdia", &mdia_content))
+        }
+
+        let video = trak(b"vide", b"avc1");
+        let audio = trak(b"soun", b"mp4a");
+
+        for (name, order) in [
+            ("video first", [&video, &audio]),
+            ("audio first", [&audio, &video]),
+        ] {
+            let mut moov_content = Vec::new();
+            for part in order {
+                moov_content.extend_from_slice(part);
+            }
+            let moov = mp4_box(b"moov", &moov_content);
+
+            let mut data = mp4_box(b"ftyp", b"mp42\x00\x00\x02\x00mp42iso2avc1mp41");
+            data.extend_from_slice(&moov);
+            data.extend_from_slice(&mp4_box(b"mdat", &[0u8; 64]));
+
+            assert!(is_aac_data(&data), "{name}");
+            let (moov_pos, h) = find_box(&data, MOOV).unwrap();
+            assert_eq!(
+                detect_codec_in_moov(
+                    &data,
+                    moov_pos + h.header_size as usize,
+                    h.content_size() as usize
+                ),
+                Some(Mp4AudioCodec::Aac),
+                "{name}"
+            );
+        }
     }
 
     /// Tag reads load only `moov` too, so they must agree with the whole-file
