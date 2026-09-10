@@ -39,6 +39,21 @@ pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
 enum Row {
     Analyzed(ReplayGainResult),
     Failed(String),
+    /// A format mp3rgain cannot adjust (ALAC, DRM-protected M4P): reported as
+    /// a skip in yellow and left out of the failure count, so one such file in
+    /// a library does not make the whole scan exit non-zero (issue #330).
+    Unsupported(String),
+}
+
+/// Classify an analysis failure. The album pass surfaces failures as strings
+/// rather than [`mp3rgain::Error`] values, so the file is re-probed — cheap,
+/// and only for files that already failed.
+fn failure_row(path: &Path, msg: String) -> Row {
+    if mp4meta::unsupported_audio_format(path).is_some() {
+        Row::Unsupported(msg)
+    } else {
+        Row::Failed(msg)
+    }
 }
 
 fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
@@ -67,7 +82,8 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
                     rows[set[set_idx].0] = Some(Row::Analyzed(report.album.tracks()[k].clone()));
                 }
                 for (set_idx, msg) in &report.failures {
-                    rows[set[*set_idx].0] = Some(Row::Failed(msg.clone()));
+                    let (orig_idx, path) = set[*set_idx];
+                    rows[orig_idx] = Some(failure_row(path, msg.clone()));
                 }
             }
             None => {
@@ -79,7 +95,7 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
                         .err()
                         .map(|e| e.to_string())
                         .unwrap_or_else(|| "analysis failed".to_string());
-                    rows[orig_idx] = Some(Row::Failed(msg));
+                    rows[orig_idx] = Some(failure_row(path, msg));
                 }
             }
         }
@@ -121,6 +137,9 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
                 Some(Row::Failed(msg)) => {
                     eprintln!("{} - {}", get_filename(file).red(), msg);
                     failed += 1;
+                }
+                Some(Row::Unsupported(msg)) => {
+                    eprintln!("{} - {} (skipped)", get_filename(file).yellow(), msg);
                 }
                 None => {}
             }

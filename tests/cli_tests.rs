@@ -826,20 +826,30 @@ fn aac_info_row_reports_the_same_global_gain_range_as_max_amplitude() {
     assert_eq!(labeled_value(&info, "Min mp3 global gain field:"), min);
 }
 
-/// A file whose global_gain cannot be scanned at all prints `-` rather than
-/// (255, 0), which reads as a real full-range measurement (issue #329). Raw
-/// ADTS is the case in practice: no scanner handles it and the apply paths
-/// reject it, but ReplayGain analysis still succeeds, so a row is emitted.
+/// Issue #330: a raw ADTS `.aac` stream is a first-class input. Every gain
+/// path used to fail it with "No valid MP3 frames found" (the MP3 scanner
+/// running on an AAC bitstream), which also poisoned the exit code of a
+/// library scan that was otherwise fine. It now scans, reports and adjusts
+/// like AAC in an MP4.
 #[test]
-fn an_unscannable_file_prints_a_dash_for_the_global_gain_columns() {
+fn raw_adts_reports_the_same_global_gain_range_as_max_amplitude() {
     let album = TempAlbum::new(&["test_adts.aac"]);
     let file = album.files[0].to_str().unwrap();
+
+    let x_report = stdout_of(&run(&["-x", file]));
+    let max = labeled_value(&x_report, "Max global_gain:");
+    let min = labeled_value(&x_report, "Min global_gain:");
+    assert_ne!(
+        (max.as_str(), min.as_str()),
+        ("255", "0"),
+        "ADTS should report a measured range, not the accumulator seed"
+    );
 
     let tsv = stdout_of(&run(&["-o", "tsv", file]));
     assert_eq!(
         tsv_gain_columns(&tsv),
-        ("-".to_string(), "-".to_string()),
-        "unscannable file should not report a measured range"
+        (max.clone(), min.clone()),
+        "-o tsv disagrees with -x"
     );
     assert!(
         tsv.lines().any(|line| line.starts_with("\"Album\"")),
@@ -848,6 +858,149 @@ fn an_unscannable_file_prints_a_dash_for_the_global_gain_columns() {
     );
 
     let info = stdout_of(&run(&[file]));
-    assert_eq!(labeled_value(&info, "Max mp3 global gain field:"), "-");
-    assert_eq!(labeled_value(&info, "Min mp3 global gain field:"), "-");
+    assert_eq!(labeled_value(&info, "Max mp3 global gain field:"), max);
+    assert_eq!(labeled_value(&info, "Min mp3 global gain field:"), min);
+}
+
+/// The apply/undo round trip on a raw ADTS stream: the gain lands in the
+/// bitstream, the undo info lands in ID3v2 (there is no `moov` to hold the
+/// freeform atoms the M4A path uses), and `-u` restores the audio bytes
+/// exactly (issue #330).
+#[test]
+fn raw_adts_gain_is_applied_and_undone_losslessly() {
+    let album = TempAlbum::new(&["test_adts.aac"]);
+    let file = album.files[0].to_str().unwrap();
+    let original = fs::read(&album.files[0]).expect("read fixture");
+
+    let out = run(&["-g", "3", file]);
+    assert!(out.status.success(), "ADTS apply failed: {:?}", out);
+    let applied = fs::read(&album.files[0]).expect("read applied");
+    assert_ne!(
+        adts_audio(&applied),
+        adts_audio(&original),
+        "gain not applied"
+    );
+
+    // The undo value goes to ID3v2 for ADTS whatever the tag layout, since a
+    // raw stream has nowhere else to put it.
+    assert!(
+        mp3rgain::read_id3v2_replaygain(&album.files[0])
+            .expect("reading the ID3v2 tag should not fail")
+            .undo
+            .is_some(),
+        "ADTS apply wrote no MP3GAIN_UNDO"
+    );
+
+    let out = run(&["-u", file]);
+    assert!(out.status.success(), "ADTS undo failed: {:?}", out);
+    assert_eq!(
+        adts_audio(&fs::read(&album.files[0]).expect("read undone")),
+        adts_audio(&original),
+        "undo did not restore the ADTS audio byte-for-byte"
+    );
+}
+
+/// A raw ADTS file in a library no longer fails the whole run. This is the
+/// exact reproducer from issue #330: `-R -r` over a directory holding one
+/// `.aac` and one `.mp3` exited 1 even though both files were fine.
+#[test]
+fn a_library_holding_a_raw_adts_file_exits_zero() {
+    let album = TempAlbum::new(&["test_adts.aac", "test_mono.mp3"]);
+    let out = run(&["-R", "-r", "-c", album.dir.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "a library with a raw ADTS file should not exit non-zero: {:?}",
+        out
+    );
+}
+
+/// Issue #330: a file mp3rgain cannot adjust because of its *format* is
+/// reported as a skip, not a failure, so one ALAC track in a library does not
+/// make the whole run exit non-zero. ALAC used to surface symphonia's
+/// "unsupported audio codec", which reads as a genuine error.
+#[test]
+fn an_unsupported_format_is_skipped_rather_than_failed() {
+    let album = TempAlbum::new(&["test_alac.m4a", "test_mono.mp3"]);
+    let out = run(&["-R", "-r", "-c", album.dir.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "an ALAC file in a library should not set the exit code: {:?}",
+        out
+    );
+
+    let alac = album.files[0].to_str().unwrap();
+    let out = run(&["-o", "json", "-r", alac]);
+    assert!(
+        out.status.success(),
+        "ALAC alone should exit zero: {:?}",
+        out
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout_of(&out)).expect("JSON output expected");
+    assert_eq!(json["files"][0]["status"], "skipped");
+    assert_eq!(json["summary"]["failed"], 0);
+}
+
+/// Album mode agrees with the track path: an unsupported member is dropped
+/// from the set without failing the run, and an album with nothing adjustable
+/// in it at all is a set of skips rather than "all files failed" (issue #330).
+#[test]
+fn album_mode_skips_unsupported_members_without_failing() {
+    let mixed = TempAlbum::new(&["test_alac.m4a", "test_mono.mp3"]);
+    let out = run(&["-R", "-a", "-c", mixed.dir.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "an ALAC member should not fail the album: {:?}",
+        out
+    );
+
+    let alac_only = TempAlbum::new(&["test_alac.m4a"]);
+    let out = run(&["-o", "json", "-a", alac_only.files[0].to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "an album with nothing adjustable should not fail: {:?}",
+        out
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout_of(&out)).expect("JSON output expected");
+    assert_eq!(json["files"][0]["status"], "skipped");
+    assert_eq!(json["summary"]["failed"], 0);
+}
+
+/// The counterpart to the skips above: a genuinely broken file must still
+/// fail, or the exit code stops meaning anything (issue #330).
+#[test]
+fn a_genuinely_unreadable_file_still_fails() {
+    let album = TempAlbum::new(&["test_mono.mp3"]);
+    let broken = album.dir.join("broken.mp3");
+    fs::write(&broken, b"this is not an MP3 at all").expect("write broken file");
+
+    for args in [
+        vec!["-R", "-r", "-c"],
+        vec!["-R", "-a", "-c", "--skip-errors"],
+    ] {
+        let mut args = args;
+        args.push(album.dir.to_str().unwrap());
+        let out = run(&args);
+        assert!(
+            !out.status.success(),
+            "a corrupt file must still set the exit code ({:?}): {:?}",
+            args,
+            out
+        );
+    }
+}
+
+/// The ADTS audio, with any ID3v2 tag mp3rgain wrote skipped. Undo restores
+/// the frames byte-for-byte; the empty tag container the `id3` crate leaves
+/// behind is not part of that guarantee (MP3 undo behaves the same way).
+fn adts_audio(data: &[u8]) -> &[u8] {
+    if data.len() < 10 || &data[..3] != b"ID3" {
+        return data;
+    }
+    let size = ((data[6] as usize & 0x7F) << 21)
+        | ((data[7] as usize & 0x7F) << 14)
+        | ((data[8] as usize & 0x7F) << 7)
+        | (data[9] as usize & 0x7F);
+    &data[10 + size..]
 }

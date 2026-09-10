@@ -241,7 +241,9 @@ fn apply_replaygain_with_album_into(
             .map(|r| (r, None));
     }
 
-    // MP3 path: hand the whole pipeline to apply_with_options.
+    // MP3 and raw ADTS: hand the whole pipeline to apply_with_options. ADTS
+    // belongs here rather than in the fail-soft AAC branch above — its tags go
+    // into ID3v2, so there is no separate mp4 metadata pass to fall back to.
     let mut apply_opts = ApplyOptions::new(steps);
     apply_opts.track_result = Some(result.clone());
     apply_opts.album_info = album_info.copied();
@@ -253,7 +255,7 @@ fn apply_replaygain_with_album_into(
     apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
     apply_opts.write_replaygain_tags = opts.stored_tag_mode != StoredTagMode::Skip;
     apply_opts.tag_layout = opts.tag_layout;
-    apply_opts.file_type = Some(AudioFileType::Mp3);
+    apply_opts.file_type = Some(result.file_type());
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {
@@ -263,10 +265,11 @@ fn apply_replaygain_with_album_into(
             if opts.output_format == OutputFormat::Text && !opts.quiet {
                 writeln!(
                     out,
-                    "  {} {} ({} frames, {:+.1} dB)",
+                    "  {} {} ({} {}, {:+.1} dB)",
                     "v".green(),
                     filename,
                     report.modified,
+                    modified_unit(result.file_type()),
                     steps_to_db(report.actual_steps)
                 )?;
             }
@@ -284,6 +287,17 @@ fn apply_replaygain_with_album_into(
             ))
         }
         Err(e) => Ok((report_file_error(file, filename, e, opts), None)),
+    }
+}
+
+/// What [`mp3rgain::ApplyReport::modified`] counts, for the per-file line:
+/// MP3 modifies whole frames, the AAC bitstream individual `global_gain`
+/// fields.
+fn modified_unit(file_type: AudioFileType) -> &'static str {
+    if file_type.is_aac_bitstream() {
+        "gains"
+    } else {
+        "frames"
     }
 }
 

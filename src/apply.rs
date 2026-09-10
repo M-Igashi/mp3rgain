@@ -20,6 +20,8 @@ use std::time::SystemTime;
 
 #[cfg(feature = "aac")]
 use crate::aac;
+#[cfg(feature = "aac")]
+use crate::adts;
 use crate::error::{Error, Result};
 use crate::frame::SaturationStats;
 use crate::gain::{
@@ -146,12 +148,10 @@ impl ApplyOptions {
 }
 
 impl ApplyOptions {
-    /// Whether the file is AAC, from the caller's hint or by detection.
-    fn is_aac(&self, file_path: &Path) -> bool {
-        match self.file_type {
-            Some(kind) => kind == AudioFileType::Aac,
-            None => mp4meta::is_aac_file(file_path),
-        }
+    /// The file's container, from the caller's hint or by detection.
+    fn container(&self, file_path: &Path) -> AudioFileType {
+        self.file_type
+            .unwrap_or_else(|| AudioFileType::from_path(file_path))
     }
 }
 
@@ -212,7 +212,12 @@ pub enum ClippingDetection {
 ///    failure anywhere leaves the original untouched (issues #227, #232).
 /// 3. Mtime restoration when [`ApplyOptions::preserve_timestamp`] is on.
 pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
-    let is_aac = opts.is_aac(file_path);
+    apply_with_options_inner(file_path, opts).map_err(|e| e.refine_format(file_path))
+}
+
+fn apply_with_options_inner(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
+    let container = opts.container(file_path);
+    let is_aac = container.is_aac_bitstream();
 
     if is_aac && opts.channel.is_some() {
         return Err(Error::ChannelGainOnAac);
@@ -232,7 +237,7 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
     let mut aac_analysis: AacAnalysisCache = None;
     let mut mp3_data: Option<Vec<u8>> = None;
     let (actual_steps, clipping_prevented, clipping_detected) =
-        check_clipping(file_path, opts, is_aac, &mut aac_analysis, &mut mp3_data)?;
+        check_clipping(file_path, opts, container, &mut aac_analysis, &mut mp3_data)?;
 
     // 2) Apply gain to bytes and write every tag, in one visible write.
     // MP3 reports global_gain saturation (issue #207); AAC clamps in its own
@@ -249,7 +254,12 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
     // processed under `-s i`, leaving stale values for players to
     // double-apply.
     let mut saturation = SaturationStats::default();
-    let modified = if is_aac {
+    let mut adts_gain_range = None;
+    let modified = if container == AudioFileType::Adts {
+        let (modified, range) = apply_adts_bytes(file_path, actual_steps, opts, aac_analysis)?;
+        adts_gain_range = range;
+        modified
+    } else if is_aac {
         let rg = opts
             .write_replaygain_tags
             .then(|| compute_rg_residual(file_path, opts, actual_steps, false))
@@ -269,8 +279,14 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
         restore_timestamp(file_path, mtime);
     }
 
-    let gain_range = (!is_aac && opts.channel.is_none() && saturation.frames > 0)
-        .then_some((saturation.max_gain, saturation.min_gain));
+    let gain_range = match container {
+        // The raw ADTS apply reports its own post-apply range; the MP4 path
+        // has never tracked one (`MP3GAIN_ALBUM_MINMAX` is MP3/APEv2-only).
+        AudioFileType::Adts => adts_gain_range,
+        AudioFileType::Aac => None,
+        _ => (opts.channel.is_none() && saturation.frames > 0)
+            .then_some((saturation.max_gain, saturation.min_gain)),
+    };
 
     Ok(ApplyReport {
         modified,
@@ -291,10 +307,14 @@ pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<Apply
 /// "would apply N steps" message lines up with what a real apply
 /// would do.
 pub fn predict_apply(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
-    let is_aac = opts.is_aac(file_path);
+    predict_apply_inner(file_path, opts).map_err(|e| e.refine_format(file_path))
+}
+
+fn predict_apply_inner(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
+    let container = opts.container(file_path);
     let mut aac_analysis: AacAnalysisCache = None;
     let (actual_steps, clipping_prevented, clipping_detected) =
-        check_clipping(file_path, opts, is_aac, &mut aac_analysis, &mut None)?;
+        check_clipping(file_path, opts, container, &mut aac_analysis, &mut None)?;
     Ok(ApplyReport {
         modified: 0,
         actual_steps,
@@ -309,7 +329,7 @@ pub fn predict_apply(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyRepor
 fn check_clipping(
     file_path: &Path,
     opts: &ApplyOptions,
-    is_aac: bool,
+    container: AudioFileType,
     aac_analysis: &mut AacAnalysisCache,
     mp3_data: &mut Option<Vec<u8>>,
 ) -> Result<(i32, bool, Option<ClippingDetection>)> {
@@ -359,10 +379,14 @@ fn check_clipping(
         return Ok((steps, false, None));
     }
 
-    let headroom = if is_aac {
+    let headroom = if container.is_aac_bitstream() {
         #[cfg(feature = "aac")]
         {
-            let analysis = aac::analyze_aac_gains(file_path).ok();
+            let analysis = if container == AudioFileType::Adts {
+                adts::analyze_adts_gains(file_path).ok()
+            } else {
+                aac::analyze_aac_gains(file_path).ok()
+            };
             let headroom = analysis
                 .as_ref()
                 .map(|a| (MAX_GAIN as i32).saturating_sub(a.max_gain() as i32));
@@ -426,6 +450,79 @@ fn apply_aac_bytes(
     _analysis: AacAnalysisCache,
     _replaygain: Option<&mp4meta::ReplayGainTags>,
 ) -> Result<usize> {
+    Err(Error::FeatureNotAvailable {
+        feature: "AAC support",
+        feature_flag: "aac",
+    })
+}
+
+/// Raw ADTS apply (issue #330): the AAC bitstream gain, then every tag in
+/// ID3v2 TXXX frames on the same temp file.
+///
+/// A raw stream has no container box for metadata, so the M4A freeform atoms
+/// have nowhere to go and ID3v2 at the front of the stream — what taggers and
+/// players already use for `.aac` — takes their place. That makes
+/// [`ApplyOptions::tag_layout`] inapplicable: it selects a container for *MP3*
+/// tags, and honouring `-s a` here would append an APEv2 tag after the last
+/// ADTS frame, where a syncword-scanning decoder has no reason to expect one.
+#[cfg(feature = "aac")]
+fn apply_adts_bytes(
+    file_path: &Path,
+    steps: i32,
+    opts: &ApplyOptions,
+    analysis: AacAnalysisCache,
+) -> Result<(usize, Option<(u8, u8)>)> {
+    with_temp_file(file_path, |r, w| {
+        let outcome = adts::apply_adts_gain(r, w, steps, analysis)?;
+
+        // Parsed once for both the prior-undo read and the frame write, the
+        // same way the `-s i` MP3 path does it.
+        let mut tag = id3v2::read_tag(w)?;
+        let mut rg = id3v2::Id3v2ReplayGain::default();
+
+        if opts.write_undo && steps != 0 {
+            let existing = id3v2::get_txxx(&tag, ape::TAG_MP3GAIN_UNDO);
+            let (existing_left, existing_right) = ape::parse_undo_values(existing.as_deref());
+            // MP3 convention (issue #210): the tag holds the *undo* delta, so
+            // applying `+steps` accumulates onto it by subtraction. Both
+            // halves move together — ADTS has no per-channel apply.
+            let undo = ape::format_undo_value(existing_left - steps, existing_right - steps, false);
+            rg.undo = Some(undo);
+            // MP3GAIN_MINMAX is the post-apply range, and only ever written
+            // alongside the undo value: on its own it would claim an apply
+            // that never happened.
+            if let Some((max, min)) = outcome.gain_range {
+                rg.minmax = Some(ape::format_minmax(min, max));
+            }
+        }
+
+        if opts.write_replaygain_tags {
+            // The apply saturates at 0-255 like the M4A path, so the residual
+            // is arithmetic; ADTS never takes the wrap branch.
+            if let Some(res) = compute_rg_residual(w, opts, steps, false) {
+                let values = res.to_id3v2();
+                rg.track_gain = values.track_gain;
+                rg.track_peak = values.track_peak;
+                rg.album_gain = values.album_gain;
+                rg.album_peak = values.album_peak;
+                rg.algorithm = values.algorithm;
+            }
+        }
+
+        if rg.undo.is_some() || rg.track_gain.is_some() {
+            id3v2::write_rg_frames_direct(w, &mut tag, &rg)?;
+        }
+        Ok((outcome.modified, outcome.gain_range))
+    })
+}
+
+#[cfg(not(feature = "aac"))]
+fn apply_adts_bytes(
+    _file_path: &Path,
+    _steps: i32,
+    _opts: &ApplyOptions,
+    _analysis: AacAnalysisCache,
+) -> Result<(usize, Option<(u8, u8)>)> {
     Err(Error::FeatureNotAvailable {
         feature: "AAC support",
         feature_flag: "aac",
@@ -851,10 +948,12 @@ pub fn write_replaygain_tags_only(file_path: &Path, opts: &TagsOnlyOptions) -> R
         mode: opts.mode,
     };
 
-    if mp4meta::is_aac_file(file_path) {
-        mp4meta::write_replaygain_tags(file_path, &values.to_mp4())?;
-    } else {
-        match opts.tag_layout {
+    match AudioFileType::from_path(file_path) {
+        AudioFileType::Aac => mp4meta::write_replaygain_tags(file_path, &values.to_mp4())?,
+        // Raw ADTS has no container for the tags, so they go into ID3v2
+        // regardless of `tag_layout` — see `apply_adts_bytes` (issue #330).
+        AudioFileType::Adts => id3v2::write_id3v2_replaygain(file_path, &values.to_id3v2())?,
+        _ => match opts.tag_layout {
             // Split keeps the authoritative values in ID3v2, so an APEv2 copy
             // from mp3gain or an earlier `-s a` run has to go, the same rule
             // the apply path follows — and in the same order, writing the new
@@ -866,7 +965,7 @@ pub fn write_replaygain_tags_only(file_path: &Path, opts: &TagsOnlyOptions) -> R
             }
             TagLayout::Id3v2 => id3v2::write_id3v2_replaygain(file_path, &values.to_id3v2())?,
             TagLayout::Ape => ape::write_ape_replaygain(file_path, &values.to_ape())?,
-        }
+        },
     }
 
     if let Some(mtime) = original_mtime {
@@ -903,7 +1002,7 @@ pub fn write_album_minmax(files: &[(&Path, Option<(u8, u8)>)]) {
     let files: Vec<(&Path, Option<(u8, u8)>)> = files
         .iter()
         .copied()
-        .filter(|&(file, _)| !mp4meta::is_aac_file(file))
+        .filter(|&(file, _)| AudioFileType::from_path(file) == AudioFileType::Mp3)
         .collect();
 
     // The fallback analyze() is a full-file frame walk, so run the range
@@ -964,8 +1063,14 @@ mod tests {
     #[test]
     fn prevent_clipping_caps_at_floor_not_round() {
         let opts = opts_with_track(5, 0.9, true);
-        let (steps, prevented, _) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+        let (steps, prevented, _) = check_clipping(
+            Path::new("unused"),
+            &opts,
+            AudioFileType::Mp3,
+            &mut None,
+            &mut None,
+        )
+        .unwrap();
         assert!(prevented);
         assert_eq!(steps, 0);
         let new_peak = 0.9 * 10.0_f64.powf(steps_to_db(steps) / 20.0);
@@ -978,8 +1083,14 @@ mod tests {
     fn prevent_clipping_never_overshoots_headroom() {
         for &peak in &[0.55_f64, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.99] {
             let opts = opts_with_track(20, peak, true);
-            let (steps, prevented, _) =
-                check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+            let (steps, prevented, _) = check_clipping(
+                Path::new("unused"),
+                &opts,
+                AudioFileType::Mp3,
+                &mut None,
+                &mut None,
+            )
+            .unwrap();
             assert!(prevented, "peak {peak} should trigger prevention");
             let new_peak = peak * 10.0_f64.powf(steps_to_db(steps) / 20.0);
             assert!(
@@ -994,8 +1105,14 @@ mod tests {
     #[test]
     fn prevent_clipping_passthrough_when_safe() {
         let opts = opts_with_track(3, 0.5, true);
-        let (steps, prevented, _) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+        let (steps, prevented, _) = check_clipping(
+            Path::new("unused"),
+            &opts,
+            AudioFileType::Mp3,
+            &mut None,
+            &mut None,
+        )
+        .unwrap();
         assert!(!prevented);
         assert_eq!(steps, 3);
     }
@@ -1010,8 +1127,14 @@ mod tests {
         // peak 1.2 = ~ -1.58 dB of (negative) headroom -> floor(-1.58/1.5)
         // = -2 steps (= -3 dB). Resulting peak = 1.2 * 10^(-3/20) = 0.85.
         let opts = opts_with_track(1, 1.2, true);
-        let (steps, prevented, _) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+        let (steps, prevented, _) = check_clipping(
+            Path::new("unused"),
+            &opts,
+            AudioFileType::Mp3,
+            &mut None,
+            &mut None,
+        )
+        .unwrap();
         assert!(prevented);
         assert!(steps < 0, "expected negative steps, got {steps}");
         let new_peak = 1.2 * 10.0_f64.powf(steps_to_db(steps) / 20.0);
@@ -1027,8 +1150,14 @@ mod tests {
     #[test]
     fn prevent_clipping_caps_zero_step_clipping_track() {
         let opts = opts_with_track(0, 1.2, true);
-        let (steps, prevented, _) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+        let (steps, prevented, _) = check_clipping(
+            Path::new("unused"),
+            &opts,
+            AudioFileType::Mp3,
+            &mut None,
+            &mut None,
+        )
+        .unwrap();
         assert!(prevented);
         assert!(steps < 0, "expected attenuation, got {steps}");
         let new_peak = 1.2 * 10.0_f64.powf(steps_to_db(steps) / 20.0);
@@ -1040,8 +1169,14 @@ mod tests {
     #[test]
     fn zero_step_non_clipping_track_is_noop() {
         let opts = opts_with_track(0, 0.8, true);
-        let (steps, prevented, detected) =
-            check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+        let (steps, prevented, detected) = check_clipping(
+            Path::new("unused"),
+            &opts,
+            AudioFileType::Mp3,
+            &mut None,
+            &mut None,
+        )
+        .unwrap();
         assert_eq!(steps, 0);
         assert!(!prevented);
         assert!(detected.is_none());
@@ -1054,8 +1189,14 @@ mod tests {
     fn prevent_clipping_never_overshoots_for_clipping_source() {
         for &peak in &[1.001_f64, 1.05, 1.1, 1.2, 1.5, 2.0] {
             let opts = opts_with_track(5, peak, true);
-            let (steps, prevented, _) =
-                check_clipping(Path::new("unused"), &opts, false, &mut None, &mut None).unwrap();
+            let (steps, prevented, _) = check_clipping(
+                Path::new("unused"),
+                &opts,
+                AudioFileType::Mp3,
+                &mut None,
+                &mut None,
+            )
+            .unwrap();
             assert!(prevented, "peak {peak} should trigger prevention");
             let new_peak = peak * 10.0_f64.powf(steps_to_db(steps) / 20.0);
             assert!(

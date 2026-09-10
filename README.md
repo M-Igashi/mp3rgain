@@ -16,7 +16,7 @@
 
 mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global_gain` field in each frame. This preserves audio quality while achieving permanent volume changes.
 
-- **Lossless & reversible**: no re-encoding; every change can be undone with `-u` (MP3 and AAC/M4A)
+- **Lossless & reversible**: no re-encoding; every change can be undone with `-u` (MP3, AAC in M4A/MP4, and raw ADTS `.aac`)
 - **ReplayGain**: track and album analysis, with standard `REPLAYGAIN_*` tags written alongside the bitstream change
 - **mp3gain / aacgain compatible**: drop-in replacement with identical CLI flags, TSV output, and undo tags
 - **Zero dependencies**: single static binary; macOS, Linux, Windows (x86_64 and ARM64)

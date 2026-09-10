@@ -9,7 +9,7 @@ use std::time::SystemTime;
 pub use mp3rgain::apply::restore_timestamp;
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::json_output::JsonFileResult;
+use crate::json_output::{FileStatus, JsonFileResult};
 
 /// One yellow `!` warning line for `filename` in text mode (never under
 /// `-q`), with an optional indented hint beneath it. Every per-file warning
@@ -36,16 +36,42 @@ pub fn emit_file_warning(opts: &Options, filename: &str, msg: &str, hint: Option
 /// TSV mode, plus the JSON error record. TSV rows go to stdout, so the stderr
 /// line cannot corrupt the stream, and staying silent left a failing file with
 /// no explanation at all.
+///
+/// A file whose *format* mp3rgain cannot process (ALAC, DRM-protected M4P) is
+/// reported as a skip instead, in yellow, and does not set the exit code
+/// (issue #330): it is not a genuine failure, and letting one such file in a
+/// library make `-R -r` exit non-zero tells a script the whole run failed.
 pub fn report_file_error(
     file: &Path,
     filename: &str,
-    e: impl std::fmt::Display,
+    e: mp3rgain::Error,
     opts: &Options,
 ) -> JsonFileResult {
+    if e.is_unsupported_format() {
+        return report_unsupported_format(file, filename, &e.to_string(), opts);
+    }
     if opts.output_format != OutputFormat::Json && !opts.quiet {
         eprintln!("  {} {} - {}", "x".red(), filename, e);
     }
     JsonFileResult::error(file, e)
+}
+
+/// The skipped-file record and warning line for an unsupported format. Split
+/// out so the album path, whose analysis failures arrive as strings rather
+/// than [`mp3rgain::Error`] values, reports them identically.
+pub fn report_unsupported_format(
+    file: &Path,
+    filename: &str,
+    reason: &str,
+    opts: &Options,
+) -> JsonFileResult {
+    emit_file_warning(opts, filename, &format!("{reason} - skipped"), None);
+    JsonFileResult {
+        file: file.display().to_string(),
+        status: Some(FileStatus::Skipped),
+        warning: Some(reason.to_string()),
+        ..Default::default()
+    }
 }
 
 /// Analyze one track with the selected analysis mode, driving the byte-level

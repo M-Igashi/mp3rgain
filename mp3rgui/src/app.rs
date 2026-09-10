@@ -1168,8 +1168,9 @@ impl Mp3rgainApp {
         );
     }
 
-    /// `-l`: apply gain to a single channel of the targeted files. AAC files
-    /// are silently skipped (channel gain is MP3-only).
+    /// `-l`: apply gain to a single channel of the targeted files. AAC files,
+    /// in MP4 or as a raw ADTS stream, are silently skipped (channel gain is
+    /// MP3-only).
     pub fn start_apply_channel_gain(&mut self, ctx: &egui::Context, channel: Channel, steps: i32) {
         if self.files.is_empty() || self.is_processing() || steps == 0 {
             return;
@@ -1179,7 +1180,7 @@ impl Mp3rgainApp {
             .target_indices()
             .iter()
             .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
-            .filter(|(_, f)| !mp3rgain::mp4meta::is_aac_file(&f.path))
+            .filter(|(_, f)| AudioFileType::from_path(&f.path) == AudioFileType::Mp3)
             .map(|(idx, f)| ApplyJob {
                 idx,
                 path: f.path.clone(),

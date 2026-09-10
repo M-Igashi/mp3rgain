@@ -4,7 +4,7 @@ use mp3rgain::replaygain::{
     self, AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult,
     REPLAYGAIN_REFERENCE_DB,
 };
-use mp3rgain::AacAlbumInfo;
+use mp3rgain::{mp4meta, AacAlbumInfo, Error};
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -24,6 +24,7 @@ use crate::processors::info::{gain_range_fields, scan_gain_range_for_row, tsv_rg
 use crate::processors::replaygain::{
     apply_is_noop, capped_tag_gain, process_apply_replaygain_with_album, process_track_gain,
 };
+use crate::processors::utils::report_unsupported_format;
 use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
 use crate::util::get_filename;
 
@@ -140,6 +141,22 @@ fn stored_album_report(files: &[PathBuf], opts: &Options) -> Option<AlbumAnalysi
         failures: Vec::new(),
         successful_indices: (0..files.len()).collect(),
     })
+}
+
+/// JSON record for a file the album pass never analyzed. An unsupported
+/// format is recorded as a skip so it stays out of the failure count, matching
+/// the yellow line the text path prints (issue #330).
+fn unanalyzed_result(file: &Path, msg: Option<&str>, unsupported: bool) -> JsonFileResult {
+    let reason = msg.unwrap_or("analysis failed");
+    if unsupported {
+        return JsonFileResult {
+            file: file.display().to_string(),
+            status: Some(FileStatus::Skipped),
+            warning: Some(reason.to_string()),
+            ..Default::default()
+        };
+    }
+    JsonFileResult::error(file, reason)
 }
 
 /// Outcome of one album run, before the JSON / exit-code epilogue.
@@ -299,15 +316,28 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
             } = report;
 
             // Index failures by file position for O(1) lookup during the
-            // apply phase (only --skip-errors produces non-empty failures).
-            // Walk failures once, reporting skipped files in text mode.
-            let failure_count = failures.len();
+            // apply phase. Walk failures once, reporting skipped files in text
+            // mode. Two kinds arrive here: `--skip-errors` tolerating a
+            // genuine failure, which still counts as failed, and a format
+            // mp3rgain cannot adjust, which does not (issue #330) — the album
+            // analysis drops those either way, so they are re-probed to tell
+            // them apart.
             let mut failure_msgs: Vec<Option<String>> = vec![None; files.len()];
+            let mut unsupported: Vec<bool> = vec![false; files.len()];
+            let mut failure_count = 0usize;
             let report_skipped = opts.output_format == OutputFormat::Text && !opts.quiet;
             for (idx, msg) in failures {
-                if report_skipped {
-                    let filename = get_filename(&files[idx]);
-                    eprintln!("  {} {} - {} (skipped)", "x".red(), filename, msg);
+                let filename = get_filename(&files[idx]);
+                if mp4meta::unsupported_audio_format(&files[idx]).is_some() {
+                    unsupported[idx] = true;
+                    if report_skipped {
+                        eprintln!("  {} {} - {} (skipped)", "!".yellow(), filename, msg);
+                    }
+                } else {
+                    failure_count += 1;
+                    if report_skipped {
+                        eprintln!("  {} {} - {} (skipped)", "x".red(), filename, msg);
+                    }
                 }
                 failure_msgs[idx] = Some(msg);
             }
@@ -419,10 +449,9 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
                                     ..JsonFileResult::from_analysis(file, track)
                                 }
                             }
-                            None => JsonFileResult::error(
-                                file,
-                                failure_msgs[i].as_deref().unwrap_or("analysis failed"),
-                            ),
+                            None => {
+                                unanalyzed_result(file, failure_msgs[i].as_deref(), unsupported[i])
+                            }
                         })
                         .collect()
                 } else {
@@ -496,10 +525,12 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
                         by_index[*file_idx] = Some(result.clone());
                     }
                     for (i, slot) in by_index.iter_mut().enumerate() {
-                        if slot.is_none() {
-                            if let Some(msg) = &failure_msgs[i] {
-                                *slot = Some(JsonFileResult::error(&files[i], msg));
-                            }
+                        if slot.is_none() && failure_msgs[i].is_some() {
+                            *slot = Some(unanalyzed_result(
+                                &files[i],
+                                failure_msgs[i].as_deref(),
+                                unsupported[i],
+                            ));
                         }
                     }
                     for entry in by_index.into_iter().flatten() {
@@ -533,10 +564,7 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
                             range_by_idx[i] = range;
                             result
                         }
-                        None => JsonFileResult::error(
-                            file,
-                            failure_msgs[i].as_deref().unwrap_or("analysis failed"),
-                        ),
+                        None => unanalyzed_result(file, failure_msgs[i].as_deref(), unsupported[i]),
                     };
                     update_counters(&result, &mut successful, &mut failed);
 
@@ -578,6 +606,33 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
             })
         }
         Err(e) => {
+            // An album with nothing adjustable in it (every member ALAC, say)
+            // is a set of skips, not a failure: the track path reports exactly
+            // that for the same files, and `-a` should not disagree
+            // (issue #330). Collecting into an `Option<Vec<_>>` short-circuits
+            // on the first file that is *not* an unsupported format, so this
+            // is both the test and the per-file reasons in one pass.
+            let unsupported: Option<Vec<&'static str>> = files
+                .iter()
+                .map(|f| mp4meta::unsupported_audio_format(f))
+                .collect();
+            if let Some(formats) = unsupported {
+                let json_results = files
+                    .iter()
+                    .zip(formats)
+                    .map(|(f, format)| {
+                        let reason = Error::UnsupportedFormat { format }.to_string();
+                        report_unsupported_format(f, get_filename(f), &reason, opts)
+                    })
+                    .collect();
+                return Ok(AlbumRun {
+                    json_results,
+                    album: None,
+                    successful: 0,
+                    failed: 0,
+                });
+            }
+
             // Every file counts as failed. JSON gets one error entry per file
             // so the caller can see which album broke; text goes to stderr.
             let json_results = if opts.output_format == OutputFormat::Json {

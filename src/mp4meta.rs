@@ -1465,6 +1465,39 @@ pub fn is_aac_file(file_path: &Path) -> bool {
     )
 }
 
+/// Name of a container mp3rgain recognizes but cannot adjust the gain of.
+///
+/// Used to report such a file as a *skip* rather than a failure (issue #330):
+/// letting one ALAC track set the exit code makes a whole library scan look
+/// failed over a file mp3rgain was never going to touch. Only positively
+/// identified containers qualify — `None` covers MP3, AAC in MP4, raw ADTS,
+/// *and* anything unidentifiable, because an unidentifiable file is also what
+/// a truncated or corrupt one looks like and that has to stay a real error.
+pub fn unsupported_audio_format(file_path: &Path) -> Option<&'static str> {
+    let mut file = fs::File::open(file_path).ok()?;
+    let mut buf = [0u8; 128];
+    let bytes_read = file.read(&mut buf).ok()?;
+    let head = &buf[..bytes_read];
+
+    if head.len() < 12 || &head[4..8] != b"ftyp" {
+        return None;
+    }
+    if is_mp4_header(head) {
+        // A brand mp3rgain accepts, so the codec decides.
+        return match detect_mp4_audio_codec(file_path) {
+            Some(Mp4AudioCodec::Alac) => Some("ALAC"),
+            Some(Mp4AudioCodec::Unknown) => Some("this MP4 audio codec"),
+            // `mp4a`, or a container whose codec could not be determined,
+            // which the AAC path handles.
+            _ => None,
+        };
+    }
+    // A brand it does not accept. `M4P ` is left out of `is_accepted_brand`
+    // on purpose (Apple DRM) and is worth naming, rather than leaving the
+    // user with an MP3 frame-parse failure for a file that was never an MP3.
+    (&head[8..12] == b"M4P ").then_some("DRM-protected M4P")
+}
+
 /// [`is_aac_file`] on a whole file already in memory, so a caller holding
 /// the bytes doesn't reopen the file to classify it. Same rule: MP4 brand
 /// plus an `mp4a` (or undetectable) codec.
@@ -1653,6 +1686,78 @@ mod tests {
             assert!(is_aac_file(&path), "{name}");
             assert!(is_aac_data(&std::fs::read(&path).unwrap()), "{name}");
         }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Issue #330: a container mp3rgain recognizes but cannot adjust has to be
+    /// nameable, so the CLI can report it as a skip instead of a failure.
+    /// Anything unidentifiable stays `None` — that is also what a truncated or
+    /// corrupt file looks like, and it must keep failing.
+    #[test]
+    fn test_unsupported_audio_format_names_only_recognized_containers() {
+        use std::io::Write;
+
+        fn audio_trak(codec: &[u8; 4]) -> Vec<u8> {
+            let entry = mp4_box(codec, &[]);
+            let mut stsd_content = vec![0u8; 4]; // version + flags
+            stsd_content.extend_from_slice(&1u32.to_be_bytes()); // entry count
+            stsd_content.extend_from_slice(&entry);
+            let stbl = mp4_box(b"stbl", &mp4_box(b"stsd", &stsd_content));
+            mp4_box(b"trak", &mp4_box(b"mdia", &mp4_box(b"minf", &stbl)))
+        }
+
+        let dir = std::env::temp_dir().join("mp3rgain_test_unsupported_format");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let write = |name: &str, parts: &[&[u8]]| {
+            let path = dir.join(name);
+            let mut f = std::fs::File::create(&path).unwrap();
+            for part in parts {
+                f.write_all(part).unwrap();
+            }
+            path
+        };
+
+        let m4a_ftyp = mp4_box(b"ftyp", b"M4A \x00\x00\x00\x00M4A ");
+        let mdat = mp4_box(b"mdat", &[0u8; 64]);
+
+        let alac = write(
+            "alac.m4a",
+            &[&m4a_ftyp, &mp4_box(b"moov", &audio_trak(b"alac")), &mdat],
+        );
+        assert_eq!(unsupported_audio_format(&alac), Some("ALAC"));
+
+        let aac = write(
+            "aac.m4a",
+            &[&m4a_ftyp, &mp4_box(b"moov", &audio_trak(b"mp4a")), &mdat],
+        );
+        assert_eq!(unsupported_audio_format(&aac), None, "AAC is supported");
+
+        // Apple DRM: `drms` is not a codec mp3rgain can touch.
+        let drm = write(
+            "drm.m4a",
+            &[&m4a_ftyp, &mp4_box(b"moov", &audio_trak(b"drms")), &mdat],
+        );
+        assert_eq!(unsupported_audio_format(&drm), Some("this MP4 audio codec"));
+
+        // M4P is excluded from the accepted brands, so it never reaches the
+        // codec check and is named from its brand instead.
+        let m4p = write(
+            "drm.m4p",
+            &[&mp4_box(b"ftyp", b"M4P \x00\x00\x00\x00M4P "), &mdat],
+        );
+        assert_eq!(unsupported_audio_format(&m4p), Some("DRM-protected M4P"));
+
+        let mp3 = write("plain.mp3", &[b"ID3\x04\x00\x00\x00\x00\x00\x00"]);
+        assert_eq!(unsupported_audio_format(&mp3), None, "MP3 is supported");
+
+        let junk = write("junk.bin", &[b"not audio at all, just bytes"]);
+        assert_eq!(
+            unsupported_audio_format(&junk),
+            None,
+            "an unidentifiable file must stay a genuine failure"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

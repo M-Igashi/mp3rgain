@@ -53,6 +53,7 @@
 //! - [`bs1770`] - ITU-R BS.1770 loudness engine for the RG2/R128 modes (feature-gated)
 //! - [`mp4meta`] - MP4/M4A metadata handling
 //! - [`aac`] - AAC bitstream parsing (feature-gated)
+//! - [`adts`] - Raw ADTS AAC streams (feature-gated)
 //!
 //! ## Technical Details
 //!
@@ -63,6 +64,8 @@
 pub mod aac;
 #[cfg(feature = "aac")]
 mod aac_codebooks;
+#[cfg(feature = "aac")]
+pub mod adts;
 
 pub mod analysis;
 pub mod ape;
@@ -137,9 +140,10 @@ pub fn collect_audio_files(dir: &Path, recursive: bool) -> Result<Vec<PathBuf>> 
 
 /// Apply gain in dB, auto-dispatching by file format.
 ///
-/// Detects MP4/AAC files via [`mp4meta::is_aac_file`] and routes them through
-/// the AAC pipeline (which rewrites only the AAC `global_gain` bitfields inside
-/// `mdat`). All other files fall back to the MP3 pipeline.
+/// Detects MP4/AAC files via [`mp4meta::is_aac_file`] and raw ADTS streams via
+/// [`adts::is_adts_file`], routing each through the AAC pipeline (which
+/// rewrites only the AAC `global_gain` bitfields). All other files fall back to
+/// the MP3 pipeline.
 ///
 /// Calling [`gain::apply_gain_db`] directly on an M4A file would scan the raw
 /// bytes for MP3 sync words and overwrite the byte following any match,
@@ -147,8 +151,12 @@ pub fn collect_audio_files(dir: &Path, recursive: bool) -> Result<Vec<PathBuf>> 
 pub fn apply_gain_db_auto(file_path: &Path, gain_db: f64) -> Result<usize> {
     #[cfg(feature = "aac")]
     {
+        let steps = gain::db_to_steps(gain_db);
         if mp4meta::is_aac_file(file_path) {
-            return aac::apply_aac_gain_to_path(file_path, file_path, gain::db_to_steps(gain_db));
+            return aac::apply_aac_gain_to_path(file_path, file_path, steps);
+        }
+        if adts::is_adts_file(file_path) {
+            return adts::apply_adts_gain(file_path, file_path, steps, None).map(|o| o.modified);
         }
     }
     gain::apply_gain_db(file_path, gain_db)
@@ -197,6 +205,9 @@ pub fn undo_gain_auto(file_path: &Path, layout: TagLayout) -> Result<usize> {
         if mp4meta::is_aac_file(file_path) {
             return aac::undo_aac_gain(file_path);
         }
+        if adts::is_adts_file(file_path) {
+            return adts::undo_adts_gain(file_path);
+        }
     }
     let ape_has_undo = || {
         ape::read_ape_tag_from_file(file_path)
@@ -240,6 +251,11 @@ pub fn delete_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<()> 
         if mp4meta::is_aac_file(file_path) {
             mp4meta::delete_replaygain_tags(file_path)?;
             return mp4meta::delete_undo_tags(file_path);
+        }
+        // Raw ADTS keeps everything in ID3v2, so that is the only container
+        // to clear (issue #330).
+        if adts::is_adts_file(file_path) {
+            return id3v2::delete_id3v2_replaygain(file_path);
         }
     }
     match layout {
@@ -384,6 +400,22 @@ pub fn read_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<Stored
                 album_minmax: None,
             });
         }
+        // Raw ADTS writes to ID3v2 whatever the layout, so that is where its
+        // tags are read from too (issue #330).
+        if adts::is_adts_file(file_path) {
+            let rg = id3v2::read_id3v2_replaygain(file_path)?;
+            return Ok(StoredGainTags {
+                source: GainTagSource::Id3v2,
+                track_gain: rg.track_gain,
+                track_peak: rg.track_peak,
+                album_gain: rg.album_gain,
+                album_peak: rg.album_peak,
+                algorithm: rg.algorithm,
+                undo: rg.undo,
+                minmax: rg.minmax,
+                album_minmax: None,
+            });
+        }
     }
     if layout.mp3gain_in_id3v2() {
         let rg = id3v2::read_id3v2_replaygain(file_path)?;
@@ -515,6 +547,12 @@ pub fn read_undo_steps(file_path: &Path, layout: TagLayout) -> Option<i32> {
             let undo_tags = mp4meta::read_undo_tags(file_path).ok()?;
             // AAC already stores the applied gain.
             return Some(ape::parse_undo_values(undo_tags.undo()).0);
+        }
+        if adts::is_adts_file(file_path) {
+            // Raw ADTS keeps the MP3 undo-delta convention, in ID3v2 only.
+            let rg = id3v2::read_id3v2_replaygain(file_path).ok()?;
+            let undo = rg.undo.as_deref()?;
+            return Some(ape::parse_undo_values(Some(undo)).0.wrapping_neg());
         }
     }
     // MP3 stores the undo delta (the value to re-add to restore the

@@ -260,7 +260,7 @@ pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
     use crate::replaygain;
 
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-    let (min_gain, max_gain) = gain_range_of(&data)?;
+    let (min_gain, max_gain) = gain_range_of(&data).map_err(|e| e.refine_format(file_path))?;
     let peak_result = replaygain::find_peak_amplitude_in_data(file_path, data)?;
 
     Ok(MaxAmplitudeResult::new(
@@ -291,26 +291,32 @@ pub fn find_max_amplitude(file_path: &Path) -> Result<MaxAmplitudeResult> {
 /// this instead (issue #329).
 pub fn gain_range(file_path: &Path) -> Result<(u8, u8)> {
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-    gain_range_of(&data)
+    gain_range_of(&data).map_err(|e| e.refine_format(file_path))
 }
 
 /// Min/max `global_gain` of a file already in memory, dispatching by
-/// container. MP3 uses the frame scanner; AAC uses the per-frame scan from
-/// [`crate::aac::analyze_aac_gains`].
+/// container. MP3 uses the frame scanner; AAC in MP4 uses the per-sample scan
+/// from [`crate::aac::analyze_aac_gains`], and a raw ADTS stream the per-frame
+/// scan from [`crate::adts::analyze_adts_gains`] (issue #330).
 fn gain_range_of(data: &[u8]) -> Result<(u8, u8)> {
-    if crate::mp4meta::is_aac_data(data) {
-        #[cfg(feature = "aac")]
-        {
+    let is_mp4_aac = crate::mp4meta::is_aac_data(data);
+    #[cfg(feature = "aac")]
+    {
+        if is_mp4_aac {
             let analysis = crate::aac::analyze_aac_gains_from_data(data)?;
             return Ok((analysis.min_gain(), analysis.max_gain()));
         }
-        #[cfg(not(feature = "aac"))]
-        {
-            return Err(Error::FeatureNotAvailable {
-                feature: "AAC support",
-                feature_flag: "aac",
-            });
+        if crate::adts::is_adts_data(data) {
+            let analysis = crate::adts::analyze_adts_gains_from_data(data)?;
+            return Ok((analysis.min_gain(), analysis.max_gain()));
         }
+    }
+    #[cfg(not(feature = "aac"))]
+    if is_mp4_aac {
+        return Err(Error::FeatureNotAvailable {
+            feature: "AAC support",
+            feature_flag: "aac",
+        });
     }
     scan_gain_range(data)
 }

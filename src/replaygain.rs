@@ -132,19 +132,34 @@ impl std::fmt::Display for AnalysisMode {
 pub enum AudioFileType {
     /// MP3 file
     Mp3,
-    /// AAC/M4A file
+    /// AAC in an MP4/M4A container
     Aac,
+    /// Raw ADTS AAC stream, typically `.aac` (issue #330). Same bitstream as
+    /// [`Self::Aac`], but with no container to hold metadata, so the tags go
+    /// into ID3v2.
+    Adts,
 }
 
 impl AudioFileType {
     /// Classify `path` by container, matching the dispatch every apply / tag
-    /// path uses (AAC for an MP4 carrying AAC audio, MP3 otherwise).
+    /// path uses (AAC for an MP4 carrying AAC audio, ADTS for a raw AAC
+    /// stream, MP3 otherwise).
     pub fn from_path(path: &Path) -> Self {
         if crate::mp4meta::is_aac_file(path) {
-            AudioFileType::Aac
-        } else {
-            AudioFileType::Mp3
+            return AudioFileType::Aac;
         }
+        #[cfg(feature = "aac")]
+        if crate::adts::is_adts_file(path) {
+            return AudioFileType::Adts;
+        }
+        AudioFileType::Mp3
+    }
+
+    /// Whether the file's audio is AAC, in either container. The bitstream
+    /// side (`global_gain` scanning, the saturating apply, no per-channel
+    /// gain) is identical for both; only metadata differs.
+    pub fn is_aac_bitstream(self) -> bool {
+        matches!(self, AudioFileType::Aac | AudioFileType::Adts)
     }
 }
 
@@ -153,6 +168,7 @@ impl std::fmt::Display for AudioFileType {
         match self {
             AudioFileType::Mp3 => f.write_str("MP3"),
             AudioFileType::Aac => f.write_str("AAC"),
+            AudioFileType::Adts => f.write_str("AAC (ADTS)"),
         }
     }
 }
@@ -1193,9 +1209,28 @@ enum TrackAnalyzer {
     },
 }
 
-/// Internal function to analyze a track and return both result and loudness state
+/// Internal function to analyze a track and return both result and loudness
+/// state, with a "this format is unsupported" failure named as such.
+///
+/// The refinement lives here rather than at each public entry point because
+/// this is the single choke point every analysis (single track and album)
+/// goes through. Without it an ALAC file fails with symphonia's "unsupported
+/// audio codec", which reads as a genuine error and sets the exit code for a
+/// whole library scan (issue #330).
 #[cfg(feature = "replaygain")]
 fn analyze_track_internal(
+    file_path: &Path,
+    track_index: Option<u32>,
+    progress: Option<&dyn Fn(u64, u64)>,
+    mode: AnalysisMode,
+    true_peak: bool,
+) -> Result<TrackAnalysisInternal> {
+    analyze_track_decoded(file_path, track_index, progress, mode, true_peak)
+        .map_err(|e| e.refine_format(file_path))
+}
+
+#[cfg(feature = "replaygain")]
+fn analyze_track_decoded(
     file_path: &Path,
     track_index: Option<u32>,
     progress: Option<&dyn Fn(u64, u64)>,
@@ -1786,13 +1821,14 @@ fn analyze_album_serial(
                 track_results.push(internal.result);
                 successful_indices.push(i);
             }
-            Err(e) => {
-                if skip_errors {
-                    failures.push((i, format!("{}", e)));
-                } else {
-                    return Err(e);
-                }
+            // A file whose *format* mp3rgain cannot process is dropped from
+            // the set whether or not `--skip-errors` is on (issue #330): the
+            // album gain over the remaining tracks is still correct, and one
+            // ALAC track should not fail the whole album.
+            Err(e) if skip_errors || e.is_unsupported_format() => {
+                failures.push((i, format!("{}", e)));
             }
+            Err(e) => return Err(e),
         }
     }
 
@@ -1869,8 +1905,11 @@ fn analyze_album_parallel_internal(
         }
     } else {
         // collect::<Result<Vec<_>>>() short-circuits at the first error,
-        // matching the serial path's fail-fast behavior.
-        let internals: Vec<TrackAnalysisInternal> = files
+        // matching the serial path's fail-fast behavior. An unsupported
+        // format is not such an error (issue #330), so it rides through as an
+        // *inner* Err — the collect keeps going, and it joins `failures`
+        // below like a `--skip-errors` skip would.
+        let internals: Vec<Result<TrackAnalysisInternal>> = files
             .par_iter()
             .enumerate()
             .map(|(i, file)| {
@@ -1881,14 +1920,22 @@ fn analyze_album_parallel_internal(
                 if let Some(cb) = on_complete {
                     cb(i, file);
                 }
-                r
+                match r {
+                    Err(e) if e.is_unsupported_format() => Ok(Err(e)),
+                    other => other.map(Ok),
+                }
             })
             .collect::<Result<Vec<_>>>()?;
-        for (i, internal) in internals.into_iter().enumerate() {
-            album_peak = album_peak.max(internal.result.peak);
-            album_state.accumulate(&internal.state);
-            track_results.push(internal.result);
-            successful_indices.push(i);
+        for (i, r) in internals.into_iter().enumerate() {
+            match r {
+                Ok(internal) => {
+                    album_peak = album_peak.max(internal.result.peak);
+                    album_state.accumulate(&internal.state);
+                    track_results.push(internal.result);
+                    successful_indices.push(i);
+                }
+                Err(e) => failures.push((i, format!("{}", e))),
+            }
         }
     }
 

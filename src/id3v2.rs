@@ -213,12 +213,24 @@ pub(crate) fn write_rg_frames_direct(
 /// Delete all ReplayGain and undo TXXX frames from ID3v2 tag
 pub fn delete_id3v2_replaygain(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
-
-    for desc in ALL_RG_DESCRIPTIONS {
-        remove_txxx_ci(&mut tag, desc);
-    }
-
+    strip_all_rg(&mut tag);
     write_tag(path, &mut tag)
+}
+
+/// [`delete_id3v2_replaygain`] without the temp+rename dance, for callers
+/// already writing onto a not-yet-visible temp file (issue #232).
+pub(crate) fn delete_id3v2_replaygain_direct(path: &Path) -> Result<()> {
+    let mut tag = read_tag(path)?;
+    strip_all_rg(&mut tag);
+    write_tag_direct(path, &mut tag)
+}
+
+/// Drop every frame mp3rgain writes: the `REPLAYGAIN_*` values plus the
+/// `MP3GAIN_UNDO` / `MP3GAIN_MINMAX` pair.
+fn strip_all_rg(tag: &mut id3::Tag) {
+    for desc in ALL_RG_DESCRIPTIONS {
+        remove_txxx_ci(tag, desc);
+    }
 }
 
 /// Undo gain changes based on ID3v2 undo tag information
@@ -243,14 +255,10 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
     // with the undo tag still present (issue #227).
     crate::apply::with_temp_file(path, |original, temp| {
         std::fs::write(temp, &data).map_err(|e| Error::io_write(original, e))?;
-        let mut tag = read_tag(temp)?;
         // Issue #306: everything mp3rgain stored (undo, minmax, and the
         // REPLAYGAIN_* residuals) described the gained audio, so strip it
         // all in the same write.
-        for desc in ALL_RG_DESCRIPTIONS {
-            remove_txxx_ci(&mut tag, desc);
-        }
-        write_tag_direct(temp, &mut tag)?;
+        delete_id3v2_replaygain_direct(temp)?;
         // The APEv2 copies (a stale `REPLAYGAIN_*` set from mp3gain or an
         // earlier `-s a` run, and the album range) described the gained
         // audio too. A tail rewrite on the temp folds their removal into the

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::utils::{finish_without_summary, for_each_file};
 use crate::json_output::JsonFileResult;
+use crate::processors::utils::report_unsupported_format;
 use crate::util::{get_filename, get_path};
 
 pub fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
@@ -87,6 +88,17 @@ fn process_max_amplitude(file: &Path, opts: &Options) -> (Option<JsonFileResult>
                 ),
             }
         }
+        // A format mp3rgain cannot adjust is a skip, not a failure, so it
+        // does not set the exit code (issue #330).
+        Err(e) if e.is_unsupported_format() => (
+            Some(report_unsupported_format(
+                file,
+                filename,
+                &e.to_string(),
+                opts,
+            )),
+            out,
+        ),
         Err(e) => {
             if opts.output_format != OutputFormat::Json && !opts.quiet {
                 eprintln!("{} - {}", filename.red(), e);

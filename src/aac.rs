@@ -167,14 +167,14 @@ const ESDS: u32 = u32::from_be_bytes(*b"esds");
 // BitReader
 // =============================================================================
 
-struct BitReader<'a> {
+pub(crate) struct BitReader<'a> {
     data: &'a [u8],
     byte_pos: usize,
     bit_pos: u8, // 0-7, bits consumed in current byte (0 = no bits consumed yet)
 }
 
 impl<'a> BitReader<'a> {
-    fn new(data: &'a [u8]) -> Self {
+    pub(crate) fn new(data: &'a [u8]) -> Self {
         Self {
             data,
             byte_pos: 0,
@@ -1215,7 +1215,7 @@ fn skip_pce(reader: &mut BitReader) -> Result<()> {
 /// `locations`. The caller owns and reuses the buffer: at ~43 samples per
 /// second of audio, allocating a fresh `Vec` per sample (and per element)
 /// was ~8k heap allocations per minute in the analyzer's hottest loop.
-fn parse_raw_data_block(
+pub(crate) fn parse_raw_data_block(
     reader: &mut BitReader,
     sample_rate: u32,
     locations: &mut Vec<AacGainLocation>,
@@ -1273,7 +1273,11 @@ fn adjust_aac_gain_value(current: u8, steps: i32) -> u8 {
 /// Apply gain adjustment to all gain locations in a file buffer.
 /// Skips locations where current gain is 0 (silence).
 /// Returns the number of modified gain locations.
-fn apply_aac_gain_to_data(data: &mut [u8], analysis: &AacAnalysis, gain_steps: i32) -> usize {
+pub(crate) fn apply_aac_gain_to_data(
+    data: &mut [u8],
+    analysis: &AacAnalysis,
+    gain_steps: i32,
+) -> usize {
     let mut modified = 0usize;
     for loc in &analysis.gain_locations {
         let current = read_aac_gain_at(data, loc);
@@ -1308,11 +1312,12 @@ pub fn apply_aac_gain_to_path(read_from: &Path, write_to: &Path, gain_steps: i32
     apply_aac_gain_to_path_with_analysis(read_from, write_to, gain_steps, None, None)
 }
 
-/// Write the finished container. When the caller reads and writes the same
+/// Write the finished bytes, for this module's MP4 rewrites and for the raw
+/// ADTS path in [`crate::adts`]. When the caller reads and writes the same
 /// path it gets the temp + rename treatment; a distinct `write_to` is already
 /// the caller's temp file (`apply_with_options`), so a plain write avoids a
 /// pointless temp-of-a-temp.
-fn write_container(read_from: &Path, write_to: &Path, data: &[u8]) -> Result<()> {
+pub(crate) fn write_container(read_from: &Path, write_to: &Path, data: &[u8]) -> Result<()> {
     if read_from == write_to {
         crate::apply::atomic_write(write_to, data)
     } else {

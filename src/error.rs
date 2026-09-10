@@ -85,6 +85,10 @@ pub enum Error {
     #[error("No AAC audio track found")]
     NoAacTrack,
 
+    // Format support
+    #[error("{format} is not supported for gain adjustment")]
+    UnsupportedFormat { format: &'static str },
+
     #[error("Failed to parse any AAC samples ({warnings} errors)")]
     AacParseFailure { warnings: u32 },
 
@@ -103,6 +107,36 @@ pub enum Error {
 }
 
 impl Error {
+    /// Re-label a "cannot read this file's audio" failure as
+    /// [`Self::UnsupportedFormat`] when `path` turns out to be a container
+    /// mp3rgain recognizes but cannot process — ALAC or DRM-protected M4P
+    /// (issue #330).
+    ///
+    /// Without this, an ALAC file fails analysis with symphonia's
+    /// "unsupported audio codec" and the MP3 apply path reports
+    /// [`Self::NoMp3Frames`] for a file that was never an MP3, both of which
+    /// read as genuine failures. Costs a 128-byte header read, and only on the
+    /// failure path.
+    pub fn refine_format(self, path: &Path) -> Self {
+        if !matches!(
+            self,
+            Self::NoMp3Frames | Self::Decode(_) | Self::ProbeFailed { .. }
+        ) {
+            return self;
+        }
+        match crate::mp4meta::unsupported_audio_format(path) {
+            Some(format) => Self::UnsupportedFormat { format },
+            None => self,
+        }
+    }
+
+    /// True for [`Self::UnsupportedFormat`]: the file's *format* is the
+    /// problem, not the file or the run, so frontends report it as a skipped
+    /// file rather than a failure that sets the exit code.
+    pub fn is_unsupported_format(&self) -> bool {
+        matches!(self, Self::UnsupportedFormat { .. })
+    }
+
     pub fn io_read(path: &Path, source: std::io::Error) -> Self {
         Self::IoRead {
             path: path.to_path_buf(),

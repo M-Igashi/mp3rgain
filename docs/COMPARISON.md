@@ -30,11 +30,11 @@ This document provides a detailed comparison between mp3rgain and the original a
 | MP3 (MPEG2 Layer III) | Yes | Yes | Yes |
 | MP3 (MPEG2.5 Layer III) | Yes | Yes | Yes |
 | AAC (M4A/MP4) | Yes (lossless) | Yes (lossless) | No |
-| AAC (raw .aac) | No | No | No |
+| AAC (raw .aac / ADTS) | Yes (lossless) | No | No |
 | HE-AAC/SBR | Yes (base layer) | No | No |
 | Apple Lossless | No | No | No |
 
-Note: As of v2.0.0, mp3rgain supports lossless AAC bitstream gain adjustment (modifying `global_gain` fields), matching aacgain's approach. Both tools also store undo information in iTunes freeform metadata tags. mp3rgain additionally supports HE-AAC/SBR files (base layer gain adjustment). ALAC and DRM-protected M4P files are detected and rejected with clear error messages.
+Note: As of v2.0.0, mp3rgain supports lossless AAC bitstream gain adjustment (modifying `global_gain` fields), matching aacgain's approach. Both tools also store undo information in iTunes freeform metadata tags. mp3rgain additionally supports HE-AAC/SBR files (base layer gain adjustment), and since v3.7.0 raw ADTS `.aac` streams, the kind `ffmpeg -f adts`, DVB/HLS captures and some rippers produce ([#330](https://github.com/M-Igashi/mp3rgain/issues/330)); a raw stream has no container for metadata, so its undo and `REPLAYGAIN_*` values go into an ID3v2 tag instead of iTunes freeform atoms. ALAC and DRM-protected M4P files are detected and reported as skipped rather than adjusted, and no longer set the exit code of a library scan.
 
 ### Command-Line Options
 

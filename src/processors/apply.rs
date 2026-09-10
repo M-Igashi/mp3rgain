@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::*;
 use mp3rgain::apply::{apply_with_options, predict_apply, ApplyOptions};
 use mp3rgain::replaygain::AudioFileType;
-use mp3rgain::{mp4meta, steps_to_db, Channel};
+use mp3rgain::{steps_to_db, Channel};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -30,13 +30,9 @@ fn process_apply_into(
 
     // Detected once here and handed to the pipeline, which used to redo the
     // MP4 probe (an open plus a `moov` parse) on its own.
-    let is_aac = mp4meta::is_aac_file(file);
-    let file_type = Some(if is_aac {
-        AudioFileType::Aac
-    } else {
-        AudioFileType::Mp3
-    });
-    if is_aac {
+    let container = AudioFileType::from_path(file);
+    let file_type = Some(container);
+    if container == AudioFileType::Aac {
         warn_aac_multi_track(file, filename, opts);
     }
 
@@ -110,7 +106,7 @@ fn process_apply_into(
             let warning_msg = combine_warnings(clip_warn, sat_warn);
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
-                if is_aac {
+                if container.is_aac_bitstream() {
                     writeln!(
                         out,
                         "  {} {} ({} gains modified)",
@@ -244,8 +240,10 @@ fn process_apply_channel_into(
     // has no clipping prevention, so the headroom analyze inside
     // check_clipping is pure waste (issue #232).
     apply_opts.skip_clipping_check = true;
-    // -l is MP3-only (the pipeline rejects AAC), so skip the container probe.
-    apply_opts.file_type = Some(AudioFileType::Mp3);
+    // -l is MP3-only. Detect the container so an AAC bitstream (MP4 or raw
+    // ADTS) is rejected with `ChannelGainOnAac` rather than run through the
+    // MP3 frame scanner.
+    apply_opts.file_type = Some(AudioFileType::from_path(file));
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {

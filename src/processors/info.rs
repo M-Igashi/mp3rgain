@@ -8,7 +8,7 @@ use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::json_output::{FileStatus, JsonFileResult};
-use crate::processors::utils::analyze_track;
+use crate::processors::utils::{analyze_track, report_unsupported_format};
 use crate::util::{get_filename, get_path};
 
 /// Scan the file's global_gain range for an info row, as `(max, min)`.
@@ -17,11 +17,11 @@ use crate::util::{get_filename, get_path};
 /// same values `-x` does (issue #329: the MP3-only scanner failed on AAC, so
 /// every AAC file took the fallback branch).
 ///
-/// `None` means the file could not be scanned at all, which is currently the
-/// case for raw ADTS `.aac` streams: neither scanner handles them, and the
-/// apply paths reject them too. The fallback used to be (255, 0), the pair
-/// `analyze_data` starts its accumulators at, which prints as a real
-/// full-range measurement.
+/// `None` means the file could not be scanned at all — a corrupt stream, or a
+/// container none of the scanners handles. It prints as `-`; the fallback used
+/// to be (255, 0), the pair `analyze_data` starts its accumulators at, which
+/// reads as a real full-range measurement. Raw ADTS `.aac` was the case that
+/// surfaced this and now scans like any other AAC stream (issue #330).
 pub fn scan_gain_range_for_row(file: &Path) -> Option<(u8, u8)> {
     mp3rgain::gain_range(file).ok().map(|(min, max)| (max, min))
 }
@@ -152,6 +152,16 @@ fn process_info_into(
                 out.push_str(&text);
                 return Ok(result);
             }
+            Err(e) if e.is_unsupported_format() => {
+                // Not a failure: a format mp3rgain cannot adjust is reported
+                // as a skip so it does not set the exit code (issue #330).
+                return Ok(report_unsupported_format(
+                    file,
+                    filename,
+                    &e.to_string(),
+                    opts,
+                ));
+            }
             Err(e) => {
                 eprintln!("{} - {}", filename.red(), e);
                 return Ok(JsonFileResult::error(file, e));
@@ -280,5 +290,25 @@ fn process_info_into(
 
             Ok(JsonFileResult::error(file, e))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gain_range_fields;
+
+    /// Issue #329: an unscannable file must not print (255, 0), the pair the
+    /// gain accumulators start at, as if it were a measurement.
+    #[test]
+    fn an_unscannable_range_prints_as_dashes() {
+        assert_eq!(
+            gain_range_fields(None),
+            ("-".to_string(), "-".to_string()),
+            "an unscannable file must not report a measured range"
+        );
+        assert_eq!(
+            gain_range_fields(Some((181, 110))),
+            ("181".to_string(), "110".to_string())
+        );
     }
 }
