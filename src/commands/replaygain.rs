@@ -341,7 +341,7 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 /// order, and the counters are summed afterwards rather than by the workers.
 pub fn cmd_album_gain_grouped(files: &[PathBuf], opts: &Options) -> Result<()> {
     require_replaygain_feature();
-    let (groups, warnings) = group_files(files, opts.album_by);
+    let (groups, warnings) = group_files(files, opts);
     print_album_intro(files.len(), Some(groups.len()), opts);
     // Printed before any analysis starts: a grouping that merged two releases
     // has to be visible while the run can still be cancelled, not buried under

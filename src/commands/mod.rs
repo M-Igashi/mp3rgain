@@ -31,6 +31,9 @@ pub fn run(mut opts: Options) -> Result<()> {
 
     // Expand files if recursive mode
     if opts.recursive {
+        // --album-depth counts levels from the arguments as typed, which the
+        // expansion below flattens away (issue #331).
+        opts.arg_roots = opts.files.clone();
         opts.files = expand_files_recursive(&opts.files)?;
         if opts.files.is_empty() {
             eprintln!("{}: no audio files found (MP3/M4A)", "error".red().bold());
