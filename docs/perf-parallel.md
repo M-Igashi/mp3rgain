@@ -193,5 +193,62 @@ Plus, in this PR's scope:
   atomicity is sufficient for diagnostics. Order across files may
   differ between runs.
 
+## Album-crossing parallelism for `-a --per-directory` (3.8, issue [#332])
+
+Until 3.7.0, `-a --per-directory` walked the album groups in a sequential loop and parallelized only *within* an album. Every album boundary was a barrier: while the last and longest track of an album finished on one core, the rest of the pool sat idle, and with N albums in one invocation that tail was paid N times. skamp saw it from the outside on the Hydrogenaudio thread, without instrumentation: "with foobar2000, all CPU cores remain fully active until the very last *file* (not album, file). With mp3rgain, I see short drops of CPU as it is scanning albums one by one."
+
+The fix nests the parallelism instead of flattening it. The outer loop over album groups became a `par_iter`, and the existing inner `par_iter` over an album's files is untouched, so rayon's work-stealing fills an album's tail with files from the next album. A flat `par_iter` over every file with grouping applied afterwards was rejected: it would hold one `LoudnessHistogram` (48 KB) or `BlockEnergies` per file for the whole run, which is 480 MB on a 10,000-file library. Nested, each album still drops its per-track state the moment it folds, so live state tracks the albums in flight rather than the size of the library.
+
+### Benchmark
+
+Synthesized corpus, one directory per album, 6 tracks each with deliberately ragged lengths (120/150/180/210/150/270 s) so every album has a long tail to drain; 44.1 kHz stereo MP3 at 320 kbps. MacBook Air (M3, 2024), 4 performance + 4 efficiency cores, fanless. Median of 3 runs, `-q -n`, warm cache.
+
+| Corpus | Command | 3.7.0 | this change | one pooled album (no barrier) |
+|---|---|---|---|---|
+| 6 albums, 36 files, 1.8 h | `-a --per-directory --rg2 --true-peak` | 6.47 s | **5.03 s** (1.29x) | 4.78 s |
+| 12 albums, 72 files, 3.6 h | `-a --per-directory --rg2 --true-peak` | 13.62 s | **11.25 s** (1.21x) | 10.92 s |
+| 12 albums, 72 files, 3.6 h | `-a --per-directory` (RG1) | 4.12 s | **3.02 s** (1.36x) | 2.87 s |
+
+The rightmost column is the floor: the same files analyzed as a single pooled album, which has no album boundary to stall on. The per-directory run now sits within 3 to 5% of it, so the barrier is gone rather than merely reduced.
+
+`-j 1` is unaffected (18.56 s → 18.37 s on the 6-album corpus): with one worker thread there is nothing to overlap, so that path keeps the sequential loop, the per-album progress bars and the direct-to-stdout writes it always had.
+
+### Memory
+
+Peak RSS, same corpus, `--rg2 --true-peak`:
+
+| Run | 6 albums / 36 files | 12 albums / 72 files |
+|---|---|---|
+| `-a --per-directory` (this change) | 6.5 MB | 6.4 MB |
+| `-a` pooled into one album | 6.3 MB | 8.1 MB |
+
+Per-directory stays flat as the library doubles; pooling does not. That is the property the nested form buys, and it is why the flat-scan alternative was not taken.
+
+### Output identity
+
+Albums finish out of order, so everything observable is re-ordered before it is shown. Album runs are collected by index, so the JSON `albums` array, the `files` array, the counters and the exit code are all built in group order after the fact. Each album's text is buffered and flushed only once every earlier album has been flushed, so a finished album still prints immediately unless an earlier one is outstanding. The album fold was already associative and folded in input order, which is what keeps the numbers bit-identical.
+
+Verified on the 12-album corpus and on a 30-file apply, against the 3.7.0 binary:
+
+```sh
+# -o json, -o tsv, text stdout and text stderr all byte-identical
+mp3rgain-3.7.0 -a --per-directory --rg2 --true-peak -n -R -o json . > base.json
+mp3rgain-new   -a --per-directory --rg2 --true-peak -n -R -o json . > new.json
+diff base.json new.json    # exits 0, and likewise for -j 1 vs -j 8
+
+# a real (non dry-run) apply over 6 concurrent albums, MP3 + AAC
+diff <(cd base && find . -type f | sort | xargs shasum) \
+     <(cd new  && find . -type f | sort | xargs shasum)   # exits 0
+```
+
+One thing does move: per-file warnings (clipping, saturation) are emitted by the apply workers straight to stderr, as they already were inside a single album, so they are not grouped by album and their position relative to an album's buffered stderr lines can differ. The album-level lines are the ones that had to stay grouped, because "Failed to analyze album" names nothing on its own.
+
+### Not in scope
+
+The other half of [#332] is granularity: the smallest schedulable unit is still one whole file, so a 9-minute track cannot be split or stolen once a worker picks it up, and thread efficiency is down to 71% at 4 threads even with no album boundary anywhere. Splitting a file into chunks with overlap-warmup is a separate design problem, and [#334] (the true-peak inner loop, a measured 2.1x on 68% of the analysis cost) is a bigger and cheaper win that should land before either.
+
 [#125]: https://github.com/M-Igashi/mp3rgain/issues/125
 [#126]: https://github.com/M-Igashi/mp3rgain/issues/126
+
+[#332]: https://github.com/M-Igashi/mp3rgain/issues/332
+[#334]: https://github.com/M-Igashi/mp3rgain/issues/334

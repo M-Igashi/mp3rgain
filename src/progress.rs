@@ -19,6 +19,12 @@ pub const ANALYSIS_PROGRESS_MIN_SIZE: u64 = 1_000_000;
 /// Standard file-count progress bar template used across commands.
 const FILE_COUNT_TEMPLATE: &str = "{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}";
 
+/// File-count template with a phase label, for the bars that span a whole
+/// `--per-directory` run (issue #332). Analysis and apply overlap in time
+/// once albums run concurrently, so each phase needs its own labelled bar.
+const LABELED_FILE_COUNT_TEMPLATE: &str =
+    "{spinner:.cyan} {prefix:<9} [{bar:30.cyan/blue}] {pos}/{len} {msg}";
+
 /// Build a bar style from a template, using the shared progress characters.
 fn bar_style(template: &str) -> ProgressStyle {
     ProgressStyle::default_bar()
@@ -53,6 +59,23 @@ pub fn create_file_count_pb_in(
     }
     let pb = mp.add(ProgressBar::new(total as u64));
     pb.set_style(bar_style(FILE_COUNT_TEMPLATE));
+    Some(pb)
+}
+
+/// Labelled file-count bar attached to a `MultiProgress`, sized to the whole
+/// run rather than to one album (issue #332).
+pub fn create_labeled_file_count_pb_in(
+    mp: &MultiProgress,
+    label: &'static str,
+    total: usize,
+    opts: &Options,
+) -> Option<ProgressBar> {
+    if !file_count_enabled(total, opts) {
+        return None;
+    }
+    let pb = mp.add(ProgressBar::new(total as u64));
+    pb.set_style(bar_style(LABELED_FILE_COUNT_TEMPLATE));
+    pb.set_prefix(label);
     Some(pb)
 }
 

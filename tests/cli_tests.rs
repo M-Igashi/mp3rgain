@@ -684,6 +684,52 @@ fn per_directory_album_gain_matches_each_directory_run_alone() {
     assert!(pooled["album"]["gain_db"].is_number());
 }
 
+/// Albums run concurrently under `--per-directory` (issue #332), so the
+/// output can no longer rely on one album finishing before the next starts.
+/// Every observable part of the run — group order, gain values, text layout —
+/// must still match what the serial `-j 1` path produces.
+#[test]
+fn per_directory_output_is_identical_whatever_the_thread_count() {
+    let root = TempAlbum::new(&[]);
+    for (name, fixtures) in [
+        ("A", vec!["test_mono.mp3", "test_vbr.mp3"]),
+        ("B", vec!["test_stereo.mp3", "test_joint_stereo.mp3"]),
+        ("C", vec!["test_vbr.mp3", "test_aac.m4a"]),
+        ("D", vec!["test_mono.mp3"]),
+    ] {
+        let dir = root.dir.join(name);
+        fs::create_dir(&dir).unwrap();
+        for f in fixtures {
+            fs::copy(Path::new("tests/fixtures").join(f), dir.join(f)).unwrap();
+        }
+    }
+    let root_arg = root.dir.to_str().unwrap();
+
+    for format in ["json", "text", "tsv"] {
+        let args = |jobs: &'static str| {
+            vec![
+                "-a",
+                "--per-directory",
+                "-n",
+                "-R",
+                "-o",
+                format,
+                "-j",
+                jobs,
+                root_arg,
+            ]
+        };
+        let serial = run(&args("1"));
+        let parallel = run(&args("4"));
+        assert!(serial.status.success() && parallel.status.success());
+        assert_eq!(
+            stdout_of(&serial),
+            stdout_of(&parallel),
+            "-o {format} differs between -j 1 and -j 4"
+        );
+    }
+}
+
 #[test]
 fn per_directory_requires_album_mode() {
     let out = run(&["--per-directory", "-r", "tests/fixtures/test_mono.mp3"]);
