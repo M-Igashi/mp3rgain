@@ -18,6 +18,13 @@ fn parse_album_grouping(mode: &str) -> Result<AlbumGrouping> {
     }
 }
 
+/// `--album-depth <n>`, for the same reason as above.
+fn parse_album_depth(value: &str) -> Result<usize> {
+    value
+        .parse::<usize>()
+        .map_err(|_| anyhow::anyhow!("--album-depth needs a level count, got '{}'", value))
+}
+
 fn parse_thread_count(value: &str, flag: &str) -> Result<usize> {
     value
         .parse()
@@ -27,6 +34,9 @@ fn parse_thread_count(value: &str, flag: &str) -> Result<usize> {
 pub fn parse_args(args: &[String]) -> Result<Options> {
     let mut opts = Options::default();
     let mut i = 0;
+    // Both spellings write `opts.album_by`, so the conflict has to be tracked
+    // separately to be reportable rather than silently last-wins.
+    let (mut album_by_given, mut album_depth_given) = (false, false);
 
     while i < args.len() {
         let arg = &args[i];
@@ -45,12 +55,14 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
 
         if arg == "--per-directory" {
             opts.album_by = AlbumGrouping::Dir;
+            album_by_given = true;
             i += 1;
             continue;
         }
 
         if let Some(mode) = arg.strip_prefix("--album-by=") {
             opts.album_by = parse_album_grouping(mode)?;
+            album_by_given = true;
             i += 1;
             continue;
         }
@@ -60,6 +72,24 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                 .get(i + 1)
                 .ok_or_else(|| anyhow::anyhow!("--album-by requires a mode (dir or tag)"))?;
             opts.album_by = parse_album_grouping(mode)?;
+            album_by_given = true;
+            i += 2;
+            continue;
+        }
+
+        if let Some(depth) = arg.strip_prefix("--album-depth=") {
+            opts.album_by = AlbumGrouping::Depth(parse_album_depth(depth)?);
+            album_depth_given = true;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--album-depth" {
+            let depth = args
+                .get(i + 1)
+                .ok_or_else(|| anyhow::anyhow!("--album-depth requires a level count"))?;
+            opts.album_by = AlbumGrouping::Depth(parse_album_depth(depth)?);
+            album_depth_given = true;
             i += 2;
             continue;
         }
@@ -338,9 +368,22 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
         anyhow::bail!("--true-peak requires --rg2 or --r128");
     }
 
-    // --album-by / --per-directory only change how -a groups files (#324, #333).
+    // --album-by / --album-depth / --per-directory only change how -a groups
+    // files (#324, #331, #333).
     if opts.album_by != AlbumGrouping::Pooled && !(opts.album_gain && !opts.skip_album) {
-        anyhow::bail!("--per-directory / --album-by requires -a");
+        anyhow::bail!("--per-directory / --album-by / --album-depth requires -a");
+    }
+
+    // Both set the same field, so the second would silently win. A user who
+    // typed both meant one of them, and guessing wrong regroups their library.
+    if album_depth_given && album_by_given {
+        anyhow::bail!("--album-depth and --album-by are mutually exclusive");
+    }
+
+    // Depth counts levels below a root argument, and without -R a directory
+    // argument is never descended into, so there are no levels to count.
+    if matches!(opts.album_by, AlbumGrouping::Depth(_)) && !opts.recursive {
+        anyhow::bail!("--album-depth requires -R");
     }
 
     // --tags-only (issue #308) writes ReplayGain metadata and nothing else, so

@@ -59,15 +59,18 @@ Binaries for all platforms are on [GitHub Releases](https://github.com/M-Igashi/
 
 ```bash
 mp3rgain -r song.mp3          # Normalize a single track (ReplayGain)
-mp3rgain -a *.mp3             # Normalize an album
+mp3rgain -a *.mp3             # Normalize an album (every file given is one album, as in mp3gain)
 mp3rgain -s R -a -R /music    # Apply from stored tags, rescan only where missing (v3.4+)
 mp3rgain -a --album-by=tag -R /music   # One album per release, whole library in one run (v3.8+)
+mp3rgain -a --album-depth 2 -R /music  # One album per Artist/Album folder, no tags needed (v3.8+)
 mp3rgain -g 2 song.mp3        # Manual gain (+3.0 dB; 1 step = 1.5 dB)
 mp3rgain -u song.mp3          # Undo
 mp3rgain song.mp3             # Show file info
 ```
 
 Run `mp3rgain -h` for all options, or see the **[full CLI reference](https://mp3rgain.tyna.ninja/docs/cli)** (analysis modes, tag handling, exit codes, recipes). Analysis runs in parallel by default; `-j 1` forces the serial path ([design and benchmarks](docs/perf-parallel.md)).
+
+`-a` on its own pools every file you give it into one album, exactly as `mp3gain -a` does, so a per-album script written for mp3gain keeps working unchanged. `--album-by` and `--album-depth` are the mp3rgain extensions that split a single invocation into several albums: use `--album-by=tag` for a tagged library, `--album-depth 2` for an untagged `Artist/Album` tree, and `--album-by=dir` (or its alias `--per-directory`) when one folder really is one album.
 
 ## Migrating from mp3gain?
 

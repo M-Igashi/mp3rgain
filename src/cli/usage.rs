@@ -27,12 +27,16 @@ pub fn print_usage() {
     println!("    -l <c> <g>  Apply gain to left (0) or right (1) channel only");
     println!("    -m <i>      Modify suggested gain by integer i");
     println!("    -r          Apply Track gain (ReplayGain analysis)");
-    println!("    -a          Apply Album gain (ReplayGain analysis)");
-    println!("    --album-by <how>  With -a: what counts as one album, so a whole library");
-    println!("                      can be album-tagged in one run (pairs with -R)");
+    println!("    -a          Apply Album gain (ReplayGain analysis). Every file given is");
+    println!("                one album, the same rule as mp3gain -a");
+    println!("    --album-by <how>  With -a: what counts as one album instead, so a whole");
+    println!("                      library can be album-tagged in one run (pairs with -R)");
     println!("                        dir  one album per directory");
     println!("                        tag  one album per release, from ALBUM/ALBUMARTIST,");
     println!("                             so discs in subfolders share one album gain");
+    println!("    --album-depth <n> With -a -R: one album per directory n levels below each");
+    println!("                      directory argument. For untagged libraries; n 0 makes");
+    println!("                      each argument one album, n 2 suits Artist/Album trees");
     println!("    --per-directory   Alias for --album-by=dir");
     println!("    --rg2       ReplayGain 2.0 analysis (BS.1770, -18 LUFS reference)");
     println!("    --r128      EBU R128 analysis (BS.1770, -23 LUFS target)");
@@ -97,6 +101,7 @@ pub fn print_usage() {
     println!("    mp3rgain -t -g 2 song.mp3      Apply gain using temp file");
     println!("    mp3rgain -R /path/to/music     Process directory recursively");
     println!("    mp3rgain -a --album-by=tag -R /music   One album per release");
+    println!("    mp3rgain -a --album-depth 2 -R /music  One album per Artist/Album folder");
     println!("    mp3rgain -Rpa --skip-errors /music  Album-scan a library, skipping");
     println!("                                        files that fail to decode");
     println!("    mp3rgain -n -g 2 *.mp3         Dry-run (preview changes)");

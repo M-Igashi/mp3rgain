@@ -33,6 +33,11 @@ pub enum AlbumGrouping {
     /// `--album-by=tag`: one album per release, taken from the tags, so discs
     /// in subdirectories and trees of mixed depth both come out right.
     Tag,
+    /// `--album-depth N`: one album per directory N levels below each root
+    /// argument. The grouping unit for a library that is not tagged: it needs
+    /// no shell expansion, has no command-line length ceiling, and behaves the
+    /// same on Windows, where `*/*` is not expanded into argv at all.
+    Depth(usize),
 }
 
 #[derive(Default)]
@@ -67,9 +72,13 @@ pub struct Options {
     // rsgain workflow. Requires -r / -a / -e.
     pub tags_only: bool,
     pub skip_album: bool, // -e: skip album analysis
-    // --album-by: with -a, what counts as one album (issues #324, #333).
-    // `--per-directory` is the alias for `--album-by=dir`.
+    // --album-by / --album-depth: with -a, what counts as one album
+    // (issues #324, #331, #333). `--per-directory` aliases `--album-by=dir`.
     pub album_by: AlbumGrouping,
+    // The path arguments as typed, before -R expanded them. `--album-depth`
+    // counts levels from these, and `expand_files_recursive` is where the
+    // provenance would otherwise be lost.
+    pub arg_roots: Vec<PathBuf>,
     pub max_amplitude_only: bool, // -x: only find max amplitude
     pub track_index: Option<u32>, // -i <index>: track index for multi-track files
 

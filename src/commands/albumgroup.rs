@@ -1,8 +1,9 @@
-//! What counts as one album under `-a` (issues #324, #333).
+//! What counts as one album under `-a` (issues #324, #331, #333).
 //!
-//! `-a` alone pools every file, which is mp3gain's rule. `--album-by` splits
-//! the run instead: `dir` by parent directory, `tag` by release taken from the
-//! metadata.
+//! `-a` alone pools every file, which is mp3gain's rule. The flags split the
+//! run instead: `--album-by=dir` by parent directory, `--album-by=tag` by
+//! release taken from the metadata, and `--album-depth N` by directory N
+//! levels below each root argument.
 
 use colored::*;
 use mp3rgain::{read_album_tags, AlbumTags};
@@ -10,7 +11,7 @@ use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use crate::cli::options::AlbumGrouping;
+use crate::cli::options::{AlbumGrouping, Options};
 
 /// How a set of files was identified as one album.
 pub enum AlbumId {
@@ -50,23 +51,165 @@ pub struct AlbumGroup {
 /// alongside the warnings the caller must surface: a grouping that silently
 /// merges two releases, or silently drops files into a fallback, is the one
 /// outcome that must not happen.
-pub fn group_files(files: &[PathBuf], mode: AlbumGrouping) -> (Vec<AlbumGroup>, Vec<String>) {
-    match mode {
+pub fn group_files(files: &[PathBuf], opts: &Options) -> (Vec<AlbumGroup>, Vec<String>) {
+    match opts.album_by {
         AlbumGrouping::Tag => group_by_tags(files),
+        AlbumGrouping::Depth(levels) => {
+            let groups = group_by_depth(files, &opts.arg_roots, levels);
+            let warnings = split_release_warnings(&groups);
+            (groups, warnings)
+        }
         // Pooled never reaches here; the caller dispatches it to `cmd_album_gain`.
-        _ => (group_by_parent(files), Vec::new()),
+        _ => {
+            let groups = group_by_parent(files);
+            let warnings = split_release_warnings(&groups);
+            (groups, warnings)
+        }
     }
 }
 
 /// Group by immediate parent directory, as given on the command line. Bare
 /// file names land in `.`. Directories come out in path order.
 fn group_by_parent(files: &[PathBuf]) -> Vec<AlbumGroup> {
+    group_by_directory(files.iter().map(|f| (parent_of(f), f.clone())))
+}
+
+/// `--album-depth N`: the album is the directory N levels below the root
+/// argument the file was found under (issue #331).
+///
+/// A file shallower than N levels groups at the deepest directory it actually
+/// has, so a stray file at the root of the tree does not get a group key that
+/// points at a directory it is not in. Descending deeper than N is what makes
+/// this handle multi-disc releases: at `--album-depth 2` over `Artist/Album`,
+/// `Artist/Album/disc1` and `disc2` both truncate to `Artist/Album`.
+fn group_by_depth(files: &[PathBuf], roots: &[PathBuf], levels: usize) -> Vec<AlbumGroup> {
+    // Deepest root first, so an overlapping pair like `-R music music/album`
+    // assigns the file to `music/album` rather than to whichever came first.
+    let mut roots: Vec<&Path> = roots.iter().map(|p| p.as_path()).collect();
+    roots.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
+
+    group_by_directory(files.iter().map(|file| {
+        let group = roots
+            .iter()
+            .find_map(|root| album_dir_under(file, root, levels))
+            .unwrap_or_else(|| parent_of(file));
+        (group, file.clone())
+    }))
+}
+
+/// The album directory for `file` under `root`, or `None` when the file is not
+/// under that root.
+fn album_dir_under(file: &Path, root: &Path, levels: usize) -> Option<PathBuf> {
+    let relative = file.strip_prefix(root).ok()?;
+    // `relative` ends in the file name, which is not a level; only the
+    // directories above it are counted.
+    let Some(dirs) = relative.parent() else {
+        // The root *is* the file: a bare file argument pools with its
+        // neighbours rather than becoming a one-file album of its own.
+        return Some(parent_of(file));
+    };
+    let mut dir = root.to_path_buf();
+    dir.extend(dirs.components().take(levels));
+    Some(dir)
+}
+
+/// Directory grouping cannot see that two sibling folders are one release, so
+/// it says so instead of writing a per-disc album gain in silence (#331).
+///
+/// One tag probe per group rather than per file: ALBUM is uniform inside a
+/// directory, so the first file answers for the whole group and a library
+/// sweep costs one probe per directory.
+fn split_release_warnings(groups: &[AlbumGroup]) -> Vec<String> {
+    // Only groups under a common parent can be discs of one release.
+    let mut siblings: BTreeMap<PathBuf, Vec<usize>> = BTreeMap::new();
+    for (i, group) in groups.iter().enumerate() {
+        let AlbumId::Directory(dir) = &group.id else {
+            continue;
+        };
+        if let Some(parent) = dir.parent() {
+            siblings.entry(parent.to_path_buf()).or_default().push(i);
+        }
+    }
+    let candidates: Vec<usize> = siblings
+        .values()
+        .filter(|g| g.len() > 1)
+        .flatten()
+        .copied()
+        .collect();
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    let probed: HashMap<usize, AlbumTags> = candidates
+        .par_iter()
+        .filter_map(|&i| {
+            let tags = read_album_tags(groups[i].files.first()?)?;
+            tags.has_album().then_some((i, tags))
+        })
+        .collect();
+
+    let mut warnings = Vec::new();
+    for members in siblings.values().filter(|g| g.len() > 1) {
+        let mut by_release: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
+        for &i in members {
+            let Some(tags) = probed.get(&i) else { continue };
+            let key = (
+                tags.effective_artist().unwrap_or_default().to_string(),
+                tags.album.clone().unwrap_or_default(),
+            );
+            by_release.entry(key).or_default().push(i);
+        }
+        for ((_, album), split) in by_release.iter().filter(|(_, s)| s.len() > 1) {
+            let first = &probed[&split[0]];
+            if !split[1..]
+                .iter()
+                .any(|i| looks_like_one_release(first, &probed[i]))
+            {
+                continue;
+            }
+            let mut warning = format!(
+                "  {} ALBUM \"{}\" is split across {} directories and was scanned as that many albums\n",
+                "!".yellow(),
+                album,
+                split.len()
+            );
+            for &i in split {
+                warning.push_str(&format!("      {}\n", groups[i].id.heading()));
+            }
+            warning.push_str("      use --album-by=tag to treat them as one release");
+            warnings.push(warning);
+        }
+    }
+    warnings
+}
+
+/// Whether two sibling directories sharing an artist and album string are one
+/// multi-disc release rather than two editions of the same album.
+///
+/// The distinction matters because the advice differs: discs of one release
+/// want `--album-by=tag`, while two editions are already grouped correctly by
+/// directory and pointing the user at `tag` would merge them wrongly. Same
+/// reasoning as the tag-mode collision report, from the other direction.
+fn looks_like_one_release(a: &AlbumTags, b: &AlbumTags) -> bool {
+    // Distinct MusicBrainz ids are two releases by definition.
+    if let (Some(x), Some(y)) = (&a.musicbrainz_album_id, &b.musicbrainz_album_id) {
+        if x != y {
+            return false;
+        }
+    }
+    match (a.disc, b.disc) {
+        // Different disc numbers under one album title: one release.
+        (Some(x), Some(y)) => x != y,
+        // No disc tags to go on, so fall back to the track numbers. The same
+        // track in both directories is the signature of two editions.
+        _ => a.track != b.track || a.track.is_none(),
+    }
+}
+
+fn group_by_directory(entries: impl Iterator<Item = (PathBuf, PathBuf)>) -> Vec<AlbumGroup> {
     let mut groups: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
-    for file in files {
-        groups
-            .entry(parent_of(file))
-            .or_default()
-            .push(file.clone());
+    for (dir, file) in entries {
+        groups.entry(dir).or_default().push(file);
     }
     groups
         .into_iter()

@@ -956,6 +956,251 @@ fn album_by_tag_falls_back_to_directory_without_an_album_tag() {
     );
 }
 
+/// Build `<root>/Pink Floyd/The Wall/disc{1,2}` plus a single-disc Metallica
+/// album, so one tree exercises every depth the grouping can be asked for.
+fn write_depth_corpus(root: &Path) {
+    for (dir, fixture, disc, track) in [
+        ("Pink Floyd/The Wall/disc1", "test_mono.mp3", "1", "1"),
+        ("Pink Floyd/The Wall/disc1", "test_vbr.mp3", "1", "2"),
+        ("Pink Floyd/The Wall/disc2", "test_stereo.mp3", "2", "1"),
+        (
+            "Pink Floyd/The Wall/disc2",
+            "test_joint_stereo.mp3",
+            "2",
+            "2",
+        ),
+    ] {
+        write_tagged_mp3(
+            fixture,
+            &root.join(dir).join(fixture),
+            &[
+                ("TALB", "The Wall"),
+                ("TPE2", "Pink Floyd"),
+                ("TPOS", disc),
+                ("TRCK", track),
+            ],
+        );
+    }
+    for (fixture, track) in [("test_mono.mp3", "1"), ("test_stereo.mp3", "2")] {
+        write_tagged_mp3(
+            fixture,
+            &root.join("Metallica/Ride the Lightning").join(fixture),
+            &[
+                ("TALB", "Ride the Lightning"),
+                ("TPE2", "Metallica"),
+                ("TPOS", "1"),
+                ("TRCK", track),
+            ],
+        );
+    }
+}
+
+/// `--album-depth N` is the grouping unit for a library that is not tagged
+/// (issue #331): N levels below each root argument, with no glob and no
+/// command-line length ceiling, so it works the same on Windows.
+#[test]
+fn album_depth_groups_at_the_requested_level() {
+    let root = TempAlbum::new(&[]);
+    write_depth_corpus(&root.dir);
+    let root_arg = root.dir.to_str().unwrap();
+
+    let directories = |depth: &str| -> Vec<String> {
+        let out = run(&[
+            "-a",
+            "--album-depth",
+            depth,
+            "-n",
+            "-R",
+            "-o",
+            "json",
+            root_arg,
+        ]);
+        albums_of(&out)
+            .iter()
+            .map(|a| {
+                // Relative to the temp root, with the separator normalized:
+                // Windows reports the same groups as `\\Pink Floyd`.
+                a["directory"]
+                    .as_str()
+                    .expect("depth groups are directories")
+                    .trim_start_matches(root_arg)
+                    .trim_start_matches(['/', '\\'])
+                    .replace('\\', "/")
+            })
+            .collect()
+    };
+
+    assert_eq!(directories("0"), vec![""], "the root itself is one album");
+    assert_eq!(directories("1"), vec!["Metallica", "Pink Floyd"]);
+    assert_eq!(
+        directories("2"),
+        vec!["Metallica/Ride the Lightning", "Pink Floyd/The Wall"]
+    );
+    // Deeper than the tree: every directory that exists becomes its own album.
+    assert_eq!(
+        directories("3"),
+        vec![
+            "Metallica/Ride the Lightning",
+            "Pink Floyd/The Wall/disc1",
+            "Pink Floyd/The Wall/disc2",
+        ]
+    );
+}
+
+/// `--album-depth 0` is what `--album-by=arg` would have been: one album per
+/// directory argument. That is why `arg` was dropped rather than implemented.
+#[test]
+fn album_depth_zero_is_one_album_per_root_argument() {
+    let root = TempAlbum::new(&[]);
+    write_depth_corpus(&root.dir);
+    let floyd = root.dir.join("Pink Floyd");
+    let metallica = root.dir.join("Metallica");
+
+    let out = run(&[
+        "-a",
+        "--album-depth",
+        "0",
+        "-n",
+        "-R",
+        "-o",
+        "json",
+        floyd.to_str().unwrap(),
+        metallica.to_str().unwrap(),
+    ]);
+    let albums = albums_of(&out);
+    assert_eq!(albums.len(), 2, "one album per argument");
+    assert_eq!(albums[0]["files"], 2, "Metallica sorts first");
+    assert_eq!(albums[1]["files"], 4, "both Floyd discs in one album");
+}
+
+/// The multi-disc case from #331, solved without tags: grouping two levels
+/// down puts both disc folders in the same album, and the value has to match
+/// pooling the same files with plain `-a`.
+#[test]
+fn album_depth_keeps_a_multi_disc_release_together() {
+    let root = TempAlbum::new(&[]);
+    write_depth_corpus(&root.dir);
+    let floyd = root.dir.join("Pink Floyd");
+    let floyd_arg = floyd.to_str().unwrap();
+
+    let by_depth = albums_of(&run(&[
+        "-a",
+        "--album-depth",
+        "1",
+        "-n",
+        "-R",
+        "-o",
+        "json",
+        floyd_arg,
+    ]));
+    assert_eq!(by_depth.len(), 1);
+    assert_eq!(by_depth[0]["files"], 4);
+
+    let pooled = json_of(&run(&["-a", "-n", "-R", "-o", "json", floyd_arg]));
+    assert_eq!(by_depth[0]["gain_db"], pooled["album"]["gain_db"]);
+}
+
+/// Directory grouping cannot see that two sibling folders are one release, so
+/// it has to say so instead of writing a per-disc album gain in silence.
+#[test]
+fn dir_grouping_warns_when_a_release_is_split_across_sibling_folders() {
+    let root = TempAlbum::new(&[]);
+    write_depth_corpus(&root.dir);
+    let out = run(&[
+        "-a",
+        "--album-by=dir",
+        "-n",
+        "-R",
+        "-o",
+        "json",
+        root.dir.to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(albums_of(&out).len(), 3, "dir grouping still splits them");
+    assert!(
+        stderr.contains(r#"ALBUM "The Wall" is split across 2 directories"#),
+        "{stderr}"
+    );
+    assert!(stderr.contains("--album-by=tag"), "{stderr}");
+    // The single-disc album next to it is not a split release.
+    assert!(!stderr.contains("Ride the Lightning"), "{stderr}");
+}
+
+/// The mirror case, raised by gcocatre on #333: two editions of one album in
+/// sibling folders are *already* grouped correctly by directory, so pointing
+/// the user at `--album-by=tag` would merge them wrongly. Same (disc, track)
+/// in both folders is what separates this from a multi-disc release.
+#[test]
+fn dir_grouping_stays_quiet_for_two_editions_of_one_album() {
+    let root = TempAlbum::new(&[]);
+    for edition in ["1973", "2011"] {
+        for (fixture, track) in [("test_mono.mp3", "1"), ("test_stereo.mp3", "2")] {
+            write_tagged_mp3(
+                fixture,
+                &root.dir.join(edition).join(fixture),
+                &[
+                    ("TALB", "The Dark Side of the Moon"),
+                    ("TPE2", "Pink Floyd"),
+                    ("TPOS", "1"),
+                    ("TRCK", track),
+                ],
+            );
+        }
+    }
+    let out = run(&[
+        "-a",
+        "--album-by=dir",
+        "-n",
+        "-R",
+        "-o",
+        "json",
+        root.dir.to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(albums_of(&out).len(), 2);
+    assert!(
+        !stderr.contains("split across"),
+        "no advice to give: {stderr}"
+    );
+}
+
+#[test]
+fn album_depth_rejects_contradictory_invocations() {
+    let dir = TempAlbum::new(&["test_mono.mp3"]);
+    let arg = dir.dir.to_str().unwrap();
+    for (args, expected) in [
+        (vec!["-a", "--album-depth", "2", "-n", arg], "requires -R"),
+        (
+            vec![
+                "-a",
+                "--album-depth",
+                "2",
+                "--album-by=tag",
+                "-n",
+                "-R",
+                arg,
+            ],
+            "mutually exclusive",
+        ),
+        (
+            vec!["-a", "--album-depth", "x", "-n", "-R", arg],
+            "needs a level count",
+        ),
+        (
+            vec!["--album-depth", "2", "-r", "-n", "-R", arg],
+            "requires -a",
+        ),
+    ] {
+        let out = run(&args);
+        assert!(!out.status.success(), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(expected),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
 /// `--per-directory` shipped in 3.6.1 and keeps working unchanged.
 #[test]
 fn per_directory_is_an_alias_for_album_by_dir() {

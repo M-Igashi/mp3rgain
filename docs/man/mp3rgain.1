@@ -65,7 +65,15 @@ Each file is normalized individually to the 89 dB reference level.
 .TP
 .B \-a
 Analyze and apply Album gain using the ReplayGain 1.0 algorithm.
-All files are treated as an album and normalized together.
+All files given on the command line are treated as one album and
+normalized together, which is the same rule as
+.BR mp3gain (1)'s
+.BR \-a .
+Use
+.B \-\-album\-by
+or
+.B \-\-album\-depth
+to split one invocation into several albums instead.
 .TP
 .BI \-\-album\-by " how"
 With
@@ -102,6 +110,49 @@ depending on how the group was formed. Albums are analyzed concurrently, so
 the worker threads stay busy across album boundaries; results, text output
 and exit status are still deterministically ordered, exactly as under
 .BR "\-j 1" .
+.IP
+In
+.B dir
+mode, sibling directories that share an ALBUM tag and look like discs of one
+release are reported, since that grouping writes a separate album gain per
+disc. Two different editions of the same album are left alone: they are
+already grouped correctly by directory.
+.TP
+.BI \-\-album\-depth " n"
+With
+.B \-a
+and
+.BR \-R ,
+one album per directory
+.I n
+levels below each directory argument. This is the grouping unit for a library
+that is not tagged: it needs no shell expansion, has no command-line length
+limit, and behaves the same on Windows, where
+.B */*
+is not expanded into arguments at all.
+.B \-\-album\-depth 0
+makes each directory argument one album,
+.B 1
+groups one level below it, and
+.B 2
+suits an
+.I Artist/Album
+tree. A file shallower than
+.I n
+levels groups at the deepest directory it has. Descending deeper than
+.I n
+is what keeps a multi\-disc release together: at
+.B \-\-album\-depth 2
+over
+.IR Artist/Album ,
+.I disc1
+and
+.I disc2
+both group at
+.IR Artist/Album .
+When directory arguments overlap, the deepest one owns the file.
+Mutually exclusive with
+.BR \-\-album\-by .
 .TP
 .B \-\-rg2
 Measure loudness with the ReplayGain 2.0 algorithm (ITU-R BS.1770
