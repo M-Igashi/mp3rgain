@@ -363,6 +363,18 @@ impl TruePeakMeter {
     pub fn peak(&self) -> f64 {
         self.peak
     }
+
+    /// Forget the maximum, keeping the filter history.
+    ///
+    /// A chunk of a track calls this once its warm-up ends (issue #337).
+    /// Until then the history is still partly the zeros it started with, and
+    /// an interpolator fed a step from silence overshoots: the values it
+    /// reports during warm-up are an artifact of the cold start, not peaks the
+    /// signal ever reaches. After 48 real samples the history is entirely real
+    /// and everything from there is exact.
+    pub fn reset_peak(&mut self) {
+        self.peak = 0.0;
+    }
 }
 
 /// Streaming BS.1770 analyzer for one track.
@@ -417,6 +429,14 @@ impl Bs1770Analyzer {
     /// [`new_with_true_peak`](Self::new_with_true_peak).
     pub fn true_peak(&self) -> Option<f64> {
         self.true_peak.as_ref().map(TruePeakMeter::peak)
+    }
+
+    /// Discard the true peak measured so far, keeping the filter history; see
+    /// [`TruePeakMeter::reset_peak`].
+    pub fn reset_true_peak(&mut self) {
+        if let Some(meter) = &mut self.true_peak {
+            meter.reset_peak();
+        }
     }
 
     /// Add one frame of normalized samples (full scale = 1.0), one per
@@ -768,6 +788,38 @@ mod tests {
                 "{rate} Hz, {channels} channel(s)"
             );
         }
+    }
+
+    /// A cold interpolator overshoots. Fed a signal that starts from silence,
+    /// its output can exceed anything the signal itself reaches, because half
+    /// the 49-tap window is still the zeros it was initialized with.
+    ///
+    /// That is why a chunk of a track throws away what its meter measured
+    /// during the warm-up region (issue #337): those values are an artifact of
+    /// the cold start, and reporting one as the track's true peak is how a
+    /// divided run came out 19% high on Windows before this was fixed.
+    #[test]
+    fn true_peak_overshoots_from_a_cold_start() {
+        let level = 0.5;
+        // Alternating sign is what the interpolator responds to most strongly.
+        let mut meter = TruePeakMeter::new(44100, 1);
+        for n in 0..24 {
+            meter.add_frame(&[if n % 2 == 0 { level } else { -level }]);
+        }
+        let cold = meter.peak();
+        assert!(
+            cold > level * 1.05,
+            "a cold start should overshoot, got {cold}"
+        );
+
+        // With the history entirely real, the same signal settles to a value
+        // the whole-file pass would also report.
+        meter.reset_peak();
+        for n in 24..4096 {
+            meter.add_frame(&[if n % 2 == 0 { level } else { -level }]);
+        }
+        let warm = meter.peak();
+        assert!(warm < cold, "warm {warm} should be below the cold {cold}");
     }
 
     #[test]

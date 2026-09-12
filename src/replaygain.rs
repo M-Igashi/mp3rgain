@@ -2093,6 +2093,10 @@ fn analyze_chunk(
     let mut peak = 0.0f64;
     let mut samples: Vec<f64> = Vec::new();
     let mut position: Option<u64> = None;
+    // Whether the warm-up region is still running, and therefore whether the
+    // peaks measured so far have to be thrown away before the chunk's own
+    // range starts.
+    let mut warming = start > 0;
 
     loop {
         let packet = match format.next_packet() {
@@ -2132,14 +2136,24 @@ fn analyze_chunk(
                     subblock_sums: analyzer.into_subblock_sums(),
                 });
             }
+            if at < start {
+                analyzer.warm_up_frame(frame);
+                at += 1;
+                continue;
+            }
+            if warming {
+                // The history is now entirely real samples, so the meter is
+                // exact from here. What it reported while the history was
+                // still partly zeros is a cold-start artifact and would
+                // otherwise be reported as a peak the signal never reaches.
+                analyzer.reset_true_peak();
+                peak = 0.0;
+                warming = false;
+            }
             for &v in frame {
                 peak = peak.max(v.abs());
             }
-            if at < start {
-                analyzer.warm_up_frame(frame);
-            } else {
-                analyzer.add_frame(frame);
-            }
+            analyzer.add_frame(frame);
             at += 1;
         }
         position = Some(at);
