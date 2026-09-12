@@ -1237,6 +1237,12 @@ fn analyze_track_decoded(
     mode: AnalysisMode,
     true_peak: bool,
 ) -> Result<TrackAnalysisInternal> {
+    // Whether to run the decode and the analysis on separate threads
+    // (issue #337). Keyed on the rayon pool because that is what `-j` sizes:
+    // `-j 1` is documented as the single-threaded legacy path and must stay
+    // one thread, and a library caller that never installs a pool gets the
+    // machine's parallelism, which is the right default for it too.
+    let pipeline = rayon::current_num_threads() > 1;
     // Detect file type
     let file_type = detect_file_type(file_path);
 
@@ -1353,37 +1359,57 @@ fn analyze_track_decoded(
     };
     let mut peak: f64 = 0.0;
 
-    // Process all packets
-    loop {
-        let packet = match format.next_packet() {
-            Ok(Some(p)) => p,
-            Ok(None) => break,
-            Err(e) => return Err(Error::Decode(Box::new(e))),
-        };
-
-        if packet.track_id != track_id {
-            continue;
+    // Decode and analysis on separate threads (issue #337). The bitstream
+    // decode is inherently serial, but the DSP behind it is over half the
+    // cost once true peak is on, and the two overlap perfectly: the analyzer
+    // still sees every frame in order, so the result is bit-identical.
+    match (&mut track_analyzer, pipeline) {
+        (TrackAnalyzer::Bs1770 { analyzer }, true) => {
+            peak = peak.max(decode_pipelined(
+                &mut format,
+                decoder.as_mut(),
+                track_id,
+                channels,
+                analyzer,
+                progress,
+                position_tracker.as_ref(),
+                file_size,
+            )?);
         }
+        (track_analyzer, _) => {
+            // Process all packets
+            loop {
+                let packet = match format.next_packet() {
+                    Ok(Some(p)) => p,
+                    Ok(None) => break,
+                    Err(e) => return Err(Error::Decode(Box::new(e))),
+                };
 
-        let decoded = match decoder.decode(&packet) {
-            Ok(d) => d,
-            Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
-            Err(e) => return Err(Error::Decode(Box::new(e))),
-        };
+                if packet.track_id != track_id {
+                    continue;
+                }
 
-        // Process audio buffer
-        match &mut track_analyzer {
-            TrackAnalyzer::Rg1 { filters, analyzer } => {
-                process_audio_buffer(&decoded, filters, analyzer, &mut peak)
+                let decoded = match decoder.decode(&packet) {
+                    Ok(d) => d,
+                    Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
+                    Err(e) => return Err(Error::Decode(Box::new(e))),
+                };
+
+                // Process audio buffer
+                match track_analyzer {
+                    TrackAnalyzer::Rg1 { filters, analyzer } => {
+                        process_audio_buffer(&decoded, filters, analyzer, &mut peak)
+                    }
+                    TrackAnalyzer::Bs1770 { analyzer } => {
+                        process_audio_buffer_bs1770(&decoded, analyzer, &mut peak)
+                    }
+                }
+
+                // Report progress
+                if let (Some(cb), Some(ref tracker)) = (progress, &position_tracker) {
+                    cb(tracker.load(Ordering::Relaxed), file_size);
+                }
             }
-            TrackAnalyzer::Bs1770 { analyzer } => {
-                process_audio_buffer_bs1770(&decoded, analyzer, &mut peak)
-            }
-        }
-
-        // Report progress
-        if let (Some(cb), Some(ref tracker)) = (progress, &position_tracker) {
-            cb(tracker.load(Ordering::Relaxed), file_size);
         }
     }
 
@@ -1702,6 +1728,163 @@ fn process_audio_buffer_bs1770(
             // Unsupported format, skip
         }
     }
+}
+
+/// Append one decoded buffer to `out` as interleaved f64, for the pipelined
+/// path.
+///
+/// The conversions are the ones [`process_audio_buffer_bs1770`] applies, and
+/// interleaving preserves frame order, so the analyzer on the other side of
+/// the channel sees exactly the same values in the same order.
+#[cfg(feature = "replaygain")]
+fn append_interleaved(buffer: &GenericAudioBufferRef, out: &mut Vec<f64>) {
+    fn append<T: Copy>(
+        planes: &[&[T]],
+        frames: usize,
+        conv: impl Fn(T) -> f64,
+        out: &mut Vec<f64>,
+    ) {
+        out.reserve(frames * planes.len());
+        for frame in 0..frames {
+            for plane in planes {
+                out.push(conv(plane[frame]));
+            }
+        }
+    }
+    match buffer {
+        GenericAudioBufferRef::F32(buf) => {
+            let planes: Vec<&[f32]> = (0..buf.num_planes())
+                .map(|i| buf.plane(i).unwrap())
+                .collect();
+            append(&planes, buf.frames(), |s| s as f64, out);
+        }
+        GenericAudioBufferRef::S16(buf) => {
+            let planes: Vec<&[i16]> = (0..buf.num_planes())
+                .map(|i| buf.plane(i).unwrap())
+                .collect();
+            append(
+                &planes,
+                buf.frames(),
+                |s| s as f64 / SAMPLE_SCALE_16BIT,
+                out,
+            );
+        }
+        GenericAudioBufferRef::S32(buf) => {
+            let planes: Vec<&[i32]> = (0..buf.num_planes())
+                .map(|i| buf.plane(i).unwrap())
+                .collect();
+            append(
+                &planes,
+                buf.frames(),
+                |s| s as f64 / SAMPLE_SCALE_32BIT,
+                out,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// Feed interleaved frames to the BS.1770 analyzer, the receiving half of
+/// [`buffer_to_interleaved`].
+#[cfg(feature = "replaygain")]
+fn analyze_interleaved(
+    samples: &[f64],
+    channels: usize,
+    analyzer: &mut crate::bs1770::Bs1770Analyzer,
+    peak: &mut f64,
+) {
+    for frame in samples.chunks_exact(channels) {
+        for &v in frame {
+            *peak = peak.max(v.abs());
+        }
+        analyzer.add_frame(frame);
+    }
+}
+
+/// Decode on this thread and analyze on another, returning the sample peak
+/// (issue #337).
+///
+/// The bitstream decode cannot be parallelized, but the DSP behind it is over
+/// half the cost once true peak is on, so overlapping the two takes a file
+/// from decode-plus-DSP down to the larger of the two. The analyzer still
+/// receives every frame exactly once and in order, so this is not an
+/// approximation: the result is bit-identical to the serial path.
+#[cfg(feature = "replaygain")]
+#[allow(clippy::too_many_arguments)]
+fn decode_pipelined(
+    format: &mut Box<dyn symphonia::core::formats::FormatReader>,
+    decoder: &mut dyn symphonia::core::codecs::audio::AudioDecoder,
+    track_id: u32,
+    channels: usize,
+    analyzer: &mut crate::bs1770::Bs1770Analyzer,
+    progress: Option<&dyn Fn(u64, u64)>,
+    tracker: Option<&Arc<AtomicU64>>,
+    file_size: u64,
+) -> Result<f64> {
+    // Batched rather than one packet per send. A handoff per 26 ms packet
+    // costs more in channel wakeups and allocator traffic than the overlap
+    // buys back; batching to roughly a second of audio makes the sync cost
+    // disappear while the batch still fits comfortably in cache.
+    const BATCH_SAMPLES: usize = 64 * 1024;
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<f64>>(2);
+    // Buffers travel back for reuse, so a long file does not allocate one
+    // per batch.
+    let (recycle_tx, recycle_rx) = std::sync::mpsc::channel::<Vec<f64>>();
+
+    std::thread::scope(|scope| {
+        let worker = scope.spawn(move || {
+            let mut peak = 0.0f64;
+            for mut samples in rx {
+                analyze_interleaved(&samples, channels, analyzer, &mut peak);
+                samples.clear();
+                // The decoder may already have finished; dropping is fine.
+                let _ = recycle_tx.send(samples);
+            }
+            peak
+        });
+
+        let mut decode = || -> Result<()> {
+            let mut batch: Vec<f64> = Vec::with_capacity(BATCH_SAMPLES);
+            loop {
+                let packet = match format.next_packet() {
+                    Ok(Some(p)) => p,
+                    Ok(None) => break,
+                    Err(e) => return Err(Error::Decode(Box::new(e))),
+                };
+                if packet.track_id != track_id {
+                    continue;
+                }
+                let decoded = match decoder.decode(&packet) {
+                    Ok(d) => d,
+                    Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
+                    Err(e) => return Err(Error::Decode(Box::new(e))),
+                };
+                append_interleaved(&decoded, &mut batch);
+                if batch.len() >= BATCH_SAMPLES {
+                    // A send error means the analysis thread is gone, which
+                    // only happens if it panicked; the join below reports it.
+                    if tx.send(std::mem::take(&mut batch)).is_err() {
+                        return Ok(());
+                    }
+                    batch = recycle_rx
+                        .try_recv()
+                        .unwrap_or_else(|_| Vec::with_capacity(BATCH_SAMPLES));
+                }
+                if let (Some(cb), Some(tracker)) = (progress, tracker) {
+                    cb(tracker.load(Ordering::Relaxed), file_size);
+                }
+            }
+            if !batch.is_empty() {
+                let _ = tx.send(batch);
+            }
+            Ok(())
+        };
+        let outcome = decode();
+        // Closing the channel is what ends the worker's loop.
+        drop(tx);
+        let peak = worker.join().expect("analysis thread panicked");
+        outcome.map(|()| peak)
+    })
 }
 
 /// Byte-level progress callback: `(file_index, bytes_read, total_bytes)`.

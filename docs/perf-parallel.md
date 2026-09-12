@@ -247,8 +247,30 @@ One thing does move: per-file warnings (clipping, saturation) are emitted by the
 
 The other half of [#332] is granularity: the smallest schedulable unit is still one whole file, so a 9-minute track cannot be split or stolen once a worker picks it up, and thread efficiency is down to 71% at 4 threads even with no album boundary anywhere. Splitting a file into chunks with overlap-warmup is a separate design problem, and [#334] (the true-peak inner loop, a measured 2.1x on 68% of the analysis cost) is a bigger and cheaper win that should land before either.
 
+## Overlapping the decode with the analysis (3.8, issue [#337])
+
+Every level of parallelism above was between files. The work unit was still one whole file, so a single track could never use more than one core: `mp3rgain -r --rg2 --true-peak long.mp3` took the same 0.94 s at `-j 1`, `-j 4` and `-j 8`, because there was nothing to hand to the other cores.
+
+The bitstream decode cannot be parallelized, but the DSP behind it can be taken off the decode thread. With true peak on, the split for a 10 minute 44.1 kHz file is roughly 0.46 s of decode plus conversion and 0.59 s of analysis, so overlapping them takes the file from the sum of the two down to the larger of them. The analyzer still receives every frame exactly once and in order, so this is not an approximation: output is byte-identical.
+
+Batching matters. Handing one 26 ms packet across the channel at a time costs more in wakeups and allocator traffic than the overlap buys back, and only reached 1.25x. Batching to roughly a second of audio, with the buffers travelling back for reuse, reaches 1.42x.
+
+| Workload | before | after | |
+|---|---|---|---|
+| one 10 min file, `-r --rg2 --true-peak` | 1.05 s | **0.74 s** | 1.42x |
+| 36 files / 3.6 h, `-a --rg2 --true-peak -j 4` | 6.33 s | 5.82 s | 1.09x |
+| 36 files / 3.6 h, `-a --rg2 --true-peak -j 8` | 5.34 s | 5.23 s | 1.02x |
+| one 10 min file, `-j 1` | 1.05 s | 1.05 s | unchanged by design |
+
+`-j 1` is documented as the single-threaded legacy path, so the pipeline is disabled there: measured CPU time stays at 1.04 s of user time for 1.05 s of wall time, i.e. one core. Above `-j 1` the pipeline costs about 7% more CPU time for 30% less wall time on a single file.
+
+### What this does not do
+
+The work unit is still a whole file for the *decode*, so one file is now decode-bound rather than decode-plus-DSP bound. Going further means splitting the decode itself across workers, which needs container-level seeking: on MP3 that works (`n_frames` is reported and an accurate seek lands a known distance before the target, 1,249 samples in the case measured), but some M4A files report no frame count at all, so a correct implementation needs a fallback and a way to verify each chunk landed exactly where it expected. [#337] stays open for that.
+
 [#125]: https://github.com/M-Igashi/mp3rgain/issues/125
 [#126]: https://github.com/M-Igashi/mp3rgain/issues/126
 
 [#332]: https://github.com/M-Igashi/mp3rgain/issues/332
 [#334]: https://github.com/M-Igashi/mp3rgain/issues/334
+[#337]: https://github.com/M-Igashi/mp3rgain/issues/337
