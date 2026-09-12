@@ -67,20 +67,40 @@ Each file is normalized individually to the 89 dB reference level.
 Analyze and apply Album gain using the ReplayGain 1.0 algorithm.
 All files are treated as an album and normalized together.
 .TP
-.B \-\-per\-directory
+.BI \-\-album\-by " how"
 With
 .BR \-a ,
-treat each directory as its own album instead of pooling every file into
-one. Files are grouped by their parent directory as given on the command
-line, so
-.B \-a \-\-per\-directory \-R /music
-computes and applies one album gain per folder in a single run. A
-directory that fails analysis is reported and the run continues with the
-next one. In JSON output the per-directory results appear in an
+choose what counts as one album instead of pooling every file into one, so
+a whole library can be album\-tagged in a single run.
+.RS
+.TP
+.B dir
+One album per parent directory, as given on the command line.
+.B \-\-per\-directory
+is an alias for this. Works on untagged libraries, but a release whose discs
+live in subdirectories is scanned as one album per disc.
+.TP
+.B tag
+One album per release, keyed on MUSICBRAINZ_ALBUMID when present and
+otherwise on ALBUMARTIST (or ARTIST) plus ALBUM. Handles discs in
+subdirectories and a tree of mixed depth in one pass, which is what
+foobar2000's "Scan as albums (by tags)", beets and Picard all do. Files
+carrying no ALBUM tag fall back to directory grouping and are reported
+rather than pooled together. When two releases share one artist and album
+string, a repeated track number inside the group is reported with the
+directories involved.
+.RE
+.IP
+An album that fails analysis is reported and the run continues with the next
+one. In JSON output the results appear in an
 .B albums
-array. Directories are analyzed concurrently, so the worker threads stay
-busy across folder boundaries; results, text output and exit status are
-still ordered by path, exactly as under
+array, each entry carrying either
+.B directory
+or
+.BR album_artist / album_title
+depending on how the group was formed. Albums are analyzed concurrently, so
+the worker threads stay busy across album boundaries; results, text output
+and exit status are still deterministically ordered, exactly as under
 .BR "\-j 1" .
 .TP
 .B \-\-rg2

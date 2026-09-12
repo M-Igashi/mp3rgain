@@ -19,7 +19,7 @@ pub struct JsonOutput {
     pub files: Option<Vec<JsonFileResult>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub album: Option<JsonAlbumResult>,
-    /// `-a --per-directory`: one entry per directory (issue #324).
+    /// `-a --album-by=...`: one entry per album (issues #324, #333).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub albums: Option<Vec<JsonDirectoryAlbum>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -28,7 +28,16 @@ pub struct JsonOutput {
 
 #[derive(Serialize)]
 pub struct JsonDirectoryAlbum {
-    pub directory: String,
+    /// `--album-by=dir`: the directory. Also set in `tag` mode for a group of
+    /// files that carried no ALBUM tag and fell back to directory grouping,
+    /// which is what tells the two apart in the output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
+    /// `--album-by=tag`: the release the group was formed from (issue #333).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_artist: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_title: Option<String>,
     pub files: usize,
     #[serde(flatten)]
     pub album: JsonAlbumResult,

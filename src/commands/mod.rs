@@ -1,3 +1,4 @@
+pub mod albumgroup;
 pub mod apply;
 pub mod info;
 pub mod max_amplitude;
@@ -10,13 +11,13 @@ pub mod utils;
 use anyhow::Result;
 use colored::*;
 
-use crate::cli::options::{Options, OutputFormat, StoredTagMode};
+use crate::cli::options::{AlbumGrouping, Options, OutputFormat, StoredTagMode};
 use crate::cli::parse_args::expand_files_recursive;
 
 use apply::{cmd_apply, cmd_apply_channel};
 use info::cmd_info;
 use max_amplitude::cmd_max_amplitude;
-use replaygain::{cmd_album_gain, cmd_album_gain_per_directory, cmd_track_gain};
+use replaygain::{cmd_album_gain, cmd_album_gain_grouped, cmd_track_gain};
 use tags::{cmd_check_tags, cmd_delete_tags};
 use undo::cmd_undo;
 
@@ -99,9 +100,10 @@ pub fn run(mut opts: Options) -> Result<()> {
     }
 
     if opts.album_gain && !opts.skip_album {
-        // -a: apply album gain (ReplayGain), per directory with --per-directory
-        if opts.per_directory {
-            return cmd_album_gain_per_directory(&opts.files, &opts);
+        // -a: apply album gain (ReplayGain). --album-by splits the run into
+        // one album per directory or per release instead of pooling.
+        if opts.album_by != AlbumGrouping::Pooled {
+            return cmd_album_gain_grouped(&opts.files, &opts);
         }
         return cmd_album_gain(&opts.files, &opts);
     }

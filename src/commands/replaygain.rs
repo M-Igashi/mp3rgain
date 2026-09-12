@@ -12,7 +12,8 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::cli::options::{Options, OutputFormat, StoredTagMode};
+use crate::cli::options::{AlbumGrouping, Options, OutputFormat, StoredTagMode};
+use crate::commands::albumgroup::{group_files, AlbumGroup, AlbumId};
 use crate::commands::threading::effective_threads;
 use crate::commands::utils::{
     create_json_summary, exit_if_failed, finish_with_album_summary, finish_with_summary,
@@ -278,13 +279,17 @@ impl AlbumBars {
 }
 
 /// TSV header plus the text-mode banner shared by both album commands.
-fn print_album_intro(file_count: usize, directories: Option<usize>, opts: &Options) {
+fn print_album_intro(file_count: usize, groups: Option<usize>, opts: &Options) {
     if opts.output_format == OutputFormat::Tsv {
         println!("{}", TSV_HEADER);
     }
     if opts.output_format == OutputFormat::Text && !opts.quiet {
-        let scope = match directories {
-            Some(n) => format!(" in {} directory(ies)", n),
+        let unit = match opts.album_by {
+            AlbumGrouping::Tag => "album(s)",
+            _ => "directory(ies)",
+        };
+        let scope = match groups {
+            Some(n) => format!(" in {} {}", n, unit),
             None => String::new(),
         };
         println!(
@@ -318,10 +323,10 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     )
 }
 
-/// `-a --per-directory`: one album per parent directory (issue #324), the
-/// grouping the GUI has used since #159. A directory that fails analysis is
-/// counted and the run moves on, so a whole library can be tagged in a single
-/// invocation.
+/// `-a --album-by=...`: several albums in one invocation, one per directory
+/// (issue #324) or one per release read from the tags (issue #333). An album
+/// that fails analysis is counted and the run moves on, so a whole library can
+/// be tagged in a single invocation.
 ///
 /// Albums are analyzed concurrently on the shared rayon pool (issue #332).
 /// The per-file parallelism inside an album stays exactly as it was, so
@@ -334,19 +339,29 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 /// Everything the caller can observe stays in group order: results are
 /// collected by index, text output is buffered per album and flushed in
 /// order, and the counters are summed afterwards rather than by the workers.
-pub fn cmd_album_gain_per_directory(files: &[PathBuf], opts: &Options) -> Result<()> {
+pub fn cmd_album_gain_grouped(files: &[PathBuf], opts: &Options) -> Result<()> {
     require_replaygain_feature();
-    let groups = group_by_parent(files);
+    let (groups, warnings) = group_files(files, opts.album_by);
     print_album_intro(files.len(), Some(groups.len()), opts);
+    // Printed before any analysis starts: a grouping that merged two releases
+    // has to be visible while the run can still be cancelled, not buried under
+    // the per-album output (issue #333).
+    if !opts.quiet {
+        for warning in &warnings {
+            eprintln!("{}", warning);
+        }
+        if !warnings.is_empty() {
+            eprintln!();
+        }
+    }
 
     // One album, or -j 1, has nothing to overlap: keep the direct-to-stdout
     // path and the per-album bars rather than buffering for no reason.
     let concurrent = groups.len() > 1 && effective_threads(opts) > 1;
     let bars = concurrent.then(|| AlbumBars::new(files.len(), opts));
     let flush = OrderedFlush::default();
-    let entries: Vec<(&PathBuf, &Vec<PathBuf>)> = groups.iter().collect();
 
-    let run_group = |i: usize, dir: &Path, group: &[PathBuf]| -> Result<AlbumRun> {
+    let run_group = |i: usize, group: &AlbumGroup| -> Result<AlbumRun> {
         let mut sink = if concurrent {
             AlbumSink::buffered()
         } else {
@@ -359,26 +374,26 @@ pub fn cmd_album_gain_per_directory(files: &[PathBuf], opts: &Options) -> Result
             writeln!(
                 sink.out(),
                 "{} ({} file(s))",
-                dir.display().to_string().bold(),
-                group.len()
+                group.id.heading().bold(),
+                group.files.len()
             )?;
         }
-        let run = run_album(group, opts, &mut sink, bars.as_ref())?;
+        let run = run_album(&group.files, opts, &mut sink, bars.as_ref())?;
         flush.submit(i, sink)?;
         Ok(run)
     };
 
     let runs: Vec<AlbumRun> = if concurrent {
-        entries
+        groups
             .par_iter()
             .enumerate()
-            .map(|(i, &(dir, group))| run_group(i, dir, group))
+            .map(|(i, group)| run_group(i, group))
             .collect::<Result<Vec<_>>>()?
     } else {
-        entries
+        groups
             .iter()
             .enumerate()
-            .map(|(i, &(dir, group))| run_group(i, dir, group))
+            .map(|(i, group)| run_group(i, group))
             .collect::<Result<Vec<_>>>()?
     };
     if let Some(bars) = bars {
@@ -388,11 +403,17 @@ pub fn cmd_album_gain_per_directory(files: &[PathBuf], opts: &Options) -> Result
     let mut json_results = Vec::with_capacity(files.len());
     let mut albums = Vec::with_capacity(groups.len());
     let (mut successful, mut failed) = (0, 0);
-    for ((dir, group), run) in entries.iter().zip(runs) {
+    for (group, run) in groups.iter().zip(runs) {
         if let Some(album) = run.album {
+            let (directory, album_artist, album_title) = match &group.id {
+                AlbumId::Directory(dir) => (Some(dir.display().to_string()), None, None),
+                AlbumId::Release { artist, album } => (None, artist.clone(), Some(album.clone())),
+            };
             albums.push(JsonDirectoryAlbum {
-                directory: dir.display().to_string(),
-                files: group.len(),
+                directory,
+                album_artist,
+                album_title,
+                files: group.files.len(),
                 album,
             });
         }
@@ -427,23 +448,6 @@ fn advance(pb: Option<&ProgressBar>, files: usize) {
     if let Some(pb) = pb {
         pb.inc(files as u64);
     }
-}
-
-/// Group files by their immediate parent directory, as given on the command
-/// line. Bare file names land in `.`.
-fn group_by_parent(files: &[PathBuf]) -> BTreeMap<PathBuf, Vec<PathBuf>> {
-    let mut groups: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
-    for file in files {
-        let dir = file
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        groups
-            .entry(dir.to_path_buf())
-            .or_default()
-            .push(file.clone());
-    }
-    groups
 }
 
 /// Analyze and apply album gain to `files` as one album, returning what the

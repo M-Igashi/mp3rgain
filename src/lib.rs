@@ -67,6 +67,7 @@ mod aac_codebooks;
 #[cfg(feature = "aac")]
 pub mod adts;
 
+pub mod albummeta;
 pub mod analysis;
 pub mod ape;
 pub mod apply;
@@ -79,6 +80,7 @@ pub mod id3v2;
 pub mod mp4meta;
 pub mod replaygain;
 
+pub use albummeta::{read_album_tags, AlbumTags};
 pub use analysis::{
     analyze, analyze_data, find_max_amplitude, gain_range, is_mono, ChannelMode,
     MaxAmplitudeResult, Mp3Analysis, MpegVersion,
