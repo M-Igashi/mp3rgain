@@ -226,19 +226,53 @@ fn gated_mean(energies: &[f64], gate: f64) -> Option<f64> {
 /// always ≥ the sample peak. Values above 1.0 are expected for lossy codecs
 /// that reconstruct above the sample grid.
 pub struct TruePeakMeter {
-    /// Polyphase sub-filters: `factor` phases of up to `TAPS/factor + 1`
-    /// coefficients each. `phases[p][k]` multiplies the input from `k`
-    /// samples ago.
-    phases: Vec<Vec<f64>>,
-    /// Per-channel input history, as a ring buffer indexed through
-    /// [`Self::pos`].
+    /// Polyphase coefficients, k-major: `coef[k * factor + p]` multiplies the
+    /// input from `k` frames ago in phase `p`. Since integer division gives
+    /// `(j / factor) * factor + j % factor == j`, that is simply the 49 taps
+    /// in their natural order, zero-padded so every phase is [`Self::taps`]
+    /// long. One pass over `k` then drives all phases at once and loads each
+    /// history sample once instead of once per phase (issue #334).
+    coef: Vec<f64>,
+    /// Oversampling factor, and therefore the number of phases: 4 below
+    /// 88.2 kHz, 2 above.
+    factor: usize,
+    /// Taps per phase, i.e. how far back the filter reaches.
+    taps: usize,
+    /// Per-channel input history, `2 * taps` long with every sample written
+    /// twice so the analysis window `history[pos..pos + taps]` is always
+    /// contiguous. The conditional wrap a plain ring buffer needs is what
+    /// stopped the inner loop from vectorizing (issue #334).
     history: Vec<Vec<f64>>,
-    /// Ring write position; steps backwards per frame so the sample written
-    /// `k` frames ago lives at `(pos + k) % len`. Replaces the per-sample
-    /// `rotate_right(1)` memmove the history used to pay on every frame of
-    /// every channel, the same trick `EqualLoudnessFilter` uses (issue #255).
+    /// Write position in the first half; steps backwards per frame so index
+    /// `k` ahead of it is the sample from `k` frames ago. Replaces the
+    /// per-sample `rotate_right(1)` memmove the history used to pay on every
+    /// frame of every channel, the same trick `EqualLoudnessFilter` uses
+    /// (issue #255).
     pos: usize,
     peak: f64,
+}
+
+/// The peak of all `F` polyphase outputs for one frame of one channel.
+///
+/// `F` is a const generic so the inner loop unrolls into `F` independent
+/// accumulators. That is the point of the whole restructure: a single `acc`
+/// per phase makes the loop run at FMA *latency*, because each add depends on
+/// the previous one, and nothing else can be in flight (issue #334).
+///
+/// Bit-identical to summing each phase separately: within a phase the terms
+/// are still added in ascending `k`, and `max` over the phases is order
+/// independent.
+#[inline]
+fn polyphase_peak<const F: usize>(coef: &[f64], window: &[f64]) -> f64 {
+    let mut acc = [0.0f64; F];
+    // `chunks_exact` plus zip keeps every index provably in range, so the
+    // inner loop is `F` bare multiply-adds with no bounds check between them.
+    for (&h, taps) in window.iter().zip(coef.chunks_exact(F)) {
+        for (a, &c) in acc.iter_mut().zip(taps) {
+            *a += c * h;
+        }
+    }
+    acc.iter().fold(0.0f64, |peak, a| peak.max(a.abs()))
 }
 
 impl TruePeakMeter {
@@ -246,8 +280,9 @@ impl TruePeakMeter {
 
     pub fn new(sample_rate: u32, channels: usize) -> Self {
         let factor: usize = if sample_rate >= 88_200 { 2 } else { 4 };
-        let mut phases = vec![Vec::new(); factor];
-        for j in 0..Self::TAPS {
+        let taps = Self::TAPS.div_ceil(factor);
+        let mut coef = vec![0.0; taps * factor];
+        for (j, c) in coef.iter_mut().enumerate().take(Self::TAPS) {
             let m = j as f64 - (Self::TAPS - 1) as f64 / 2.0;
             let sinc = if m.abs() > 1e-9 {
                 let x = m * std::f64::consts::PI / factor as f64;
@@ -257,12 +292,14 @@ impl TruePeakMeter {
             };
             let window = 0.5
                 * (1.0 - (2.0 * std::f64::consts::PI * j as f64 / (Self::TAPS - 1) as f64).cos());
-            phases[j % factor].push(sinc * window);
+            *c = sinc * window;
         }
-        let history_len = phases.iter().map(Vec::len).max().unwrap_or(0);
         Self {
-            phases,
-            history: vec![vec![0.0; history_len]; channels.max(1)],
+            coef,
+            factor,
+            taps,
+            // Doubled, so the window is contiguous wherever `pos` lands.
+            history: vec![vec![0.0; 2 * taps]; channels.max(1)],
             pos: 0,
             peak: 0.0,
         }
@@ -273,27 +310,32 @@ impl TruePeakMeter {
     /// ignored.
     #[inline]
     pub fn add_frame(&mut self, frame: &[f64]) {
-        let len = self.history.first().map_or(0, Vec::len);
-        if len == 0 {
+        let Self {
+            coef,
+            factor,
+            taps,
+            history,
+            pos,
+            peak,
+        } = self;
+        let taps = *taps;
+        if taps == 0 {
             return;
         }
         // Step the write position backwards so index `k` ahead of it is the
-        // sample from `k` frames ago, matching `phases[p][k]`'s meaning.
-        self.pos = (self.pos + len - 1) % len;
-        let pos = self.pos;
-        for (history, &sample) in self.history.iter_mut().zip(frame) {
-            history[pos] = sample;
-            for phase in &self.phases {
-                let mut acc = 0.0;
-                for (k, &c) in phase.iter().enumerate() {
-                    // `phase.len() <= len`, so one conditional subtraction
-                    // wraps the index.
-                    let idx = pos + k;
-                    let idx = if idx >= len { idx - len } else { idx };
-                    acc += c * history[idx];
-                }
-                self.peak = self.peak.max(acc.abs());
-            }
+        // sample from `k` frames ago, matching `coef[k * factor + p]`.
+        *pos = (*pos + taps - 1) % taps;
+        let start = *pos;
+        for (history, &sample) in history.iter_mut().zip(frame) {
+            // Written twice, `taps` apart, so the window below never wraps.
+            history[start] = sample;
+            history[start + taps] = sample;
+            let window = &history[start..start + taps];
+            let frame_peak = match *factor {
+                2 => polyphase_peak::<2>(coef, window),
+                _ => polyphase_peak::<4>(coef, window),
+            };
+            *peak = peak.max(frame_peak);
         }
     }
 
@@ -610,6 +652,32 @@ mod tests {
         }
         let expected = crate::gain::db_to_linear(-6.0);
         assert!((meter.peak() - expected).abs() / expected < 0.01);
+    }
+
+    /// The #334 restructure changed the memory layout and the loop shape of
+    /// the polyphase filter, not its design, so its output has to stay
+    /// bit-identical. These two values were produced by the 3.7.0
+    /// implementation and are asserted exactly, not within a tolerance: a
+    /// change here means the filter itself moved, which is a different
+    /// decision needing its own discussion (the f32 variant, say).
+    #[test]
+    fn true_peak_is_bit_identical_to_the_reference_values() {
+        let mut meter = TruePeakMeter::new(44100, 2);
+        let mut x = 0.123f64;
+        for _ in 0..44100 {
+            x = (x * 997.0).sin();
+            meter.add_frame(&[x, -0.5 * x]);
+        }
+        assert_eq!(meter.peak(), 1.7696673322779737);
+
+        // ≥ 88.2 kHz takes the 2× oversampling path, a different phase count.
+        let mut meter = TruePeakMeter::new(96000, 1);
+        let mut x = 0.123f64;
+        for _ in 0..96000 {
+            x = (x * 997.0).sin();
+            meter.add_frame(&[x]);
+        }
+        assert_eq!(meter.peak(), 1.9725296121967306);
     }
 
     #[test]
