@@ -61,7 +61,7 @@ Binaries for all platforms are on [GitHub Releases](https://github.com/M-Igashi/
 mp3rgain -r song.mp3          # Normalize a single track (ReplayGain)
 mp3rgain -a *.mp3             # Normalize an album
 mp3rgain -s R -a -R /music    # Apply from stored tags, rescan only where missing (v3.4+)
-mp3rgain -a --per-directory -R /music  # One album per folder, whole library in one run (v3.6.1+)
+mp3rgain -a --album-by=tag -R /music   # One album per release, whole library in one run (v3.8+)
 mp3rgain -g 2 song.mp3        # Manual gain (+3.0 dB; 1 step = 1.5 dB)
 mp3rgain -u song.mp3          # Undo
 mp3rgain song.mp3             # Show file info

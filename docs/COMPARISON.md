@@ -72,7 +72,8 @@ All options from the original mp3gain are fully implemented in mp3rgain:
 | Option | Description |
 |--------|-------------|
 | `-R` | Recursive directory processing |
-| `--per-directory` | With `-a`: one album per directory, like rsgain's directory-based album detection |
+| `--album-by=dir` | With `-a`: one album per directory, like rsgain's directory-based album detection (`--per-directory` is the alias) |
+| `--album-by=tag` | With `-a`: one album per release from ALBUM/ALBUMARTIST, like foobar2000's "Scan as albums (by tags)", so multi-disc releases share one album gain |
 | `-s R` | Reuse stored ReplayGain tags with `-r`/`-a`, rescanning only when tags are missing (mp3gain's *default* behavior, opt-in here) |
 | `-n` / `--dry-run` | Dry-run mode (preview changes without modifying files) |
 | `-o json` | JSON output format (for scripting and automation) |

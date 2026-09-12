@@ -4,8 +4,19 @@ use mp3rgain::replaygain::AnalysisMode;
 use mp3rgain::{Channel, TagLayout};
 use std::path::PathBuf;
 
-use super::options::{Options, OutputFormat, StoredTagMode};
+use super::options::{AlbumGrouping, Options, OutputFormat, StoredTagMode};
 use super::usage::{print_usage, print_version};
+
+/// `--album-by=<mode>`. Rejected rather than defaulted: a typo here silently
+/// changes which files share an album gain, which is not something the user
+/// would notice until the tags are already written.
+fn parse_album_grouping(mode: &str) -> Result<AlbumGrouping> {
+    match mode {
+        "dir" | "directory" => Ok(AlbumGrouping::Dir),
+        "tag" | "tags" => Ok(AlbumGrouping::Tag),
+        other => anyhow::bail!("unknown --album-by mode '{}' (expected dir or tag)", other),
+    }
+}
 
 fn parse_thread_count(value: &str, flag: &str) -> Result<usize> {
     value
@@ -33,8 +44,23 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
         }
 
         if arg == "--per-directory" {
-            opts.per_directory = true;
+            opts.album_by = AlbumGrouping::Dir;
             i += 1;
+            continue;
+        }
+
+        if let Some(mode) = arg.strip_prefix("--album-by=") {
+            opts.album_by = parse_album_grouping(mode)?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--album-by" {
+            let mode = args
+                .get(i + 1)
+                .ok_or_else(|| anyhow::anyhow!("--album-by requires a mode (dir or tag)"))?;
+            opts.album_by = parse_album_grouping(mode)?;
+            i += 2;
             continue;
         }
 
@@ -312,9 +338,9 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
         anyhow::bail!("--true-peak requires --rg2 or --r128");
     }
 
-    // --per-directory only changes how -a groups files (issue #324).
-    if opts.per_directory && !(opts.album_gain && !opts.skip_album) {
-        anyhow::bail!("--per-directory requires -a");
+    // --album-by / --per-directory only change how -a groups files (#324, #333).
+    if opts.album_by != AlbumGrouping::Pooled && !(opts.album_gain && !opts.skip_album) {
+        anyhow::bail!("--per-directory / --album-by requires -a");
     }
 
     // --tags-only (issue #308) writes ReplayGain metadata and nothing else, so

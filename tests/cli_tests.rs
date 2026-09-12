@@ -732,9 +732,245 @@ fn per_directory_output_is_identical_whatever_the_thread_count() {
 
 #[test]
 fn per_directory_requires_album_mode() {
-    let out = run(&["--per-directory", "-r", "tests/fixtures/test_mono.mp3"]);
+    for flag in ["--per-directory", "--album-by=tag"] {
+        let out = run(&[flag, "-r", "tests/fixtures/test_mono.mp3"]);
+        assert!(!out.status.success(), "{flag}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("requires -a"),
+            "{flag}"
+        );
+    }
+    let out = run(&[
+        "-a",
+        "--album-by=bogus",
+        "-n",
+        "tests/fixtures/test_mono.mp3",
+    ]);
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("--per-directory requires -a"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown --album-by mode"));
+}
+
+/// Write `fixture` into `dst` behind a minimal ID3v2.3 tag. Tagging through an
+/// external tool would make these tests depend on ffmpeg being installed on
+/// every CI runner, and the frames needed here are four text frames.
+fn write_tagged_mp3(fixture: &str, dst: &Path, frames: &[(&str, &str)]) {
+    let audio = fs::read(Path::new("tests/fixtures").join(fixture)).expect("fixture");
+    let mut body = Vec::new();
+    for (id, text) in frames {
+        // Text frame payload: encoding byte, then the text. TXXX carries
+        // "description\0value" in that same payload.
+        let mut payload = vec![0u8]; // ISO-8859-1
+        payload.extend_from_slice(text.as_bytes());
+        body.extend_from_slice(id.as_bytes());
+        body.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        body.extend_from_slice(&[0, 0]);
+        body.extend_from_slice(&payload);
+    }
+    let size = body.len() as u32;
+    let mut out = Vec::from(*b"ID3\x03\x00\x00");
+    // The header length is synchsafe: 7 bits per byte.
+    out.extend_from_slice(&[
+        ((size >> 21) & 0x7f) as u8,
+        ((size >> 14) & 0x7f) as u8,
+        ((size >> 7) & 0x7f) as u8,
+        (size & 0x7f) as u8,
+    ]);
+    out.extend_from_slice(&body);
+    out.extend_from_slice(&audio);
+    fs::create_dir_all(dst.parent().unwrap()).unwrap();
+    fs::write(dst, out).expect("write tagged mp3");
+}
+
+fn albums_of(out: &Output) -> Vec<serde_json::Value> {
+    json_of(out)["albums"].as_array().expect("albums").clone()
+}
+
+/// The bug in #331: a release whose discs live in subdirectories gets one
+/// album gain per disc under `dir` grouping, which is wrong for both
+/// compatibility targets. `tag` grouping is the fix, and the value it produces
+/// has to be the one the whole release would get pooled into a single album.
+#[test]
+fn album_by_tag_keeps_a_multi_disc_release_as_one_album() {
+    let root = TempAlbum::new(&[]);
+    let common = [("TALB", "The Wall"), ("TPE2", "Pink Floyd")];
+    for (disc, track, fixture) in [
+        (1, 1, "test_mono.mp3"),
+        (1, 2, "test_vbr.mp3"),
+        (2, 1, "test_stereo.mp3"),
+        (2, 2, "test_joint_stereo.mp3"),
+    ] {
+        let mut frames = common.to_vec();
+        let (disc_s, track_s) = (disc.to_string(), track.to_string());
+        frames.push(("TPOS", &disc_s));
+        frames.push(("TRCK", &track_s));
+        let dst = root.dir.join(format!("disc{disc}")).join(fixture);
+        write_tagged_mp3(fixture, &dst, &frames);
+    }
+    let root_arg = root.dir.to_str().unwrap();
+
+    let by_tag = albums_of(&run(&[
+        "-a",
+        "--album-by=tag",
+        "-n",
+        "-R",
+        "-o",
+        "json",
+        root_arg,
+    ]));
+    assert_eq!(by_tag.len(), 1, "both discs are one release");
+    assert_eq!(by_tag[0]["album_title"], "The Wall");
+    assert_eq!(by_tag[0]["album_artist"], "Pink Floyd");
+    assert_eq!(by_tag[0]["files"], 4);
+    assert!(
+        by_tag[0]["directory"].is_null(),
+        "tag groups are not directories"
+    );
+
+    // The value must match pooling the same files with plain -a.
+    let pooled = json_of(&run(&["-a", "-n", "-R", "-o", "json", root_arg]));
+    assert_eq!(by_tag[0]["gain_db"], pooled["album"]["gain_db"]);
+
+    // dir grouping still splits them, which is the behavior #331 reported.
+    let by_dir = albums_of(&run(&[
+        "-a",
+        "--album-by=dir",
+        "-n",
+        "-R",
+        "-o",
+        "json",
+        root_arg,
+    ]));
+    assert_eq!(by_dir.len(), 2);
+    assert_ne!(by_dir[0]["gain_db"], by_dir[1]["gain_db"]);
+}
+
+/// gcocatre on #333: several releases of one album share the artist and album
+/// string, and the ways users tell them apart are too varied to enumerate. So
+/// nothing is guessed. A repeated (disc, track) inside one group is structural
+/// proof that more than one release is in it, and that is what gets reported.
+#[test]
+fn album_by_tag_reports_two_releases_sharing_one_album_string() {
+    let root = TempAlbum::new(&[]);
+    for (edition, fixture) in [("1973", "test_mono.mp3"), ("2011", "test_stereo.mp3")] {
+        write_tagged_mp3(
+            fixture,
+            &root.dir.join(edition).join("01.mp3"),
+            &[
+                ("TALB", "The Dark Side of the Moon"),
+                ("TPE2", "Pink Floyd"),
+                ("TRCK", "1"),
+            ],
+        );
+    }
+    let out = run(&[
+        "-a",
+        "--album-by=tag",
+        "-n",
+        "-R",
+        "-o",
+        "json",
+        root.dir.to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(albums_of(&out).len(), 1, "they do group together");
+    assert!(
+        stderr.contains("track 1 appears 2 times"),
+        "the collision has to be reported: {stderr}"
+    );
+    assert!(
+        stderr.contains("1973") && stderr.contains("2011"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("--album-by=dir"), "{stderr}");
+}
+
+/// The same two releases, tagged the way Picard tags them, must come apart
+/// without any warning: MUSICBRAINZ_ALBUMID is the one field that separates
+/// them without guessing.
+#[test]
+fn album_by_tag_separates_releases_by_musicbrainz_album_id() {
+    let root = TempAlbum::new(&[]);
+    for (edition, fixture) in [("1973", "test_mono.mp3"), ("2011", "test_stereo.mp3")] {
+        write_tagged_mp3(
+            fixture,
+            &root.dir.join(edition).join("01.mp3"),
+            &[
+                ("TALB", "The Dark Side of the Moon"),
+                ("TPE2", "Pink Floyd"),
+                ("TRCK", "1"),
+                (
+                    "TXXX",
+                    &format!("MusicBrainz Album Id\u{0}release-{edition}"),
+                ),
+            ],
+        );
+    }
+    let out = run(&[
+        "-a",
+        "--album-by=tag",
+        "-n",
+        "-R",
+        "-o",
+        "json",
+        root.dir.to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(albums_of(&out).len(), 2, "two releases, two album gains");
+    assert!(
+        !stderr.contains("appears"),
+        "no collision to report: {stderr}"
+    );
+}
+
+/// Pooling every untagged file in a library into one album is the one outcome
+/// that must not happen silently.
+#[test]
+fn album_by_tag_falls_back_to_directory_without_an_album_tag() {
+    let root = TempAlbum::new(&[]);
+    for (dir, fixture) in [("a", "test_mono.mp3"), ("b", "test_stereo.mp3")] {
+        let dst = root.dir.join(dir).join(fixture);
+        fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        fs::copy(Path::new("tests/fixtures").join(fixture), &dst).unwrap();
+    }
+    let out = run(&[
+        "-a",
+        "--album-by=tag",
+        "-n",
+        "-R",
+        "-o",
+        "json",
+        root.dir.to_str().unwrap(),
+    ]);
+    let albums = albums_of(&out);
+    assert_eq!(albums.len(), 2, "not pooled into one album");
+    for album in &albums {
+        assert!(
+            album["directory"].is_string(),
+            "reported as a directory group"
+        );
+        assert!(album["album_title"].is_null());
+    }
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("no ALBUM tag"),
+        "the fallback has to be reported"
+    );
+}
+
+/// `--per-directory` shipped in 3.6.1 and keeps working unchanged.
+#[test]
+fn per_directory_is_an_alias_for_album_by_dir() {
+    let root = TempAlbum::new(&[]);
+    for (dir, fixture) in [("a", "test_mono.mp3"), ("b", "test_stereo.mp3")] {
+        let dst = root.dir.join(dir).join(fixture);
+        fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        fs::copy(Path::new("tests/fixtures").join(fixture), &dst).unwrap();
+    }
+    let root_arg = root.dir.to_str().unwrap();
+    for format in ["json", "text", "tsv"] {
+        let alias = run(&["-a", "--per-directory", "-n", "-R", "-o", format, root_arg]);
+        let explicit = run(&["-a", "--album-by=dir", "-n", "-R", "-o", format, root_arg]);
+        assert_eq!(stdout_of(&alias), stdout_of(&explicit), "-o {format}");
+    }
 }
 
 /// Reported on the Hydrogenaudio forum: `-o tsv` only produced rows for the
