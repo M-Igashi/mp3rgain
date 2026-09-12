@@ -654,30 +654,83 @@ mod tests {
         assert!((meter.peak() - expected).abs() / expected < 0.01);
     }
 
+    /// The 3.7.0 loop, transcribed: a ring buffer with a conditional wrap and
+    /// one accumulator per phase, walked phase by phase. Kept here as the
+    /// reference the #334 restructure has to reproduce exactly.
+    fn reference_true_peak(sample_rate: u32, frames: &[[f64; 2]], channels: usize) -> f64 {
+        let factor: usize = if sample_rate >= 88_200 { 2 } else { 4 };
+        let mut phases: Vec<Vec<f64>> = vec![Vec::new(); factor];
+        for j in 0..TruePeakMeter::TAPS {
+            let m = j as f64 - (TruePeakMeter::TAPS - 1) as f64 / 2.0;
+            let sinc = if m.abs() > 1e-9 {
+                let x = m * std::f64::consts::PI / factor as f64;
+                x.sin() / x
+            } else {
+                1.0
+            };
+            let window = 0.5
+                * (1.0
+                    - (2.0 * std::f64::consts::PI * j as f64 / (TruePeakMeter::TAPS - 1) as f64)
+                        .cos());
+            phases[j % factor].push(sinc * window);
+        }
+        let len = phases.iter().map(Vec::len).max().unwrap_or(0);
+        let mut history = vec![vec![0.0; len]; channels];
+        let mut pos = 0usize;
+        let mut peak = 0.0f64;
+        for frame in frames {
+            pos = (pos + len - 1) % len;
+            for (history, &sample) in history.iter_mut().zip(frame) {
+                history[pos] = sample;
+                for phase in &phases {
+                    let mut acc = 0.0;
+                    for (k, &c) in phase.iter().enumerate() {
+                        let idx = pos + k;
+                        let idx = if idx >= len { idx - len } else { idx };
+                        acc += c * history[idx];
+                    }
+                    peak = peak.max(acc.abs());
+                }
+            }
+        }
+        peak
+    }
+
     /// The #334 restructure changed the memory layout and the loop shape of
     /// the polyphase filter, not its design, so its output has to stay
-    /// bit-identical. These two values were produced by the 3.7.0
-    /// implementation and are asserted exactly, not within a tolerance: a
-    /// change here means the filter itself moved, which is a different
+    /// bit-identical.
+    ///
+    /// Compared against the transcribed 3.7.0 loop rather than against
+    /// recorded constants: the same input has to produce the same `f64` on
+    /// whatever machine is running the test, and the two implementations
+    /// share the input samples, so a libm that rounds `sin` differently moves
+    /// both sides together. Exact equality, not a tolerance, because a
+    /// difference here means the filter itself moved, which is a separate
     /// decision needing its own discussion (the f32 variant, say).
     #[test]
-    fn true_peak_is_bit_identical_to_the_reference_values() {
-        let mut meter = TruePeakMeter::new(44100, 2);
-        let mut x = 0.123f64;
-        for _ in 0..44100 {
-            x = (x * 997.0).sin();
-            meter.add_frame(&[x, -0.5 * x]);
-        }
-        assert_eq!(meter.peak(), 1.7696673322779737);
+    fn true_peak_matches_the_previous_loop_exactly() {
+        for (rate, channels) in [(44100u32, 2usize), (96000, 1)] {
+            // Deterministic, and materialized once so both implementations
+            // see identical inputs.
+            let frames: Vec<[f64; 2]> = (0..rate as usize)
+                .map(|n| {
+                    let t = n as f64 / rate as f64;
+                    let l = 0.9 * (2.0 * std::f64::consts::PI * 997.0 * t).sin()
+                        + 0.1 * (2.0 * std::f64::consts::PI * 13_000.0 * t).sin();
+                    [l, -0.5 * l]
+                })
+                .collect();
 
-        // ≥ 88.2 kHz takes the 2× oversampling path, a different phase count.
-        let mut meter = TruePeakMeter::new(96000, 1);
-        let mut x = 0.123f64;
-        for _ in 0..96000 {
-            x = (x * 997.0).sin();
-            meter.add_frame(&[x]);
+            let mut meter = TruePeakMeter::new(rate, channels);
+            for frame in &frames {
+                meter.add_frame(&frame[..channels]);
+            }
+            assert_eq!(
+                meter.peak(),
+                reference_true_peak(rate, &frames, channels),
+                "{rate} Hz, {channels} channel(s)"
+            );
         }
-        assert_eq!(meter.peak(), 1.9725296121967306);
     }
 
     #[test]
