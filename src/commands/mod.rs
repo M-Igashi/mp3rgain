@@ -43,7 +43,12 @@ pub fn run(mut opts: Options) -> Result<()> {
 
     // Configure the global rayon pool from -j / --threads / MP3RGAIN_THREADS.
     // Default is std::thread::available_parallelism(); -j 1 forces serial.
-    threading::install_global_pool(threading::effective_threads(&opts));
+    let threads = threading::effective_threads(&opts);
+    threading::install_global_pool(threads);
+    // Dividing a track across workers only pays when the pool would otherwise
+    // sit idle, which is decided by the whole run rather than by any one
+    // album or file (issue #337).
+    opts.chunk_tracks = threads > 1 && opts.files.len() < threads;
 
     // -f option warning (assume MPEG2)
     if opts.assume_mpeg2 && !opts.quiet && opts.output_format == OutputFormat::Text {
