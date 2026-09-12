@@ -730,6 +730,42 @@ fn per_directory_output_is_identical_whatever_the_thread_count() {
     }
 }
 
+/// The decode and the analysis run on separate threads once `-j` allows it
+/// (issue #337). The analyzer still sees every frame once and in order, so
+/// this has to be byte-identical to the single-threaded path, not merely
+/// close. `--true-peak` is the case that actually exercises it, being over
+/// half the analysis cost.
+#[test]
+fn pipelined_analysis_matches_the_single_threaded_path() {
+    let album = TempAlbum::new(&[
+        "test_mono.mp3",
+        "test_stereo.mp3",
+        "test_vbr.mp3",
+        "test_joint_stereo.mp3",
+        "test_aac.m4a",
+    ]);
+    for mode in [
+        vec!["--rg2", "--true-peak"],
+        vec!["--r128", "--true-peak"],
+        vec!["--rg2"],
+    ] {
+        for command in [vec!["-r"], vec!["-a"]] {
+            let render = |jobs: &'static str| {
+                let mut args = command.clone();
+                args.extend_from_slice(&mode);
+                args.extend_from_slice(&["-n", "-o", "json", "-j", jobs]);
+                args.extend(album.args());
+                stdout_of(&run(&args))
+            };
+            assert_eq!(
+                render("1"),
+                render("4"),
+                "{command:?} {mode:?} differs between -j 1 and -j 4"
+            );
+        }
+    }
+}
+
 #[test]
 fn per_directory_requires_album_mode() {
     for flag in ["--per-directory", "--album-by=tag"] {
