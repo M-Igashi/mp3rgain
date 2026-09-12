@@ -6,8 +6,8 @@
 //! once the Symphonia v0.6 decoder migration landed.
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use std::cell::Cell;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::cli::options::{Options, OutputFormat};
 
@@ -111,24 +111,27 @@ pub fn album_progress_callbacks<'a>(
     pb: &Option<ProgressBar>,
     file_names: Vec<&'a str>,
 ) -> (
-    impl Fn(usize, u64, u64) + 'a,
+    impl Fn(usize, u64, u64) + Sync + 'a,
     impl Fn(usize, &Path) + Sync + 'a,
 ) {
     let total = file_names.len();
     let pb_for_progress = pb.clone();
-    let last_message_idx: Cell<Option<usize>> = Cell::new(None);
+    // Atomic rather than `Cell` because a chunked analysis drives this from
+    // several worker threads (issue #337). `usize::MAX` stands in for "no file
+    // reported yet"; the value is only used to avoid re-allocating the same
+    // message.
+    let last_message_idx = AtomicUsize::new(usize::MAX);
     let on_progress = move |file_idx: usize, bytes: u64, total_bytes: u64| {
         if let Some(pb) = &pb_for_progress {
             pb.set_length(total_bytes);
             pb.set_position(bytes);
-            if last_message_idx.get() != Some(file_idx) {
+            if last_message_idx.swap(file_idx, Ordering::Relaxed) != file_idx {
                 pb.set_message(format!(
                     "({}/{}) {}",
                     file_idx + 1,
                     total,
                     file_names[file_idx]
                 ));
-                last_message_idx.set(Some(file_idx));
             }
         }
     };
