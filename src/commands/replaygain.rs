@@ -1,5 +1,6 @@
 use anyhow::Result;
 use colored::*;
+use indicatif::{MultiProgress, ProgressBar};
 use mp3rgain::replaygain::{
     self, AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult,
     REPLAYGAIN_REFERENCE_DB,
@@ -9,6 +10,7 @@ use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::commands::threading::effective_threads;
@@ -25,7 +27,10 @@ use crate::processors::replaygain::{
     apply_is_noop, capped_tag_gain, process_apply_replaygain_with_album, process_track_gain,
 };
 use crate::processors::utils::report_unsupported_format;
-use crate::progress::{create_progress_bar, progress_finish, progress_inc, progress_set_message};
+use crate::progress::{
+    create_labeled_file_count_pb_in, create_progress_bar, progress_finish, progress_inc,
+    progress_set_message,
+};
 use crate::util::get_filename;
 
 fn print_target_with_modifier(opts: &Options) {
@@ -167,6 +172,111 @@ struct AlbumRun {
     failed: usize,
 }
 
+/// Where one album's text goes.
+///
+/// `-a` on its own writes straight through, so a long album still reports as
+/// it goes. `-a --per-directory` runs albums concurrently (issue #332), where
+/// writing straight through would interleave two albums mid-line, so each
+/// album buffers and the driver flushes the buffers in group order.
+///
+/// Only the album-level lines come through here. Per-file warnings (clipping,
+/// saturation) are emitted by the apply workers straight to stderr, as they
+/// already were inside a single album, so they name their file but are not
+/// grouped by album. The album-level lines are the ones that have to be:
+/// "Failed to analyze album" identifies nothing on its own.
+enum AlbumSink {
+    Direct(io::Stdout, io::Stderr),
+    Buffered { out: Vec<u8>, err: Vec<u8> },
+}
+
+impl AlbumSink {
+    fn direct() -> Self {
+        Self::Direct(io::stdout(), io::stderr())
+    }
+
+    fn buffered() -> Self {
+        Self::Buffered {
+            out: Vec::new(),
+            err: Vec::new(),
+        }
+    }
+
+    fn out(&mut self) -> &mut dyn Write {
+        match self {
+            Self::Direct(out, _) => out,
+            Self::Buffered { out, .. } => out,
+        }
+    }
+
+    fn err(&mut self) -> &mut dyn Write {
+        match self {
+            Self::Direct(_, err) => err,
+            Self::Buffered { err, .. } => err,
+        }
+    }
+
+    /// Copy the buffered bytes to the real streams; a no-op when direct.
+    fn drain(self) -> io::Result<()> {
+        if let Self::Buffered { out, err } = self {
+            io::stdout().write_all(&out)?;
+            io::stderr().write_all(&err)?;
+        }
+        Ok(())
+    }
+}
+
+/// Flushes each album's buffered output as soon as every earlier album has
+/// been flushed. Concurrent albums finish out of order, so without this the
+/// group order in the text output would depend on which album happened to
+/// win; with it, a finished album still prints immediately unless an earlier
+/// one is outstanding.
+#[derive(Default)]
+struct OrderedFlush {
+    /// `(next index to print, albums finished ahead of their turn)`
+    state: Mutex<(usize, BTreeMap<usize, AlbumSink>)>,
+}
+
+impl OrderedFlush {
+    fn submit(&self, index: usize, sink: AlbumSink) -> io::Result<()> {
+        let mut guard = self.state.lock().expect("output lock poisoned");
+        let (next, pending) = &mut *guard;
+        pending.insert(index, sink);
+        while let Some(sink) = pending.remove(next) {
+            sink.drain()?;
+            *next += 1;
+        }
+        Ok(())
+    }
+}
+
+/// The two progress bars of a concurrent `--per-directory` run, each sized to
+/// the whole file list. A per-album bar would reset at every boundary and
+/// several albums would be drawing at once; these span the run, and analysis
+/// and apply get one each because they now overlap in time (issue #332).
+struct AlbumBars {
+    _mp: MultiProgress,
+    analysis: Option<ProgressBar>,
+    apply: Option<ProgressBar>,
+}
+
+impl AlbumBars {
+    fn new(total: usize, opts: &Options) -> Self {
+        let mp = MultiProgress::new();
+        let analysis = create_labeled_file_count_pb_in(&mp, "Analyzing", total, opts);
+        let apply = create_labeled_file_count_pb_in(&mp, "Applying", total, opts);
+        Self {
+            _mp: mp,
+            analysis,
+            apply,
+        }
+    }
+
+    fn finish(self) {
+        progress_finish(self.analysis);
+        progress_finish(self.apply);
+    }
+}
+
 /// TSV header plus the text-mode banner shared by both album commands.
 fn print_album_intro(file_count: usize, directories: Option<usize>, opts: &Options) {
     if opts.output_format == OutputFormat::Tsv {
@@ -197,7 +307,7 @@ fn print_album_intro(file_count: usize, directories: Option<usize>, opts: &Optio
 pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     require_replaygain_feature();
     print_album_intro(files.len(), None, opts);
-    let run = run_album(files, opts)?;
+    let run = run_album(files, opts, &mut AlbumSink::direct(), None)?;
     finish_with_album_summary(
         files.len(),
         run.json_results,
@@ -209,29 +319,76 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 }
 
 /// `-a --per-directory`: one album per parent directory (issue #324), the
-/// grouping the GUI has used since #159. Directories are processed in path
-/// order; one that fails analysis is counted and the run moves on to the
-/// next, so a whole library can be tagged in a single invocation.
+/// grouping the GUI has used since #159. A directory that fails analysis is
+/// counted and the run moves on, so a whole library can be tagged in a single
+/// invocation.
+///
+/// Albums are analyzed concurrently on the shared rayon pool (issue #332).
+/// The per-file parallelism inside an album stays exactly as it was, so
+/// rayon fills an album's tail — the stretch where one long track is still
+/// decoding and the rest of the pool has nothing to do — with files from the
+/// next album, instead of draining at every album boundary. Each album still
+/// drops its per-track analysis state when it folds, so live memory tracks
+/// the albums in flight rather than the size of the library.
+///
+/// Everything the caller can observe stays in group order: results are
+/// collected by index, text output is buffered per album and flushed in
+/// order, and the counters are summed afterwards rather than by the workers.
 pub fn cmd_album_gain_per_directory(files: &[PathBuf], opts: &Options) -> Result<()> {
     require_replaygain_feature();
     let groups = group_by_parent(files);
     print_album_intro(files.len(), Some(groups.len()), opts);
 
-    let mut json_results = Vec::with_capacity(files.len());
-    let mut albums = Vec::with_capacity(groups.len());
-    let (mut successful, mut failed) = (0, 0);
-    for (i, (dir, group)) in groups.iter().enumerate() {
+    // One album, or -j 1, has nothing to overlap: keep the direct-to-stdout
+    // path and the per-album bars rather than buffering for no reason.
+    let concurrent = groups.len() > 1 && effective_threads(opts) > 1;
+    let bars = concurrent.then(|| AlbumBars::new(files.len(), opts));
+    let flush = OrderedFlush::default();
+    let entries: Vec<(&PathBuf, &Vec<PathBuf>)> = groups.iter().collect();
+
+    let run_group = |i: usize, dir: &Path, group: &[PathBuf]| -> Result<AlbumRun> {
+        let mut sink = if concurrent {
+            AlbumSink::buffered()
+        } else {
+            AlbumSink::direct()
+        };
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             if i > 0 {
-                println!();
+                writeln!(sink.out())?;
             }
-            println!(
+            writeln!(
+                sink.out(),
                 "{} ({} file(s))",
                 dir.display().to_string().bold(),
                 group.len()
-            );
+            )?;
         }
-        let run = run_album(group, opts)?;
+        let run = run_album(group, opts, &mut sink, bars.as_ref())?;
+        flush.submit(i, sink)?;
+        Ok(run)
+    };
+
+    let runs: Vec<AlbumRun> = if concurrent {
+        entries
+            .par_iter()
+            .enumerate()
+            .map(|(i, &(dir, group))| run_group(i, dir, group))
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        entries
+            .iter()
+            .enumerate()
+            .map(|(i, &(dir, group))| run_group(i, dir, group))
+            .collect::<Result<Vec<_>>>()?
+    };
+    if let Some(bars) = bars {
+        bars.finish();
+    }
+
+    let mut json_results = Vec::with_capacity(files.len());
+    let mut albums = Vec::with_capacity(groups.len());
+    let (mut successful, mut failed) = (0, 0);
+    for ((dir, group), run) in entries.iter().zip(runs) {
         if let Some(album) = run.album {
             albums.push(JsonDirectoryAlbum {
                 directory: dir.display().to_string(),
@@ -264,6 +421,14 @@ pub fn cmd_album_gain_per_directory(files: &[PathBuf], opts: &Options) -> Result
     Ok(())
 }
 
+/// Tick a shared progress bar past files that were never decoded or written,
+/// so it still reaches its total.
+fn advance(pb: Option<&ProgressBar>, files: usize) {
+    if let Some(pb) = pb {
+        pb.inc(files as u64);
+    }
+}
+
 /// Group files by their immediate parent directory, as given on the command
 /// line. Bare file names land in `.`.
 fn group_by_parent(files: &[PathBuf]) -> BTreeMap<PathBuf, Vec<PathBuf>> {
@@ -284,7 +449,16 @@ fn group_by_parent(files: &[PathBuf]) -> BTreeMap<PathBuf, Vec<PathBuf>> {
 /// Analyze and apply album gain to `files` as one album, returning what the
 /// epilogue needs instead of printing JSON or exiting, so the per-directory
 /// driver can aggregate several albums (issue #324).
-fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
+///
+/// Text goes to `sink` rather than straight to stdout, and `bars`, when
+/// present, replaces the per-album progress bars with ones shared by every
+/// album in the run: both are what let several albums run at once (#332).
+fn run_album(
+    files: &[PathBuf],
+    opts: &Options,
+    sink: &mut AlbumSink,
+    bars: Option<&AlbumBars>,
+) -> Result<AlbumRun> {
     let file_refs: Vec<&Path> = files.iter().map(|p| p.as_path()).collect();
 
     let threads = effective_threads(opts);
@@ -295,15 +469,27 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
     let album_analysis = match stored_album_report(files, opts) {
         Some(report) => {
             if opts.output_format == OutputFormat::Text && !opts.quiet {
-                println!("  {} Using stored tags (no rescan)", "->".cyan());
+                writeln!(
+                    sink.out(),
+                    "  {} Using stored tags (no rescan)",
+                    "->".cyan()
+                )?;
             }
+            // Nothing was decoded, so the shared bar has to be told that this
+            // album's files are accounted for or it never reaches its total.
+            advance(bars.and_then(|b| b.analysis.as_ref()), files.len());
             Ok(report)
         }
         None => {
             if opts.output_format == OutputFormat::Text && !opts.quiet {
-                println!("  {} Analyzing tracks...", "->".cyan());
+                writeln!(sink.out(), "  {} Analyzing tracks...", "->".cyan())?;
             }
-            run_album_analysis(&file_refs, opts, opts.skip_errors)
+            run_album_analysis(
+                &file_refs,
+                opts,
+                opts.skip_errors,
+                bars.and_then(|b| b.analysis.as_ref()),
+            )
         }
     };
 
@@ -331,12 +517,24 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
                 if mp4meta::unsupported_audio_format(&files[idx]).is_some() {
                     unsupported[idx] = true;
                     if report_skipped {
-                        eprintln!("  {} {} - {} (skipped)", "!".yellow(), filename, msg);
+                        writeln!(
+                            sink.err(),
+                            "  {} {} - {} (skipped)",
+                            "!".yellow(),
+                            filename,
+                            msg
+                        )?;
                     }
                 } else {
                     failure_count += 1;
                     if report_skipped {
-                        eprintln!("  {} {} - {} (skipped)", "x".red(), filename, msg);
+                        writeln!(
+                            sink.err(),
+                            "  {} {} - {} (skipped)",
+                            "x".red(),
+                            filename,
+                            msg
+                        )?;
                     }
                 }
                 failure_msgs[idx] = Some(msg);
@@ -385,22 +583,26 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
             // mp3gain-compatible TSV rows, emitted before the apply so the
             // global_gain columns describe the files as they were scanned.
             if opts.output_format == OutputFormat::Tsv {
-                emit_album_tsv_rows(files, &album_result, &file_to_track, opts)?;
+                emit_album_tsv_rows(files, &album_result, &file_to_track, opts, sink)?;
             }
 
             if opts.output_format == OutputFormat::Text && !opts.quiet {
-                println!();
-                println!(
+                let out = sink.out();
+                writeln!(out)?;
+                writeln!(
+                    out,
                     "  Album loudness: {:.1} {}",
                     album_result.album_loudness_db(),
                     opts.analysis_mode.unit()
-                );
+                )?;
                 match album_tag_gain_db {
-                    Some(tag_gain) => println!(
+                    Some(tag_gain) => writeln!(
+                        out,
                         "  Album gain:     {:+.2} dB (tag value, audio unchanged)",
                         tag_gain
-                    ),
-                    None => println!(
+                    )?,
+                    None => writeln!(
+                        out,
                         "  Album gain:     {:+.1} dB ({} steps{})",
                         album_result.album_gain_db(),
                         album_result.album_gain_steps(),
@@ -409,10 +611,10 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
                         } else {
                             String::new()
                         }
-                    ),
+                    )?,
                 }
-                println!("  Album peak:     {:.4}", album_result.album_peak());
-                println!();
+                writeln!(out, "  Album peak:     {:.4}", album_result.album_peak())?;
+                writeln!(out)?;
             }
 
             // Apply album gain to all files
@@ -456,10 +658,13 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
                         .collect()
                 } else {
                     if !opts.quiet {
-                        println!("  {} No adjustment needed", ".".cyan());
+                        writeln!(sink.out(), "  {} No adjustment needed", ".".cyan())?;
                     }
                     Vec::new()
                 };
+                // No file is touched, so the shared apply bar has to be
+                // advanced here for the same reason as the analysis one.
+                advance(bars.and_then(|b| b.apply.as_ref()), files.len());
                 return Ok(AlbumRun {
                     json_results,
                     album: Some(json_album),
@@ -468,7 +673,12 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
                 });
             }
 
-            let pb = create_progress_bar(files.len(), opts);
+            // A concurrent run shares one apply bar across every album; a
+            // single album owns its bar and clears it when it is done.
+            let pb = match bars {
+                Some(bars) => bars.apply.clone(),
+                None => create_progress_bar(files.len(), opts),
+            };
             let mut json_results: Vec<JsonFileResult> = Vec::with_capacity(files.len());
             let mut successful = 0;
             let mut failed = 0;
@@ -502,14 +712,11 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
                     })
                     .collect::<Result<Vec<_>>>()?;
 
-                let stdout = io::stdout();
-                let mut handle = stdout.lock();
                 for (_, _, text, _) in &collected {
                     if !text.is_empty() {
-                        handle.write_all(text.as_bytes())?;
+                        sink.out().write_all(text.as_bytes())?;
                     }
                 }
-                drop(handle);
 
                 for (file_idx, _, _, range) in &collected {
                     range_by_idx[*file_idx] = *range;
@@ -559,7 +766,7 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
                                 Some(&album_info),
                             )?;
                             if !text.is_empty() {
-                                print!("{}", text);
+                                write!(sink.out(), "{}", text)?;
                             }
                             range_by_idx[i] = range;
                             result
@@ -576,7 +783,9 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
                 }
             }
 
-            progress_finish(pb);
+            if bars.is_none() {
+                progress_finish(pb);
+            }
 
             // MP3GAIN_ALBUM_MINMAX: the album-wide post-apply global_gain range,
             // matching mp3gain's album (`-a`) mode (issue #210). Written to every
@@ -606,6 +815,10 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
             })
         }
         Err(e) => {
+            // Nothing is applied for a failed album, so its files still have
+            // to be counted off the shared apply bar.
+            advance(bars.and_then(|b| b.apply.as_ref()), files.len());
+
             // An album with nothing adjustable in it (every member ALAC, say)
             // is a set of skips, not a failure: the track path reports exactly
             // that for the same files, and `-a` should not disagree
@@ -641,7 +854,12 @@ fn run_album(files: &[PathBuf], opts: &Options) -> Result<AlbumRun> {
                     .map(|f| JsonFileResult::error(f, e.to_string()))
                     .collect()
             } else {
-                eprintln!("{}: Failed to analyze album: {}", "error".red().bold(), e);
+                writeln!(
+                    sink.err(),
+                    "{}: Failed to analyze album: {}",
+                    "error".red().bold(),
+                    e
+                )?;
                 Vec::new()
             };
             Ok(AlbumRun {
@@ -661,6 +879,7 @@ fn emit_album_tsv_rows(
     album_result: &AlbumGainResult,
     file_to_track: &[Option<usize>],
     opts: &Options,
+    sink: &mut AlbumSink,
 ) -> Result<()> {
     // The frame scan re-reads each file, so run it in parallel the way
     // cmd_info does rather than serializing it inside the emit loop.
@@ -676,8 +895,7 @@ fn emit_album_tsv_rows(
     let mut any_row = false;
     let mut album_max_gain: Option<u8> = None;
     let mut album_min_gain: Option<u8> = None;
-    let stdout = io::stdout();
-    let mut handle = stdout.lock();
+    let handle = sink.out();
     for (i, file) in files.iter().enumerate() {
         let Some(track_idx) = file_to_track[i] else {
             continue;

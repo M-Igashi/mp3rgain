@@ -21,14 +21,21 @@ use crate::util::get_filename;
 /// tick per file via `on_complete`. Shared by `cmd_info` and `cmd_album_gain`.
 /// The thread count follows `-j` (see [`effective_threads`]); only
 /// `skip_errors` varies between callers.
+///
+/// `shared_pb` belongs to a `--per-directory` run, where several albums are
+/// analyzed at once (issue #332). It spans every album, so this call ticks it
+/// once per finished file and never takes the byte-level callback: two albums
+/// decoding concurrently have no single byte total to report.
 pub fn run_album_analysis(
     paths: &[&Path],
     opts: &Options,
     skip_errors: bool,
+    shared_pb: Option<&ProgressBar>,
 ) -> mp3rgain::error::Result<AlbumAnalysisReport> {
     let threads = effective_threads(opts);
     let parallel = threads > 1 && paths.len() > 1;
-    let show_progress = !opts.quiet && opts.output_format == OutputFormat::Text;
+    let show_progress =
+        shared_pb.is_none() && !opts.quiet && opts.output_format == OutputFormat::Text;
     let mp = MultiProgress::new();
     let pb = if show_progress {
         Some(create_album_progress_pb_in(&mp, paths.len(), parallel))
@@ -37,6 +44,12 @@ pub fn run_album_analysis(
     };
     let file_names: Vec<&str> = paths.iter().map(|p| get_filename(p)).collect();
     let (on_progress, on_complete) = album_progress_callbacks(&pb, file_names);
+    let on_shared_complete = |_: usize, path: &Path| {
+        if let Some(pb) = shared_pb {
+            pb.set_message(get_filename(path).to_string());
+            pb.inc(1);
+        }
+    };
 
     let report = replaygain::analyze_album_with_options(
         paths,
@@ -44,8 +57,11 @@ pub fn run_album_analysis(
             track_index: opts.track_index,
             threads,
             skip_errors,
-            on_progress: (!parallel).then_some(&on_progress as _),
-            on_complete: parallel.then_some(&on_complete as _),
+            on_progress: (shared_pb.is_none() && !parallel).then_some(&on_progress as _),
+            on_complete: match shared_pb {
+                Some(_) => Some(&on_shared_complete as _),
+                None => parallel.then_some(&on_complete as _),
+            },
             cancel: None,
             mode: opts.analysis_mode,
             true_peak: opts.true_peak,

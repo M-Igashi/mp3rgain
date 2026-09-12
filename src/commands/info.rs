@@ -200,7 +200,7 @@ fn analyze_set(set: &[(usize, &Path)], opts: &Options) -> Option<AlbumAnalysisRe
         return None;
     }
     let paths: Vec<&Path> = set.iter().map(|&(_, p)| p).collect();
-    run_album_analysis(&paths, opts, true).ok()
+    run_album_analysis(&paths, opts, true, None).ok()
 }
 
 /// Basic per-file info (JSON output or builds without the replaygain feature).
