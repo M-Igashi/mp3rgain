@@ -1018,12 +1018,14 @@ fn album_depth_groups_at_the_requested_level() {
         albums_of(&out)
             .iter()
             .map(|a| {
+                // Relative to the temp root, with the separator normalized:
+                // Windows reports the same groups as `\\Pink Floyd`.
                 a["directory"]
                     .as_str()
                     .expect("depth groups are directories")
                     .trim_start_matches(root_arg)
-                    .trim_start_matches('/')
-                    .to_string()
+                    .trim_start_matches(['/', '\\'])
+                    .replace('\\', "/")
             })
             .collect()
     };
