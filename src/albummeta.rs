@@ -36,7 +36,10 @@ pub enum AlbumLabel {
     Directory(PathBuf),
     /// Grouped by release.
     Release {
+        /// Album artist, or the track artist when no ALBUMARTIST is set.
+        /// `None` when the file carries neither.
         artist: Option<String>,
+        /// The ALBUM tag the group was formed from.
         album: String,
     },
 }
@@ -71,14 +74,20 @@ impl fmt::Display for AlbumLabel {
 /// The tags that decide which album a file belongs to.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct AlbumTags {
+    /// `ALBUM`. Its absence is what makes a file ungroupable by release.
     pub album: Option<String>,
+    /// `ALBUMARTIST`, preferred over [`Self::artist`] for the grouping key.
     pub album_artist: Option<String>,
+    /// `ARTIST`, the fallback when there is no `ALBUMARTIST`.
     pub artist: Option<String>,
     /// `MUSICBRAINZ_ALBUMID`, written by Picard and beets. The only field that
     /// separates two releases carrying the same artist and album string
     /// without guessing at how the user chose to tell them apart.
     pub musicbrainz_album_id: Option<String>,
+    /// `DISCNUMBER`, used with [`Self::track`] to spot two releases that
+    /// collapsed into one group.
     pub disc: Option<u64>,
+    /// `TRACKNUMBER`. See [`repeated_position`].
     pub track: Option<u64>,
 }
 

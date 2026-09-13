@@ -45,6 +45,11 @@ lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
 
+[package.metadata.docs.rs]
+# `serde` is off by default, so without this docs.rs omits the Serialize /
+# Deserialize impls on the public result types.
+all-features = true
+
 [package.metadata.deb]
 maintainer = "M-Igashi <M-Igashi@users.noreply.github.com>"
 copyright = "2025, M-Igashi"

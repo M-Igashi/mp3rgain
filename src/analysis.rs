@@ -239,7 +239,7 @@ pub fn analyze_data(data: &[u8]) -> Result<Mp3Analysis> {
 
 /// Find maximum amplitude in an MP3 or AAC file.
 ///
-/// MP3 files use [`scan_gain_range`] for the global_gain min/max and
+/// MP3 files use `scan_gain_range` for the global_gain min/max and
 /// `replaygain::find_peak_amplitude` for the decoded peak.
 /// AAC files use `aac::analyze_aac_gains` for the gain range and the same
 /// `find_peak_amplitude` call for the peak (issue #173: previously the

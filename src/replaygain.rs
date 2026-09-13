@@ -9,7 +9,7 @@
 //!
 //! Supports both MP3 and AAC/M4A files when compiled with the replaygain feature.
 //!
-//! Reference: https://wiki.hydrogenaud.io/index.php?title=ReplayGain_specification
+//! Reference: <https://wiki.hydrogenaud.io/index.php?title=ReplayGain_specification>
 
 use crate::error::{Error, Result};
 use std::path::Path;
@@ -389,7 +389,7 @@ pub struct AlbumAnalysisReport {
 /// Yule-Walker and Butterworth filter coefficients for equal-loudness weighting
 /// These are the coefficients used in the original ReplayGain algorithm
 /// Supporting all 12 sample rates from the original mp3gain
-/// Reference: https://github.com/cpuimage/ReplayGainAnalysis/blob/master/gain_analysis.c
+/// Reference: <https://github.com/cpuimage/ReplayGainAnalysis/blob/master/gain_analysis.c>
 #[cfg(feature = "replaygain")]
 mod filter_coeffs {
     // =========================================================================

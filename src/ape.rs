@@ -24,7 +24,7 @@ pub const TAG_REPLAYGAIN_ALBUM_PEAK: &str = "REPLAYGAIN_ALBUM_PEAK";
 /// Loudness algorithm the gain values were measured with. Only written by the
 /// BS.1770 modes (`--rg2` / `--r128`) — see [`AnalysisMode::algorithm_tag`].
 ///
-/// [`AnalysisMode::algorithm_tag`]: crate::AnalysisMode::algorithm_tag
+/// [`AnalysisMode::algorithm_tag`]: crate::replaygain::AnalysisMode::algorithm_tag
 pub const TAG_REPLAYGAIN_ALGORITHM: &str = "REPLAYGAIN_ALGORITHM";
 
 /// Every `REPLAYGAIN_*` key mp3rgain writes, for the read/remove paths that
@@ -587,14 +587,14 @@ pub(crate) fn format_rg_peak(peak: f64) -> String {
 }
 
 /// Parse a `REPLAYGAIN_*_GAIN` tag value (e.g. `"+3.500000 dB"`) into dB.
-/// Inverse of [`format_rg_gain`]; tolerant of a missing `dB` suffix and
+/// Inverse of `format_rg_gain`; tolerant of a missing `dB` suffix and
 /// surrounding whitespace.
 pub fn parse_rg_gain(s: &str) -> Option<f64> {
     s.trim().trim_end_matches("dB").trim().parse().ok()
 }
 
 /// Parse a `REPLAYGAIN_*_PEAK` tag value into a linear peak.
-/// Inverse of [`format_rg_peak`].
+/// Inverse of `format_rg_peak`.
 pub fn parse_rg_peak(s: &str) -> Option<f64> {
     s.trim().parse().ok()
 }

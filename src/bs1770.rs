@@ -403,7 +403,7 @@ pub struct Bs1770Analyzer {
 
 impl Bs1770Analyzer {
     /// `channels` beyond the first are analyzed with BS.1770 channel weights;
-    /// see [`channel_weights`] for the layout assumption.
+    /// see `channel_weights` for the layout assumption.
     pub fn new(sample_rate: u32, channels: usize) -> Self {
         let channels = channels.max(1);
         Self {

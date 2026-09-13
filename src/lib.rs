@@ -47,13 +47,17 @@
 //! ## Modules
 //!
 //! - [`analysis`] - MP3 file analysis and amplitude detection
+//! - [`apply`] - The unified apply pipeline both frontends drive ([`apply_with_options`])
 //! - [`gain`] - Gain adjustment operations and the [`GainOptions`] builder
 //! - [`ape`] - APEv2 tag reading, writing, and management
+//! - [`id3v2`] - ReplayGain and undo values in ID3v2 TXXX frames
 //! - [`replaygain`] - ReplayGain loudness analysis
 //! - [`bs1770`] - ITU-R BS.1770 loudness engine for the RG2/R128 modes (feature-gated)
+//! - [`albummeta`] - Album identity tags, deciding which files are one release
 //! - [`mp4meta`] - MP4/M4A metadata handling
 //! - [`aac`] - AAC bitstream parsing (feature-gated)
 //! - [`adts`] - Raw ADTS AAC streams (feature-gated)
+//! - [`error`] - The crate's [`Error`] and [`Result`] types
 //!
 //! ## Technical Details
 //!

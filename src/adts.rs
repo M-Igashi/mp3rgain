@@ -94,7 +94,7 @@ fn has_adts_frames(data: &[u8]) -> bool {
 ///
 /// Reads the head only: a leading ID3v2 tag is skipped by its declared size
 /// (cover art can run to megabytes) and a small window read after it, which
-/// holds the two frame headers [`has_adts_frames`] needs.
+/// holds the two frame headers `has_adts_frames` needs.
 pub fn is_adts_file(file_path: &Path) -> bool {
     use std::io::{Read, Seek, SeekFrom};
     // The largest ADTS frame (`aac_frame_length` is 13 bits, so up to 8191
