@@ -60,6 +60,10 @@ pub enum WorkerEvent {
         successful: Vec<(usize, ReplayGainResult)>,
         failures: Vec<(usize, String)>,
         album_info: AacAlbumInfo,
+        /// How the album was identified, for the per-row tooltip (issue
+        /// #344). `None` when every loaded file is one album and there is
+        /// nothing to name.
+        album_label: Option<String>,
     },
     AlbumAnalysisFailed(String),
 
@@ -297,7 +301,7 @@ pub fn spawn_track_analysis(
 /// behavior-identical to the pre-fix code.
 pub fn spawn_album_analysis(
     ctx: egui::Context,
-    groups: Vec<Vec<(usize, PathBuf)>>,
+    groups: Vec<crate::app::AlbumGroup>,
     mode: AnalysisMode,
 ) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
@@ -311,8 +315,18 @@ pub fn spawn_album_analysis(
         let mut analyzed_total = 0usize;
         let mut skipped_total = 0usize;
         let mut error_groups = 0usize;
+        // Groups that hold more than one release (issue #333). Counted rather
+        // than reported per album: the summary line is where a relationship
+        // between rows belongs, while which album a single row landed in is
+        // the Album Gain tooltip's job (issue #344).
+        let mut merged_groups = 0usize;
 
-        for group in groups {
+        for crate::app::AlbumGroup {
+            label,
+            merged_releases,
+            rows: group,
+        } in groups
+        {
             if cancel_w.load(Ordering::Relaxed) {
                 send(&tx, &ctx, WorkerEvent::Cancelled);
                 return;
@@ -321,6 +335,10 @@ pub fn spawn_album_analysis(
                 continue;
             }
 
+            if merged_releases {
+                merged_groups += 1;
+            }
+            let album_label = label.as_ref().map(ToString::to_string);
             let paths: Vec<PathBuf> = group.iter().map(|(_, p)| p.clone()).collect();
             let original_indices: Vec<usize> = group.iter().map(|(i, _)| *i).collect();
             let path_refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
@@ -380,6 +398,7 @@ pub fn spawn_album_analysis(
                             successful,
                             failures,
                             album_info,
+                            album_label,
                         },
                     );
                 }
@@ -410,6 +429,15 @@ pub fn spawn_album_analysis(
                 "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed",
                 analyzed_total, skipped_total, n
             ),
+        };
+        let message = if merged_groups > 0 {
+            format!(
+                "{}; {} album(s) hold more than one release (same artist and album tag). \
+                 Hover Album Gain to see the grouping.",
+                message, merged_groups
+            )
+        } else {
+            message
         };
         send(&tx, &ctx, WorkerEvent::Done { message });
     });

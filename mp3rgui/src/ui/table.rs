@@ -262,7 +262,14 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                         } else {
                             ui.style().visuals.text_color()
                         };
-                        ui.colored_label(color, format!("{:+.1} dB", g));
+                        let label = ui.colored_label(color, format!("{:+.1} dB", g));
+                        // Which album this row was grouped into (issue #344).
+                        // Under By tags the grouping is otherwise invisible:
+                        // a file that fell back to its folder, or two
+                        // releases that merged, look like any other row.
+                        if let Some(album) = &file.album_label {
+                            label.on_hover_text(format!("Album: {}", album));
+                        }
                     }
                 });
                 row.col(|ui| {

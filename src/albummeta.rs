@@ -6,7 +6,8 @@
 //! a reader per container, the way [`crate::id3v2`] and [`crate::mp4meta`] do
 //! for the ReplayGain tags, would mean three parsers that have to agree.
 
-use std::path::Path;
+use std::fmt;
+use std::path::{Path, PathBuf};
 
 /// What identifies the release a file belongs to.
 ///
@@ -21,6 +22,50 @@ pub enum ReleaseKey {
     /// (album artist or artist, album). The artist half is what keeps two
     /// unrelated "Greatest Hits" apart.
     Titled(String, String),
+}
+
+/// How an album was identified, for display.
+///
+/// Shared by the CLI's text and JSON output and by the GUI's per-row tooltip,
+/// so the two cannot describe the same album differently (issues #333, #338,
+/// #344).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AlbumLabel {
+    /// Grouped by directory: `--album-by=dir` and `--album-depth`, and the
+    /// fallback in tag grouping for a file that carries no ALBUM tag.
+    Directory(PathBuf),
+    /// Grouped by release.
+    Release {
+        artist: Option<String>,
+        album: String,
+    },
+}
+
+impl AlbumLabel {
+    /// The release `tags` describes, or `None` when it carries no ALBUM tag
+    /// and so was not grouped by release at all.
+    pub fn from_tags(tags: &AlbumTags) -> Option<Self> {
+        Some(Self::Release {
+            artist: tags.effective_artist().map(str::to_string),
+            album: tags.album.clone()?,
+        })
+    }
+}
+
+impl fmt::Display for AlbumLabel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Directory(dir) => write!(f, "{}", dir.display()),
+            Self::Release {
+                artist: Some(artist),
+                album,
+            } => write!(f, "{} / {}", artist, album),
+            Self::Release {
+                artist: None,
+                album,
+            } => write!(f, "{}", album),
+        }
+    }
 }
 
 /// The tags that decide which album a file belongs to.
@@ -64,6 +109,35 @@ impl AlbumTags {
             ),
         })
     }
+}
+
+/// The (disc, track) position claimed by more than one file in a set, with
+/// how many claim it, or `None` when every position is unique.
+///
+/// A repeat is structural proof that a group holds more than one release,
+/// whatever convention the user followed to tell the releases apart. That
+/// matters because the conventions are too varied to enumerate, as gcocatre
+/// put it on #333: "it gets complicated as you'd have to imagine all the ways
+/// a user could have been differentiating each release". Nothing is guessed
+/// here; the collision itself is the evidence.
+///
+/// Keyed on (disc, track) rather than track alone so a genuine multi-disc
+/// release stays quiet: disc 1 track 1 and disc 2 track 1 are not a repeat.
+/// Files with no track number are ignored, having no position to claim.
+pub fn repeated_position<'a>(
+    tags: impl IntoIterator<Item = &'a AlbumTags>,
+) -> Option<(Option<u64>, u64, usize)> {
+    let mut seen: std::collections::HashMap<(Option<u64>, u64), usize> =
+        std::collections::HashMap::new();
+    for t in tags {
+        if let Some(track) = t.track {
+            *seen.entry((t.disc, track)).or_insert(0) += 1;
+        }
+    }
+    seen.into_iter()
+        .max_by_key(|(_, count)| *count)
+        .filter(|(_, count)| *count > 1)
+        .map(|((disc, track), count)| (disc, track, count))
 }
 
 /// Read the album identity tags from `path`, or `None` when the file cannot be

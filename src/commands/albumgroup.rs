@@ -6,44 +6,15 @@
 //! levels below each root argument.
 
 use colored::*;
-use mp3rgain::{read_album_tags, AlbumTags, ReleaseKey};
+use mp3rgain::{read_album_tags, repeated_position, AlbumLabel, AlbumTags, ReleaseKey};
 use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use crate::cli::options::{AlbumGrouping, Options};
 
-/// How a set of files was identified as one album.
-pub enum AlbumId {
-    /// By parent directory: `--album-by=dir`, and the fallback in `tag` mode
-    /// for files that carry no ALBUM tag.
-    Directory(PathBuf),
-    /// By release, from the tags.
-    Release {
-        artist: Option<String>,
-        album: String,
-    },
-}
-
-impl AlbumId {
-    /// The heading printed above the album in text output.
-    pub fn heading(&self) -> String {
-        match self {
-            Self::Directory(dir) => dir.display().to_string(),
-            Self::Release {
-                artist: Some(artist),
-                album,
-            } => format!("{} / {}", artist, album),
-            Self::Release {
-                artist: None,
-                album,
-            } => album.clone(),
-        }
-    }
-}
-
 pub struct AlbumGroup {
-    pub id: AlbumId,
+    pub id: AlbumLabel,
     pub files: Vec<PathBuf>,
 }
 
@@ -123,7 +94,7 @@ fn split_release_warnings(groups: &[AlbumGroup]) -> Vec<String> {
     // Only groups under a common parent can be discs of one release.
     let mut siblings: BTreeMap<PathBuf, Vec<usize>> = BTreeMap::new();
     for (i, group) in groups.iter().enumerate() {
-        let AlbumId::Directory(dir) = &group.id else {
+        let AlbumLabel::Directory(dir) = &group.id else {
             continue;
         };
         if let Some(parent) = dir.parent() {
@@ -180,7 +151,7 @@ fn split_release_warnings(groups: &[AlbumGroup]) -> Vec<String> {
                 split.len()
             );
             for &i in split {
-                warning.push_str(&format!("      {}\n", groups[i].id.heading()));
+                warning.push_str(&format!("      {}\n", groups[i].id));
             }
             warning.push_str("      use --album-by=tag to treat them as one release");
             warnings.push(warning);
@@ -220,7 +191,7 @@ fn group_by_directory(entries: impl Iterator<Item = (PathBuf, PathBuf)>) -> Vec<
     groups
         .into_iter()
         .map(|(dir, files)| AlbumGroup {
-            id: AlbumId::Directory(dir),
+            id: AlbumLabel::Directory(dir),
             files,
         })
         .collect()
@@ -282,18 +253,14 @@ fn group_by_tags(files: &[PathBuf]) -> (Vec<AlbumGroup>, Vec<String>) {
     for key in order {
         let indices = members.remove(&key).unwrap_or_default();
         let id = match &key {
-            TagKey::Directory(dir) => AlbumId::Directory(dir.clone()),
-            TagKey::Release(_) => {
-                let first = tags[indices[0]].as_ref();
-                AlbumId::Release {
-                    artist: first
-                        .and_then(|t| t.effective_artist())
-                        .map(|s| s.to_string()),
-                    album: first
-                        .and_then(|t| t.album.clone())
-                        .unwrap_or_else(|| "(unknown album)".to_string()),
-                }
-            }
+            TagKey::Directory(dir) => AlbumLabel::Directory(dir.clone()),
+            TagKey::Release(_) => tags[indices[0]]
+                .as_ref()
+                .and_then(AlbumLabel::from_tags)
+                // The key was built from an ALBUM tag, so this cannot be
+                // reached; falling back keeps the grouping rather than
+                // panicking on a file that changed under us.
+                .unwrap_or_else(|| AlbumLabel::Directory(parent_of(&files[indices[0]]))),
         };
         if let Some(warning) = collision_warning(&id, &indices, &tags, files) {
             warnings.push(warning);
@@ -317,25 +284,17 @@ fn group_by_tags(files: &[PathBuf]) -> (Vec<AlbumGroup>, Vec<String>) {
 /// pair inside one group is structural proof that more than one release is in
 /// it, whatever convention the user was following.
 fn collision_warning(
-    id: &AlbumId,
+    id: &AlbumLabel,
     indices: &[usize],
     tags: &[Option<AlbumTags>],
     files: &[PathBuf],
 ) -> Option<String> {
-    if matches!(id, AlbumId::Directory(_)) {
+    if matches!(id, AlbumLabel::Directory(_)) {
         return None;
     }
 
-    let mut seen: HashMap<(Option<u64>, u64), usize> = HashMap::new();
-    for &i in indices {
-        let Some(t) = tags[i].as_ref() else { continue };
-        let Some(track) = t.track else { continue };
-        *seen.entry((t.disc, track)).or_insert(0) += 1;
-    }
-    let (&(disc, track), &copies) = seen.iter().max_by_key(|(_, &n)| n)?;
-    if copies < 2 {
-        return None;
-    }
+    let (disc, track, copies) =
+        repeated_position(indices.iter().filter_map(|&i| tags[i].as_ref()))?;
 
     let mut dirs: Vec<String> = indices
         .iter()
@@ -351,7 +310,7 @@ fn collision_warning(
     let mut warning = format!(
         "  {} {}: {} appears {} times, so this is probably {} releases sharing one album and artist string\n",
         "!".yellow(),
-        id.heading(),
+        id,
         position,
         copies,
         copies
