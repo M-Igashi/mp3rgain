@@ -93,7 +93,10 @@ pub fn analyze_track(
             track_index: opts.track_index,
             mode: opts.analysis_mode,
             true_peak: opts.true_peak,
-            on_progress: on_progress.as_ref().map(|cb| cb as &dyn Fn(u64, u64)),
+            chunk: opts.chunk_tracks,
+            on_progress: on_progress
+                .as_ref()
+                .map(|cb| cb as &(dyn Fn(u64, u64) + Sync)),
         },
     )
 }

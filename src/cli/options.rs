@@ -75,6 +75,11 @@ pub struct Options {
     // --album-by / --album-depth: with -a, what counts as one album
     // (issues #324, #331, #333). `--per-directory` aliases `--album-by=dir`.
     pub album_by: AlbumGrouping,
+    // Whether a long track may be divided across workers (issue #337). Set
+    // once per run from the file count against the thread count: a run that
+    // already has a file per thread gains nothing from dividing and pays for
+    // the warm-up regions and the seeks.
+    pub chunk_tracks: bool,
     // The path arguments as typed, before -R expanded them. `--album-depth`
     // counts levels from these, and `expand_files_recursive` is where the
     // provenance would otherwise be lost.

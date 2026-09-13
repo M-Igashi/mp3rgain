@@ -268,9 +268,52 @@ Batching matters. Handing one 26 ms packet across the channel at a time costs mo
 
 The work unit is still a whole file for the *decode*, so one file is now decode-bound rather than decode-plus-DSP bound. Going further means splitting the decode itself across workers, which needs container-level seeking: on MP3 that works (`n_frames` is reported and an accurate seek lands a known distance before the target, 1,249 samples in the case measured), but some M4A files report no frame count at all, so a correct implementation needs a fallback and a way to verify each chunk landed exactly where it expected. [#337] stays open for that.
 
+## Dividing one file across workers (3.8, issue [#337])
+
+Overlapping the decode with the analysis left a single file decode-bound. Going past that means splitting the decode, which needs container-level seeking.
+
+A track is divided at 100 ms sub-block boundaries. Each piece seeks to its start minus a one-second warm-up region, decodes forward, runs the filters through the warm-up without accumulating, and then measures its own sub-block sums and peaks. The pieces' sums are concatenated in order and the 400 ms gating blocks are formed from the whole list afterwards, so a block straddling a piece boundary is neither lost nor counted twice.
+
+| Workload | before | after | |
+|---|---|---|---|
+| one 10 min file, `-r --rg2 --true-peak -j 8` | 0.74 s | **0.26 s** | 2.8x |
+| the same at `-j 4` | 0.73 s | **0.35 s** | 2.1x |
+| the same at `-j 2` | 0.74 s | 0.58 s | 1.3x |
+| the same at `-j 1` | 1.04 s | 1.06 s | unchanged by design |
+| 36 files / 3.6 h, `-a --rg2 --true-peak -j 4` | 5.44 s | 5.38 s | unchanged, not divided |
+
+Against the `-j 1` baseline of 1.04 s, a single file now runs 4.0x faster at `-j 8`, where before this change `-j` did nothing at all for one file.
+
+### When a file is divided
+
+Only when the run as a whole has fewer files than threads. A run with a file per thread already has every core busy, and dividing there costs the warm-up regions and the seeks for no gain: measured at 23% *slower* at `-j 4` on the 36-file corpus before this gate was added. The decision is made once for the whole run rather than per album, since six albums of six files saturate the pool just as thoroughly as one list of thirty-six.
+
+Also only for `--rg2` and `--r128`. RG1's equal-loudness filter is a 10th-order Yule-Walker IIR that settles far more slowly than the two biquads of K-weighting, and RG1 is the mp3gain-compatible path where the values have to match bit for bit. RG1 without true peak is already decode-bound at about 880x realtime, so leaving it whole costs nothing.
+
+### When a file is not divided
+
+Every check that cannot be satisfied falls back to the whole-file pass, because the failure mode is a wrong loudness value written into someone's tags:
+
+- No frame count. Some M4A reports none: a 96 kHz HE-AAC file here reports `n_frames = None`.
+- A time base that is not 1/sample_rate, so there is no sample index to divide. The same HE-AAC file reports a 96 kHz base against a 48 kHz rate.
+- A seek that overshoots the piece's first wanted sample, which would leave a hole in the measurement.
+- A piece that produced fewer sub-blocks than the plan said it owed, which means the plan and the file disagree.
+
+### Accuracy
+
+Not bit-identical, unlike [#334] and [#341], and this is the one place in the analysis where that is true.
+
+Each piece starts its filters from zero and converges during the warm-up. The K-weighting's slowest pole is the 38 Hz high-pass, radius about 0.995 at 44.1 kHz, so a second of warm-up leaves a state error around 1e-100 relative. That is far below f64 resolution, but it can still flip the last bit of the filter state, and that carries through to the reported loudness.
+
+Measured worst case over MP3 and AAC corpora: **7.1e-15 dB**. MP3 was exact in most runs; AAC differed by one or two ulp. The tests assert agreement within 1e-9 dB, six orders of margin over the observed worst case, which would still catch a misaligned piece or a dropped block.
+
+True peak has no tolerance to spend: the 49-tap FIR reaches back 48 samples, and the warm-up feeds the meter the real preceding samples, so its history at a piece boundary is exact. The peak is asserted byte-equal.
+
 [#125]: https://github.com/M-Igashi/mp3rgain/issues/125
 [#126]: https://github.com/M-Igashi/mp3rgain/issues/126
 
 [#332]: https://github.com/M-Igashi/mp3rgain/issues/332
 [#334]: https://github.com/M-Igashi/mp3rgain/issues/334
 [#337]: https://github.com/M-Igashi/mp3rgain/issues/337
+[#334]: https://github.com/M-Igashi/mp3rgain/issues/334
+[#341]: https://github.com/M-Igashi/mp3rgain/pull/341

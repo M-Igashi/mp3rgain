@@ -65,6 +65,7 @@ pub fn run_album_analysis(
             cancel: None,
             mode: opts.analysis_mode,
             true_peak: opts.true_peak,
+            chunk: opts.chunk_tracks,
         },
     );
 

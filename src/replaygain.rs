@@ -27,7 +27,7 @@ use symphonia::core::codecs::audio::{AudioDecoderOptions, CODEC_ID_NULL_AUDIO};
 #[cfg(feature = "replaygain")]
 use symphonia::core::formats::probe::Hint;
 #[cfg(feature = "replaygain")]
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::{FormatOptions, SeekMode, SeekTo};
 #[cfg(feature = "replaygain")]
 use symphonia::core::io::{MediaSource, MediaSourceStream};
 #[cfg(feature = "replaygain")]
@@ -1221,10 +1221,21 @@ enum TrackAnalyzer {
 fn analyze_track_internal(
     file_path: &Path,
     track_index: Option<u32>,
-    progress: Option<&dyn Fn(u64, u64)>,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
     mode: AnalysisMode,
     true_peak: bool,
+    chunk: bool,
 ) -> Result<TrackAnalysisInternal> {
+    // A long track is divided across workers when the caller says there is
+    // spare parallelism for it (issue #337); anything that makes the division
+    // untrustworthy falls through to the ordinary whole-file pass below.
+    if chunk {
+        if let Some(internal) =
+            analyze_track_chunked(file_path, track_index, progress, mode, true_peak)
+        {
+            return Ok(internal);
+        }
+    }
     analyze_track_decoded(file_path, track_index, progress, mode, true_peak)
         .map_err(|e| e.refine_format(file_path))
 }
@@ -1233,7 +1244,7 @@ fn analyze_track_internal(
 fn analyze_track_decoded(
     file_path: &Path,
     track_index: Option<u32>,
-    progress: Option<&dyn Fn(u64, u64)>,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
     mode: AnalysisMode,
     true_peak: bool,
 ) -> Result<TrackAnalysisInternal> {
@@ -1478,7 +1489,7 @@ pub fn analyze_track_with_mode(
     file_path: &Path,
     track_index: Option<u32>,
     mode: AnalysisMode,
-    on_progress: Option<&dyn Fn(u64, u64)>,
+    on_progress: Option<&(dyn Fn(u64, u64) + Sync)>,
 ) -> Result<ReplayGainResult> {
     analyze_track_with_options(
         file_path,
@@ -1508,7 +1519,16 @@ pub struct TrackAnalysisOptions<'a> {
     /// mp3gain's `MAX_AMPLITUDE` semantics and must stay bit-compatible.
     pub true_peak: bool,
     /// Byte-level progress callback, as in [`analyze_track_with_progress`].
-    pub on_progress: Option<&'a dyn Fn(u64, u64)>,
+    pub on_progress: Option<&'a (dyn Fn(u64, u64) + Sync)>,
+    /// Divide a long track across rayon workers instead of decoding it in one
+    /// pass (issue #337).
+    ///
+    /// Only worth setting when the pool has room, which is why it is the
+    /// caller's decision: a run that already has a file per thread gains
+    /// nothing and pays for the warm-up regions and the seeks. Ignored for
+    /// [`AnalysisMode::Rg1`] and for containers whose frame count or time base
+    /// cannot be trusted, which fall back to the whole-file pass.
+    pub chunk: bool,
 }
 
 /// Analyze a single track with the full option set (issue #292). The other
@@ -1524,6 +1544,7 @@ pub fn analyze_track_with_options(
         opts.on_progress,
         opts.mode,
         opts.true_peak,
+        opts.chunk,
     )?;
     Ok(internal.result)
 }
@@ -1538,7 +1559,7 @@ pub fn analyze_track_with_options(
 pub fn analyze_track_with_progress(
     file_path: &Path,
     track_index: Option<u32>,
-    on_progress: &dyn Fn(u64, u64),
+    on_progress: &(dyn Fn(u64, u64) + Sync),
 ) -> Result<ReplayGainResult> {
     analyze_track_with_mode(
         file_path,
@@ -1817,7 +1838,7 @@ fn decode_pipelined(
     track_id: u32,
     channels: usize,
     analyzer: &mut crate::bs1770::Bs1770Analyzer,
-    progress: Option<&dyn Fn(u64, u64)>,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
     tracker: Option<&Arc<AtomicU64>>,
     file_size: u64,
 ) -> Result<f64> {
@@ -1887,8 +1908,355 @@ fn decode_pipelined(
     })
 }
 
+// ============================================================================
+// Chunked single-track analysis (issue #337)
+// ============================================================================
+
+/// Minimum audio per chunk. Every chunk decodes a warm-up region it then
+/// throws away, so chunks much shorter than this spend a visible share of
+/// their time warming up.
+#[cfg(feature = "replaygain")]
+const CHUNK_MIN_SECS: usize = 30;
+
+/// Audio decoded before a chunk's first wanted sample and discarded.
+///
+/// A second is far more than any component needs. The 49-tap true-peak FIR
+/// reaches back 48 samples, so its history is exact well before the chunk
+/// starts. The K-weighting's slowest pole is the 38 Hz high-pass, radius about
+/// 0.9946 at 44.1 kHz, which leaves a state error near 1e-52 after a second,
+/// below anything f64 can represent. MP3's bit reservoir reaches back a
+/// handful of frames at most.
+#[cfg(feature = "replaygain")]
+const CHUNK_WARMUP_SECS: f64 = 1.0;
+
+/// How one track is divided for analysis.
+#[cfg(feature = "replaygain")]
+struct ChunkPlan {
+    sample_rate: u32,
+    channels: usize,
+    track_id: u32,
+    subblock_len: usize,
+    /// Sub-block ranges, contiguous and covering the whole track.
+    bounds: Vec<(usize, usize)>,
+}
+
+/// What one chunk measured.
+#[cfg(feature = "replaygain")]
+struct ChunkOutcome {
+    subblock_sums: Vec<f64>,
+    peak: f64,
+    true_peak: Option<f64>,
+}
+
+/// Decide how to divide `file_path`, or `None` when it cannot be divided.
+///
+/// Every reason to decline is a reason the sample grid cannot be trusted, and
+/// the caller falls back to analyzing the whole file in one pass. Silently
+/// dividing a file whose frame count or time base is a guess would write a
+/// wrong loudness value, which is worse than being slow.
+#[cfg(feature = "replaygain")]
+fn plan_chunks(file_path: &Path, track_index: Option<u32>, threads: usize) -> Option<ChunkPlan> {
+    let file = std::fs::File::open(file_path).ok()?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let format = symphonia::default::get_probe()
+        .probe(
+            &hint,
+            mss,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
+        .ok()?;
+
+    let audio_tracks: Vec<_> = format
+        .tracks()
+        .iter()
+        .filter(|t| {
+            t.codec_params
+                .as_ref()
+                .and_then(|p| p.audio())
+                .is_some_and(|a| a.codec != CODEC_ID_NULL_AUDIO)
+        })
+        .collect();
+    let track = match track_index {
+        Some(idx) => audio_tracks.get(idx as usize)?,
+        None => audio_tracks.first()?,
+    };
+
+    let audio = track.codec_params.as_ref()?.audio()?;
+    let sample_rate = audio.sample_rate?;
+    let channels = audio.channels.as_ref().map(|c| c.count()).unwrap_or(2);
+    // No frame count means no grid to divide. Common enough: HE-AAC in MP4
+    // reports none here.
+    let n_frames = track.num_frames?;
+    // The grid is in samples, so a time base that is not 1/sample_rate has no
+    // sample index to divide by. HE-AAC reports a 96 kHz base against a 48 kHz
+    // rate, for instance.
+    let time_base = track.time_base?;
+    if time_base.numer.get() != 1 || time_base.denom.get() != sample_rate {
+        return None;
+    }
+
+    let subblock_len = (sample_rate as usize + 5) / 10;
+    let total = n_frames as usize / subblock_len;
+    let min_per_chunk = CHUNK_MIN_SECS * 10;
+    let chunks = (total / min_per_chunk).min(threads);
+    if chunks < 2 {
+        return None;
+    }
+
+    let per = total.div_ceil(chunks);
+    let bounds: Vec<(usize, usize)> = (0..chunks)
+        .map(|i| (i * per, ((i + 1) * per).min(total)))
+        .filter(|(start, end)| start < end)
+        .collect();
+    (bounds.len() > 1).then_some(ChunkPlan {
+        sample_rate,
+        channels,
+        track_id: track.id,
+        subblock_len,
+        bounds,
+    })
+}
+
+/// Analyze one chunk of a track.
+///
+/// Seeks to a warm-up region before the chunk's first wanted sample, runs the
+/// filters through it without accumulating, then accumulates the chunk's own
+/// sub-block sums. The last chunk runs to end of file so the peaks cover the
+/// trailing samples that no complete sub-block contains, exactly as the
+/// whole-file pass does.
+#[cfg(feature = "replaygain")]
+fn analyze_chunk(
+    file_path: &Path,
+    plan: &ChunkPlan,
+    index: usize,
+    mode: AnalysisMode,
+    true_peak: bool,
+) -> Result<ChunkOutcome> {
+    let (start_sb, end_sb) = plan.bounds[index];
+    let start = (start_sb * plan.subblock_len) as u64;
+    let is_last = index + 1 == plan.bounds.len();
+    let end = (!is_last).then(|| (end_sb * plan.subblock_len) as u64);
+
+    let file = std::fs::File::open(file_path).map_err(|e| Error::io_open(file_path, e))?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let mut format = symphonia::default::get_probe()
+        .probe(
+            &hint,
+            mss,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
+        .map_err(|e| Error::ProbeFailed {
+            path: file_path.to_path_buf(),
+            source: Box::new(e),
+        })?;
+    let audio = format
+        .tracks()
+        .iter()
+        .find(|t| t.id == plan.track_id)
+        .and_then(|t| t.codec_params.as_ref())
+        .and_then(|p| p.audio())
+        .ok_or(Error::NoAudioTrack)?
+        .clone();
+    let mut decoder = symphonia::default::get_codecs()
+        .make_audio_decoder(&audio, &AudioDecoderOptions::default())
+        .map_err(|e| Error::Decode(Box::new(e)))?;
+
+    if start > 0 {
+        let warmup = (CHUNK_WARMUP_SECS * plan.sample_rate as f64) as u64;
+        let target = start.saturating_sub(warmup);
+        format
+            .seek(
+                SeekMode::Accurate,
+                SeekTo::Timestamp {
+                    ts: symphonia::core::units::Timestamp::new(target as i64),
+                    track_id: plan.track_id,
+                },
+            )
+            .map_err(|e| Error::Decode(Box::new(e)))?;
+    }
+
+    let mut analyzer = if true_peak && mode != AnalysisMode::Rg1 {
+        crate::bs1770::Bs1770Analyzer::new_with_true_peak(plan.sample_rate, plan.channels)
+    } else {
+        crate::bs1770::Bs1770Analyzer::new(plan.sample_rate, plan.channels)
+    };
+    let mut peak = 0.0f64;
+    let mut samples: Vec<f64> = Vec::new();
+    let mut position: Option<u64> = None;
+    // Whether the warm-up region is still running, and therefore whether the
+    // peaks measured so far have to be thrown away before the chunk's own
+    // range starts.
+    let mut warming = start > 0;
+
+    loop {
+        let packet = match format.next_packet() {
+            Ok(Some(p)) => p,
+            Ok(None) => break,
+            Err(e) => return Err(Error::Decode(Box::new(e))),
+        };
+        if packet.track_id != plan.track_id {
+            continue;
+        }
+        let pts = packet.pts.get().max(0) as u64;
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
+            Err(e) => return Err(Error::Decode(Box::new(e))),
+        };
+        // The first packet fixes where this chunk is reading from. Landing
+        // after the first wanted sample would leave a hole in the
+        // measurement, so refuse rather than measure the wrong range.
+        let mut at = match position {
+            None if pts > start => {
+                return Err(Error::Decode(Box::new(
+                    symphonia::core::errors::Error::Unsupported("seek overshot the chunk start"),
+                )))
+            }
+            None => pts,
+            Some(previous) => previous.max(pts),
+        };
+
+        samples.clear();
+        append_interleaved(&decoded, &mut samples);
+        for frame in samples.chunks_exact(plan.channels) {
+            if end.is_some_and(|end| at >= end) {
+                return Ok(ChunkOutcome {
+                    peak,
+                    true_peak: analyzer.true_peak(),
+                    subblock_sums: analyzer.into_subblock_sums(),
+                });
+            }
+            if at < start {
+                analyzer.warm_up_frame(frame);
+                at += 1;
+                continue;
+            }
+            if warming {
+                // The history is now entirely real samples, so the meter is
+                // exact from here. What it reported while the history was
+                // still partly zeros is a cold-start artifact and would
+                // otherwise be reported as a peak the signal never reaches.
+                analyzer.reset_true_peak();
+                peak = 0.0;
+                warming = false;
+            }
+            for &v in frame {
+                peak = peak.max(v.abs());
+            }
+            analyzer.add_frame(frame);
+            at += 1;
+        }
+        position = Some(at);
+    }
+
+    Ok(ChunkOutcome {
+        peak,
+        true_peak: analyzer.true_peak(),
+        subblock_sums: analyzer.into_subblock_sums(),
+    })
+}
+
+/// Analyze one track by dividing it across workers, or `None` when it cannot
+/// be divided or the division did not come out as planned.
+///
+/// `None` always means "analyze this file the ordinary way instead", never
+/// "the file is broken": the caller falls back, so every check here can be
+/// conservative without costing anything but speed.
+#[cfg(feature = "replaygain")]
+fn analyze_track_chunked(
+    file_path: &Path,
+    track_index: Option<u32>,
+    progress: Option<&(dyn Fn(u64, u64) + Sync)>,
+    mode: AnalysisMode,
+    true_peak: bool,
+) -> Option<TrackAnalysisInternal> {
+    use rayon::prelude::*;
+
+    // RG1 is never divided. Its equal-loudness filter is a 10th-order
+    // Yule-Walker IIR whose settling time is far longer than the two biquads
+    // of K-weighting, and RG1 is the path whose values have to match mp3gain
+    // bit for bit. It is also already decode-bound, so there is nothing here
+    // to win.
+    if mode == AnalysisMode::Rg1 {
+        return None;
+    }
+    let threads = rayon::current_num_threads();
+    if threads < 2 {
+        return None;
+    }
+    let plan = plan_chunks(file_path, track_index, threads)?;
+
+    let file_size = std::fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
+    let finished = AtomicU64::new(0);
+    let total_chunks = plan.bounds.len() as u64;
+    let outcomes: Vec<Result<ChunkOutcome>> = (0..plan.bounds.len())
+        .into_par_iter()
+        .map(|i| {
+            let outcome = analyze_chunk(file_path, &plan, i, mode, true_peak);
+            // Chunk granularity, since a divided read has no single byte
+            // position to report.
+            if let Some(cb) = progress {
+                let done = finished.fetch_add(1, Ordering::Relaxed) + 1;
+                cb(done * file_size / total_chunks, file_size);
+            }
+            outcome
+        })
+        .collect();
+
+    let mut subblock_sums = Vec::new();
+    let mut peak = 0.0f64;
+    let mut measured_true_peak: Option<f64> = None;
+    for (i, outcome) in outcomes.into_iter().enumerate() {
+        let outcome = outcome.ok()?;
+        // Every chunk but the last owes an exact number of sub-blocks. A short
+        // count means the plan and the file disagree, which is exactly what
+        // the whole-file fallback is for.
+        let (start, end) = plan.bounds[i];
+        if i + 1 < plan.bounds.len() && outcome.subblock_sums.len() != end - start {
+            return None;
+        }
+        subblock_sums.extend(outcome.subblock_sums);
+        peak = peak.max(outcome.peak);
+        if let Some(tp) = outcome.true_peak {
+            measured_true_peak = Some(measured_true_peak.map_or(tp, |v: f64| v.max(tp)));
+        }
+    }
+
+    let blocks =
+        crate::bs1770::BlockEnergies::from_subblock_sums(&subblock_sums, plan.subblock_len);
+    let mut is_true_peak = false;
+    if let Some(tp) = measured_true_peak {
+        peak = peak.max(tp);
+        is_true_peak = true;
+    }
+    let (loudness_db, gain_db) = lufs_loudness_and_gain(blocks.integrated_lufs(), mode);
+    let mut result = ReplayGainResult::new(
+        loudness_db,
+        gain_db,
+        peak,
+        plan.sample_rate,
+        detect_file_type(file_path),
+        mode,
+    );
+    result.true_peak = is_true_peak;
+    Some(TrackAnalysisInternal {
+        result,
+        state: LoudnessState::Bs1770(blocks),
+    })
+}
+
 /// Byte-level progress callback: `(file_index, bytes_read, total_bytes)`.
-pub type AlbumProgressFn<'a> = &'a dyn Fn(usize, u64, u64);
+pub type AlbumProgressFn<'a> = &'a (dyn Fn(usize, u64, u64) + Sync);
 
 /// Per-file completion callback: `(file_index, path)`.
 pub type AlbumCompleteFn<'a> = &'a (dyn Fn(usize, &Path) + Sync);
@@ -1930,6 +2298,9 @@ pub struct AlbumAnalysisOptions<'a> {
     /// BS.1770 modes (issue #292); see [`TrackAnalysisOptions::true_peak`].
     /// Ignored in [`AnalysisMode::Rg1`].
     pub true_peak: bool,
+    /// Divide each track across rayon workers; see
+    /// [`TrackAnalysisOptions::chunk`].
+    pub chunk: bool,
 }
 
 /// Analyze multiple tracks for album gain (strict, serial, no callbacks).
@@ -1974,6 +2345,7 @@ fn analyze_album_serial(
         cancel,
         mode,
         true_peak,
+        chunk,
         ..
     } = *opts;
     let mut track_results = Vec::with_capacity(files.len());
@@ -1988,12 +2360,18 @@ fn analyze_album_serial(
             return Err(Error::Cancelled);
         }
         // Create a per-file progress callback that includes the file index
-        let file_progress: Option<Box<dyn Fn(u64, u64) + '_>> =
+        let file_progress: Option<Box<dyn Fn(u64, u64) + Sync + '_>> =
             on_progress.map(|cb| Box::new(move |bytes, total| cb(i, bytes, total)) as _);
 
         // Analyze each track and get its loudness state
-        let track =
-            analyze_track_internal(file, track_index, file_progress.as_deref(), mode, true_peak);
+        let track = analyze_track_internal(
+            file,
+            track_index,
+            file_progress.as_deref(),
+            mode,
+            true_peak,
+            chunk,
+        );
         if let Some(cb) = on_complete {
             cb(i, file);
         }
@@ -2044,6 +2422,7 @@ fn analyze_album_parallel_internal(
         cancel,
         mode,
         true_peak,
+        chunk,
         ..
     } = *opts;
 
@@ -2065,7 +2444,7 @@ fn analyze_album_parallel_internal(
                 if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
                     return Err(Error::Cancelled);
                 }
-                let r = analyze_track_internal(file, track_index, None, mode, true_peak);
+                let r = analyze_track_internal(file, track_index, None, mode, true_peak, chunk);
                 if let Some(cb) = on_complete {
                     cb(i, file);
                 }
@@ -2099,7 +2478,7 @@ fn analyze_album_parallel_internal(
                 if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
                     return Err(Error::Cancelled);
                 }
-                let r = analyze_track_internal(file, track_index, None, mode, true_peak);
+                let r = analyze_track_internal(file, track_index, None, mode, true_peak, chunk);
                 if let Some(cb) = on_complete {
                     cb(i, file);
                 }
@@ -2164,7 +2543,7 @@ pub fn analyze_track_with_mode(
     _file_path: &Path,
     _track_index: Option<u32>,
     _mode: AnalysisMode,
-    _on_progress: Option<&dyn Fn(u64, u64)>,
+    _on_progress: Option<&(dyn Fn(u64, u64) + Sync)>,
 ) -> Result<ReplayGainResult> {
     Err(Error::FeatureNotAvailable {
         feature: "ReplayGain analysis",
@@ -2187,7 +2566,7 @@ pub fn analyze_track_with_options(
 pub fn analyze_track_with_progress(
     _file_path: &Path,
     _track_index: Option<u32>,
-    _on_progress: &dyn Fn(u64, u64),
+    _on_progress: &(dyn Fn(u64, u64) + Sync),
 ) -> Result<ReplayGainResult> {
     Err(Error::FeatureNotAvailable {
         feature: "ReplayGain analysis",
@@ -2413,6 +2792,47 @@ pub fn find_peak_amplitude_in_data(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The planner is what decides whether a track is divided at all, so the
+    /// value comparisons elsewhere would be vacuous if it quietly declined
+    /// every file. This asserts it engages, and that the ranges it produces
+    /// tile the track without a gap or an overlap (issue #337).
+    #[cfg(feature = "replaygain")]
+    #[test]
+    fn plan_chunks_divides_a_long_track_and_leaves_a_short_one_alone() {
+        let short = Path::new("tests/fixtures/test_stereo.mp3");
+        let fixture = std::fs::read(short).expect("fixture");
+        let dir = std::env::temp_dir().join(format!("mp3rgain_chunkplan_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let long = dir.join("long.mp3");
+        // MP3 frames concatenate, so repeating a one-second fixture makes a
+        // two-minute track without an encoder in the test. The ID3 tag and the
+        // leading Xing/Info frame have to go: they declare a one-second frame
+        // count, which the planner would believe over the file itself.
+        let id3_len = {
+            let s = &fixture[6..10];
+            10 + (((s[0] & 0x7f) as usize) << 21
+                | ((s[1] & 0x7f) as usize) << 14
+                | ((s[2] & 0x7f) as usize) << 7
+                | (s[3] & 0x7f) as usize)
+        };
+        // 320 kbps at 44.1 kHz is a 1044-byte frame, plus one padding byte.
+        let body = &fixture[id3_len + 1045..];
+        std::fs::write(&long, body.repeat(120)).expect("write");
+
+        let plan = plan_chunks(&long, None, 4).expect("two minutes divides four ways");
+        assert_eq!(plan.bounds.len(), 4);
+        assert_eq!(plan.bounds[0].0, 0, "the first chunk starts at the start");
+        for pair in plan.bounds.windows(2) {
+            assert_eq!(pair[0].1, pair[1].0, "chunks must tile the track");
+        }
+
+        // One second is far below the minimum chunk length, so it stays whole
+        // rather than being divided into pieces that are mostly warm-up.
+        assert!(plan_chunks(short, None, 4).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn test_replaygain_availability() {

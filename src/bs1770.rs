@@ -181,6 +181,26 @@ impl BlockEnergies {
         self.energies.extend_from_slice(&other.energies);
     }
 
+    /// Form the 400 ms gating blocks from a track's 100 ms sub-block sums.
+    ///
+    /// A block is four consecutive sub-blocks, so consecutive blocks overlap
+    /// by 75%, and a trailing partial sub-block is not in the list at all: the
+    /// spec measures only complete blocks.
+    ///
+    /// Taking the sums as input rather than folding blocks as they complete is
+    /// what lets one track be analyzed in several pieces (issue #337). A block
+    /// straddling a piece boundary is formed here, from the concatenation, so
+    /// it is not lost and not counted twice.
+    pub fn from_subblock_sums(sums: &[f64], subblock_len: usize) -> Self {
+        let divisor = (4 * subblock_len) as f64;
+        Self {
+            energies: sums
+                .windows(4)
+                .map(|window| window.iter().sum::<f64>() / divisor)
+                .collect(),
+        }
+    }
+
     /// Integrated loudness in LUFS after absolute and relative gating.
     ///
     /// Returns `f64::NEG_INFINITY` when no block survives the gates
@@ -343,6 +363,18 @@ impl TruePeakMeter {
     pub fn peak(&self) -> f64 {
         self.peak
     }
+
+    /// Forget the maximum, keeping the filter history.
+    ///
+    /// A chunk of a track calls this once its warm-up ends (issue #337).
+    /// Until then the history is still partly the zeros it started with, and
+    /// an interpolator fed a step from silence overshoots: the values it
+    /// reports during warm-up are an artifact of the cold start, not peaks the
+    /// signal ever reaches. After 48 real samples the history is entirely real
+    /// and everything from there is exact.
+    pub fn reset_peak(&mut self) {
+        self.peak = 0.0;
+    }
 }
 
 /// Streaming BS.1770 analyzer for one track.
@@ -362,11 +394,11 @@ pub struct Bs1770Analyzer {
     /// Weighted sum of squares accumulating in the current sub-block.
     subblock_sum: f64,
     subblock_samples: usize,
-    /// Sums of the last up-to-3 completed sub-blocks, oldest first; a gating
-    /// block is these plus the sub-block that just completed (75% overlap).
-    recent: [f64; 3],
-    recent_len: usize,
-    blocks: BlockEnergies,
+    /// One weighted sum of squares per completed 100 ms sub-block. The gating
+    /// blocks are formed from this at the end rather than as each sub-block
+    /// completes, so a track analyzed in pieces can concatenate the pieces'
+    /// sums and get the same blocks (issue #337).
+    subblock_sums: Vec<f64>,
 }
 
 impl Bs1770Analyzer {
@@ -381,9 +413,7 @@ impl Bs1770Analyzer {
             subblock_len: (sample_rate as usize + 5) / 10,
             subblock_sum: 0.0,
             subblock_samples: 0,
-            recent: [0.0; 3],
-            recent_len: 0,
-            blocks: BlockEnergies::new(),
+            subblock_sums: Vec::new(),
         }
     }
 
@@ -399,6 +429,14 @@ impl Bs1770Analyzer {
     /// [`new_with_true_peak`](Self::new_with_true_peak).
     pub fn true_peak(&self) -> Option<f64> {
         self.true_peak.as_ref().map(TruePeakMeter::peak)
+    }
+
+    /// Discard the true peak measured so far, keeping the filter history; see
+    /// [`TruePeakMeter::reset_peak`].
+    pub fn reset_true_peak(&mut self) {
+        if let Some(meter) = &mut self.true_peak {
+            meter.reset_peak();
+        }
     }
 
     /// Add one frame of normalized samples (full scale = 1.0), one per
@@ -421,26 +459,45 @@ impl Bs1770Analyzer {
         }
     }
 
-    fn finish_subblock(&mut self) {
-        let sum = self.subblock_sum;
-        if self.recent_len == 3 {
-            let block_sum = self.recent.iter().sum::<f64>() + sum;
-            self.blocks
-                .energies
-                .push(block_sum / (4 * self.subblock_len) as f64);
-            self.recent.rotate_left(1);
-            self.recent[2] = sum;
-        } else {
-            self.recent[self.recent_len] = sum;
-            self.recent_len += 1;
+    /// Advance the filter state without accumulating anything.
+    ///
+    /// A chunk of a track feeds the samples before its first wanted one
+    /// through here (issue #337): the K-weighting biquads and the true-peak
+    /// FIR history converge to the state the whole-file pass would have had,
+    /// while the sub-block sums stay owned by whichever chunk the samples
+    /// actually belong to. The peaks are deliberately still updated, since a
+    /// maximum over a superset of the file's samples is the same maximum.
+    #[inline]
+    pub fn warm_up_frame(&mut self, frame: &[f64]) {
+        if let Some(meter) = &mut self.true_peak {
+            meter.add_frame(frame);
         }
+        for (filter, &sample) in self.filters.iter_mut().zip(frame) {
+            filter.process(sample);
+        }
+    }
+
+    fn finish_subblock(&mut self) {
+        self.subblock_sums.push(self.subblock_sum);
         self.subblock_sum = 0.0;
         self.subblock_samples = 0;
     }
 
+    /// Samples per 100 ms sub-block, which a caller analyzing a track in
+    /// pieces needs in order to align the pieces to the same grid.
+    pub fn subblock_len(&self) -> usize {
+        self.subblock_len
+    }
+
     /// Finish analysis, returning the gating blocks for this track.
     pub fn into_blocks(self) -> BlockEnergies {
-        self.blocks
+        BlockEnergies::from_subblock_sums(&self.subblock_sums, self.subblock_len)
+    }
+
+    /// The per-sub-block sums instead of the blocks, for a caller that will
+    /// concatenate several pieces of one track before gating (issue #337).
+    pub fn into_subblock_sums(self) -> Vec<f64> {
+        self.subblock_sums
     }
 }
 
@@ -731,6 +788,38 @@ mod tests {
                 "{rate} Hz, {channels} channel(s)"
             );
         }
+    }
+
+    /// A cold interpolator overshoots. Fed a signal that starts from silence,
+    /// its output can exceed anything the signal itself reaches, because half
+    /// the 49-tap window is still the zeros it was initialized with.
+    ///
+    /// That is why a chunk of a track throws away what its meter measured
+    /// during the warm-up region (issue #337): those values are an artifact of
+    /// the cold start, and reporting one as the track's true peak is how a
+    /// divided run came out 19% high on Windows before this was fixed.
+    #[test]
+    fn true_peak_overshoots_from_a_cold_start() {
+        let level = 0.5;
+        // Alternating sign is what the interpolator responds to most strongly.
+        let mut meter = TruePeakMeter::new(44100, 1);
+        for n in 0..24 {
+            meter.add_frame(&[if n % 2 == 0 { level } else { -level }]);
+        }
+        let cold = meter.peak();
+        assert!(
+            cold > level * 1.05,
+            "a cold start should overshoot, got {cold}"
+        );
+
+        // With the history entirely real, the same signal settles to a value
+        // the whole-file pass would also report.
+        meter.reset_peak();
+        for n in 24..4096 {
+            meter.add_frame(&[if n % 2 == 0 { level } else { -level }]);
+        }
+        let warm = meter.peak();
+        assert!(warm < cold, "warm {warm} should be below the cold {cold}");
     }
 
     #[test]

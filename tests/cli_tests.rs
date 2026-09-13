@@ -730,6 +730,86 @@ fn per_directory_output_is_identical_whatever_the_thread_count() {
     }
 }
 
+/// Write a two-minute MP3 built by repeating a one-second fixture's frames.
+///
+/// MP3 frames concatenate, so this needs no encoder. The ID3 tag and the
+/// leading Xing/Info frame are dropped because they declare a one-second frame
+/// count, and a track that claims to be one second long is never divided.
+fn write_long_mp3(dst: &Path) {
+    let fixture = fs::read("tests/fixtures/test_stereo.mp3").expect("fixture");
+    let size = &fixture[6..10];
+    let id3_len = 10
+        + (((size[0] & 0x7f) as usize) << 21
+            | ((size[1] & 0x7f) as usize) << 14
+            | ((size[2] & 0x7f) as usize) << 7
+            | (size[3] & 0x7f) as usize);
+    // 320 kbps at 44.1 kHz is a 1044-byte frame, plus one padding byte.
+    let body = &fixture[id3_len + 1045..];
+    fs::create_dir_all(dst.parent().unwrap()).unwrap();
+    fs::write(dst, body.repeat(120)).expect("write long mp3");
+}
+
+/// A long track is divided across workers when the pool has room for it
+/// (issue #337). Each piece starts its filters from zero and runs them through
+/// a warm-up region it discards, so the result is not guaranteed bit-identical
+/// the way the pipeline in #341 is: the filter state at a piece boundary can
+/// differ from the whole-file state in its last bit, which carries through to
+/// the reported loudness.
+///
+/// The bound asserted here is 1e-9 dB against a measured worst case of 7e-15
+/// on MP3 and AAC corpora, so it is six orders of margin and would still catch
+/// a real error such as a misaligned piece or a dropped block.
+#[test]
+fn chunked_analysis_matches_the_whole_file_pass() {
+    let album = TempAlbum::new(&[]);
+    let long = album.dir.join("long.mp3");
+    write_long_mp3(&long);
+    let path = long.to_str().unwrap();
+
+    for mode in [
+        vec!["--rg2", "--true-peak"],
+        vec!["--r128", "--true-peak"],
+        vec!["--rg2"],
+    ] {
+        let measure = |jobs: &'static str| -> (f64, f64) {
+            let mut args = vec!["-r"];
+            args.extend_from_slice(&mode);
+            args.extend_from_slice(&["-n", "-o", "json", "-j", jobs, path]);
+            let json = json_of(&run(&args));
+            let file = &json["files"][0];
+            (
+                file["loudness_db"].as_f64().expect("loudness"),
+                file["peak"].as_f64().expect("peak"),
+            )
+        };
+        let (whole_loudness, whole_peak) = measure("1");
+        let (chunked_loudness, chunked_peak) = measure("8");
+        assert!(
+            (whole_loudness - chunked_loudness).abs() < 1e-9,
+            "{mode:?}: {whole_loudness} vs {chunked_loudness}"
+        );
+        // The true-peak history is exact at a piece boundary, since the
+        // warm-up feeds the meter the real preceding samples, so the peak has
+        // no tolerance to spend.
+        assert_eq!(whole_peak, chunked_peak, "{mode:?}");
+    }
+}
+
+/// RG1 is never divided: its equal-loudness filter settles far more slowly
+/// than the two biquads of K-weighting, and it is the path whose values have
+/// to match mp3gain bit for bit.
+#[test]
+fn rg1_is_never_chunked() {
+    let album = TempAlbum::new(&[]);
+    let long = album.dir.join("long.mp3");
+    write_long_mp3(&long);
+    let path = long.to_str().unwrap();
+
+    let measure =
+        |jobs: &'static str| stdout_of(&run(&["-r", "-n", "-o", "json", "-j", jobs, path]));
+    assert_eq!(measure("1"), measure("8"), "RG1 must be byte-identical");
+}
+
 /// The decode and the analysis run on separate threads once `-j` allows it
 /// (issue #337). The analyzer still sees every frame once and in order, so
 /// this has to be byte-identical to the single-threaded path, not merely
