@@ -6,8 +6,8 @@ use mp3rgain::replaygain::{
     self, AnalysisMode, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB,
 };
 use mp3rgain::{
-    apply_gain_to_peak, db_to_steps, read_album_tags, would_clip, AacAlbumInfo, AlbumTags, Channel,
-    ReleaseKey, StoredAlbumValues,
+    apply_gain_to_peak, db_to_steps, read_album_tags, would_clip, AacAlbumInfo, AlbumLabel,
+    AlbumTags, Channel, ReleaseKey, StoredAlbumValues,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -110,6 +110,11 @@ pub struct FileEntry {
     /// batch can hold several albums, whichever way they were grouped
     /// (issues #159, #224, #338).
     pub album_info: Option<AacAlbumInfo>,
+    /// How the album this row was grouped into was identified, for the
+    /// Album Gain tooltip (issue #344). Populated by Album Analysis; `None`
+    /// when the batch was analyzed as one album, where there is nothing to
+    /// name, or when no album analysis has run.
+    pub album_label: Option<String>,
     /// Pre-existing ReplayGain / undo tags read from the file, populated by
     /// the "Check Stored Tags" action. `None` = not scanned yet.
     pub stored_tags: Option<StoredTagsView>,
@@ -316,18 +321,31 @@ enum PendingApply {
     Album,
 }
 
+/// One album: how it was identified, and the rows in it.
+pub struct AlbumGroup {
+    /// `None` only for [`AlbumGrouping::Single`], where the album is
+    /// "everything given" and there is nothing to name (issue #344).
+    pub label: Option<AlbumLabel>,
+    /// Set when the rows claim the same (disc, track) position more than
+    /// once, which means more than one release landed in this group. Only
+    /// [`AlbumGrouping::Tag`] can produce it (issue #333).
+    pub merged_releases: bool,
+    pub rows: Vec<(usize, PathBuf)>,
+}
+
 /// Split rows into albums. A free function so it can be tested without an
 /// `Mp3rgainApp`, which needs an eframe context to exist.
-fn group_albums(
-    rows: Vec<(usize, PathBuf)>,
-    grouping: AlbumGrouping,
-) -> Vec<Vec<(usize, PathBuf)>> {
+fn group_albums(rows: Vec<(usize, PathBuf)>, grouping: AlbumGrouping) -> Vec<AlbumGroup> {
     match grouping {
         AlbumGrouping::Single => {
             if rows.is_empty() {
                 Vec::new()
             } else {
-                vec![rows]
+                vec![AlbumGroup {
+                    label: None,
+                    merged_releases: false,
+                    rows,
+                }]
             }
         }
         AlbumGrouping::Folder => {
@@ -336,35 +354,60 @@ fn group_albums(
                 let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
                 groups.entry(parent).or_default().push((idx, path));
             }
-            groups.into_values().collect()
+            groups
+                .into_iter()
+                .map(|(dir, rows)| AlbumGroup {
+                    label: Some(AlbumLabel::Directory(dir)),
+                    merged_releases: false,
+                    rows,
+                })
+                .collect()
         }
         // Files with no ALBUM tag fall back to their own folder rather than
         // pooling together, the same rule the CLI follows: one "untagged"
         // album covering a whole library is silently wrong.
         AlbumGrouping::Tag => {
             let mut order: Vec<TagGroupKey> = Vec::new();
-            let mut groups: HashMap<TagGroupKey, Vec<(usize, PathBuf)>> = HashMap::new();
+            type Pending = (Option<AlbumLabel>, Vec<AlbumTags>, Vec<(usize, PathBuf)>);
+            let mut groups: HashMap<TagGroupKey, Pending> = HashMap::new();
             for (idx, path) in rows {
-                let key = read_album_tags(&path)
-                    .as_ref()
-                    .and_then(AlbumTags::release_key)
-                    .map(TagGroupKey::Release)
-                    .unwrap_or_else(|| {
-                        TagGroupKey::Folder(
-                            path.parent().map(Path::to_path_buf).unwrap_or_default(),
+                let tags = read_album_tags(&path);
+                let (key, label) = match tags.as_ref().and_then(AlbumTags::release_key) {
+                    Some(release) => (
+                        TagGroupKey::Release(release),
+                        tags.as_ref().and_then(AlbumLabel::from_tags),
+                    ),
+                    None => {
+                        let folder = path.parent().map(Path::to_path_buf).unwrap_or_default();
+                        (
+                            TagGroupKey::Folder(folder.clone()),
+                            Some(AlbumLabel::Directory(folder)),
                         )
-                    });
-                let group = groups.entry(key.clone()).or_default();
-                if group.is_empty() {
+                    }
+                };
+                let group = groups
+                    .entry(key.clone())
+                    .or_insert((label, Vec::new(), Vec::new()));
+                if group.2.is_empty() {
                     order.push(key);
                 }
-                group.push((idx, path));
+                if let Some(tags) = tags {
+                    group.1.push(tags);
+                }
+                group.2.push((idx, path));
             }
             // First-seen order, so albums come out in the order the rows are
             // listed rather than in hash order.
             order
                 .into_iter()
                 .filter_map(|key| groups.remove(&key))
+                .map(|(label, tags, rows)| AlbumGroup {
+                    // A repeated track position means two releases share an
+                    // artist and album string and landed together.
+                    merged_releases: mp3rgain::repeated_position(&tags).is_some(),
+                    label,
+                    rows,
+                })
                 .collect()
         }
     }
@@ -577,6 +620,7 @@ impl Mp3rgainApp {
         for file in &mut self.files {
             file.set_measurement(None);
             file.album_info = None;
+            file.album_label = None;
             file.status = FileStatus::Pending;
         }
         self.display_order_dirty = true;
@@ -885,6 +929,7 @@ impl Mp3rgainApp {
             if let Some(f) = self.files.get_mut(idx) {
                 f.status = FileStatus::Pending;
                 f.album_info = None;
+                f.album_label = None;
             }
         }
 
@@ -915,11 +960,12 @@ impl Mp3rgainApp {
             if let Some(f) = self.files.get_mut(idx) {
                 f.status = FileStatus::Pending;
                 f.album_info = None;
+                f.album_label = None;
             }
         }
 
         let group_jobs = self.album_groups(&targets);
-        let total: usize = group_jobs.iter().map(|g| g.len()).sum();
+        let total: usize = group_jobs.iter().map(|g| g.rows.len()).sum();
 
         self.begin_worker(
             WorkerKind::AlbumAnalysis,
@@ -1029,7 +1075,7 @@ impl Mp3rgainApp {
 
     /// Album grouping shared by Album Analysis and Apply Album Gain
     /// (issues #159, #224, #338).
-    fn album_groups(&self, targets: &[usize]) -> Vec<Vec<(usize, PathBuf)>> {
+    fn album_groups(&self, targets: &[usize]) -> Vec<AlbumGroup> {
         let rows: Vec<(usize, PathBuf)> = targets
             .iter()
             .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f.path.clone())))
@@ -1323,24 +1369,25 @@ impl Mp3rgainApp {
         // phase chains in via `pending_apply`.
         if self.stored_reuse_active() {
             let targets = self.target_indices();
-            let rescan: Vec<Vec<(usize, PathBuf)>> = self
+            let rescan: Vec<AlbumGroup> = self
                 .album_groups(&targets)
                 .into_iter()
                 .filter(|g| {
-                    let all_fresh = g.iter().all(|&(idx, _)| {
+                    let all_fresh = g.rows.iter().all(|&(idx, _)| {
                         self.files.get(idx).is_some_and(|f| f.album_info.is_some())
                     });
-                    !all_fresh && self.trusted_album_group(g).is_none()
+                    !all_fresh && self.trusted_album_group(&g.rows).is_none()
                 })
                 .collect();
             if !rescan.is_empty() {
-                for &(idx, _) in rescan.iter().flatten() {
+                for &(idx, _) in rescan.iter().flat_map(|g| &g.rows) {
                     if let Some(f) = self.files.get_mut(idx) {
                         f.status = FileStatus::Pending;
                         f.album_info = None;
+                        f.album_label = None;
                     }
                 }
-                let total: usize = rescan.iter().map(|g| g.len()).sum();
+                let total: usize = rescan.iter().map(|g| g.rows.len()).sum();
                 self.pending_apply = Some(PendingApply::Album);
                 self.begin_worker(
                     WorkerKind::AlbumAnalysis,
@@ -1378,13 +1425,14 @@ impl Mp3rgainApp {
         if self.stored_reuse_active() {
             let target_offset = target - REPLAYGAIN_REFERENCE_DB;
             for group in &groups {
-                let all_fresh = group
+                let rows = &group.rows;
+                let all_fresh = rows
                     .iter()
                     .all(|&(idx, _)| self.files.get(idx).is_some_and(|f| f.album_info.is_some()));
                 if !all_fresh {
-                    if let Some(info) = self.trusted_album_group(group) {
+                    if let Some(info) = self.trusted_album_group(rows) {
                         let steps = db_to_steps(target_offset + info.album_gain_db);
-                        for &(idx, _) in group {
+                        for &(idx, _) in rows {
                             let Some(f) = self.files.get(idx) else {
                                 continue;
                             };
@@ -1412,7 +1460,7 @@ impl Mp3rgainApp {
                 // Fully analyzed group, or one whose rescan partly failed:
                 // apply each row from its displayed values; rows without a
                 // gain (e.g. analysis errors) are skipped.
-                for &(idx, _) in group {
+                for &(idx, _) in rows {
                     let Some(f) = self.files.get(idx) else {
                         continue;
                     };
@@ -1462,7 +1510,7 @@ impl Mp3rgainApp {
         // modes (issue #338) a second copy of that decision would drift.
         let album_minmax_groups: Vec<Vec<PathBuf>> = groups
             .into_iter()
-            .map(|group| group.into_iter().map(|(_, path)| path).collect())
+            .map(|g| g.rows.into_iter().map(|(_, path)| path).collect())
             .collect();
         self.begin_worker(
             WorkerKind::AlbumApply,
@@ -1593,11 +1641,13 @@ impl Mp3rgainApp {
                 successful,
                 failures,
                 album_info,
+                album_label,
             } => {
                 for (idx, track_result) in successful {
                     if let Some(file) = self.files.get_mut(idx) {
                         file.set_measurement(Some(Measurement::Analyzed(track_result)));
                         file.album_info = Some(album_info);
+                        file.album_label = album_label.clone();
                         file.status = FileStatus::Analyzed;
                     }
                 }
@@ -1691,6 +1741,7 @@ impl Mp3rgainApp {
                     // it rather than claiming an out-of-date target.
                     file.set_measurement(Some(Measurement::Headroom { peak }));
                     file.album_info = None;
+                    file.album_label = None;
                     file.status = FileStatus::Analyzed;
                 }
             }
@@ -1899,12 +1950,12 @@ mod tests {
 
     /// Write `fixture`'s frames behind a minimal ID3v2.3 tag, so the grouping
     /// test has real tagged files without needing a tagger.
-    fn tagged_copy(dst: &Path, album: Option<&str>) {
+    fn tagged_copy_at(dst: &Path, album: Option<&str>, track: &str) {
         let audio = std::fs::read("../tests/fixtures/test_stereo.mp3").expect("fixture");
         let mut out = Vec::new();
         if let Some(album) = album {
             let mut body = Vec::new();
-            for (id, text) in [("TALB", album), ("TPE2", "Pink Floyd")] {
+            for (id, text) in [("TALB", album), ("TPE2", "Pink Floyd"), ("TRCK", track)] {
                 let mut payload = vec![0u8]; // ISO-8859-1
                 payload.extend_from_slice(text.as_bytes());
                 body.extend_from_slice(id.as_bytes());
@@ -1934,16 +1985,20 @@ mod tests {
     fn album_grouping_units_split_the_rows_as_documented() {
         let dir = std::env::temp_dir().join(format!("mp3rgui_grouping_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
+        // Track numbers run across the two discs, so the discs are one
+        // release with no repeated position. The same album string with the
+        // *same* track number would mean something else entirely, which is
+        // what `tag_grouping_flags_two_releases_under_one_title` covers.
         let rows: Vec<(usize, PathBuf)> = [
-            ("wall/disc1/01.mp3", Some("The Wall")),
-            ("wall/disc2/01.mp3", Some("The Wall")),
-            ("loose/01.mp3", None),
+            ("wall/disc1/01.mp3", Some("The Wall"), "1"),
+            ("wall/disc2/01.mp3", Some("The Wall"), "2"),
+            ("loose/01.mp3", None, "1"),
         ]
         .iter()
         .enumerate()
-        .map(|(i, (rel, album))| {
+        .map(|(i, (rel, album, track))| {
             let path = dir.join(rel);
-            tagged_copy(&path, *album);
+            tagged_copy_at(&path, *album, track);
             (i, path)
         })
         .collect();
@@ -1951,7 +2006,7 @@ mod tests {
         let sizes = |grouping| -> Vec<usize> {
             group_albums(rows.clone(), grouping)
                 .iter()
-                .map(Vec::len)
+                .map(|g| g.rows.len())
                 .collect()
         };
 
@@ -1961,6 +2016,45 @@ mod tests {
         // The discs join; the untagged file falls back to its own folder
         // rather than joining them.
         assert_eq!(sizes(AlbumGrouping::Tag), vec![2, 1]);
+
+        // The label is what the Album Gain tooltip shows (issue #344): the
+        // release for a tag group, the folder for a row that fell back.
+        let tagged = group_albums(rows.clone(), AlbumGrouping::Tag);
+        assert_eq!(
+            tagged[0].label.as_ref().map(ToString::to_string).as_deref(),
+            Some("Pink Floyd / The Wall")
+        );
+        assert!(matches!(tagged[1].label, Some(AlbumLabel::Directory(_))));
+        assert!(tagged[0].label.is_some() && !tagged[0].merged_releases);
+
+        // Everything in one album has nothing to name.
+        assert!(group_albums(rows.clone(), AlbumGrouping::Single)[0]
+            .label
+            .is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Two releases sharing an artist and album tag land in one group, which
+    /// the summary line has to say (issue #333). The signature is a repeated
+    /// track position; the two discs above keep distinct ones and stay quiet.
+    #[test]
+    fn tag_grouping_flags_two_releases_under_one_title() {
+        let dir = std::env::temp_dir().join(format!("mp3rgui_merged_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let rows: Vec<(usize, PathBuf)> = ["1973", "2011"]
+            .iter()
+            .enumerate()
+            .map(|(i, edition)| {
+                let path = dir.join(edition).join("01.mp3");
+                tagged_copy_at(&path, Some("The Dark Side of the Moon"), "1");
+                (i, path)
+            })
+            .collect();
+
+        let groups = group_albums(rows, AlbumGrouping::Tag);
+        assert_eq!(groups.len(), 1, "they do group together");
+        assert!(groups[0].merged_releases, "and that has to be reported");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

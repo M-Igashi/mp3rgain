@@ -5,7 +5,7 @@ use mp3rgain::replaygain::{
     self, AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult,
     REPLAYGAIN_REFERENCE_DB,
 };
-use mp3rgain::{mp4meta, AacAlbumInfo, Error};
+use mp3rgain::{mp4meta, AacAlbumInfo, AlbumLabel, Error};
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::cli::options::{AlbumGrouping, Options, OutputFormat, StoredTagMode};
-use crate::commands::albumgroup::{group_files, AlbumGroup, AlbumId};
+use crate::commands::albumgroup::{group_files, AlbumGroup};
 use crate::commands::threading::effective_threads;
 use crate::commands::utils::{
     create_json_summary, exit_if_failed, finish_with_album_summary, finish_with_summary,
@@ -374,7 +374,7 @@ pub fn cmd_album_gain_grouped(files: &[PathBuf], opts: &Options) -> Result<()> {
             writeln!(
                 sink.out(),
                 "{} ({} file(s))",
-                group.id.heading().bold(),
+                group.id.to_string().bold(),
                 group.files.len()
             )?;
         }
@@ -406,8 +406,10 @@ pub fn cmd_album_gain_grouped(files: &[PathBuf], opts: &Options) -> Result<()> {
     for (group, run) in groups.iter().zip(runs) {
         if let Some(album) = run.album {
             let (directory, album_artist, album_title) = match &group.id {
-                AlbumId::Directory(dir) => (Some(dir.display().to_string()), None, None),
-                AlbumId::Release { artist, album } => (None, artist.clone(), Some(album.clone())),
+                AlbumLabel::Directory(dir) => (Some(dir.display().to_string()), None, None),
+                AlbumLabel::Release { artist, album } => {
+                    (None, artist.clone(), Some(album.clone()))
+                }
             };
             albums.push(JsonDirectoryAlbum {
                 directory,
