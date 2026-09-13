@@ -1367,19 +1367,23 @@ impl Mp3rgainApp {
         // tracks from different folders get the album RG tags for their own
         // album.
         let targets = self.target_indices();
+        // Grouped once and reused: tag grouping (issue #338) reads the ALBUM
+        // tag of every row, so calling this twice in one action would read
+        // them twice.
+        let groups = self.album_groups(&targets);
         let target = self.target_volume;
         let mode = self.analysis_mode;
         let mut jobs: Vec<ApplyJob> = Vec::new();
         if self.stored_reuse_active() {
             let target_offset = target - REPLAYGAIN_REFERENCE_DB;
-            for group in self.album_groups(&targets) {
+            for group in &groups {
                 let all_fresh = group
                     .iter()
                     .all(|&(idx, _)| self.files.get(idx).is_some_and(|f| f.album_info.is_some()));
                 if !all_fresh {
-                    if let Some(info) = self.trusted_album_group(&group) {
+                    if let Some(info) = self.trusted_album_group(group) {
                         let steps = db_to_steps(target_offset + info.album_gain_db);
-                        for &(idx, _) in &group {
+                        for &(idx, _) in group {
                             let Some(f) = self.files.get(idx) else {
                                 continue;
                             };
@@ -1407,7 +1411,7 @@ impl Mp3rgainApp {
                 // Fully analyzed group, or one whose rescan partly failed:
                 // apply each row from its displayed values; rows without a
                 // gain (e.g. analysis errors) are skipped.
-                for &(idx, _) in &group {
+                for &(idx, _) in group {
                     let Some(f) = self.files.get(idx) else {
                         continue;
                     };
@@ -1455,8 +1459,7 @@ impl Mp3rgainApp {
         // The album-wide MINMAX range is stamped per album, so the worker is
         // given the grouping rather than re-deriving it: with three grouping
         // modes (issue #338) a second copy of that decision would drift.
-        let album_minmax_groups: Vec<Vec<PathBuf>> = self
-            .album_groups(&targets)
+        let album_minmax_groups: Vec<Vec<PathBuf>> = groups
             .into_iter()
             .map(|group| group.into_iter().map(|(_, path)| path).collect())
             .collect();

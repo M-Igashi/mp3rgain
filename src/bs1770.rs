@@ -483,12 +483,6 @@ impl Bs1770Analyzer {
         self.subblock_samples = 0;
     }
 
-    /// Samples per 100 ms sub-block, which a caller analyzing a track in
-    /// pieces needs in order to align the pieces to the same grid.
-    pub fn subblock_len(&self) -> usize {
-        self.subblock_len
-    }
-
     /// Finish analysis, returning the gating blocks for this track.
     pub fn into_blocks(self) -> BlockEnergies {
         BlockEnergies::from_subblock_sums(&self.subblock_sums, self.subblock_len)

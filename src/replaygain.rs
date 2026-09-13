@@ -1253,6 +1253,11 @@ fn analyze_track_decoded(
     // `-j 1` is documented as the single-threaded legacy path and must stay
     // one thread, and a library caller that never installs a pool gets the
     // machine's parallelism, which is the right default for it too.
+    //
+    // Deliberately a weaker condition than the one gating chunked analysis
+    // above, which also needs the run to have fewer files than threads: this
+    // adds one thread per file being analyzed, where chunking adds a task per
+    // piece, so a saturated run tolerates this and not that.
     let pipeline = rayon::current_num_threads() > 1;
     // Detect file type
     let file_type = detect_file_type(file_path);
@@ -1757,6 +1762,12 @@ fn process_audio_buffer_bs1770(
 /// The conversions are the ones [`process_audio_buffer_bs1770`] applies, and
 /// interleaving preserves frame order, so the analyzer on the other side of
 /// the channel sees exactly the same values in the same order.
+///
+/// The two are deliberately not merged: routing the serial path through here
+/// costs it a copy per packet, measured at 5% on `-j 1`, which is the path
+/// kept for mp3gain parity. They have to agree, and what enforces it is
+/// `pipelined_analysis_matches_the_single_threaded_path`, which asserts the
+/// two produce byte-identical output.
 #[cfg(feature = "replaygain")]
 fn append_interleaved(buffer: &GenericAudioBufferRef, out: &mut Vec<f64>) {
     fn append<T: Copy>(

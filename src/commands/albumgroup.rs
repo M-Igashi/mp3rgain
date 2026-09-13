@@ -150,6 +150,12 @@ fn split_release_warnings(groups: &[AlbumGroup]) -> Vec<String> {
 
     let mut warnings = Vec::new();
     for members in siblings.values().filter(|g| g.len() > 1) {
+        // Keyed on the artist and album strings rather than on
+        // `AlbumTags::release_key`, which prefers MUSICBRAINZ_ALBUMID: the
+        // question here is which folders *share a title*, and keying on the
+        // id would put two discs of one release in different buckets and find
+        // nothing to report. The id is consulted afterwards, by
+        // `looks_like_one_release`, to decide what the shared title means.
         let mut by_release: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
         for &i in members {
             let Some(tags) = probed.get(&i) else { continue };
