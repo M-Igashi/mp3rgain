@@ -104,10 +104,11 @@ pub struct FileEntry {
     /// What we know about the audio, from analysis or stored tags. `None`
     /// leaves every numeric column empty.
     pub measurement: Option<Measurement>,
-    /// Album-level ReplayGain summary for the folder this file belongs to,
-    /// populated by Album Analysis. Used to write `replaygain_album_*` tags
-    /// on Apply Album Gain. Per-file (not global) so adding multiple folders
-    /// treats each as its own album (issue #159).
+    /// Album-level ReplayGain summary for the album this file was grouped
+    /// into, populated by Album Analysis. Used to write `replaygain_album_*`
+    /// tags on Apply Album Gain. Per-file rather than global because the
+    /// batch can hold several albums, whichever way they were grouped
+    /// (issues #159, #224, #338).
     pub album_info: Option<AacAlbumInfo>,
     /// Pre-existing ReplayGain / undo tags read from the file, populated by
     /// the "Check Stored Tags" action. `None` = not scanned yet.
