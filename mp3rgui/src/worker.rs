@@ -16,7 +16,7 @@ use mp3rgain::replaygain::{self, AnalysisMode, ReplayGainResult};
 use mp3rgain::{
     read_gain_tags_auto, AacAlbumInfo, Channel, GainTagSource, StoredGainTags, TagLayout,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -429,10 +429,10 @@ pub fn spawn_apply(
     jobs: Vec<ApplyJob>,
     action_label: &'static str,
     ui_opts: ApplyOptionsUi,
-    // When true (album-gain apply with issue #224 enabled), the album-wide
-    // MINMAX range is stamped across the whole batch instead of per folder.
-    // Ignored by track/manual/channel gain, whose jobs carry no album_info.
-    single_album: bool,
+    // The album grouping the app used, so the album-wide MINMAX range is
+    // stamped over the same sets the gain was computed over (issue #338).
+    // Empty for track/manual/channel gain, whose jobs carry no album_info.
+    album_minmax_groups: Vec<Vec<PathBuf>>,
 ) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -536,30 +536,23 @@ pub fn spawn_apply(
 
         // Album-wide MP3GAIN_ALBUM_MINMAX, written once the whole album has
         // been applied (mp3gain parity, issue #210). No-op for track/manual
-        // gain (empty list) and for the dry-run / ID3v2 paths. By default the
-        // GUI treats each folder as its own album (issue #159), so the range
-        // is stamped per parent directory; in single-album mode (issue #224)
-        // it spans the whole batch to match the one shared album gain.
+        // gain (empty list) and for the dry-run / ID3v2 paths. The range is
+        // stamped over the groups the app grouped by, whichever of the three
+        // modes that was (issues #159, #224, #338).
         if !album_minmax_paths.is_empty() {
             type MinmaxEntry<'a> = (&'a Path, Option<(u8, u8)>);
             let gain_ranges = gain_ranges.into_inner().unwrap();
-            if single_album {
-                let all: Vec<MinmaxEntry> = album_minmax_paths
+            let applied: HashSet<&Path> = album_minmax_paths.iter().map(PathBuf::as_path).collect();
+            for group in &album_minmax_groups {
+                // A group's rows that never reached the apply (skipped, or
+                // not MP3) carry no range and must not be stamped.
+                let entries: Vec<MinmaxEntry> = group
                     .iter()
+                    .filter(|p| applied.contains(p.as_path()))
                     .map(|p| (p.as_path(), gain_ranges.get(p).copied()))
                     .collect();
-                write_album_minmax(&all);
-            } else {
-                let mut by_folder: BTreeMap<PathBuf, Vec<MinmaxEntry>> = BTreeMap::new();
-                for p in &album_minmax_paths {
-                    let parent = p.parent().map(Path::to_path_buf).unwrap_or_default();
-                    by_folder
-                        .entry(parent)
-                        .or_default()
-                        .push((p.as_path(), gain_ranges.get(p).copied()));
-                }
-                for group in by_folder.values() {
-                    write_album_minmax(group);
+                if !entries.is_empty() {
+                    write_album_minmax(&entries);
                 }
             }
         }

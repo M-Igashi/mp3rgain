@@ -6,9 +6,10 @@ use mp3rgain::replaygain::{
     self, AnalysisMode, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB,
 };
 use mp3rgain::{
-    apply_gain_to_peak, db_to_steps, would_clip, AacAlbumInfo, Channel, StoredAlbumValues,
+    apply_gain_to_peak, db_to_steps, read_album_tags, would_clip, AacAlbumInfo, AlbumTags, Channel,
+    ReleaseKey, StoredAlbumValues,
 };
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::TryRecvError;
 
@@ -314,6 +315,87 @@ enum PendingApply {
     Album,
 }
 
+/// Split rows into albums. A free function so it can be tested without an
+/// `Mp3rgainApp`, which needs an eframe context to exist.
+fn group_albums(
+    rows: Vec<(usize, PathBuf)>,
+    grouping: AlbumGrouping,
+) -> Vec<Vec<(usize, PathBuf)>> {
+    match grouping {
+        AlbumGrouping::Single => {
+            if rows.is_empty() {
+                Vec::new()
+            } else {
+                vec![rows]
+            }
+        }
+        AlbumGrouping::Folder => {
+            let mut groups: BTreeMap<PathBuf, Vec<(usize, PathBuf)>> = BTreeMap::new();
+            for (idx, path) in rows {
+                let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+                groups.entry(parent).or_default().push((idx, path));
+            }
+            groups.into_values().collect()
+        }
+        // Files with no ALBUM tag fall back to their own folder rather than
+        // pooling together, the same rule the CLI follows: one "untagged"
+        // album covering a whole library is silently wrong.
+        AlbumGrouping::Tag => {
+            let mut order: Vec<TagGroupKey> = Vec::new();
+            let mut groups: HashMap<TagGroupKey, Vec<(usize, PathBuf)>> = HashMap::new();
+            for (idx, path) in rows {
+                let key = read_album_tags(&path)
+                    .as_ref()
+                    .and_then(AlbumTags::release_key)
+                    .map(TagGroupKey::Release)
+                    .unwrap_or_else(|| {
+                        TagGroupKey::Folder(
+                            path.parent().map(Path::to_path_buf).unwrap_or_default(),
+                        )
+                    });
+                let group = groups.entry(key.clone()).or_default();
+                if group.is_empty() {
+                    order.push(key);
+                }
+                group.push((idx, path));
+            }
+            // First-seen order, so albums come out in the order the rows are
+            // listed rather than in hash order.
+            order
+                .into_iter()
+                .filter_map(|key| groups.remove(&key))
+                .collect()
+        }
+    }
+}
+
+/// Grouping key in [`AlbumGrouping::Tag`]: the release, or the folder a file
+/// with no ALBUM tag falls back to.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum TagGroupKey {
+    Release(ReleaseKey),
+    Folder(PathBuf),
+}
+
+/// What counts as one album for Album Analysis and Apply Album Gain: the
+/// GUI's form of the CLI's `--album-by` (issues #159, #224, #338).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AlbumGrouping {
+    /// Each folder is its own album (issue #159), the long-standing default.
+    /// A release whose discs live in subfolders is split, which is what
+    /// [`AlbumGrouping::Tag`] is for.
+    #[default]
+    Folder,
+    /// Every loaded file is one album (issue #224), the CLI's plain `-a`.
+    /// Also the way to group an untagged release: select its rows first,
+    /// since the album actions act on the selection when there is one.
+    Single,
+    /// One album per release, from ALBUMARTIST / ALBUM, preferring
+    /// MUSICBRAINZ_ALBUMID when it is present. The CLI's `--album-by=tag`,
+    /// where discs in subfolders share one album gain.
+    Tag,
+}
+
 /// Settings persisted across launches (issue #202). Window geometry and egui
 /// memory (e.g. table column widths) are persisted by eframe automatically;
 /// this only carries the app-specific toggles.
@@ -325,6 +407,11 @@ struct PersistedSettings {
     // keys) still deserialize instead of falling back to full defaults.
     #[serde(default)]
     show_filename_only: bool,
+    #[serde(default)]
+    album_grouping: AlbumGrouping,
+    /// Superseded by `album_grouping` (issue #338). Still read so a session
+    /// saved by an older build keeps the choice it made; written as `false`
+    /// from now on, or it would override that choice on every load.
     #[serde(default)]
     single_album: bool,
     #[serde(default)]
@@ -339,6 +426,7 @@ impl Default for PersistedSettings {
             apply_options: ApplyOptionsUi::default(),
             target_volume: 89.0,
             show_filename_only: false,
+            album_grouping: AlbumGrouping::default(),
             single_album: false,
             analysis_mode: AnalysisMode::default(),
             use_stored_tags: false,
@@ -417,10 +505,9 @@ pub struct Mp3rgainApp {
     /// pre-existing behavior.
     pub show_filename_only: bool,
 
-    /// When true, Album Analysis / Apply Album Gain treat every loaded file
-    /// as a single album regardless of directory (issue #224). Off = each
-    /// folder is its own album, the default (issue #159).
-    pub single_album: bool,
+    /// What counts as one album for Album Analysis / Apply Album Gain
+    /// (issues #159, #224, #338).
+    pub album_grouping: AlbumGrouping,
 
     /// Loudness measurement mode for Track / Album Analysis (issue #272).
     /// RG 1.0 (mp3gain-compatible) by default; the BS.1770 modes normalize
@@ -469,7 +556,12 @@ impl Mp3rgainApp {
             pending_import_scan: Vec::new(),
             pending_drops: Vec::new(),
             show_filename_only: settings.show_filename_only,
-            single_album: settings.single_album,
+            album_grouping: if settings.single_album {
+                // A settings file written before #338 only knows the boolean.
+                AlbumGrouping::Single
+            } else {
+                settings.album_grouping
+            },
             analysis_mode: settings.analysis_mode,
             use_stored_tags: settings.use_stored_tags,
             pending_apply: None,
@@ -930,42 +1022,18 @@ impl Mp3rgainApp {
         self.begin_worker(
             WorkerKind::TrackApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "track gain", ui_opts, false),
+            worker::spawn_apply(ctx.clone(), jobs, "track gain", ui_opts, Vec::new()),
         );
     }
 
-    /// Album grouping shared by Album Analysis and Apply Album Gain: one
-    /// group per parent directory (issue #159), or a single group covering
-    /// every target in single-album mode (issue #224).
+    /// Album grouping shared by Album Analysis and Apply Album Gain
+    /// (issues #159, #224, #338).
     fn album_groups(&self, targets: &[usize]) -> Vec<Vec<(usize, PathBuf)>> {
-        if self.single_album {
-            let jobs: Vec<(usize, PathBuf)> = targets
-                .iter()
-                .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f.path.clone())))
-                .collect();
-            if jobs.is_empty() {
-                Vec::new()
-            } else {
-                vec![jobs]
-            }
-        } else {
-            let mut groups: std::collections::BTreeMap<PathBuf, Vec<(usize, PathBuf)>> =
-                std::collections::BTreeMap::new();
-            for &idx in targets {
-                if let Some(f) = self.files.get(idx) {
-                    let parent = f
-                        .path
-                        .parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(PathBuf::new);
-                    groups
-                        .entry(parent)
-                        .or_default()
-                        .push((idx, f.path.clone()));
-                }
-            }
-            groups.into_values().collect()
-        }
+        let rows: Vec<(usize, PathBuf)> = targets
+            .iter()
+            .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f.path.clone())))
+            .collect();
+        group_albums(rows, self.album_grouping)
     }
 
     /// Stored-tag reuse (issue #302) is only trusted in RG 1.0 mode, the
@@ -1164,7 +1232,7 @@ impl Mp3rgainApp {
         self.begin_worker(
             WorkerKind::TrackApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "manual gain", ui_opts, false),
+            worker::spawn_apply(ctx.clone(), jobs, "manual gain", ui_opts, Vec::new()),
         );
     }
 
@@ -1205,7 +1273,7 @@ impl Mp3rgainApp {
         self.begin_worker(
             WorkerKind::TrackApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "channel gain", ui_opts, false),
+            worker::spawn_apply(ctx.clone(), jobs, "channel gain", ui_opts, Vec::new()),
         );
     }
 
@@ -1384,11 +1452,24 @@ impl Mp3rgainApp {
         }
         let count = jobs.len();
         let ui_opts = self.apply_options;
-        let single_album = self.single_album;
+        // The album-wide MINMAX range is stamped per album, so the worker is
+        // given the grouping rather than re-deriving it: with three grouping
+        // modes (issue #338) a second copy of that decision would drift.
+        let album_minmax_groups: Vec<Vec<PathBuf>> = self
+            .album_groups(&targets)
+            .into_iter()
+            .map(|group| group.into_iter().map(|(_, path)| path).collect())
+            .collect();
         self.begin_worker(
             WorkerKind::AlbumApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "album gain", ui_opts, single_album),
+            worker::spawn_apply(
+                ctx.clone(),
+                jobs,
+                "album gain",
+                ui_opts,
+                album_minmax_groups,
+            ),
         );
     }
 
@@ -1778,7 +1859,8 @@ impl eframe::App for Mp3rgainApp {
             apply_options: self.apply_options,
             target_volume: self.target_volume,
             show_filename_only: self.show_filename_only,
-            single_album: self.single_album,
+            album_grouping: self.album_grouping,
+            single_album: false,
             analysis_mode: self.analysis_mode,
             use_stored_tags: self.use_stored_tags,
         };
@@ -1809,6 +1891,74 @@ mod tests {
             (None, None) => true,
             _ => false,
         }
+    }
+
+    /// Write `fixture`'s frames behind a minimal ID3v2.3 tag, so the grouping
+    /// test has real tagged files without needing a tagger.
+    fn tagged_copy(dst: &Path, album: Option<&str>) {
+        let audio = std::fs::read("../tests/fixtures/test_stereo.mp3").expect("fixture");
+        let mut out = Vec::new();
+        if let Some(album) = album {
+            let mut body = Vec::new();
+            for (id, text) in [("TALB", album), ("TPE2", "Pink Floyd")] {
+                let mut payload = vec![0u8]; // ISO-8859-1
+                payload.extend_from_slice(text.as_bytes());
+                body.extend_from_slice(id.as_bytes());
+                body.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+                body.extend_from_slice(&[0, 0]);
+                body.extend_from_slice(&payload);
+            }
+            let size = body.len() as u32;
+            out.extend_from_slice(b"ID3\x03\x00\x00");
+            out.extend_from_slice(&[
+                ((size >> 21) & 0x7f) as u8,
+                ((size >> 14) & 0x7f) as u8,
+                ((size >> 7) & 0x7f) as u8,
+                (size & 0x7f) as u8,
+            ]);
+            out.extend_from_slice(&body);
+        }
+        out.extend_from_slice(&audio);
+        std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        std::fs::write(dst, out).expect("write");
+    }
+
+    /// The three grouping units (issues #159, #224, #338). The one that
+    /// matters is `Tag`: two discs of one release in separate folders have to
+    /// come out as a single album, which is what `Folder` gets wrong.
+    #[test]
+    fn album_grouping_units_split_the_rows_as_documented() {
+        let dir = std::env::temp_dir().join(format!("mp3rgui_grouping_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let rows: Vec<(usize, PathBuf)> = [
+            ("wall/disc1/01.mp3", Some("The Wall")),
+            ("wall/disc2/01.mp3", Some("The Wall")),
+            ("loose/01.mp3", None),
+        ]
+        .iter()
+        .enumerate()
+        .map(|(i, (rel, album))| {
+            let path = dir.join(rel);
+            tagged_copy(&path, *album);
+            (i, path)
+        })
+        .collect();
+
+        let sizes = |grouping| -> Vec<usize> {
+            group_albums(rows.clone(), grouping)
+                .iter()
+                .map(Vec::len)
+                .collect()
+        };
+
+        assert_eq!(sizes(AlbumGrouping::Single), vec![3]);
+        // One folder each: the two discs are split, which is the bug Tag fixes.
+        assert_eq!(sizes(AlbumGrouping::Folder), vec![1, 1, 1]);
+        // The discs join; the untagged file falls back to its own folder
+        // rather than joining them.
+        assert_eq!(sizes(AlbumGrouping::Tag), vec![2, 1]);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

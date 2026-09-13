@@ -6,7 +6,7 @@
 //! levels below each root argument.
 
 use colored::*;
-use mp3rgain::{read_album_tags, AlbumTags};
+use mp3rgain::{read_album_tags, AlbumTags, ReleaseKey};
 use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -227,16 +227,11 @@ fn parent_of(file: &Path) -> PathBuf {
         .to_path_buf()
 }
 
-/// The grouping key in `tag` mode.
+/// The grouping key in `tag` mode: the release, or the directory a file with
+/// no ALBUM tag falls back to.
 #[derive(PartialEq, Eq, Hash, Clone)]
 enum TagKey {
-    /// MUSICBRAINZ_ALBUMID, preferred whenever it is present: it is the one
-    /// field that separates two releases of the same album without guessing
-    /// at how the user chose to tell them apart.
-    MusicBrainz(String),
-    /// (album artist or artist, album).
-    Release(String, String),
-    /// No ALBUM tag: this file falls back to its directory.
+    Release(ReleaseKey),
     Directory(PathBuf),
 }
 
@@ -254,15 +249,9 @@ fn group_by_tags(files: &[PathBuf]) -> (Vec<AlbumGroup>, Vec<String>) {
     let mut untagged = 0usize;
 
     for (i, file_tags) in tags.iter().enumerate() {
-        let key = match file_tags {
-            Some(t) if t.has_album() => match &t.musicbrainz_album_id {
-                Some(id) => TagKey::MusicBrainz(id.clone()),
-                None => TagKey::Release(
-                    t.effective_artist().unwrap_or_default().to_string(),
-                    t.album.clone().unwrap_or_default(),
-                ),
-            },
-            _ => {
+        let key = match file_tags.as_ref().and_then(AlbumTags::release_key) {
+            Some(release) => TagKey::Release(release),
+            None => {
                 untagged += 1;
                 TagKey::Directory(parent_of(&files[i]))
             }
@@ -288,7 +277,7 @@ fn group_by_tags(files: &[PathBuf]) -> (Vec<AlbumGroup>, Vec<String>) {
         let indices = members.remove(&key).unwrap_or_default();
         let id = match &key {
             TagKey::Directory(dir) => AlbumId::Directory(dir.clone()),
-            _ => {
+            TagKey::Release(_) => {
                 let first = tags[indices[0]].as_ref();
                 AlbumId::Release {
                     artist: first

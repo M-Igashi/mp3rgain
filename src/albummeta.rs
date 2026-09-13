@@ -8,6 +8,21 @@
 
 use std::path::Path;
 
+/// What identifies the release a file belongs to.
+///
+/// Shared by the CLI's `--album-by=tag` and the GUI's tag grouping so the two
+/// cannot drift into disagreeing about what one album is (issues #333, #338).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ReleaseKey {
+    /// MUSICBRAINZ_ALBUMID, preferred whenever present: it is the one field
+    /// that separates two releases of the same album without guessing at how
+    /// the user chose to tell them apart.
+    MusicBrainz(String),
+    /// (album artist or artist, album). The artist half is what keeps two
+    /// unrelated "Greatest Hits" apart.
+    Titled(String, String),
+}
+
 /// The tags that decide which album a file belongs to.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct AlbumTags {
@@ -32,6 +47,22 @@ impl AlbumTags {
     /// Whether this file can be grouped by release at all.
     pub fn has_album(&self) -> bool {
         self.album.is_some()
+    }
+
+    /// The release this file belongs to, or `None` when it carries no ALBUM
+    /// tag and so cannot be grouped by release. A caller that gets `None` has
+    /// to fall back to something else, never to a shared "untagged" bucket:
+    /// pooling every untagged file in a library into one album is silently
+    /// wrong.
+    pub fn release_key(&self) -> Option<ReleaseKey> {
+        let album = self.album.clone()?;
+        Some(match &self.musicbrainz_album_id {
+            Some(id) => ReleaseKey::MusicBrainz(id.clone()),
+            None => ReleaseKey::Titled(
+                self.effective_artist().unwrap_or_default().to_string(),
+                album,
+            ),
+        })
     }
 }
 

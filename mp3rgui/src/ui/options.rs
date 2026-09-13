@@ -1,4 +1,4 @@
-use crate::app::Mp3rgainApp;
+use crate::app::{AlbumGrouping, Mp3rgainApp};
 use mp3rgain::replaygain::AnalysisMode;
 use mp3rgain::TagLayout;
 
@@ -87,12 +87,32 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
 
                 ui.separator();
 
-                ui.checkbox(&mut app.single_album, "Single album")
+                // What one album is, for Album Analysis / Apply Album Gain.
+                // The CLI's --album-by, in the same three units (issue #338).
+                ui.label("Album:");
+                ui.radio_value(&mut app.album_grouping, AlbumGrouping::Folder, "Per folder")
                     .on_hover_text(
-                        "Treat all loaded files as one album for Album Analysis / \
-                         Apply Album Gain, ignoring subfolders (e.g. multi-disc sets). \
-                         Off = each folder is its own album.",
+                        "Each folder is its own album. A release whose discs live in \
+                         subfolders gets one album gain per disc, so use By tags for \
+                         those. CLI --album-by=dir.",
                     );
+                ui.radio_value(&mut app.album_grouping, AlbumGrouping::Tag, "By tags")
+                    .on_hover_text(
+                        "One album per release, read from ALBUMARTIST / ALBUM (and \
+                         MUSICBRAINZ_ALBUMID when present), so discs in subfolders \
+                         share one album gain. Files with no ALBUM tag fall back to \
+                         their own folder. CLI --album-by=tag.",
+                    );
+                ui.radio_value(
+                    &mut app.album_grouping,
+                    AlbumGrouping::Single,
+                    "Single album",
+                )
+                .on_hover_text(
+                    "Treat every loaded file as one album, ignoring folders. \
+                         Select rows first to group just those, which is how to \
+                         handle a release that has no usable tags. CLI -a.",
+                );
 
                 ui.checkbox(&mut app.show_filename_only, "Filename only")
                     .on_hover_text(

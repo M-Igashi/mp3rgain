@@ -80,7 +80,7 @@ pub mod id3v2;
 pub mod mp4meta;
 pub mod replaygain;
 
-pub use albummeta::{read_album_tags, AlbumTags};
+pub use albummeta::{read_album_tags, AlbumTags, ReleaseKey};
 pub use analysis::{
     analyze, analyze_data, find_max_amplitude, gain_range, is_mono, ChannelMode,
     MaxAmplitudeResult, Mp3Analysis, MpegVersion,
