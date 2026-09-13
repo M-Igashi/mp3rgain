@@ -1208,6 +1208,22 @@ pub fn delete_replaygain_tags(file_path: &Path) -> Result<()> {
     write_replaygain_tags(file_path, &ReplayGainTags::default())
 }
 
+/// Delete both the ReplayGain and the undo freeform tags in one container
+/// rebuild — what `-s d` wants from an M4A.
+///
+/// Calling [`delete_replaygain_tags`] and [`delete_undo_tags`] in sequence
+/// reads and rewrites the whole file twice, which on an album-length M4A is
+/// hundreds of megabytes of avoidable I/O for a few dozen bytes of metadata.
+pub fn delete_gain_tags(file_path: &Path) -> Result<()> {
+    let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+    let new_data = rebuild_mp4_with_ilst(&data, |existing| {
+        create_ilst_box_filtered(&[], existing, |data, pos, header| {
+            is_replaygain_freeform(data, pos, header) || is_undo_freeform(data, pos, header)
+        })
+    })?;
+    crate::apply::atomic_write(file_path, &new_data)
+}
+
 /// Check if a 4-byte brand is a recognized MP4/M4A audio brand.
 /// Note: M4P (DRM-protected) is intentionally excluded.
 fn is_accepted_brand(brand: &[u8]) -> bool {

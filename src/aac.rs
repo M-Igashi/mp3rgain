@@ -580,8 +580,9 @@ fn parse_chunk_offsets(data: &[u8], stbl_start: usize, stbl_size: usize) -> Resu
 // AudioSpecificConfig parser
 // =============================================================================
 
-/// Sample rate index table (ISO 14496-3)
-const SAMPLE_RATE_TABLE: [u32; 13] = [
+/// Sample rate index table (ISO 14496-3). Shared with [`crate::adts`], whose
+/// ADTS `sampling_frequency_index` indexes the same table.
+pub(crate) const SAMPLE_RATE_TABLE: [u32; 13] = [
     96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350,
 ];
 
@@ -725,9 +726,7 @@ fn read_desc_length(data: &[u8], start: usize, end: usize) -> Option<(usize, usi
 // =============================================================================
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct IcsInfo {
-    window_sequence: u8,
     max_sfb: usize,
     long_win: bool,
     window_groups: usize,
@@ -771,7 +770,6 @@ fn parse_ics_info(reader: &mut BitReader) -> Result<IcsInfo> {
     };
 
     Ok(IcsInfo {
-        window_sequence,
         max_sfb,
         long_win,
         window_groups,
@@ -1016,10 +1014,9 @@ fn parse_tns_data(reader: &mut BitReader, info: &IcsInfo) -> Result<()> {
 fn parse_ics(
     reader: &mut BitReader,
     channel: u8,
-    common_window: bool,
     shared_info: Option<&IcsInfo>,
     sample_rate: u32,
-) -> Result<(AacGainLocation, IcsInfo)> {
+) -> Result<AacGainLocation> {
     // Record position BEFORE reading global_gain
     let (byte_off, bit_off) = reader.position();
     let global_gain = reader.read_bits(8)? as u8;
@@ -1033,10 +1030,12 @@ fn parse_ics(
         global_gain,
     );
 
-    let info = if common_window {
-        shared_info.unwrap().clone()
-    } else {
-        parse_ics_info(reader)?
+    // `Some` exactly when the enclosing CPE declared common_window, so there
+    // is no second flag that could disagree with it and no unwrap to panic on
+    // bitstream-derived data.
+    let info = match shared_info {
+        Some(info) => info.clone(),
+        None => parse_ics_info(reader)?,
     };
 
     // Get SWB band offsets for this window type
@@ -1085,7 +1084,7 @@ fn parse_ics(
 
     parse_spectral_data(reader, &info, &section, bands)?;
 
-    Ok((gain_loc, info))
+    Ok(gain_loc)
 }
 
 // =============================================================================
@@ -1098,8 +1097,7 @@ fn parse_sce(
     out: &mut Vec<AacGainLocation>,
 ) -> Result<()> {
     let _tag = reader.read_bits(4)?;
-    let (loc, _) = parse_ics(reader, 0, false, None, sample_rate)?;
-    out.push(loc);
+    out.push(parse_ics(reader, 0, None, sample_rate)?);
     Ok(())
 }
 
@@ -1123,8 +1121,8 @@ fn parse_cpe(
         None
     };
 
-    let (loc1, _) = parse_ics(reader, 0, common_window, shared_info.as_ref(), sample_rate)?;
-    let (loc2, _) = parse_ics(reader, 1, common_window, shared_info.as_ref(), sample_rate)?;
+    let loc1 = parse_ics(reader, 0, shared_info.as_ref(), sample_rate)?;
+    let loc2 = parse_ics(reader, 1, shared_info.as_ref(), sample_rate)?;
     out.push(loc1);
     out.push(loc2);
     Ok(())

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::{
-    read_gain_tags_auto, GainTagSource, StoredGainTags, TAG_MP3GAIN_ALBUM_MINMAX,
+    mp4meta, read_gain_tags_auto, GainTagSource, StoredGainTags, TAG_MP3GAIN_ALBUM_MINMAX,
     TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
     TAG_REPLAYGAIN_ALGORITHM, TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
@@ -14,80 +14,98 @@ use crate::json_output::{FileStatus, JsonFileResult};
 use crate::processors::utils::{report_file_error, restore_timestamp, save_original_mtime};
 use crate::util::{get_filename, get_path};
 
-/// Tags plus per-container labels for display in cmd_check_tags
-struct CheckTagInfo<'a> {
-    tags: &'a StoredGainTags,
-    undo_label: &'a str,
-    minmax_label: &'a str,
-    no_tag_msg: &'a str,
+/// The `MP3GAIN_*` item names as they appear on disk in `source`'s container,
+/// plus what to say when the file carries no gain tags at all. Derived from
+/// the source rather than carried alongside the tags: all three follow from
+/// it, so there is nothing to keep in sync.
+fn container_labels(source: GainTagSource) -> (&'static str, &'static str, &'static str) {
+    match source {
+        // The MP4 freeform names are lowercase on disk. `-s c` exists to show
+        // what a tag dump would show, so it prints them as they are written.
+        GainTagSource::Aac => (mp4meta::UNDO_TAG, mp4meta::MINMAX_TAG, "no tags found"),
+        GainTagSource::Id3v2 => (
+            TAG_MP3GAIN_UNDO,
+            TAG_MP3GAIN_MINMAX,
+            "no ID3v2 ReplayGain tags found",
+        ),
+        GainTagSource::Ape { tag_present: true } => (
+            TAG_MP3GAIN_UNDO,
+            TAG_MP3GAIN_MINMAX,
+            "no mp3gain tags found",
+        ),
+        GainTagSource::Ape { tag_present: false } => {
+            (TAG_MP3GAIN_UNDO, TAG_MP3GAIN_MINMAX, "no APE tag found")
+        }
+        GainTagSource::Split => (TAG_MP3GAIN_UNDO, TAG_MP3GAIN_MINMAX, "no gain tags found"),
+    }
 }
 
-impl CheckTagInfo<'_> {
-    fn render(
-        &self,
-        filename: &str,
-        file_path: &Path,
-        format: OutputFormat,
-        out: &mut String,
-    ) -> Option<JsonFileResult> {
-        let tags = self.tags;
-        match format {
-            OutputFormat::Text => {
-                writeln!(out, "{}", filename.cyan().bold()).ok();
-                if let Some(v) = &tags.undo {
-                    writeln!(out, "  {:<25}{}", format!("{}:", self.undo_label), v).ok();
-                }
-                if let Some(v) = &tags.minmax {
-                    writeln!(out, "  {:<25}{}", format!("{}:", self.minmax_label), v).ok();
-                }
-                let rg_fields = [
-                    (TAG_MP3GAIN_ALBUM_MINMAX, &tags.album_minmax),
-                    (TAG_REPLAYGAIN_TRACK_GAIN, &tags.track_gain),
-                    (TAG_REPLAYGAIN_TRACK_PEAK, &tags.track_peak),
-                    (TAG_REPLAYGAIN_ALBUM_GAIN, &tags.album_gain),
-                    (TAG_REPLAYGAIN_ALBUM_PEAK, &tags.album_peak),
-                    (TAG_REPLAYGAIN_ALGORITHM, &tags.algorithm),
-                ];
-                for (label, value) in rg_fields {
-                    if let Some(v) = value {
-                        writeln!(out, "  {:<25}{}", format!("{}:", label), v).ok();
-                    }
-                }
-                if !tags.has_any() {
-                    writeln!(out, "  ({})", self.no_tag_msg).ok();
-                }
-                writeln!(out).ok();
-                None
+/// Render one file's stored tags in `format`, returning the JSON record when
+/// that format has one.
+fn render_tags(
+    tags: &StoredGainTags,
+    filename: &str,
+    file_path: &Path,
+    format: OutputFormat,
+    out: &mut String,
+) -> Option<JsonFileResult> {
+    let (undo_label, minmax_label, no_tag_msg) = container_labels(tags.source);
+    match format {
+        OutputFormat::Text => {
+            writeln!(out, "{}", filename.cyan().bold()).ok();
+            if let Some(v) = &tags.undo {
+                writeln!(out, "  {:<25}{}", format!("{}:", undo_label), v).ok();
             }
-            OutputFormat::Tsv => {
-                writeln!(
-                    out,
-                    // The algorithm column is appended last so existing
-                    // column indices stay stable for scripts.
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                    get_path(file_path),
-                    tags.undo.as_deref().unwrap_or("-"),
-                    tags.minmax.as_deref().unwrap_or("-"),
-                    tags.track_gain.as_deref().unwrap_or("-"),
-                    tags.track_peak.as_deref().unwrap_or("-"),
-                    tags.album_gain.as_deref().unwrap_or("-"),
-                    tags.album_peak.as_deref().unwrap_or("-"),
-                    tags.album_minmax.as_deref().unwrap_or("-"),
-                    tags.algorithm.as_deref().unwrap_or("-")
-                )
-                .ok();
-                None
+            if let Some(v) = &tags.minmax {
+                writeln!(out, "  {:<25}{}", format!("{}:", minmax_label), v).ok();
             }
-            OutputFormat::Json => Some(JsonFileResult {
-                file: file_path.display().to_string(),
-                status: Some(if tags.has_any() {
-                    FileStatus::Success
-                } else {
-                    FileStatus::NoTag
-                }),
-                ..Default::default()
-            }),
+            let rg_fields = [
+                (TAG_MP3GAIN_ALBUM_MINMAX, &tags.album_minmax),
+                (TAG_REPLAYGAIN_TRACK_GAIN, &tags.track_gain),
+                (TAG_REPLAYGAIN_TRACK_PEAK, &tags.track_peak),
+                (TAG_REPLAYGAIN_ALBUM_GAIN, &tags.album_gain),
+                (TAG_REPLAYGAIN_ALBUM_PEAK, &tags.album_peak),
+                (TAG_REPLAYGAIN_ALGORITHM, &tags.algorithm),
+            ];
+            for (label, value) in rg_fields {
+                if let Some(v) = value {
+                    writeln!(out, "  {:<25}{}", format!("{}:", label), v).ok();
+                }
+            }
+            if !tags.has_any() {
+                writeln!(out, "  ({})", no_tag_msg).ok();
+            }
+            writeln!(out).ok();
+            None
         }
+        OutputFormat::Tsv => {
+            writeln!(
+                out,
+                // The algorithm column is appended last so existing column
+                // indices stay stable for scripts.
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                get_path(file_path),
+                tags.undo.as_deref().unwrap_or("-"),
+                tags.minmax.as_deref().unwrap_or("-"),
+                tags.track_gain.as_deref().unwrap_or("-"),
+                tags.track_peak.as_deref().unwrap_or("-"),
+                tags.album_gain.as_deref().unwrap_or("-"),
+                tags.album_peak.as_deref().unwrap_or("-"),
+                tags.album_minmax.as_deref().unwrap_or("-"),
+                tags.algorithm.as_deref().unwrap_or("-")
+            )
+            .ok();
+            None
+        }
+        OutputFormat::Json => Some(JsonFileResult {
+            file: file_path.display().to_string(),
+            status: Some(if tags.has_any() {
+                FileStatus::Success
+            } else {
+                FileStatus::NoTag
+            }),
+            ..Default::default()
+        }),
     }
 }
 
@@ -244,31 +262,6 @@ fn process_check_tags(file: &Path, opts: &Options) -> (Option<JsonFileResult>, S
         Ok(tags) => tags,
         Err(e) => return (Some(tag_read_error(file, filename, e, opts)), out),
     };
-
-    let (undo_label, minmax_label, no_tag_msg) = match tags.source {
-        GainTagSource::Aac => ("MP3RGAIN_UNDO", "MP3RGAIN_MINMAX", "no tags found"),
-        GainTagSource::Id3v2 => (
-            TAG_MP3GAIN_UNDO,
-            TAG_MP3GAIN_MINMAX,
-            "no ID3v2 ReplayGain tags found",
-        ),
-        GainTagSource::Ape { tag_present: true } => (
-            TAG_MP3GAIN_UNDO,
-            TAG_MP3GAIN_MINMAX,
-            "no mp3gain tags found",
-        ),
-        GainTagSource::Ape { tag_present: false } => {
-            (TAG_MP3GAIN_UNDO, TAG_MP3GAIN_MINMAX, "no APE tag found")
-        }
-        GainTagSource::Split => (TAG_MP3GAIN_UNDO, TAG_MP3GAIN_MINMAX, "no gain tags found"),
-    };
-
-    let info = CheckTagInfo {
-        tags: &tags,
-        undo_label,
-        minmax_label,
-        no_tag_msg,
-    };
-    let json = info.render(filename, file, opts.output_format, &mut out);
+    let json = render_tags(&tags, filename, file, opts.output_format, &mut out);
     (json, out)
 }

@@ -5,7 +5,9 @@ use mp3rgain::apply::{
     apply_with_options, predict_apply, write_replaygain_tags_only, ApplyOptions, TagsOnlyOptions,
 };
 use mp3rgain::replaygain::{AudioFileType, ReplayGainResult};
-use mp3rgain::{apply_gain_to_peak, mp4meta, peak_to_headroom_db, steps_to_db, AacAlbumInfo};
+use mp3rgain::{
+    apply_gain_to_peak, mp4meta, peak_to_headroom_db, steps_to_db, would_clip, AacAlbumInfo,
+};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -306,7 +308,7 @@ fn modified_unit(file_type: AudioFileType) -> &'static str {
 /// past unity (issue #308). Pure, so the album summary can report the same
 /// number the per-file writer stores.
 pub fn capped_tag_gain(gain_db: f64, peak: f64, prevent_clipping: bool) -> f64 {
-    if !prevent_clipping || apply_gain_to_peak(peak, gain_db) <= 1.0 {
+    if !prevent_clipping || !would_clip(peak, gain_db) {
         return gain_db;
     }
     // `None` only for a peak of 0 (digital silence), which cannot clip.

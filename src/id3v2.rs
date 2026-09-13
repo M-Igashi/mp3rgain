@@ -272,18 +272,11 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
 /// `REPLAYGAIN_*` TXXX frames, leaving any `MP3GAIN_UNDO` / `MP3GAIN_MINMAX`
 /// alone. Files without ReplayGain frames are left untouched rather than
 /// rewritten.
-#[allow(dead_code)]
-pub(crate) fn remove_id3v2_rg_values(path: &Path) -> Result<()> {
-    let mut tag = read_tag(path)?;
-    if !strip_rg_values(&mut tag) {
-        return Ok(());
-    }
-    write_tag(path, &mut tag)
-}
-
-/// [`remove_id3v2_rg_values`] for a not-yet-visible temp file the caller is
-/// about to rename into place (the APEv2 undo path), so the ID3v2 cleanup
-/// rides along instead of costing a second full-file copy.
+///
+/// Writes in place, without the temp+rename dance, because the only caller
+/// (the APEv2 undo path) hands it a not-yet-visible temp file it is about to
+/// rename over the original — so the ID3v2 cleanup rides along instead of
+/// costing a second full-file copy.
 pub(crate) fn remove_id3v2_rg_values_direct(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
     if !strip_rg_values(&mut tag) {

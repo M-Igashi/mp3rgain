@@ -18,17 +18,14 @@
 use std::fs;
 use std::path::Path;
 
-use crate::aac::{apply_aac_gain_to_data, AacAnalysis, AacGainLocation, BitReader};
+use crate::aac::{
+    apply_aac_gain_to_data, AacAnalysis, AacGainLocation, BitReader, SAMPLE_RATE_TABLE,
+};
 use crate::error::{Error, Result};
 use crate::frame::{find_audio_end, skip_id3v2};
 
 /// Fixed ADTS header length, without the optional 16-bit CRC.
 const HEADER_LEN: usize = 7;
-
-/// `sampling_frequency_index` table. Indices 13-15 are reserved.
-const SAMPLE_RATES: [u32; 13] = [
-    96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350,
-];
 
 struct AdtsHeader {
     /// Bytes from the start of the frame to its first raw_data_block.
@@ -53,7 +50,8 @@ fn parse_adts_header(data: &[u8]) -> Option<AdtsHeader> {
         return None;
     }
 
-    let sample_rate = *SAMPLE_RATES.get(((h[2] >> 2) & 0x0F) as usize)?;
+    // Indices 13-15 are reserved, so a lookup miss rejects the header.
+    let sample_rate = *SAMPLE_RATE_TABLE.get(((h[2] >> 2) & 0x0F) as usize)?;
     let channel_config = ((h[2] & 0x01) << 2) | (h[3] >> 6);
     let frame_len = ((h[3] as usize & 0x03) << 11) | ((h[4] as usize) << 3) | (h[5] as usize >> 5);
     // protection_absent == 0 means a 16-bit crc_check follows the header.

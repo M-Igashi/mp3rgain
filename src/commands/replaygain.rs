@@ -123,19 +123,28 @@ fn stored_album_report(files: &[PathBuf], opts: &Options) -> Option<AlbumAnalysi
     if !opts.stored_tags_usable() {
         return None;
     }
-    let mut tracks = Vec::with_capacity(files.len());
-    let mut album_values = Vec::with_capacity(files.len());
-    for file in files {
-        let tags = mp3rgain::read_gain_tags_auto(file, opts.tag_layout).ok()?;
-        let values = tags.rg1_album_values()?;
-        album_values.push((values.album_gain_db, values.album_peak));
-        tracks.push(ReplayGainResult::from_stored_tags(
-            values.track_gain_db,
-            values.track_peak,
-            AudioFileType::from_path(file),
-            opts.analysis_mode,
-        ));
-    }
+    // The point of this path is "no rescan", so the tag reads must not be the
+    // thing that walks the album on one thread: each one probes the container
+    // and parses a full ID3v2 tag, embedded cover art included. Collecting
+    // into an `Option` short-circuits on the first file with no usable set,
+    // exactly as the `?` in a sequential loop would.
+    let read: Option<Vec<(ReplayGainResult, (f64, f64))>> = files
+        .par_iter()
+        .map(|file| {
+            let tags = mp3rgain::read_gain_tags_auto(file, opts.tag_layout).ok()?;
+            let values = tags.rg1_album_values()?;
+            Some((
+                ReplayGainResult::from_stored_tags(
+                    values.track_gain_db,
+                    values.track_peak,
+                    AudioFileType::from_path(file),
+                    opts.analysis_mode,
+                ),
+                (values.album_gain_db, values.album_peak),
+            ))
+        })
+        .collect();
+    let (tracks, album_values): (Vec<_>, Vec<_>) = read?.into_iter().unzip();
     let (album_gain, album_peak) = mp3rgain::consistent_album_gain(album_values)?;
     Some(AlbumAnalysisReport {
         album: AlbumGainResult::from_stored_tags(

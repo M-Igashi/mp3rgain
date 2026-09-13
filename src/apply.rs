@@ -988,8 +988,8 @@ pub fn write_replaygain_tags_only(file_path: &Path, opts: &TagsOnlyOptions) -> R
 /// re-analyzing every file (issue #232); files without one (zero-frame
 /// applies, failed applies) fall back to a fresh `analyze()`.
 ///
-/// AAC members are filtered out up front (issue #307): `MP3GAIN_ALBUM_MINMAX`
-/// is an MP3/APEv2 concept, and the `analyze()` fallback is the raw MP3 frame
+/// AAC members are dropped (issue #307): `MP3GAIN_ALBUM_MINMAX` is an
+/// MP3/APEv2 concept, and the `analyze()` fallback is the raw MP3 frame
 /// scanner, which can false-sync on MP4 bytes and "succeed" with garbage
 /// values, skewing the album range and appending an APEv2 tag after the MP4
 /// data. Best-effort: a failed scan or tag write on one file is ignored so a
@@ -999,17 +999,15 @@ pub fn write_replaygain_tags_only(file_path: &Path, opts: &TagsOnlyOptions) -> R
 pub fn write_album_minmax(files: &[(&Path, Option<(u8, u8)>)]) {
     use rayon::prelude::*;
 
-    let files: Vec<(&Path, Option<(u8, u8)>)> = files
-        .iter()
-        .copied()
-        .filter(|&(file, _)| AudioFileType::from_path(file) == AudioFileType::Mp3)
-        .collect();
-
-    // The fallback analyze() is a full-file frame walk, so run the range
-    // collection in parallel like the apply pass that precedes it (#252).
+    // Both the container probe and the fallback analyze() read the file, so
+    // they run together on the pool like the apply pass that precedes them
+    // (#252). Probing serially first walked the whole album on one thread.
     let ranges: Vec<Option<(u8, u8)>> = files
         .par_iter()
         .map(|&(file, range)| {
+            if AudioFileType::from_path(file) != AudioFileType::Mp3 {
+                return None;
+            }
             range.or_else(|| {
                 crate::analyze(file)
                     .ok()

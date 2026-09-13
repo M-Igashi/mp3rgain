@@ -1,14 +1,12 @@
 use anyhow::Result;
 use colored::*;
-use indicatif::ProgressBar;
-use mp3rgain::replaygain::{self, ReplayGainResult};
+use mp3rgain::replaygain::ReplayGainResult;
 use mp3rgain::{analyze, mp4meta, peak_to_pcm_sample};
 use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::json_output::{FileStatus, JsonFileResult};
-use crate::processors::utils::{analyze_track, report_unsupported_format};
 use crate::util::{get_filename, get_path};
 
 /// Scan the file's global_gain range for an info row, as `(max, min)`.
@@ -123,51 +121,18 @@ pub fn format_rg_row(
     ))
 }
 
-pub fn process_info(
-    file: &Path,
-    opts: &Options,
-    analysis_pb: Option<&ProgressBar>,
-) -> Result<(JsonFileResult, String)> {
+/// Per-file info for the paths `cmd_info` does *not* hand to the single-pass
+/// ReplayGain flow: `-o json`, and builds without the `replaygain` feature.
+/// A ReplayGain analysis is therefore never available here — `cmd_info` routes
+/// every case that has one to `cmd_info_replaygain` instead.
+pub fn process_info(file: &Path, opts: &Options) -> Result<(JsonFileResult, String)> {
     let mut out = String::new();
-    let result = process_info_into(file, opts, analysis_pb, &mut out)?;
+    let result = process_info_into(file, opts, &mut out)?;
     Ok((result, out))
 }
 
-fn process_info_into(
-    file: &Path,
-    opts: &Options,
-    analysis_pb: Option<&ProgressBar>,
-    out: &mut String,
-) -> Result<JsonFileResult> {
+fn process_info_into(file: &Path, opts: &Options, out: &mut String) -> Result<JsonFileResult> {
     let filename = get_filename(file);
-
-    // Perform ReplayGain analysis for TSV/Text output (mp3gain compatible)
-    if matches!(opts.output_format, OutputFormat::Tsv | OutputFormat::Text)
-        && replaygain::is_available()
-    {
-        match analyze_track(file, opts, analysis_pb) {
-            Ok(rg_result) => {
-                let (result, text) =
-                    format_rg_row(file, opts, &rg_result, scan_gain_range_for_row(file))?;
-                out.push_str(&text);
-                return Ok(result);
-            }
-            Err(e) if e.is_unsupported_format() => {
-                // Not a failure: a format mp3rgain cannot adjust is reported
-                // as a skip so it does not set the exit code (issue #330).
-                return Ok(report_unsupported_format(
-                    file,
-                    filename,
-                    &e.to_string(),
-                    opts,
-                ));
-            }
-            Err(e) => {
-                eprintln!("{} - {}", filename.red(), e);
-                return Ok(JsonFileResult::error(file, e));
-            }
-        }
-    }
 
     // Check if this is an M4A/AAC file - if so, show appropriate message
     if mp4meta::is_mp4_file(file) {

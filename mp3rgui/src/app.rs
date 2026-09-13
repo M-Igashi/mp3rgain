@@ -468,7 +468,7 @@ impl Default for PersistedSettings {
     fn default() -> Self {
         Self {
             apply_options: ApplyOptionsUi::default(),
-            target_volume: 89.0,
+            target_volume: REPLAYGAIN_REFERENCE_DB,
             show_filename_only: false,
             album_grouping: AlbumGrouping::default(),
             single_album: false,
@@ -533,6 +533,10 @@ pub struct Mp3rgainApp {
     /// `rebuild_selection_set` at the start of each table frame. Kept on the
     /// app so its allocation is reused instead of rebuilt per frame.
     pub selection_set: HashSet<usize>,
+    /// Set by every method that writes `selected_indices`. Without it the
+    /// mirror was re-hashed on every frame the table drew — 50k inserts a
+    /// frame after Select All, for data that only changes on a click.
+    selection_dirty: bool,
 
     /// File indices added since the last import scan, awaiting an automatic
     /// stored-tag read (issue #203). Drained by `start_import_scan` on the
@@ -597,6 +601,7 @@ impl Mp3rgainApp {
             display_order_cache: Vec::new(),
             display_order_dirty: true,
             selection_set: HashSet::new(),
+            selection_dirty: false,
             pending_import_scan: Vec::new(),
             pending_drops: Vec::new(),
             show_filename_only: settings.show_filename_only,
@@ -668,14 +673,18 @@ impl Mp3rgainApp {
         &self.display_order_cache
     }
 
-    /// Refresh `selection_set` from `selected_indices`, reusing its
-    /// allocation. Called once per table frame; row rendering then does set
-    /// lookups instead of `Vec::contains` (issue #190) without rebuilding a
-    /// fresh `HashSet` every frame.
+    /// Refresh `selection_set` from `selected_indices` when the selection has
+    /// changed since the last refresh, reusing its allocation. Called once per
+    /// table frame; row rendering then does set lookups instead of
+    /// `Vec::contains` (issue #190).
     pub fn rebuild_selection_set(&mut self) {
+        if !self.selection_dirty {
+            return;
+        }
         self.selection_set.clear();
         self.selection_set
             .extend(self.selected_indices.iter().copied());
+        self.selection_dirty = false;
     }
 
     /// Sort `0..files.len()` by the active column. String columns
@@ -799,6 +808,7 @@ impl Mp3rgainApp {
             }
         }
         self.selected_indices.clear();
+        self.selection_dirty = true;
         // Removing rows shifts indices, so the anchor and any queued import
         // scan are stale.
         self.selection_anchor = None;
@@ -812,6 +822,7 @@ impl Mp3rgainApp {
         }
         self.files.clear();
         self.selected_indices.clear();
+        self.selection_dirty = true;
         self.selection_anchor = None;
         self.pending_import_scan.clear();
         self.display_order_dirty = true;
@@ -824,6 +835,7 @@ impl Mp3rgainApp {
             return;
         }
         self.selected_indices = (0..self.files.len()).collect();
+        self.selection_dirty = true;
         // Anchor at the first row so a follow-up Shift+click extends a sane
         // range. (Without this, an Esc-then-Cmd-A flow would lose the
         // anchor and Shift+click would behave like a plain click.)
@@ -833,6 +845,7 @@ impl Mp3rgainApp {
     /// Drop the current selection. Used by Escape (when no modal is open).
     pub fn clear_selection(&mut self) {
         self.selected_indices.clear();
+        self.selection_dirty = true;
         self.selection_anchor = None;
     }
 
@@ -844,6 +857,7 @@ impl Mp3rgainApp {
         if idx >= self.files.len() {
             return;
         }
+        self.selection_dirty = true;
         match mode {
             ClickMode::Replace => {
                 self.selected_indices.clear();
@@ -868,11 +882,13 @@ impl Mp3rgainApp {
             }
             ClickMode::RangeAdd => {
                 let anchor = self.selection_anchor.unwrap_or(idx);
-                for i in self.range_in_display_order(anchor, idx) {
-                    if !self.selected_indices.contains(&i) {
-                        self.selected_indices.push(i);
-                    }
-                }
+                let range = self.range_in_display_order(anchor, idx);
+                // Set membership rather than a `Vec::contains` per candidate:
+                // Select All followed by Shift+Cmd+click is otherwise
+                // quadratic and freezes the UI on a large table.
+                let mut seen: HashSet<usize> = self.selected_indices.iter().copied().collect();
+                self.selected_indices
+                    .extend(range.into_iter().filter(|i| seen.insert(*i)));
             }
         }
     }

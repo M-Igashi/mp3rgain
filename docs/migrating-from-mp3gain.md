@@ -131,7 +131,7 @@ For new integrations, prefer `-o json`, which is structured and stable.
 | APEv2 `mp3gain_minmax` (MP3) | Written | Written | Same |
 | APEv2 ReplayGain (`mp3gain_album_*`, `replaygain_*`) | Written | Written with `-s a` | Since 3.2.0 the default puts `REPLAYGAIN_*` in ID3v2 instead, and clears stale APEv2 copies so the two cannot disagree. `-s a` restores mp3gain's layout exactly |
 | ID3v2 TXXX ReplayGain | Not written | Written by default since 3.2.0 | Where standard ReplayGain readers look. ffmpeg does not read APEv2 on MP3 at all, and Rockbox only handles APE tags for WavPack/Musepack |
-| MP4 freeform metadata (AAC/M4A) | N/A | Written | mp3gain has no AAC support; mp3rgain stores AAC undo and ReplayGain in `com.apple.metadata.mdta:ReplayGain_*` and a `mp3gain_undo` freeform atom |
+| MP4 freeform metadata (AAC/M4A) | N/A | Written | mp3gain has no AAC support; mp3rgain stores AAC undo and ReplayGain as `com.apple.iTunes` freeform atoms — `mp3rgain_undo` / `mp3rgain_minmax`, and `replaygain_track_gain` / `replaygain_track_peak` / `replaygain_album_gain` / `replaygain_album_peak` (plus `replaygain_algorithm` in the `--rg2` / `--r128` modes) |
 | ID3v2 TXXX (raw ADTS `.aac`) | N/A | Written since 3.7.0 | A raw stream has no container for freeform atoms, so both families go into ID3v2 and the `-s a` / `-s i` layout choice does not apply ([#330](https://github.com/M-Igashi/mp3rgain/issues/330)) |
 
 For more on the choice between bitstream `global_gain` rewriting and

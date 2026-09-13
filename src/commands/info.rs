@@ -8,8 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::utils::{
-    exit_if_failed, finish_without_summary, for_each_file_with_analysis_bar, run_album_analysis,
-    TSV_HEADER,
+    exit_if_failed, finish_without_summary, for_each_file, run_album_analysis, TSV_HEADER,
 };
 use crate::processors::info::{
     format_rg_row, gain_range_fields, process_info, scan_gain_range_for_row,
@@ -205,10 +204,9 @@ fn analyze_set(set: &[(usize, &Path)], opts: &Options) -> Option<AlbumAnalysisRe
 
 /// Basic per-file info (JSON output or builds without the replaygain feature).
 fn cmd_info_basic(files: &[PathBuf], opts: &Options) -> Result<()> {
-    let (json_results, _, failed) =
-        for_each_file_with_analysis_bar(files, opts, |file, analysis_pb| {
-            process_info(file, opts, analysis_pb).map(|(r, t)| (Some(r), t))
-        })?;
+    let (json_results, _, failed) = for_each_file(files, opts, |file| {
+        process_info(file, opts).map(|(r, t)| (Some(r), t))
+    })?;
 
     finish_without_summary(json_results, failed, opts)
 }

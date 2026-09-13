@@ -251,8 +251,7 @@ pub fn delete_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<()> 
     #[cfg(feature = "aac")]
     {
         if mp4meta::is_aac_file(file_path) {
-            mp4meta::delete_replaygain_tags(file_path)?;
-            return mp4meta::delete_undo_tags(file_path);
+            return mp4meta::delete_gain_tags(file_path);
         }
         // Raw ADTS keeps everything in ID3v2, so that is the only container
         // to clear (issue #330).
@@ -303,6 +302,22 @@ pub struct StoredGainTags {
 }
 
 impl StoredGainTags {
+    /// Snapshot of the ID3v2 TXXX frames `rg` carries. `album_minmax` is an
+    /// APEv2-only item, so it is always absent here.
+    fn from_id3v2(rg: id3v2::Id3v2ReplayGain) -> Self {
+        Self {
+            source: GainTagSource::Id3v2,
+            track_gain: rg.track_gain,
+            track_peak: rg.track_peak,
+            album_gain: rg.album_gain,
+            album_peak: rg.album_peak,
+            algorithm: rg.algorithm,
+            undo: rg.undo,
+            minmax: rg.minmax,
+            album_minmax: None,
+        }
+    }
+
     /// A snapshot with every tag absent, attributed to `source`.
     pub fn empty(source: GainTagSource) -> Self {
         Self {
@@ -405,33 +420,15 @@ pub fn read_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<Stored
         // Raw ADTS writes to ID3v2 whatever the layout, so that is where its
         // tags are read from too (issue #330).
         if adts::is_adts_file(file_path) {
-            let rg = id3v2::read_id3v2_replaygain(file_path)?;
-            return Ok(StoredGainTags {
-                source: GainTagSource::Id3v2,
-                track_gain: rg.track_gain,
-                track_peak: rg.track_peak,
-                album_gain: rg.album_gain,
-                album_peak: rg.album_peak,
-                algorithm: rg.algorithm,
-                undo: rg.undo,
-                minmax: rg.minmax,
-                album_minmax: None,
-            });
+            return Ok(StoredGainTags::from_id3v2(id3v2::read_id3v2_replaygain(
+                file_path,
+            )?));
         }
     }
     if layout.mp3gain_in_id3v2() {
-        let rg = id3v2::read_id3v2_replaygain(file_path)?;
-        return Ok(StoredGainTags {
-            source: GainTagSource::Id3v2,
-            track_gain: rg.track_gain,
-            track_peak: rg.track_peak,
-            album_gain: rg.album_gain,
-            album_peak: rg.album_peak,
-            algorithm: rg.algorithm,
-            undo: rg.undo,
-            minmax: rg.minmax,
-            album_minmax: None,
-        });
+        return Ok(StoredGainTags::from_id3v2(id3v2::read_id3v2_replaygain(
+            file_path,
+        )?));
     }
     if layout == TagLayout::Split {
         let id3 = id3v2::read_id3v2_replaygain(file_path)?;
