@@ -123,6 +123,7 @@ The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained up
 - [Compatibility Report](docs/compatibility-report.md) - bit-level verification against original mp3gain
 - [Parallel Performance](docs/perf-parallel.md) - `-j` / `--threads` design and benchmarks
 - [Use Cases](docs/use-cases.md) - integration examples (beets, headroom, etc.)
+- [Design Decisions](docs/design-decisions.md) - things that look like defects and are deliberate, and where each was decided
 - [Security](docs/security.md) - memory safety and CVE analysis
 - [Roadmap](docs/roadmap.md) - development plans
 - [FAQ](https://mp3rgain.tyna.ninja/faq) · [Download Stats](https://m-igashi.github.io/mp3rgain/)

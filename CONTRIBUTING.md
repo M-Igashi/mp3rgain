@@ -57,10 +57,18 @@ We especially welcome Windows testing reports! Please use the [Windows Compatibi
 ## Code Style
 
 - Follow standard Rust conventions
-- Run `cargo fmt` before committing
+- Run `cargo fmt` before committing. `mp3rgui/` is not a workspace member, so a GUI change also needs `cargo fmt --manifest-path mp3rgui/Cargo.toml`
 - Run `cargo clippy` and address warnings
 - Add tests for new functionality
 - Update documentation as needed
+
+### Before you simplify something
+
+Parts of this codebase look wrong until you know why they are that way: duplicated functions that measurement says to keep, two gates that differ by one condition on purpose, a `round()` next to a `floor()`. [docs/design-decisions.md](docs/design-decisions.md) is the index of those, with pointers to where each was decided.
+
+Commit messages here carry the reasoning at length, so `git log -S '<the line>' -- <file>` usually answers the question faster than working it out from scratch.
+
+RG1 analysis and every apply path are byte-exact guarantees. `cargo test` passing is necessary but not sufficient for a change that touches them: build the binary before and after and compare real output and written files.
 
 ## Priority Areas
 
