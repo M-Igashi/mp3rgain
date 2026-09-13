@@ -263,6 +263,14 @@ All core functionality complete:
 - [x] ALAC and DRM-protected M4P are reported as skipped rather than failed, so one such file no longer sets the exit code of a library scan (#330)
 - [x] The `global_gain` range in info / `-o tsv` is scanned per container, and prints `-` when it cannot be scanned instead of the (255, 0) accumulator seed (#329)
 
+### v3.8.0 - Album Grouping and Parallel Analysis
+
+- [x] `--album-by=tag` groups albums by ALBUM / ALBUMARTIST (preferring `MUSICBRAINZ_ALBUMID`), so a release whose discs live in subfolders gets one album gain (#333, #336)
+- [x] `--album-depth N` groups by directory depth for untagged libraries, and `dir` mode reports a release split across sibling folders (#331, #339)
+- [x] mp3rgui exposes the same three album units as the CLI, and names on hover which album each row was grouped into (#338, #343, #344, #345)
+- [x] `-a --album-by=...` analyzes albums concurrently instead of draining the thread pool at every album boundary (#332, #335)
+- [x] The true-peak polyphase filter was restructured for a measured 2.1x, and a long track is now divided across workers so `-j` helps a single file (#334, #337, #340, #341, #342)
+
 ## Upcoming Goals
 
 ### Future Enhancements
