@@ -271,6 +271,17 @@ All core functionality complete:
 - [x] `-a --album-by=...` analyzes albums concurrently instead of draining the thread pool at every album boundary (#332, #335)
 - [x] The true-peak polyphase filter was restructured for a measured 2.1x, and a long track is now divided across workers so `-j` helps a single file (#334, #337, #340, #341, #342)
 
+### Unreleased
+
+Documentation only. No behaviour change: every command produces output identical to 3.8.0, and MP3, M4A and raw ADTS applies are byte-identical. Nothing here reaches docs.rs until the next version is published, because a published version's documentation is immutable.
+
+- [x] Every public library item is documented, and `#![warn(missing_docs)]` keeps it that way. 151 items reached docs.rs with nothing on them, on a crate whose README points at docs.rs as the API reference (#346)
+- [x] The `Error` enum, 46 of those 151, now says *when* each variant is produced rather than restating its name, which is what a consumer matching on a `#[non_exhaustive]` enum needs (#346)
+- [x] The crate-level module list had drifted four modules behind, `albummeta` shipped seven undocumented public fields with #345, and rustdoc emitted eight warnings including one genuinely broken link. `cargo doc` is now at zero warnings
+- [x] docs.rs builds with `all-features`, so the `serde` impls on the public result types are documented
+- [x] `docs/design-decisions.md` records the deliberate shapes a whole-codebase review keeps re-proposing as defects, each pointing at where it was decided
+- [x] The AAC tag row in the migration guide named an atom and a namespace that were both wrong; it now lists the actual `com.apple.iTunes` atom names
+
 ## Upcoming Goals
 
 ### Future Enhancements
