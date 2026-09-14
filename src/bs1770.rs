@@ -163,6 +163,7 @@ pub struct BlockEnergies {
 }
 
 impl BlockEnergies {
+    /// An empty set, ready to [`accumulate`](Self::accumulate) into.
     pub fn new() -> Self {
         Self::default()
     }
@@ -172,6 +173,7 @@ impl BlockEnergies {
         self.energies.len()
     }
 
+    /// True when no complete 400 ms block was measured.
     pub fn is_empty(&self) -> bool {
         self.energies.is_empty()
     }
@@ -298,6 +300,9 @@ fn polyphase_peak<const F: usize>(coef: &[f64], window: &[f64]) -> f64 {
 impl TruePeakMeter {
     const TAPS: usize = 49;
 
+    /// Build a meter for `channels` channels at `sample_rate`.
+    ///
+    /// Oversamples 4x below 88.2 kHz and 2x at or above it.
     pub fn new(sample_rate: u32, channels: usize) -> Self {
         let factor: usize = if sample_rate >= 88_200 { 2 } else { 4 };
         let taps = Self::TAPS.div_ceil(factor);

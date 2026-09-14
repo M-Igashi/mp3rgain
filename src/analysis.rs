@@ -1,3 +1,11 @@
+//! MP3 frame inspection: gain statistics, headroom and peak amplitude.
+//!
+//! Everything here reads `global_gain` out of the frame side information
+//! without decoding audio, so it is cheap compared with a ReplayGain
+//! analysis. [`analyze`] walks every frame; [`read_channel_mode`] reads one
+//! header; [`gain_range`] and [`find_max_amplitude`] dispatch on the
+//! container so AAC input reports the same values as MP3.
+
 use crate::error::{Error, Result};
 use crate::frame::{first_frame_header, iterate_frames, read_gain_at, scan_gain_range, skip_id3v2};
 use crate::gain::{steps_to_db, MAX_GAIN};
@@ -40,27 +48,38 @@ impl Mp3Analysis {
         }
     }
 
+    /// Frames the scanner accepted. Xing/Info headers and frames inconsistent
+    /// with the first one are not counted.
     pub fn frame_count(&self) -> usize {
         self.frame_count
     }
+    /// MPEG version of the first accepted frame.
     pub fn mpeg_version(&self) -> MpegVersion {
         self.mpeg_version
     }
+    /// Channel mode of the first accepted frame.
     pub fn channel_mode(&self) -> ChannelMode {
         self.channel_mode
     }
+    /// Lowest `global_gain` seen across every frame.
     pub fn min_gain(&self) -> u8 {
         self.min_gain
     }
+    /// Highest `global_gain` seen across every frame. This is what bounds how
+    /// much gain can be added before saturating.
     pub fn max_gain(&self) -> u8 {
         self.max_gain
     }
+    /// Mean `global_gain` across every frame.
     pub fn avg_gain(&self) -> f64 {
         self.avg_gain
     }
+    /// Steps that can still be added before the loudest frame saturates at
+    /// 255, i.e. `255 - max_gain`.
     pub fn headroom_steps(&self) -> i32 {
         self.headroom_steps
     }
+    /// [`headroom_steps`](Self::headroom_steps) in dB.
     pub fn headroom_db(&self) -> f64 {
         steps_to_db(self.headroom_steps)
     }
@@ -84,8 +103,11 @@ impl std::fmt::Display for Mp3Analysis {
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MpegVersion {
+    /// MPEG-1 Audio, 32/44.1/48 kHz, two granules per frame.
     Mpeg1,
+    /// MPEG-2 Audio (LSF), 16/22.05/24 kHz, one granule per frame.
     Mpeg2,
+    /// MPEG-2.5, the unofficial extension, 8/11.025/12 kHz.
     Mpeg25,
 }
 
@@ -111,9 +133,15 @@ impl std::fmt::Display for MpegVersion {
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ChannelMode {
+    /// Two independent channels.
     Stereo,
+    /// Two channels sharing information. Per-channel gain (`-l`) may not do
+    /// what the user expects here, so the CLI warns.
     JointStereo,
+    /// Two unrelated channels, e.g. two languages. Two channels for gain.
     DualChannel,
+    /// One channel. Rejects per-channel gain with
+    /// [`crate::Error::ChannelGainOnMono`].
     Mono,
 }
 
@@ -162,12 +190,16 @@ impl MaxAmplitudeResult {
         }
     }
 
+    /// Decoded peak, normalized so 1.0 is full scale. Values above 1.0 mean
+    /// the audio already clips. Multiply by 32768 for mp3gain's PCM scale.
     pub fn max_amplitude(&self) -> f64 {
         self.max_amplitude
     }
+    /// Highest `global_gain` in the file.
     pub fn max_global_gain(&self) -> u8 {
         self.max_global_gain
     }
+    /// Lowest `global_gain` in the file.
     pub fn min_global_gain(&self) -> u8 {
         self.min_global_gain
     }

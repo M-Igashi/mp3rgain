@@ -214,6 +214,8 @@ fn fill(slot: &mut Option<String>, value: &str) {
     }
 }
 
+/// Always `None` without the `replaygain` feature: reading tags needs the
+/// symphonia metadata probe, so a build without it cannot group by release.
 #[cfg(not(feature = "replaygain"))]
 pub fn read_album_tags(_path: &Path) -> Option<AlbumTags> {
     None

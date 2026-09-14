@@ -25,11 +25,20 @@ use std::fs;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
 
-/// ReplayGain tag keys (iTunes freeform format)
+/// `replaygain_track_gain` freeform atom name.
+///
+/// The MP4 freeform names are **lowercase**, unlike the uppercase APEv2 and
+/// ID3v2 keys in [`crate::ape`]. Reads compare case-insensitively, but writes
+/// use these constants, so use them rather than a literal.
 pub const RG_TRACK_GAIN: &str = "replaygain_track_gain";
+/// `replaygain_track_peak` freeform atom name. See [`RG_TRACK_GAIN`].
 pub const RG_TRACK_PEAK: &str = "replaygain_track_peak";
+/// `replaygain_album_gain` freeform atom name. See [`RG_TRACK_GAIN`].
 pub const RG_ALBUM_GAIN: &str = "replaygain_album_gain";
+/// `replaygain_album_peak` freeform atom name. See [`RG_TRACK_GAIN`].
 pub const RG_ALBUM_PEAK: &str = "replaygain_album_peak";
+/// `replaygain_algorithm` freeform atom name, written only by the BS.1770
+/// modes. See [`RG_TRACK_GAIN`].
 pub const RG_ALGORITHM: &str = "replaygain_algorithm";
 
 /// Every ReplayGain freeform name mp3rgain writes, for the paths that treat
@@ -42,8 +51,12 @@ const RG_FREEFORM_NAMES: [&str; 5] = [
     RG_ALGORITHM,
 ];
 
-/// Undo tag keys (iTunes freeform format, same namespace)
+/// `mp3rgain_undo` freeform atom name, same namespace as the ReplayGain ones.
+///
+/// Unlike MP3's [`TAG_MP3GAIN_UNDO`](crate::ape::TAG_MP3GAIN_UNDO), the AAC
+/// value is the cumulative *applied* gain and is negated on undo.
 pub const UNDO_TAG: &str = "mp3rgain_undo";
+/// `mp3rgain_minmax` freeform atom name, the pre-apply `global_gain` range.
 pub const MINMAX_TAG: &str = "mp3rgain_minmax";
 
 /// iTunes namespace for freeform tags
@@ -133,12 +146,15 @@ impl FreeformTag {
         }
     }
 
+    /// The `mean` box, e.g. `com.apple.iTunes`.
     pub fn namespace(&self) -> &str {
         &self.namespace
     }
+    /// The `name` box, e.g. `replaygain_track_gain`.
     pub fn name(&self) -> &str {
         &self.name
     }
+    /// The `data` box payload, decoded as UTF-8.
     pub fn value(&self) -> &str {
         &self.value
     }
@@ -163,27 +179,34 @@ pub struct ReplayGainTags {
 }
 
 impl ReplayGainTags {
+    /// `replaygain_track_gain` as stored, or `None` when absent.
     pub fn track_gain(&self) -> Option<&str> {
         self.track_gain.as_deref()
     }
+    /// `replaygain_track_peak` as stored.
     pub fn track_peak(&self) -> Option<&str> {
         self.track_peak.as_deref()
     }
+    /// `replaygain_album_gain` as stored.
     pub fn album_gain(&self) -> Option<&str> {
         self.album_gain.as_deref()
     }
+    /// `replaygain_album_peak` as stored.
     pub fn album_peak(&self) -> Option<&str> {
         self.album_peak.as_deref()
     }
+    /// `replaygain_algorithm` as stored; `None` in RG1 mode.
     pub fn algorithm(&self) -> Option<&str> {
         self.algorithm.as_deref()
     }
 
+    /// Set the track pair, formatting both to the 6-decimal tag convention.
     pub fn set_track(&mut self, gain_db: f64, peak: f64) {
         self.track_gain = Some(crate::ape::format_rg_gain(gain_db));
         self.track_peak = Some(crate::ape::format_rg_peak(peak));
     }
 
+    /// Set the album pair, formatting both to the 6-decimal tag convention.
     pub fn set_album(&mut self, gain_db: f64, peak: f64) {
         self.album_gain = Some(crate::ape::format_rg_gain(gain_db));
         self.album_peak = Some(crate::ape::format_rg_peak(peak));
@@ -195,6 +218,7 @@ impl ReplayGainTags {
         self.algorithm = mode.algorithm_tag().map(str::to_string);
     }
 
+    /// True when no ReplayGain value is set, so there is nothing to write.
     pub fn is_empty(&self) -> bool {
         self.track_gain.is_none()
             && self.track_peak.is_none()
@@ -268,13 +292,17 @@ impl UndoTags {
         Self { undo, minmax }
     }
 
+    /// `mp3rgain_undo` as stored: the cumulative *applied* gain, which undo
+    /// negates. Opposite sign to MP3's `MP3GAIN_UNDO`.
     pub fn undo(&self) -> Option<&str> {
         self.undo.as_deref()
     }
+    /// `mp3rgain_minmax` as stored, `min,max`.
     pub fn minmax(&self) -> Option<&str> {
         self.minmax.as_deref()
     }
 
+    /// True when neither value is set, so writing would remove both atoms.
     pub fn is_empty(&self) -> bool {
         self.undo.is_none() && self.minmax.is_none()
     }
@@ -1286,8 +1314,11 @@ const SOUN: u32 = u32::from_be_bytes(*b"soun");
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Mp4AudioCodec {
+    /// `mp4a`. The only codec mp3rgain can adjust in an MP4.
     Aac,
+    /// `alac`. Lossless, and reported as a skip rather than a failure.
     Alac,
+    /// A sample entry that is neither, e.g. DRM-protected `drms`.
     Unknown,
 }
 

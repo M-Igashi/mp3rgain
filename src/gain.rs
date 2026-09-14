@@ -1,3 +1,18 @@
+//! Gain adjustment: the step model, the conversions, and the apply entry points.
+//!
+//! MP3 volume is changed losslessly by moving the 8-bit `global_gain` field in
+//! each frame's side information. One step scales amplitude by 2^(1/4), which
+//! is [`GAIN_STEP_DB`] and is fixed by the MP3 specification, so every gain
+//! this crate applies is a whole number of steps. [`db_to_steps`] and
+//! [`steps_to_db`] are the conversion, and they use the exact constant rather
+//! than the rounded 1.5 dB so that applying a gain and re-measuring it does not
+//! drift.
+//!
+//! [`GainOptions`] is the builder for an apply. For anything beyond a plain
+//! gain change, prefer [`crate::apply::apply_with_options`], which adds the
+//! clipping check, the tag writes and the atomic rename that both frontends
+//! rely on.
+
 use crate::analysis::ChannelMode;
 use crate::ape::{
     parse_undo_values, parse_undo_wrap, read_ape_tag, replace_ape_tag, ApeReplayGain,

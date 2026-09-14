@@ -56,21 +56,29 @@ impl AacGainLocation {
         }
     }
 
+    /// Index of the AAC sample (frame) this field was found in.
     pub fn sample_index(&self) -> u32 {
         self.sample_index
     }
+    /// Absolute byte offset of the field in the file.
     pub fn file_offset(&self) -> u64 {
         self.file_offset
     }
+    /// Byte offset of the field within its own sample.
     pub fn sample_byte_offset(&self) -> u32 {
         self.sample_byte_offset
     }
+    /// Bit offset within that byte. `global_gain` is 8 bits and rarely
+    /// byte-aligned, so reads and writes are bit-level.
     pub fn bit_offset(&self) -> u8 {
         self.bit_offset
     }
+    /// Which channel of the element this field belongs to (0 or 1).
     pub fn channel(&self) -> u8 {
         self.channel
     }
+    /// The `global_gain` value as found, before any adjustment. A value of 0
+    /// means silence and is left alone by the apply.
     pub fn original_gain(&self) -> u8 {
         self.original_gain
     }
@@ -111,24 +119,33 @@ impl AacAnalysis {
         }
     }
 
+    /// Every `global_gain` field located, in stream order.
     pub fn gain_locations(&self) -> &[AacGainLocation] {
         &self.gain_locations
     }
+    /// AAC samples (frames) in the stream, including any that failed to parse.
     pub fn sample_count(&self) -> u32 {
         self.sample_count
     }
+    /// Highest channel index seen, plus one.
     pub fn channel_count(&self) -> u8 {
         self.channel_count
     }
+    /// Lowest `global_gain` across every located field.
     pub fn min_gain(&self) -> u8 {
         self.min_gain
     }
+    /// Highest `global_gain` across every located field, which is what bounds
+    /// how much gain can be added before saturating.
     pub fn max_gain(&self) -> u8 {
         self.max_gain
     }
+    /// Sample rate from the AudioSpecificConfig, or the ADTS header.
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
+    /// Samples the parser could not read. A non-zero count is tolerated: those
+    /// samples keep their original gain.
     pub fn parse_warnings(&self) -> u32 {
         self.parse_warnings
     }

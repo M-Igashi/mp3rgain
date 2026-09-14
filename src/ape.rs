@@ -1,3 +1,14 @@
+//! APEv2 tag reading and writing, the container mp3gain stores its values in.
+//!
+//! An APEv2 tag lives at the end of the file, optionally followed by a 128-byte
+//! ID3v1 block. Reads and writes therefore touch only the tail: a tag update
+//! costs a few KB of I/O rather than a full-file copy. The trade-off is
+//! documented on the internal `rewrite_ape_tail`, and it is the same one
+//! mp3gain has always made.
+//!
+//! The `TAG_*` constants are the on-disk item names, uppercase. Their MP4
+//! counterparts in [`crate::mp4meta`] are lowercase.
+
 use crate::error::{Error, Result};
 use crate::frame::{read_u32_le, APE_FLAG_HEADER_PRESENT, APE_PREAMBLE};
 
@@ -11,15 +22,28 @@ const APE_VERSION: u32 = 2000;
 /// APEv2 tag flag: is header
 const APE_FLAG_IS_HEADER: u32 = 1 << 29;
 
-/// MP3Gain specific tag keys
+/// Cumulative undo value, `+LLL,+RRR,W|N`. Read by the mp3gain lineage.
+///
+/// For MP3 this stores the *undo delta*, the value to re-apply to restore the
+/// original. See [`format_undo_value`] for why AAC uses the opposite sign.
 pub const TAG_MP3GAIN_UNDO: &str = "MP3GAIN_UNDO";
+/// Post-apply `global_gain` range of one file, `min,max`.
 pub const TAG_MP3GAIN_MINMAX: &str = "MP3GAIN_MINMAX";
+/// Post-apply `global_gain` range across a whole album, `min,max`. The same
+/// value is stored on every member. APEv2 only.
 pub const TAG_MP3GAIN_ALBUM_MINMAX: &str = "MP3GAIN_ALBUM_MINMAX";
 
-/// ReplayGain tag keys
+/// `REPLAYGAIN_TRACK_GAIN`, in dB at 6 decimals.
+///
+/// After a real apply this is a *residual*: the gain a player should still
+/// apply on top of what is already baked into `global_gain`. Under
+/// `--tags-only` it is the absolute measured gain instead.
 pub const TAG_REPLAYGAIN_TRACK_GAIN: &str = "REPLAYGAIN_TRACK_GAIN";
+/// `REPLAYGAIN_TRACK_PEAK`, a linear peak where 1.0 is full scale.
 pub const TAG_REPLAYGAIN_TRACK_PEAK: &str = "REPLAYGAIN_TRACK_PEAK";
+/// `REPLAYGAIN_ALBUM_GAIN`. Same residual rule as the track value.
 pub const TAG_REPLAYGAIN_ALBUM_GAIN: &str = "REPLAYGAIN_ALBUM_GAIN";
+/// `REPLAYGAIN_ALBUM_PEAK`, the loudest peak across the album.
 pub const TAG_REPLAYGAIN_ALBUM_PEAK: &str = "REPLAYGAIN_ALBUM_PEAK";
 /// Loudness algorithm the gain values were measured with. Only written by the
 /// BS.1770 modes (`--rg2` / `--r128`) — see [`AnalysisMode::algorithm_tag`].
@@ -51,9 +75,12 @@ impl ApeItem {
         Self { key, value }
     }
 
+    /// The item key, as stored. Uppercased on write; compare
+    /// case-insensitively on read.
     pub fn key(&self) -> &str {
         &self.key
     }
+    /// The item value, as stored.
     pub fn value(&self) -> &str {
         &self.value
     }
@@ -483,9 +510,14 @@ pub fn write_ape_tag(file_path: &Path, tag: &ApeTag) -> Result<()> {
 /// as mp3rgain's ID3v2 (`-s i`) and AAC paths.
 #[derive(Debug, Clone, Default)]
 pub struct ApeReplayGain {
+    /// `REPLAYGAIN_TRACK_GAIN`, e.g. `"-3.500000 dB"`. `None` leaves any
+    /// existing item alone.
     pub track_gain: Option<String>,
+    /// `REPLAYGAIN_TRACK_PEAK`, e.g. `"0.987650"`.
     pub track_peak: Option<String>,
+    /// `REPLAYGAIN_ALBUM_GAIN`. Only set when an album was analyzed.
     pub album_gain: Option<String>,
+    /// `REPLAYGAIN_ALBUM_PEAK`. Only set when an album was analyzed.
     pub album_peak: Option<String>,
     /// `REPLAYGAIN_ALGORITHM`; `None` in the mp3gain-compatible RG1 mode.
     pub algorithm: Option<String>,

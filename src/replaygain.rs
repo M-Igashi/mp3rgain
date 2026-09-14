@@ -240,18 +240,26 @@ impl ReplayGainResult {
     pub fn loudness_db(&self) -> f64 {
         self.loudness_db
     }
+    /// Gain needed to reach the mode's target, in dB.
     pub fn gain_db(&self) -> f64 {
         self.gain_db
     }
+    /// Measured peak, normalized so 1.0 is full scale. A true peak
+    /// ([`is_true_peak`](Self::is_true_peak)) can legitimately exceed 1.0.
     pub fn peak(&self) -> f64 {
         self.peak
     }
+    /// Sample rate the analysis ran at. `0` for a result built from stored
+    /// tags, where it is unknown.
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
+    /// Container the file was classified as.
     pub fn file_type(&self) -> AudioFileType {
         self.file_type
     }
+    /// Which algorithm measured this result. Values from different modes are
+    /// on different scales and must not be mixed.
     pub fn analysis_mode(&self) -> AnalysisMode {
         self.analysis_mode
     }
@@ -338,15 +346,23 @@ impl AlbumGainResult {
         }
     }
 
+    /// Per-track results, in the order the successfully-analyzed files were
+    /// given. Map back to input positions with
+    /// [`AlbumAnalysisReport::successful_indices`].
     pub fn tracks(&self) -> &[ReplayGainResult] {
         &self.tracks
     }
+    /// Loudness of the album measured as one continuous programme, not the
+    /// mean of the per-track values.
     pub fn album_loudness_db(&self) -> f64 {
         self.album_loudness_db
     }
+    /// Gain needed to bring the album to the mode's target, in dB. The same
+    /// value applies to every member, which is the point of album gain.
     pub fn album_gain_db(&self) -> f64 {
         self.album_gain_db
     }
+    /// Loudest peak across the album.
     pub fn album_peak(&self) -> f64 {
         self.album_peak
     }
@@ -377,8 +393,13 @@ impl std::fmt::Display for AlbumGainResult {
 /// `album.tracks()[k]` back to `files[successful_indices[k]]`.
 #[derive(Debug, Clone)]
 pub struct AlbumAnalysisReport {
+    /// The album result, computed from the successfully-analyzed tracks only.
     pub album: AlbumGainResult,
+    /// `(file_index, error_message)` for each file that was skipped, in input
+    /// order.
     pub failures: Vec<(usize, String)>,
+    /// Maps track results back to inputs: `album.tracks()[k]` is
+    /// `files[successful_indices[k]]`.
     pub successful_indices: Vec<usize>,
 }
 
@@ -2530,6 +2551,8 @@ fn analyze_album_parallel_internal(
 // Stub implementations when feature is disabled
 // =============================================================================
 
+/// Always fails with [`Error::FeatureNotAvailable`] in a build without the
+/// `replaygain` feature.
 #[cfg(not(feature = "replaygain"))]
 pub fn analyze_track(_file_path: &Path) -> Result<ReplayGainResult> {
     Err(Error::FeatureNotAvailable {
@@ -2538,6 +2561,8 @@ pub fn analyze_track(_file_path: &Path) -> Result<ReplayGainResult> {
     })
 }
 
+/// Always fails with [`Error::FeatureNotAvailable`] in a build without the
+/// `replaygain` feature.
 #[cfg(not(feature = "replaygain"))]
 pub fn analyze_track_with_index(
     _file_path: &Path,
@@ -2549,6 +2574,8 @@ pub fn analyze_track_with_index(
     })
 }
 
+/// Always fails with [`Error::FeatureNotAvailable`] in a build without the
+/// `replaygain` feature.
 #[cfg(not(feature = "replaygain"))]
 pub fn analyze_track_with_mode(
     _file_path: &Path,
@@ -2562,6 +2589,8 @@ pub fn analyze_track_with_mode(
     })
 }
 
+/// Always fails with [`Error::FeatureNotAvailable`] in a build without the
+/// `replaygain` feature.
 #[cfg(not(feature = "replaygain"))]
 pub fn analyze_track_with_options(
     _file_path: &Path,
@@ -2573,6 +2602,8 @@ pub fn analyze_track_with_options(
     })
 }
 
+/// Always fails with [`Error::FeatureNotAvailable`] in a build without the
+/// `replaygain` feature.
 #[cfg(not(feature = "replaygain"))]
 pub fn analyze_track_with_progress(
     _file_path: &Path,
@@ -2585,6 +2616,8 @@ pub fn analyze_track_with_progress(
     })
 }
 
+/// Always fails with [`Error::FeatureNotAvailable`] in a build without the
+/// `replaygain` feature.
 #[cfg(not(feature = "replaygain"))]
 pub fn analyze_album(_files: &[&Path]) -> Result<AlbumGainResult> {
     Err(Error::FeatureNotAvailable {
@@ -2593,6 +2626,8 @@ pub fn analyze_album(_files: &[&Path]) -> Result<AlbumGainResult> {
     })
 }
 
+/// Always fails with [`Error::FeatureNotAvailable`] in a build without the
+/// `replaygain` feature.
 #[cfg(not(feature = "replaygain"))]
 pub fn analyze_album_with_options(
     _files: &[&Path],
@@ -2629,12 +2664,15 @@ impl PeakAmplitudeResult {
         }
     }
 
+    /// Peak normalized so 1.0 is full scale. Above 1.0 means the audio clips.
     pub fn peak(&self) -> f64 {
         self.peak
     }
+    /// The same peak on mp3gain's 16-bit PCM scale (`peak * 32768`).
     pub fn peak_pcm(&self) -> f64 {
         self.peak_pcm
     }
+    /// Sample rate the file decoded at.
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
@@ -2781,6 +2819,8 @@ fn find_peak_amplitude_from_source(
     ))
 }
 
+/// Always fails with [`Error::FeatureNotAvailable`] in a build without the
+/// `replaygain` feature.
 #[cfg(not(feature = "replaygain"))]
 pub fn find_peak_amplitude(_file_path: &Path) -> Result<PeakAmplitudeResult> {
     Err(Error::FeatureNotAvailable {
@@ -2789,6 +2829,8 @@ pub fn find_peak_amplitude(_file_path: &Path) -> Result<PeakAmplitudeResult> {
     })
 }
 
+/// Always fails with [`Error::FeatureNotAvailable`] in a build without the
+/// `replaygain` feature.
 #[cfg(not(feature = "replaygain"))]
 pub fn find_peak_amplitude_in_data(
     _file_path: &Path,

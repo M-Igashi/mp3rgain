@@ -64,6 +64,12 @@
 //! Each gain step scales amplitude by 2^(1/4) ≈ 1.505 dB (fixed by MP3 specification).
 //! The global_gain field is 8 bits, allowing values 0-255.
 
+// docs.rs is the API reference this crate's README points at, so every public
+// item has to carry documentation. `warn` rather than `deny`: CI runs
+// `cargo clippy -- -D warnings`, which is what enforces it, while a local
+// build mid-edit still succeeds.
+#![warn(missing_docs)]
+
 #[cfg(feature = "aac")]
 pub mod aac;
 #[cfg(feature = "aac")]
@@ -282,7 +288,10 @@ pub enum GainTagSource {
     Id3v2,
     /// APEv2 tag. `tag_present` distinguishes a file with no APE tag at all
     /// from one whose APE tag simply carries no mp3gain items.
-    Ape { tag_present: bool },
+    Ape {
+        /// Whether the file had an APEv2 tag at all.
+        tag_present: bool,
+    },
     /// Both containers were read and merged ([`TagLayout::Split`]).
     Split,
 }
@@ -291,15 +300,25 @@ pub enum GainTagSource {
 /// [`read_gain_tags_auto`]. `None` means the tag is absent (not an error).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredGainTags {
+    /// Which container these values were read from.
     pub source: GainTagSource,
+    /// `REPLAYGAIN_TRACK_GAIN` as stored. Parse with
+    /// [`track_gain_db`](Self::track_gain_db).
     pub track_gain: Option<String>,
+    /// `REPLAYGAIN_TRACK_PEAK` as stored. Parse with
+    /// [`track_peak_value`](Self::track_peak_value).
     pub track_peak: Option<String>,
+    /// `REPLAYGAIN_ALBUM_GAIN` as stored.
     pub album_gain: Option<String>,
+    /// `REPLAYGAIN_ALBUM_PEAK` as stored.
     pub album_peak: Option<String>,
     /// `REPLAYGAIN_ALGORITHM`; only written by the `--rg2` / `--r128` modes,
     /// so `None` on anything measured with mp3gain-compatible ReplayGain 1.0.
     pub algorithm: Option<String>,
+    /// `MP3GAIN_UNDO`. Its sign convention differs by container: see
+    /// [`ape::format_undo_value`].
     pub undo: Option<String>,
+    /// `MP3GAIN_MINMAX`, the post-apply `global_gain` range.
     pub minmax: Option<String>,
     /// APE-only `MP3GAIN_ALBUM_MINMAX`; always `None` for AAC and ID3v2.
     pub album_minmax: Option<String>,
@@ -485,9 +504,13 @@ pub fn read_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<Stored
 /// [`StoredGainTags::rg1_album_values`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StoredAlbumValues {
+    /// This file's `REPLAYGAIN_TRACK_GAIN` in dB.
     pub track_gain_db: f64,
+    /// This file's `REPLAYGAIN_TRACK_PEAK` as a linear peak.
     pub track_peak: f64,
+    /// `REPLAYGAIN_ALBUM_GAIN` in dB, shared by every album member.
     pub album_gain_db: f64,
+    /// `REPLAYGAIN_ALBUM_PEAK`, the loudest peak in the album.
     pub album_peak: f64,
 }
 

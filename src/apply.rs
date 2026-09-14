@@ -50,7 +50,9 @@ type AacAnalysisCache = Option<std::convert::Infallible>;
 /// [`ApplyOptions::write_replaygain_tags`] is on.
 #[derive(Debug, Clone, Copy)]
 pub struct AacAlbumInfo {
+    /// Album gain in dB, the same value for every member of the album.
     pub album_gain_db: f64,
+    /// Loudest peak across the album, normalized so 1.0 is full scale.
     pub album_peak: f64,
 }
 

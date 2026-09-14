@@ -35,13 +35,20 @@ const ALL_RG_DESCRIPTIONS: &[&str] = &[
 /// ReplayGain and undo data stored in ID3v2 TXXX frames
 #[derive(Debug, Clone, Default)]
 pub struct Id3v2ReplayGain {
+    /// `REPLAYGAIN_TRACK_GAIN`, e.g. `"-3.500000 dB"`. `None` leaves any
+    /// existing item alone.
     pub track_gain: Option<String>,
+    /// `REPLAYGAIN_TRACK_PEAK`, e.g. `"0.987650"`.
     pub track_peak: Option<String>,
+    /// `REPLAYGAIN_ALBUM_GAIN`. Only set when an album was analyzed.
     pub album_gain: Option<String>,
+    /// `REPLAYGAIN_ALBUM_PEAK`. Only set when an album was analyzed.
     pub album_peak: Option<String>,
     /// `REPLAYGAIN_ALGORITHM`; `None` in the mp3gain-compatible RG1 mode.
     pub algorithm: Option<String>,
+    /// `MP3GAIN_UNDO`, present in this container only under `-s i`.
     pub undo: Option<String>,
+    /// `MP3GAIN_MINMAX`, written alongside the undo value and never alone.
     pub minmax: Option<String>,
 }
 
