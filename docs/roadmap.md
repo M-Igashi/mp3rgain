@@ -271,9 +271,9 @@ All core functionality complete:
 - [x] `-a --album-by=...` analyzes albums concurrently instead of draining the thread pool at every album boundary (#332, #335)
 - [x] The true-peak polyphase filter was restructured for a measured 2.1x, and a long track is now divided across workers so `-j` helps a single file (#334, #337, #340, #341, #342)
 
-### Unreleased
+### v3.8.1 - Documented Public API
 
-Documentation only. No behaviour change: every command produces output identical to 3.8.0, and MP3, M4A and raw ADTS applies are byte-identical. Nothing here reaches docs.rs until the next version is published, because a published version's documentation is immutable.
+Documentation only. No behaviour change: every command produces output identical to 3.8.0, and MP3, M4A and raw ADTS applies are byte-identical. It exists as a release because a published version's documentation on docs.rs is immutable, so the only way to correct 3.8.0's is to publish 3.8.1.
 
 - [x] Every public library item is documented, and `#![warn(missing_docs)]` keeps it that way. 151 items reached docs.rs with nothing on them, on a crate whose README points at docs.rs as the API reference (#346)
 - [x] The `Error` enum, 46 of those 151, now says *when* each variant is produced rather than restating its name, which is what a consumer matching on a `#[non_exhaustive]` enum needs (#346)
