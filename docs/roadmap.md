@@ -282,6 +282,10 @@ Documentation only. No behaviour change: every command produces output identical
 - [x] `docs/design-decisions.md` records the deliberate shapes a whole-codebase review keeps re-proposing as defects, each pointing at where it was decided
 - [x] The AAC tag row in the migration guide named an atom and a namespace that were both wrong; it now lists the actual `com.apple.iTunes` atom names
 
+### Unreleased
+
+- [x] The peak measured for an AAC file no longer depends on `-j`. Chunked analysis seeked each piece to its own start, and an AAC decode that starts at a different packet substitutes a different realisation of every noise-substituted band, so `REPLAYGAIN_TRACK_PEAK` moved by up to 0.06 with the thread count. AAC is now analyzed whole; MP3 chunking is unchanged (#349)
+
 ## Upcoming Goals
 
 ### Future Enhancements

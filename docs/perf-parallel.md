@@ -294,6 +294,7 @@ Also only for `--rg2` and `--r128`. RG1's equal-loudness filter is a 10th-order 
 
 Every check that cannot be satisfied falls back to the whole-file pass, because the failure mode is a wrong loudness value written into someone's tags:
 
+- The codec is AAC, in either container. See below.
 - No frame count. Some M4A reports none: a 96 kHz HE-AAC file here reports `n_frames = None`.
 - A time base that is not 1/sample_rate, so there is no sample index to divide. The same HE-AAC file reports a 96 kHz base against a 48 kHz rate.
 - A seek that overshoots the piece's first wanted sample, which would leave a hole in the measurement.
@@ -309,6 +310,18 @@ Measured worst case over MP3 and AAC corpora: **7.1e-15 dB**. MP3 was exact in m
 
 True peak has no tolerance to spend: the 49-tap FIR reaches back 48 samples, and the warm-up feeds the meter the real preceding samples, so its history at a piece boundary is exact. The peak is asserted byte-equal.
 
+Both figures come from before [#349], and both included AAC. What they missed is that the argument above is about *filter* state converging during the warm-up, while the AAC discrepancy is in the decoded samples the filters are fed, which no warm-up converges. The MP3 figures stand; the AAC ones describe a path that no longer exists.
+
+### Why AAC is excluded ([#349])
+
+The accuracy argument above rests on an assumption the warm-up cannot repair: that seeking to a position and decoding forward reproduces the samples a linear decode would have produced there. That holds for MP3. For AAC it does not.
+
+AAC's perceptual noise substitution transmits only a band's *energy*; the decoder synthesises the coefficients from a linear congruential generator seeded once per decoder instance. Start decoding at a different packet and the generator is at a different point in its sequence, so the band is filled with a different realisation of the same energy. Diffing symphonia's linear decode against a decode seeked to 1,277,952 on a 60 s 256 kbps file: 13,613 frames differ by more than 1e-4, in 59 runs of almost exactly 256 frames each, scattered over the whole remainder of the file, the furthest more than 30 s past the seek. The largest single-frame difference is 1.01.
+
+The noise is energy-normalised, so loudness barely moves: -5.289471 whole against -5.289470 divided, 1e-6 dB. The peak has no such protection and moved from 1.542153 to 1.480072, and that value is written to `REPLAYGAIN_TRACK_PEAK`. ffmpeg's decoder behaves the same way for the same reason; any AAC decoder does. The wrong assumption was ours.
+
+Detecting per file whether a decode actually used noise substitution would need a symphonia API that does not exist, and taking the peak from a separate linear pass would give back the decode, which is the cost being parallelised. So AAC is declined outright, on the codec rather than the container, which leaves ALAC in an M4A divisible. This costs the [#337] speedup on single long AAC tracks and keeps it for MP3, where the case that motivated [#337] was measured.
+
 [#125]: https://github.com/M-Igashi/mp3rgain/issues/125
 [#126]: https://github.com/M-Igashi/mp3rgain/issues/126
 
@@ -317,3 +330,4 @@ True peak has no tolerance to spend: the 49-tap FIR reaches back 48 samples, and
 [#337]: https://github.com/M-Igashi/mp3rgain/issues/337
 [#334]: https://github.com/M-Igashi/mp3rgain/issues/334
 [#341]: https://github.com/M-Igashi/mp3rgain/pull/341
+[#349]: https://github.com/M-Igashi/mp3rgain/issues/349

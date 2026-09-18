@@ -23,6 +23,8 @@ use std::sync::Arc;
 #[cfg(feature = "replaygain")]
 use symphonia::core::audio::{Audio, GenericAudioBufferRef};
 #[cfg(feature = "replaygain")]
+use symphonia::core::codecs::audio::well_known::CODEC_ID_AAC;
+#[cfg(feature = "replaygain")]
 use symphonia::core::codecs::audio::{AudioDecoderOptions, CODEC_ID_NULL_AUDIO};
 #[cfg(feature = "replaygain")]
 use symphonia::core::formats::probe::Hint;
@@ -1982,10 +1984,11 @@ struct ChunkOutcome {
 
 /// Decide how to divide `file_path`, or `None` when it cannot be divided.
 ///
-/// Every reason to decline is a reason the sample grid cannot be trusted, and
-/// the caller falls back to analyzing the whole file in one pass. Silently
-/// dividing a file whose frame count or time base is a guess would write a
-/// wrong loudness value, which is worse than being slow.
+/// It declines either because the sample grid cannot be trusted (a frame count
+/// or time base that is a guess) or because the codec's seeked decode is not
+/// its linear decode (AAC). Both would write a wrong value, which is worse
+/// than being slow, so the caller falls back to analyzing the whole file in
+/// one pass.
 #[cfg(feature = "replaygain")]
 fn plan_chunks(file_path: &Path, track_index: Option<u32>, threads: usize) -> Option<ChunkPlan> {
     let file = std::fs::File::open(file_path).ok()?;
@@ -2019,6 +2022,21 @@ fn plan_chunks(file_path: &Path, track_index: Option<u32>, threads: usize) -> Op
     };
 
     let audio = track.codec_params.as_ref()?.audio()?;
+    // AAC is never divided (issue #349). Chunking assumes a seeked decode
+    // reproduces the samples a linear decode would have produced, and for AAC
+    // it does not: perceptual noise substitution synthesises a band's
+    // coefficients from a generator seeded once per decoder instance, so a
+    // decode that starts at a different packet substitutes a different
+    // realisation of the same band energy. The difference persists for the
+    // rest of the file, not just past the warm-up. Loudness is unaffected, the
+    // noise being energy-normalised, but the peak is not, and the peak is
+    // written to `REPLAYGAIN_TRACK_PEAK`. Any AAC decoder behaves this way;
+    // the wrong assumption is ours. Covered by both MP4 and raw ADTS, since
+    // this keys on the codec rather than the container, which also leaves ALAC
+    // in an M4A divisible.
+    if audio.codec == CODEC_ID_AAC {
+        return None;
+    }
     let sample_rate = audio.sample_rate?;
     let channels = audio.channels.as_ref().map(|c| c.count()).unwrap_or(2);
     // No frame count means no grid to divide. Common enough: HE-AAC in MP4
