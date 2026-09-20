@@ -828,6 +828,11 @@ fn write_long_adts(dst: &Path) {
 ///
 /// The fixture repeated here does use noise substitution: before the codec was
 /// excluded this measured 0.188276 at `-j 1` against 0.188269 at `-j 8`.
+///
+/// Both peak accumulators are covered, because both move. On the file skamp
+/// supplied for #350 the sample peak ran 1.790314 / 1.786002 / 1.804941 /
+/// 2.657919 at `-j 1` / 2 / 4 / 8, and the true peak 2.287768 at `-j 1`
+/// against 2.687167 at `-j 8`.
 #[test]
 fn aac_is_never_chunked() {
     let album = TempAlbum::new(&[]);
@@ -835,19 +840,31 @@ fn aac_is_never_chunked() {
     write_long_adts(&long);
     let path = long.to_str().unwrap();
 
-    let measure = |jobs: &'static str| {
-        let out = stdout_of(&run(&["-r", "--rg2", "-n", "-o", "json", "-j", jobs, path]));
-        let json: serde_json::Value = serde_json::from_str(&out).expect("json report");
-        let peak = json["files"][0]["peak"].as_f64().expect("peak");
-        (out, peak)
-    };
-    let (whole, whole_peak) = measure("1");
-    let (divided, divided_peak) = measure("8");
-    assert_eq!(
-        whole_peak, divided_peak,
-        "AAC peak must not depend on -j: {whole_peak} vs {divided_peak}"
-    );
-    assert_eq!(whole, divided, "AAC output must be byte-identical");
+    for mode in [
+        vec!["--rg2"],
+        vec!["--rg2", "--true-peak"],
+        vec!["--r128", "--true-peak"],
+    ] {
+        let measure = |jobs: &'static str| {
+            let mut args = vec!["-r"];
+            args.extend_from_slice(&mode);
+            args.extend_from_slice(&["-n", "-o", "json", "-j", jobs, path]);
+            let out = stdout_of(&run(&args));
+            let json: serde_json::Value = serde_json::from_str(&out).expect("json report");
+            let peak = json["files"][0]["peak"].as_f64().expect("peak");
+            (out, peak)
+        };
+        let (whole, whole_peak) = measure("1");
+        let (divided, divided_peak) = measure("8");
+        assert_eq!(
+            whole_peak, divided_peak,
+            "{mode:?}: AAC peak must not depend on -j: {whole_peak} vs {divided_peak}"
+        );
+        assert_eq!(
+            whole, divided,
+            "{mode:?}: AAC output must be byte-identical"
+        );
+    }
 }
 
 /// The decode and the analysis run on separate threads once `-j` allows it
