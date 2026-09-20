@@ -51,6 +51,8 @@ Do not propose a change to these paths on the grounds that it is equivalent. If 
 
 **Two editions of one album in sibling folders are left alone** in `--album-by=dir`. They are already grouped correctly by directory, and telling that user to switch to `--album-by=tag` would merge them wrongly, which is what the tag-mode collision report exists to warn about. PR #339.
 
+**The peak tag reports the decoder's raw output, not a clamped one**, which is why mp3rgain reads higher than rsgain and foobar2000 on AAC that carries decoder overshoot. This is not a defect and was investigated to the bottom in issue #350. AAC decoders disagree about whether to clamp: symphonia and ffmpeg's native decoder pass samples above 1.0 through, Apple's AudioToolbox decoder hard-limits at exactly 1.0. On the file the reporter supplied, mp3rgain measures a true peak of 2.287768 where rsgain measures 1.307024, and 1.3215 is exactly what an ideal band-limited interpolation of the *clamped* signal gives. Both tools are right about their own input. Clamping would make the tag describe one decoder rather than the file, under-report the headroom a float playback path actually needs, and silently disagree with every peak mp3rgain has already written. Issue #350 carries the full evidence and the argument.
+
 **`--album-depth` is not exposed in the GUI.** It exists because a CLI user cannot glob a library on Windows and cannot exceed `ARG_MAX` anywhere, and neither constraint reaches a GUI. Selecting rows and choosing **Single album** covers the case it would serve. PR #343.
 
 ## Where the reasoning lives
