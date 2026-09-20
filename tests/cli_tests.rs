@@ -810,6 +810,63 @@ fn rg1_is_never_chunked() {
     assert_eq!(measure("1"), measure("8"), "RG1 must be byte-identical");
 }
 
+/// Write a two-minute raw ADTS stream by repeating a one-second fixture.
+///
+/// ADTS frames concatenate the way MP3 frames do, and the fixture carries no
+/// ID3 tag and no frame count to contradict, so the repeat is all it takes.
+fn write_long_adts(dst: &Path) {
+    let fixture = fs::read("tests/fixtures/test_adts.aac").expect("fixture");
+    fs::create_dir_all(dst.parent().unwrap()).unwrap();
+    fs::write(dst, fixture.repeat(120)).expect("write long adts");
+}
+
+/// AAC is never divided (issue #349). Chunking seeks each piece to its own
+/// start, and an AAC decode that starts at a different packet substitutes a
+/// different realisation of every noise-substituted band, for the rest of the
+/// file. The energy is preserved so the loudness is not affected, but the peak
+/// is, and the peak is what goes into `REPLAYGAIN_TRACK_PEAK`.
+///
+/// The fixture repeated here does use noise substitution: before the codec was
+/// excluded this measured 0.188276 at `-j 1` against 0.188269 at `-j 8`.
+///
+/// Both peak accumulators are covered, because both move. On the file skamp
+/// supplied for #350 the sample peak ran 1.790314 / 1.786002 / 1.804941 /
+/// 2.657919 at `-j 1` / 2 / 4 / 8, and the true peak 2.287768 at `-j 1`
+/// against 2.687167 at `-j 8`.
+#[test]
+fn aac_is_never_chunked() {
+    let album = TempAlbum::new(&[]);
+    let long = album.dir.join("long.aac");
+    write_long_adts(&long);
+    let path = long.to_str().unwrap();
+
+    for mode in [
+        vec!["--rg2"],
+        vec!["--rg2", "--true-peak"],
+        vec!["--r128", "--true-peak"],
+    ] {
+        let measure = |jobs: &'static str| {
+            let mut args = vec!["-r"];
+            args.extend_from_slice(&mode);
+            args.extend_from_slice(&["-n", "-o", "json", "-j", jobs, path]);
+            let out = stdout_of(&run(&args));
+            let json: serde_json::Value = serde_json::from_str(&out).expect("json report");
+            let peak = json["files"][0]["peak"].as_f64().expect("peak");
+            (out, peak)
+        };
+        let (whole, whole_peak) = measure("1");
+        let (divided, divided_peak) = measure("8");
+        assert_eq!(
+            whole_peak, divided_peak,
+            "{mode:?}: AAC peak must not depend on -j: {whole_peak} vs {divided_peak}"
+        );
+        assert_eq!(
+            whole, divided,
+            "{mode:?}: AAC output must be byte-identical"
+        );
+    }
+}
+
 /// The decode and the analysis run on separate threads once `-j` allows it
 /// (issue #337). The analyzer still sees every frame once and in order, so
 /// this has to be byte-identical to the single-threaded path, not merely
