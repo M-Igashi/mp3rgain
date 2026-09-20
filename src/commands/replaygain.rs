@@ -7,10 +7,8 @@ use mp3rgain::replaygain::{
 };
 use mp3rgain::{mp4meta, AacAlbumInfo, AlbumLabel, Error};
 use rayon::prelude::*;
-use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use crate::cli::options::{AlbumGrouping, Options, OutputFormat, StoredTagMode};
 use crate::commands::albumgroup::{group_files, AlbumGroup};
@@ -18,7 +16,7 @@ use crate::commands::threading::effective_threads;
 use crate::commands::utils::{
     create_json_summary, exit_if_failed, finish_with_album_summary, finish_with_summary,
     for_each_file_with_analysis_bar, print_dry_run_notice, run_album_analysis, update_counters,
-    TSV_HEADER,
+    CompletionFlush, TSV_HEADER,
 };
 use crate::json_output::{
     FileStatus, JsonAlbumResult, JsonDirectoryAlbum, JsonFileResult, JsonOutput,
@@ -187,7 +185,8 @@ struct AlbumRun {
 /// `-a` on its own writes straight through, so a long album still reports as
 /// it goes. `-a --per-directory` runs albums concurrently (issue #332), where
 /// writing straight through would interleave two albums mid-line, so each
-/// album buffers and the driver flushes the buffers in group order.
+/// album buffers and hands its buffer to `CompletionFlush` when it finishes.
+/// Blocks therefore land whole, in completion order (issue #348).
 ///
 /// Only the album-level lines come through here. Per-file warnings (clipping,
 /// saturation) are emitted by the apply workers straight to stderr, as they
@@ -225,37 +224,13 @@ impl AlbumSink {
         }
     }
 
-    /// Copy the buffered bytes to the real streams; a no-op when direct.
-    fn drain(self) -> io::Result<()> {
-        if let Self::Buffered { out, err } = self {
-            io::stdout().write_all(&out)?;
-            io::stderr().write_all(&err)?;
+    /// The buffered bytes, or `None` when the sink wrote straight through and
+    /// there is nothing left to hand to the flusher.
+    fn into_buffers(self) -> Option<(Vec<u8>, Vec<u8>)> {
+        match self {
+            Self::Direct(..) => None,
+            Self::Buffered { out, err } => Some((out, err)),
         }
-        Ok(())
-    }
-}
-
-/// Flushes each album's buffered output as soon as every earlier album has
-/// been flushed. Concurrent albums finish out of order, so without this the
-/// group order in the text output would depend on which album happened to
-/// win; with it, a finished album still prints immediately unless an earlier
-/// one is outstanding.
-#[derive(Default)]
-struct OrderedFlush {
-    /// `(next index to print, albums finished ahead of their turn)`
-    state: Mutex<(usize, BTreeMap<usize, AlbumSink>)>,
-}
-
-impl OrderedFlush {
-    fn submit(&self, index: usize, sink: AlbumSink) -> io::Result<()> {
-        let mut guard = self.state.lock().expect("output lock poisoned");
-        let (next, pending) = &mut *guard;
-        pending.insert(index, sink);
-        while let Some(sink) = pending.remove(next) {
-            sink.drain()?;
-            *next += 1;
-        }
-        Ok(())
     }
 }
 
@@ -368,7 +343,8 @@ pub fn cmd_album_gain_grouped(files: &[PathBuf], opts: &Options) -> Result<()> {
     // path and the per-album bars rather than buffering for no reason.
     let concurrent = groups.len() > 1 && effective_threads(opts) > 1;
     let bars = concurrent.then(|| AlbumBars::new(files.len(), opts));
-    let flush = OrderedFlush::default();
+    let flush = CompletionFlush::default();
+    let text_groups = opts.output_format == OutputFormat::Text && !opts.quiet;
 
     let run_group = |i: usize, group: &AlbumGroup| -> Result<AlbumRun> {
         let mut sink = if concurrent {
@@ -376,8 +352,12 @@ pub fn cmd_album_gain_grouped(files: &[PathBuf], opts: &Options) -> Result<()> {
         } else {
             AlbumSink::direct()
         };
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
-            if i > 0 {
+        if text_groups {
+            // Writing straight through means completion order is input order,
+            // so the blank line between groups can go into the block itself.
+            // A concurrent run prints in completion order and only the flusher
+            // knows which block is actually first (issue #348).
+            if !concurrent && i > 0 {
                 writeln!(sink.out())?;
             }
             writeln!(
@@ -388,7 +368,9 @@ pub fn cmd_album_gain_grouped(files: &[PathBuf], opts: &Options) -> Result<()> {
             )?;
         }
         let run = run_album(&group.files, opts, &mut sink, bars.as_ref())?;
-        flush.submit(i, sink)?;
+        if let Some((out, err)) = sink.into_buffers() {
+            flush.submit(&out, &err, text_groups)?;
+        }
         Ok(run)
     };
 

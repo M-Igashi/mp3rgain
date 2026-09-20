@@ -12,8 +12,10 @@ default-on choice.
   `std::thread::available_parallelism()` worker threads via rayon.
 - **`-j 1` is the legacy fallback** for behavioral parity with mp3gain
   or for debugging. `-j 0` and `MP3RGAIN_THREADS=0` mean "auto".
-- **Output is byte-identical regardless of `-j`** — TSV/Text/JSON line
-  order and album-summary numbers all match the serial path exactly.
+- **`-o json` is byte-identical regardless of `-j`**, and so are all the
+  numbers in every format. Since [#348] the TSV and text output is written
+  as each unit finishes, so its *line order* follows completion rather than
+  input; `-j 1` still emits in input order.
 - On a 124-track / 2.1 GB corpus, an Apple M3 (4 performance + 4
   efficiency cores) sees **~3x wall-clock speedup** for the default
   recursive analysis (`mp3rgain -R -o tsv .`), going from 110.2s →
@@ -186,9 +188,10 @@ Plus, in this PR's scope:
   is safe; we still iterate in input order to keep the result
   bit-identical.
 - Stdout output is buffered into per-file `String` instances inside
-  `process_*` functions and replayed by the cmd layer in input order.
-  This guarantees deterministic line ordering regardless of completion
-  order.
+  `process_*` functions. The cmd layer writes each one under a single lock
+  as soon as its unit finishes ([#348]), so a block is never split or
+  interleaved, but blocks appear in completion order. The JSON records are
+  still collected in input order, which is what keeps `-o json` stable.
 - Stderr (warnings/errors) stays on `eprintln!`; OS-level per-line
   atomicity is sufficient for diagnostics. Order across files may
   differ between runs.
@@ -226,7 +229,9 @@ Per-directory stays flat as the library doubles; pooling does not. That is the p
 
 ### Output identity
 
-Albums finish out of order, so everything observable is re-ordered before it is shown. Album runs are collected by index, so the JSON `albums` array, the `files` array, the counters and the exit code are all built in group order after the fact. Each album's text is buffered and flushed only once every earlier album has been flushed, so a finished album still prints immediately unless an earlier one is outstanding. The album fold was already associative and folded in input order, which is what keeps the numbers bit-identical.
+Albums finish out of order. Album runs are collected by index, so the JSON `albums` array, the `files` array, the counters and the exit code are all built in group order after the fact, and the album fold was already associative and folded in input order, which is what keeps the numbers bit-identical.
+
+Each album's text is buffered and handed to the flusher when the album finishes. Until [#348] the flusher also gated on input order, which turned out to cost most of the benefit: on a 16-album run album 2 is the *second* album on worker 0 while albums 3, 5, 7 and so on are the *first* on their own workers, so fourteen finished albums sat waiting behind it. It now writes each block as it arrives, under the same lock, so a block still lands whole and the group order follows completion.
 
 Verified on the 12-album corpus and on a 30-file apply, against the 3.7.0 binary:
 
@@ -330,4 +335,5 @@ Detecting per file whether a decode actually used noise substitution would need 
 [#337]: https://github.com/M-Igashi/mp3rgain/issues/337
 [#334]: https://github.com/M-Igashi/mp3rgain/issues/334
 [#341]: https://github.com/M-Igashi/mp3rgain/pull/341
+[#348]: https://github.com/M-Igashi/mp3rgain/issues/348
 [#349]: https://github.com/M-Igashi/mp3rgain/issues/349

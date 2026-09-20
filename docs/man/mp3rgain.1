@@ -107,9 +107,14 @@ array, each entry carrying either
 or
 .BR album_artist / album_title
 depending on how the group was formed. Albums are analyzed concurrently, so
-the worker threads stay busy across album boundaries; results, text output
-and exit status are still deterministically ordered, exactly as under
+the worker threads stay busy across album boundaries. The JSON report and the
+exit status stay deterministically ordered, exactly as under
 .BR "\-j 1" .
+Text and TSV output is written as each album finishes, so its group order
+follows completion rather than the order the albums were given in. Each
+album's block is still emitted whole and its rows stay in file order. Use
+.B \-j 1
+when the output has to be byte-reproducible between runs.
 .IP
 In
 .B dir
@@ -289,6 +294,17 @@ available CPUs; 0 also means auto, and 1 forces the legacy serial path.
 See also the
 .B MP3RGAIN_THREADS
 environment variable.
+.IP
+With more than one thread, the
+.B text
+and
+.B tsv
+output is written as each unit finishes, so a program reading the output can
+start parsing before the run ends. Rows therefore appear in completion order
+rather than in the order the files were given. A unit is never split or
+interleaved with another, and
+.B json
+is unaffected: its records stay in input order at every thread count.
 .TP
 .BR \-n ", " \-\-dry\-run
 Dry-run mode. Show what would be done without making changes.
