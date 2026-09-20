@@ -79,14 +79,63 @@ pub fn run_album_analysis(
 pub const TSV_HEADER: &str =
     "File\tMP3 gain\tdB gain\tMax Amplitude\tMax global_gain\tMin global_gain";
 
-/// Run `per_file` over every file — in parallel when `-j` allows it — with
-/// progress reporting and ordered stdout flushing. `per_file` returns the
-/// optional JSON record plus the text to print for that file; records are
-/// collected in input order and counted into (successful, failed).
+/// Writes each unit's text to stdout the moment that unit finishes, rather
+/// than holding everything until the run does (issue #348).
+///
+/// A unit is one file's block for the per-file commands and one album's whole
+/// block for the album commands. The mutex is what makes a unit atomic: two
+/// workers can never interleave inside one block, which is the property a
+/// consumer parsing `-o tsv` actually needs.
+///
+/// Units therefore appear in **completion order**, not input order. That is
+/// the trade the issue asks for, and it is why this is not the ordered flush
+/// it replaced: gating the drain on an input counter made every finished
+/// album wait behind the slowest earlier one, which on a 16-album run held
+/// back fourteen of them until almost the end of the run.
+#[derive(Default)]
+pub struct CompletionFlush {
+    /// Guards the write, and records whether any unit has reached stdout yet.
+    /// Text mode puts a blank line *between* group blocks, and with completion
+    /// order the block printed first is no longer necessarily input index 0.
+    printed: std::sync::Mutex<bool>,
+}
+
+impl CompletionFlush {
+    /// Write one unit's `out` (and `err`) bytes under a single lock.
+    ///
+    /// `separator` asks for a blank line ahead of the block, which is
+    /// suppressed for whichever block reaches stdout first. stdout is flushed
+    /// before the lock is released, so a downstream reader sees a whole unit
+    /// as soon as it is available.
+    pub fn submit(&self, out: &[u8], err: &[u8], separator: bool) -> io::Result<()> {
+        let mut printed = self.printed.lock().expect("output lock poisoned");
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        if separator && *printed {
+            writeln!(handle)?;
+        }
+        handle.write_all(out)?;
+        handle.flush()?;
+        drop(handle);
+        if !err.is_empty() {
+            io::stderr().write_all(err)?;
+        }
+        *printed |= !out.is_empty();
+        Ok(())
+    }
+}
+
+/// Run `per_file` over every file, in parallel when `-j` allows it, with
+/// progress reporting and per-file stdout flushing. `per_file` returns the
+/// optional JSON record plus the text to print for that file.
+///
+/// Each file's text reaches stdout as soon as that file is done, in
+/// completion order (issue #348). The JSON records are collected in **input**
+/// order and counted into (successful, failed), so `-o json` is unaffected.
 ///
 /// This is the shared fan-out driver for the per-file commands (apply,
 /// channel apply, undo, delete tags, check tags, max amplitude), which all
-/// repeated the progress-bar / par_iter / ordered-flush / counter loop.
+/// repeated the progress-bar / par_iter / flush / counter loop.
 pub fn for_each_file<F>(
     files: &[PathBuf],
     opts: &Options,
@@ -136,32 +185,28 @@ where
 
     if parallel {
         let pb_ref = pb.as_ref();
-        let collected: Vec<(Option<JsonFileResult>, String)> = files
+        let flush = CompletionFlush::default();
+        // Each file's block goes out as it finishes (issue #348). The JSON
+        // records still come back in input order, because rayon's collect
+        // preserves it, so `-o json` output does not move.
+        let collected: Vec<Option<JsonFileResult>> = files
             .par_iter()
-            .map(|file| -> Result<(Option<JsonFileResult>, String)> {
-                let r = per_file(file, None)?;
+            .map(|file| -> Result<Option<JsonFileResult>> {
+                let (result, text) = per_file(file, None)?;
+                if !text.is_empty() {
+                    flush.submit(text.as_bytes(), &[], false)?;
+                }
                 if let Some(pb) = pb_ref {
                     pb.set_message(get_filename(file).to_string());
                     pb.inc(1);
                 }
-                Ok(r)
+                Ok(result)
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let stdout = io::stdout();
-        let mut handle = stdout.lock();
-        for (_, text) in &collected {
-            if !text.is_empty() {
-                handle.write_all(text.as_bytes())?;
-            }
-        }
-        drop(handle);
-
-        for (result, _) in collected {
-            if let Some(result) = result {
-                update_counters(&result, &mut successful, &mut failed);
-                json_results.push(result);
-            }
+        for result in collected.into_iter().flatten() {
+            update_counters(&result, &mut successful, &mut failed);
+            json_results.push(result);
         }
     } else {
         for file in files {

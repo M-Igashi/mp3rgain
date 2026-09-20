@@ -6,9 +6,11 @@
 //! `CARGO_BIN_EXE_mp3rgain`, so no extra tooling is needed.
 
 use mp3rgain::{read_ape_tag_from_file, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_TRACK_GAIN};
+use std::collections::BTreeMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -684,12 +686,64 @@ fn per_directory_album_gain_matches_each_directory_run_alone() {
     assert!(pooled["album"]["gain_db"].is_number());
 }
 
-/// Albums run concurrently under `--per-directory` (issue #332), so the
-/// output can no longer rely on one album finishing before the next starts.
-/// Every observable part of the run — group order, gain values, text layout —
-/// must still match what the serial `-j 1` path produces.
+/// Split a `--per-directory` run's stdout into one block per album.
+///
+/// `-o tsv` blocks are the file rows up to and including the album row, keyed
+/// by the directory the rows name. `-o text` blocks start at the group header
+/// line and run to the next one. Each block is trimmed, because the blank line
+/// text mode puts *between* groups belongs to neither of them and moves with
+/// the group order.
+fn album_blocks(out: &str, format: &str) -> Vec<(String, String)> {
+    let mut blocks: Vec<(String, String)> = Vec::new();
+    if format == "tsv" {
+        let mut rows: Vec<&str> = Vec::new();
+        for line in out.lines().skip(1) {
+            rows.push(line);
+            if line.starts_with("\"Album\"") {
+                let first = rows[0].split('\t').next().unwrap_or_default();
+                let key = Path::new(first)
+                    .parent()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+                blocks.push((key, rows.join("\n")));
+                rows.clear();
+            }
+        }
+    } else {
+        // Group content is indented; an unindented line either opens the next
+        // group or is the run epilogue, which belongs to no group and lands
+        // after whichever block printed last.
+        let mut in_group = false;
+        for line in out.lines() {
+            if !line.starts_with(' ') && line.ends_with(" file(s))") {
+                blocks.push((line.to_string(), String::new()));
+                in_group = true;
+            } else if !line.starts_with(' ') && !line.is_empty() {
+                in_group = false;
+            } else if in_group {
+                if let Some(last) = blocks.last_mut() {
+                    last.1.push_str(line);
+                    last.1.push('\n');
+                }
+            }
+        }
+        for block in &mut blocks {
+            block.1 = block.1.trim().to_string();
+        }
+    }
+    blocks
+}
+
+/// Albums run concurrently under `--per-directory` (issue #332) and now print
+/// in completion order rather than input order (issue #348), so stdout is no
+/// longer byte-identical between `-j 1` and `-j 4` for the line-oriented
+/// formats. What must still hold is the part a consumer depends on: the same
+/// set of album blocks, each one intact and internally in file order, and
+/// `-j 1` still emitting them in group order.
+///
+/// `-o json` stays byte-identical at every thread count.
 #[test]
-fn per_directory_output_is_identical_whatever_the_thread_count() {
+fn per_directory_blocks_are_intact_whatever_the_thread_count() {
     let root = TempAlbum::new(&[]);
     for (name, fixtures) in [
         ("A", vec!["test_mono.mp3", "test_vbr.mp3"]),
@@ -722,11 +776,139 @@ fn per_directory_output_is_identical_whatever_the_thread_count() {
         let serial = run(&args("1"));
         let parallel = run(&args("4"));
         assert!(serial.status.success() && parallel.status.success());
+        let (serial, parallel) = (stdout_of(&serial), stdout_of(&parallel));
+
+        if format == "json" {
+            assert_eq!(serial, parallel, "-o json must not move with -j");
+            continue;
+        }
+
+        let serial_blocks = album_blocks(&serial, format);
+        let parallel_blocks = album_blocks(&parallel, format);
+        assert_eq!(serial_blocks.len(), 4, "-o {format}: expected four albums");
+
+        // -j 1 keeps input order, which is what makes a scripted run
+        // reproducible when the user asks for it.
+        let serial_keys: Vec<&str> = serial_blocks.iter().map(|(k, _)| k.as_str()).collect();
+        let mut sorted = serial_keys.clone();
+        sorted.sort_unstable();
         assert_eq!(
-            stdout_of(&serial),
-            stdout_of(&parallel),
-            "-o {format} differs between -j 1 and -j 4"
+            serial_keys, sorted,
+            "-o {format}: -j 1 must keep group order"
         );
+
+        // Same albums, same bytes per album. Only the order between blocks may
+        // differ, so compare them keyed rather than concatenated.
+        let by_key = |blocks: Vec<(String, String)>| -> BTreeMap<String, String> {
+            blocks.into_iter().collect()
+        };
+        assert_eq!(
+            by_key(serial_blocks),
+            by_key(parallel_blocks),
+            "-o {format}: an album block changed between -j 1 and -j 4"
+        );
+
+        // One blank line between groups and none before the first, whichever
+        // group happens to be printed first.
+        assert_eq!(
+            serial.lines().count(),
+            parallel.lines().count(),
+            "-o {format}: separator lines differ between -j 1 and -j 4"
+        );
+    }
+}
+
+/// A unit's output has to reach stdout when that unit finishes, not when the
+/// run finishes (issue #348). A third-party consumer of `-o tsv` cannot start
+/// parsing until the first row arrives, and before this it never arrived
+/// before the last file was done.
+///
+/// Spawn a run whose units finish far apart, read one data row, and check the
+/// process is still working. The two paths have separate causes: the per-file
+/// commands collected everything before writing, and the album commands
+/// emitted in input order so every finished album waited behind the slowest
+/// earlier one.
+#[test]
+fn a_finished_unit_reaches_stdout_before_the_run_ends() {
+    let album = TempAlbum::new(&["test_mono.mp3", "test_vbr.mp3", "test_joint_stereo.mp3"]);
+    let long = album.dir.join("zz_long.mp3");
+    write_long_mp3(&long);
+    let long_arg = long.to_str().unwrap().to_string();
+
+    // Per-file: one long file listed first, three short ones after it.
+    let mut per_file = vec![
+        "-r",
+        "--rg2",
+        "-n",
+        "-o",
+        "tsv",
+        "-j",
+        "4",
+        long_arg.as_str(),
+    ];
+    per_file.extend(album.args());
+
+    // Album: the long file alone in one directory, one short file in each of
+    // three others, so three albums finish while the fourth is still running.
+    let root = TempAlbum::new(&[]);
+    for (name, fixture) in [
+        ("A", "test_mono.mp3"),
+        ("B", "test_vbr.mp3"),
+        ("C", "test_joint_stereo.mp3"),
+    ] {
+        let dir = root.dir.join(name);
+        fs::create_dir(&dir).unwrap();
+        fs::copy(Path::new("tests/fixtures").join(fixture), dir.join(fixture)).unwrap();
+    }
+    let slow_dir = root.dir.join("D");
+    write_long_mp3(&slow_dir.join("zz_long.mp3"));
+    let root_arg = root.dir.to_str().unwrap().to_string();
+    let per_album = vec![
+        "-a",
+        "--per-directory",
+        "--rg2",
+        "-n",
+        "-R",
+        "-o",
+        "tsv",
+        "-j",
+        "4",
+        root_arg.as_str(),
+    ];
+
+    for (label, args) in [("per-file", per_file), ("per-directory", per_album)] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_mp3rgain"))
+            .args(&args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("failed to run mp3rgain");
+        let mut reader = BufReader::new(child.stdout.take().expect("piped stdout"));
+
+        // The header proves nothing: it is printed before any analysis starts.
+        let mut header = String::new();
+        reader.read_line(&mut header).expect("header");
+        assert!(
+            header.starts_with("File\t"),
+            "{label}: expected the TSV header, got {header:?}"
+        );
+
+        let mut row = String::new();
+        reader.read_line(&mut row).expect("first data row");
+        assert!(
+            !row.contains("zz_long"),
+            "{label}: the long unit should not be the first to finish, got {row:?}"
+        );
+
+        // If the row had been withheld until the end of the run, the process
+        // would already have exited by the time it arrived.
+        assert!(
+            child.try_wait().expect("try_wait").is_none(),
+            "{label}: the first row only arrived once the whole run had finished"
+        );
+
+        let out = child.wait_with_output().expect("wait");
+        assert!(out.status.success(), "{label}: run failed");
     }
 }
 
@@ -1375,6 +1557,10 @@ fn album_depth_rejects_contradictory_invocations() {
 }
 
 /// `--per-directory` shipped in 3.6.1 and keeps working unchanged.
+///
+/// Pinned to `-j 1`. What is under test is argument parsing, and since #348
+/// the line-oriented formats emit albums in completion order, so two parallel
+/// runs of the same command can legitimately order their groups differently.
 #[test]
 fn per_directory_is_an_alias_for_album_by_dir() {
     let root = TempAlbum::new(&[]);
@@ -1385,8 +1571,28 @@ fn per_directory_is_an_alias_for_album_by_dir() {
     }
     let root_arg = root.dir.to_str().unwrap();
     for format in ["json", "text", "tsv"] {
-        let alias = run(&["-a", "--per-directory", "-n", "-R", "-o", format, root_arg]);
-        let explicit = run(&["-a", "--album-by=dir", "-n", "-R", "-o", format, root_arg]);
+        let alias = run(&[
+            "-a",
+            "--per-directory",
+            "-n",
+            "-R",
+            "-j",
+            "1",
+            "-o",
+            format,
+            root_arg,
+        ]);
+        let explicit = run(&[
+            "-a",
+            "--album-by=dir",
+            "-n",
+            "-R",
+            "-j",
+            "1",
+            "-o",
+            format,
+            root_arg,
+        ]);
         assert_eq!(stdout_of(&alias), stdout_of(&explicit), "-o {format}");
     }
 }
@@ -1424,14 +1630,17 @@ fn tsv_rows_are_emitted_by_the_gain_applying_commands() {
 
 /// `-a -o tsv` reports the same recommended gain as `-o tsv` alone, including
 /// the trailing `"Album"` summary row.
+///
+/// Pinned to `-j 1`: since #348 the bare analysis path emits a row as each
+/// file finishes, so its row order is completion order and not file order.
 #[test]
 fn tsv_album_mode_matches_the_analysis_only_rows() {
     let album = TempAlbum::new(&["test_mono.mp3", "test_stereo.mp3"]);
-    let mut analysis = vec!["-o", "tsv"];
+    let mut analysis = vec!["-o", "tsv", "-j", "1"];
     analysis.extend(album.args());
     let expected = stdout_of(&run(&analysis));
 
-    let mut applied = vec!["-o", "tsv", "-a", "-n"];
+    let mut applied = vec!["-o", "tsv", "-a", "-n", "-j", "1"];
     applied.extend(album.args());
     assert_eq!(stdout_of(&run(&applied)), expected);
     assert!(expected.contains("\"Album\"\t"), "{}", expected);

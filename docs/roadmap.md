@@ -285,6 +285,7 @@ Documentation only. No behaviour change: every command produces output identical
 ### Unreleased
 
 - [x] The peak measured for an AAC file no longer depends on `-j`. Chunked analysis seeked each piece to its own start, and an AAC decode that starts at a different packet substitutes a different realisation of every noise-substituted band, so `REPLAYGAIN_TRACK_PEAK` moved by up to 0.06 with the thread count. AAC is now analyzed whole; MP3 chunking is unchanged (#349)
+- [x] `-o tsv` and `-o text` write each unit as it finishes instead of holding everything until the run ends, so a program consuming the output can start parsing immediately. `-r` previously emitted nothing at all before the last file was done, and `-a --per-directory` stalled every finished album behind the slowest earlier one. Rows now appear in completion order; `-o json` and `-j 1` are unchanged (#348)
 
 ## Upcoming Goals
 
