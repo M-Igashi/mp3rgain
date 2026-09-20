@@ -398,6 +398,18 @@ RMS calculation in 50ms windows
 This provides compatibility with the original mp3gain. Note that loudness values
 will differ from tools using EBU R128/LUFS-based analysis (such as foobar2000's
 ReplayGain scanner or ffmpeg's loudnorm filter), which use a \-23 LUFS reference.
+.PP
+On AAC,
+.B mp3rgain
+may report a higher peak than
+.BR rsgain (1)
+or foobar2000 while the gain values agree. Lossy AAC decodes to samples that can
+exceed full scale, and decoders disagree about whether to clamp them:
+.B mp3rgain
+reports the decoded signal as it is, which is the headroom a float playback path
+actually needs. See the peak section of
+.I COMPARISON.md
+for the measurements.
 .SH SUPPORTED FORMATS
 .TP
 .B MP3

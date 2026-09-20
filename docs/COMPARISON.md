@@ -97,6 +97,32 @@ All options from the original mp3gain are fully implemented in mp3rgain:
 
 **Note**: As of v1.2.6, mp3rgain's ReplayGain analysis uses the correct filter coefficients from the original ReplayGain specification, producing results consistent with the original mp3gain/aacgain.
 
+### Peak values on AAC, compared with rsgain and foobar2000
+
+mp3rgain can report a noticeably higher peak than rsgain or foobar2000 for the same AAC file, while the gain values agree to 0.01 dB. This is expected and the tools are measuring different things.
+
+Lossy AAC decodes to samples that can exceed full scale. Some encoders leave isolated bursts that decode well above 1.0, and **decoders disagree about what to do with them**: symphonia (which mp3rgain uses) and ffmpeg's native decoder pass them through, while Apple's AudioToolbox decoder hard-limits at exactly 1.0. mp3rgain reports the peak of the decoded signal as it is. A tool measuring a clamped decode necessarily reports less.
+
+Worked example from issue #350, one track of a `ffmpeg -c:a aac -b:a 256k` encode:
+
+| Measurement | Value | dBFS |
+|---|---|---|
+| mp3rgain sample peak | 1.790314 | +5.06 |
+| ffmpeg's decoder, same frame | 1.790310 | +5.06 |
+| mp3rgain true peak (`--true-peak`) | 2.287768 | +7.19 |
+| ffmpeg `ebur128=peak=true` | (7.3 print) | +7.30 |
+| ideal band-limited interpolation | 2.310848 | +7.27 |
+| **ideal, after clamping to [-1, 1]** | **1.321509** | **+2.42** |
+| rsgain `-t` | 1.307024 | +2.33 |
+
+mp3rgain lands 0.09 dB under the exact unclamped answer and rsgain 0.10 dB under the exact clamped one, which is the residual a 49-tap 4x oversampling filter is expected to leave in both cases.
+
+Why mp3rgain does not clamp: the peak describes the file rather than whichever decoder the listener happens to use, and float playback paths (CoreAudio, WASAPI shared mode, PipeWire, most software players) really do reach the DAC with those samples. Over-reporting costs a little unnecessary attenuation; under-reporting clips.
+
+In practice it rarely changes anything. Applying each track's own gain to the unclamped peak on the album this was reported against gives a worst case of 0.84, so no player applies extra attenuation either way. It matters only on a quiet recording that carries the same kind of burst, where peak-based clipping prevention would cap the gain differently.
+
+If you want the encoder side of this gone, re-encode with Apple's encoder (`ffmpeg -c:a aac_at`): on the same source it dropped that track's peak from 1.790314 to 1.276827.
+
 ### Tag Storage
 
 | Tag Type | mp3rgain | aacgain | mp3gain |
