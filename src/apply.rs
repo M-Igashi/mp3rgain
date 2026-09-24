@@ -14,8 +14,10 @@
 //! primitives and silently miss undo / ReplayGain tags (issue #149/#150
 //! / #151).
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::SystemTime;
 
 #[cfg(feature = "aac")]
@@ -35,6 +37,61 @@ use crate::{ape, id3v2, mp4meta, TagLayout};
 /// apply tasks operating on files in the same directory don't collide.
 /// Lifted from `src/processors/utils.rs`.
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Identity of the file `with_temp_file` is about to replace.
+///
+/// An inode covers the same path listed twice, a symlink and its target,
+/// and hard links. A path is only the fallback for a destination that does
+/// not exist yet, where there is no inode to share.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum FileIdentity {
+    Inode(u64, u64),
+    Path(PathBuf),
+}
+
+/// One mutex per file identity. Parallel jobs that name the same inode take
+/// this for the whole read-modify-rename, so the second job observes the
+/// first job's write instead of both renaming over the original.
+static FILE_LOCKS: LazyLock<Mutex<HashMap<FileIdentity, Arc<Mutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn absolute_path(file: &Path) -> PathBuf {
+    if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(file))
+            .unwrap_or_else(|_| file.to_path_buf())
+    }
+}
+
+#[cfg(unix)]
+fn file_identity(file: &Path) -> FileIdentity {
+    use std::os::unix::fs::MetadataExt;
+    // `metadata` follows symlinks, so a link and its target share one key.
+    if let Ok(meta) = std::fs::metadata(file) {
+        return FileIdentity::Inode(meta.dev(), meta.ino());
+    }
+    FileIdentity::Path(absolute_path(file))
+}
+
+#[cfg(not(unix))]
+fn file_identity(file: &Path) -> FileIdentity {
+    // `canonicalize` follows symlinks and resolves `.` / `..`. A missing
+    // file has nothing to resolve, so fall back to an absolute path.
+    FileIdentity::Path(std::fs::canonicalize(file).unwrap_or_else(|_| absolute_path(file)))
+}
+
+/// Mutex for `file`'s identity. The map lock is dropped before the inode
+/// lock is taken, so two different files never deadlock on the map.
+fn file_lock(file: &Path) -> Arc<Mutex<()>> {
+    let key = file_identity(file);
+    let mut locks = FILE_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    locks
+        .entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
 
 /// AAC analysis cached between the clipping check and the apply step so a
 /// single apply never walks the bitstream twice (issue #188).
@@ -853,10 +910,23 @@ pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
 /// Run `operation(original, temp)` against a fresh sibling temp path, then
 /// fsync the temp file and rename it over the original (issue #227). The temp
 /// file is removed on failure, leaving the original untouched.
+///
+/// The destination's inode is locked for the whole call. Parallel jobs on
+/// the same file (duplicate arguments, a symlink and its target, hard links)
+/// otherwise both read the original and the later `rename` drops the other
+/// job's change. A nested call names the temp path, a different inode, so it
+/// does not re-enter this lock.
 pub(crate) fn with_temp_file<T, F>(file: &Path, operation: F) -> Result<T>
 where
     F: FnOnce(&Path, &Path) -> Result<T>,
 {
+    // Follow a symlink so the read and the rename hit the audio file. Renaming
+    // onto the link itself would replace the link and leave the target stale,
+    // and the other job (named by the real path) would not see that write.
+    let canonical = std::fs::canonicalize(file).ok();
+    let file = canonical.as_deref().unwrap_or(file);
+    let lock = file_lock(file);
+    let _same_file = lock.lock().unwrap_or_else(|e| e.into_inner());
     let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("tmp");
     let temp_path = temp_sibling_path(file, ext);
     let result = operation(file, &temp_path).and_then(|value| {
@@ -1204,5 +1274,99 @@ mod tests {
                 "peak {peak} -> capped steps {steps} still clips ({new_peak})"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod same_file_lock_tests {
+    use super::*;
+    use std::sync::Barrier;
+
+    fn test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Overlapping `with_temp_file` calls on one path must both land. Without
+    /// the inode lock both read `0` and the later rename leaves `1`.
+    #[test]
+    fn parallel_writes_to_the_same_path_accumulate() {
+        let dir = test_dir("mp3rgain_same_file_lock");
+        let path = dir.join("counter.txt");
+        std::fs::write(&path, b"0").unwrap();
+
+        let barrier = Arc::new(Barrier::new(2));
+        let mut threads = Vec::new();
+        for _ in 0..2 {
+            let path = path.clone();
+            let barrier = Arc::clone(&barrier);
+            threads.push(std::thread::spawn(move || {
+                barrier.wait();
+                with_temp_file(&path, |original, temp| {
+                    let n: i32 = std::fs::read_to_string(original)
+                        .map_err(|e| Error::io_read(original, e))?
+                        .trim()
+                        .parse()
+                        .unwrap_or(0);
+                    // Hold the critical section long enough that the other
+                    // thread is already inside `with_temp_file` and blocked
+                    // on the inode lock, rather than running fully after us.
+                    std::thread::sleep(std::time::Duration::from_millis(80));
+                    std::fs::write(temp, (n + 1).to_string())
+                        .map_err(|e| Error::io_write(original, e))?;
+                    Ok(())
+                })
+                .unwrap();
+            }));
+        }
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        let got = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(got.trim(), "2");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A symlink and its target are one inode, so the two writes serialize
+    /// the same way a repeated path does.
+    #[cfg(unix)]
+    #[test]
+    fn parallel_writes_through_a_symlink_accumulate() {
+        use std::os::unix::fs::symlink;
+
+        let dir = test_dir("mp3rgain_symlink_file_lock");
+        let path = dir.join("counter.txt");
+        let link = dir.join("counter.link");
+        std::fs::write(&path, b"0").unwrap();
+        symlink(&path, &link).unwrap();
+
+        let barrier = Arc::new(Barrier::new(2));
+        let mut threads = Vec::new();
+        for target in [path.clone(), link] {
+            let barrier = Arc::clone(&barrier);
+            threads.push(std::thread::spawn(move || {
+                barrier.wait();
+                with_temp_file(&target, |original, temp| {
+                    let n: i32 = std::fs::read_to_string(original)
+                        .map_err(|e| Error::io_read(original, e))?
+                        .trim()
+                        .parse()
+                        .unwrap_or(0);
+                    std::thread::sleep(std::time::Duration::from_millis(80));
+                    std::fs::write(temp, (n + 1).to_string())
+                        .map_err(|e| Error::io_write(original, e))?;
+                    Ok(())
+                })
+                .unwrap();
+            }));
+        }
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        let got = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(got.trim(), "2");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
