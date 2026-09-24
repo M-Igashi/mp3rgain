@@ -219,9 +219,30 @@ jobs:
           cd ../../dist
           shasum -a 256 "mp3rgain-${TAG}-windows-arm64.zip" > "mp3rgain-${TAG}-windows-arm64.zip.sha256"
 
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" "$HOME/Library/Keychains/login.keychain-db"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | awk -F'"' '/Developer ID Application/ {print $2; exit}')
+          if [ -z "$IDENTITY" ]; then
+            echo "No Developer ID Application identity in APPLE_CERTIFICATE" >&2
+            exit 1
+          fi
+          echo "SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
       - name: Create GUI macOS .app bundle
         env:
-          TAG: ${{ github.ref_name }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           # Create universal binary
@@ -239,8 +260,28 @@ jobs:
           cp mp3rgui/icons/mp3rgui.icns "${APP}/Contents/Resources/mp3rgui.icns"
           sed "s/__VERSION__/${VERSION}/g" packages/macos/Info.plist > "${APP}/Contents/Info.plist"
 
-          # Create DMG
-          hdiutil create -volname "mp3rgui" -srcfolder "${APP}" -ov -format UDZO "dist/mp3rgui-${TAG}-macos-universal.dmg"
+          # Notarization requires the hardened runtime and a secure timestamp
+          codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "${APP}"
+
+      - name: Create and notarize GUI macOS DMG
+        env:
+          TAG: ${{ github.ref_name }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_B64: ${{ secrets.ASC_KEY_B64 }}
+        run: |
+          DMG="dist/mp3rgui-${TAG}-macos-universal.dmg"
+          hdiutil create -volname "mp3rgui" -srcfolder dist/mp3rgui.app -ov -format UDZO "$DMG"
+          codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$DMG"
+
+          echo "$ASC_KEY_B64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          xcrun notarytool submit "$DMG" --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait
+
+          # Stapling fails unless notarization was accepted. The ticket covers
+          # the app inside the DMG as well, so the tarball copy gets stapled too.
+          xcrun stapler staple "$DMG"
+          xcrun stapler staple dist/mp3rgui.app
+
           cd dist
           shasum -a 256 "mp3rgui-${TAG}-macos-universal.dmg" > "mp3rgui-${TAG}-macos-universal.dmg.sha256"
 

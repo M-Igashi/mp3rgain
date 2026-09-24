@@ -53,8 +53,6 @@ No terminal needed - Start Menu entry, uninstaller, Intel + ARM in one, no admin
 
 Binaries for all platforms are on [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases). For checksum verification and troubleshooting (Windows Defender false positives, missing OpenGL, PPA on older Ubuntu), see the **[install guide](https://mp3rgain.tyna.ninja/install)**.
 
-> **macOS manual download:** if you see a "mp3rgui cannot be opened" warning, run `xattr -cr /path/to/mp3rgui.app` (not needed with Homebrew).
-
 ## Quick Start
 
 ```bash
