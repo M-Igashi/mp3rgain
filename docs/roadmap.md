@@ -282,11 +282,12 @@ Documentation only. No behaviour change: every command produces output identical
 - [x] `docs/design-decisions.md` records the deliberate shapes a whole-codebase review keeps re-proposing as defects, each pointing at where it was decided
 - [x] The AAC tag row in the migration guide named an atom and a namespace that were both wrong; it now lists the actual `com.apple.iTunes` atom names
 
-### Unreleased
+### v3.9.0 - Streaming Output & Notarized macOS GUI
 
 - [x] The peak measured for an AAC file no longer depends on `-j`. Chunked analysis seeked each piece to its own start, and an AAC decode that starts at a different packet substitutes a different realisation of every noise-substituted band, so `REPLAYGAIN_TRACK_PEAK` moved by up to 0.06 with the thread count. AAC is now analyzed whole; MP3 chunking is unchanged (#349)
 - [x] `-o tsv` and `-o text` write each unit as it finishes instead of holding everything until the run ends, so a program consuming the output can start parsing immediately. `-r` previously emitted nothing at all before the last file was done, and `-a --per-directory` stalled every finished album behind the slowest earlier one. Rows now appear in completion order; `-o json` and `-j 1` are unchanged (#348)
 - [x] Documented why mp3rgain reports a higher AAC peak than rsgain and foobar2000. AAC decoders disagree about whether to clamp samples above full scale, mp3rgain reports the decoded signal as it is, and both tools are right about their own input. `docs/COMPARISON.md` carries the measurements (#350)
+- [x] mp3rgui for macOS is signed with a Developer ID certificate and notarized, so it opens without a Gatekeeper warning from the DMG and from the Homebrew cask. Homebrew stopped installing casks that fail Gatekeeper on 2026-09-01 (#354)
 
 ## Upcoming Goals
 
