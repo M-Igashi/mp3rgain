@@ -22,6 +22,8 @@ mp3rgain adjusts MP3 and AAC volume without re-encoding by modifying the `global
 - **Zero dependencies**: single static binary; macOS, Linux, Windows (x86_64 and ARM64)
 - **GUI application**: `mp3rgui`, a native desktop app for drag-and-drop workflows
 
+**Preparing DJ tracks for rekordbox and CDJs?** [Bake'n Deck](https://baken.ravers.workers.dev) has mp3rgain built in and adds true peak ceiling gain for FLAC, AIFF and WAV, key + BPM playlist sorting, and a CDJ-safe MP3 export.
+
 ## Installation
 
 ### Windows: download the installer
@@ -120,7 +122,7 @@ The original [mp3gain](http://mp3gain.sourceforge.net/) has been unmaintained up
 - [Technical Comparison](docs/COMPARISON.md) - comparison with mp3gain, aacgain, and other ReplayGain tools
 - [Compatibility Report](docs/compatibility-report.md) - bit-level verification against original mp3gain
 - [Parallel Performance](docs/perf-parallel.md) - `-j` / `--threads` design and benchmarks
-- [Use Cases](docs/use-cases.md) - integration examples (beets, headroom, etc.)
+- [Use Cases](docs/use-cases.md) - integration examples (beets, Bake'n Deck, etc.)
 - [Design Decisions](docs/design-decisions.md) - things that look like defects and are deliberate, and where each was decided
 - [Security](docs/security.md) - memory safety and CVE analysis
 - [Roadmap](docs/roadmap.md) - development plans
@@ -137,4 +139,4 @@ MIT License - see [LICENSE](LICENSE).
 ## See Also
 
 - [Original mp3gain](http://mp3gain.sourceforge.net/)
-- [headroom](https://github.com/M-Igashi/headroom) - DJ audio loudness optimizer
+- [Bake'n Deck (baken)](https://baken.ravers.workers.dev) - rekordbox → CDJ prep toolkit for DJs, with mp3rgain built in

@@ -26,32 +26,34 @@ For MP3, mp3rgain is one of several drop-in mp3gain replacements; for AAC on the
 - **Integration**: [PR #6289](https://github.com/beetbox/beets/pull/6289)
 - **Documentation**: [ReplayGain plugin docs](https://beets.readthedocs.io/en/latest/plugins/replaygain.html)
 
-### headroom - DJ Audio Loudness Optimizer
+### Bake'n Deck (baken) - rekordbox → CDJ Prep Toolkit
 
-[headroom](https://github.com/M-Igashi/headroom) is an audio loudness analyzer and gain adjustment tool designed for mastering and DJ workflows. It simulates Rekordbox's Auto Gain feature but with a key difference: it identifies files with available headroom and applies gain adjustment without using a limiter.
+[Bake'n Deck](https://baken.ravers.workers.dev) ([GitHub](https://github.com/M-Igashi/baken), called `headroom` before v3.0.0) writes rekordbox prep into the audio files so it survives the USB export to CDJs. rekordbox Auto Gain is never written into exported files, so a CDJ never sees it; the loudness tool, `baken headroom`, instead brings each track to a uniform true peak ceiling (-0.5 dBTP by default) with gain only and no limiter. The toolkit also sorts rekordbox playlists by Camelot key and BPM (`baken rbsort`) and builds a CDJ-safe MP3 backup (`baken cdjsafe`).
 
 **How it uses mp3rgain:**
 
-headroom includes mp3rgain as a built-in library dependency for lossless MP3 **and AAC/M4A** volume adjustment. This enables:
+Bake'n Deck embeds mp3rgain as a library for lossless MP3 **and AAC/M4A** gain, and for measurement:
 
-- **Native lossless gain**: For MP3 and AAC/M4A files with sufficient headroom (≥1.5 dB), headroom uses the mp3rgain library to directly modify the `global_gain` field
-- **AAC bitstream gain via embedded library**: For AAC, no other Rust library or maintained CLI exposes this — headroom previously had to re-encode AAC files (foobar2000's GUI-only equivalent could not be embedded)
-- **Zero external dependencies for MP3/AAC**: No need to install mp3gain or aacgain separately
-- **Bitrate-aware processing**: Automatically selects appropriate True Peak ceiling based on bitrate
+- **Native lossless gain, up or down**: MP3 and AAC/M4A files move in whole 1.5 dB `global_gain` steps; nothing is re-encoded
+- **AAC bitstream gain via embedded library**: for AAC, no other Rust library or maintained CLI exposes this (foobar2000's GUI-only equivalent could not be embedded)
+- **In-process measurement**: since baken 3.6.0, loudness and true peak come from mp3rgain's BS.1770-4 analyzer instead of ffmpeg `loudnorm`, about 15x faster per file
 
 ```
-# headroom's processing approach:
-1. Native Lossless (mp3rgain)   - MP3 / AAC with ≥1.5 dB headroom
-2. Re-encode (ffmpeg)            - FLAC / WAV / AIFF, or files needing <1.5 dB precision
-3. Skip                          - Files already at target ceiling
+# baken headroom's processing approach:
+1. Native lossless (mp3rgain)  - MP3 / AAC, whole 1.5 dB steps up or down
+2. Exact gain (ffmpeg)         - FLAC / WAV / AIFF / ALAC, source bit depth kept
+3. Skip                        - MP3 / AAC already within one step of the ceiling
 ```
 
 **Installation:**
 ```bash
-brew install M-Igashi/tap/headroom    # macOS
-winget install M-Igashi.headroom      # Windows
-cargo install headroom                # All platforms
+brew install M-Igashi/tap/baken    # macOS
+winget install M-Igashi.baken      # Windows
+yay -S baken-bin                   # Arch Linux
+cargo install baken                # All platforms (ffmpeg required)
 ```
+
+Bake'n Deck for Mac, the native app edition, is on the [Mac App Store](https://apps.apple.com/app/baken-deck/id6808813823).
 
 ---
 
@@ -121,7 +123,7 @@ mp3rgain -a *.mp3
 
 ### DJ Preparation
 
-DJs need consistent volume levels across tracks for smooth mixing. headroom (mentioned above) demonstrates this use case with additional features like True Peak analysis.
+DJ hardware ignores ReplayGain tags, so gain has to be baked into the file to reach the deck. For a DJ library played from CDJs, [Bake'n Deck](https://baken.ravers.workers.dev) (above) is the purpose-built option: a true peak ceiling instead of a ReplayGain target, FLAC/AIFF/WAV support, and rekordbox cues kept linked. For a quick MP3/AAC-only pass, mp3rgain alone works:
 
 ```bash
 # Quick normalization for DJ sets
