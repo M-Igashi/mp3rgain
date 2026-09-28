@@ -28,7 +28,7 @@ For MP3, mp3rgain is one of several drop-in mp3gain replacements; for AAC on the
 
 ### Bake'n Deck (baken) - rekordbox → CDJ Prep Toolkit
 
-[Bake'n Deck](https://baken.ravers.workers.dev) ([GitHub](https://github.com/M-Igashi/baken), called `headroom` before v3.0.0) writes rekordbox prep into the audio files so it survives the USB export to CDJs. rekordbox Auto Gain is never written into exported files, so a CDJ never sees it; the loudness tool, `baken headroom`, instead brings each track to a uniform true peak ceiling (-0.5 dBTP by default) with gain only and no limiter. The toolkit also sorts rekordbox playlists by Camelot key and BPM (`baken rbsort`) and builds a CDJ-safe MP3 backup (`baken cdjsafe`).
+[Bake'n Deck](https://baken.ravers.workers.dev) ([GitHub](https://github.com/M-Igashi/baken), called `headroom` before v3.0.0) writes rekordbox prep into the audio files so it survives the USB export to CDJs. rekordbox Auto Gain is never written into exported files, so a CDJ never sees it; the loudness tool, `baken headroom`, instead brings each track to a uniform true peak ceiling (-0.5 dBTP by default) with gain only and no limiter. The toolkit also sorts rekordbox playlists by key and BPM (`baken rbsort`) and builds a CDJ-safe MP3 backup (`baken cdjsafe`).
 
 **How it uses mp3rgain:**
 
