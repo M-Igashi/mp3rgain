@@ -794,19 +794,27 @@ fn temp_sibling_path(file: &Path, ext: &str) -> std::path::PathBuf {
     ))
 }
 
-/// Retry `op` on transient Windows sharing violations (issue #303).
+const ERROR_ACCESS_DENIED: i32 = 5;
+const ERROR_SHARING_VIOLATION: i32 = 32;
+const ERROR_LOCK_VIOLATION: i32 = 33;
+const SHARING_ERRORS: &[i32] = &[ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION];
+
+/// Retry `op` while it fails with one of the Win32 error `codes`
+/// (issues #303, #358).
 ///
 /// On SMB shares an antivirus scanner, Windows Search, or the SMB
-/// redirector's handle caching can briefly hold the temp file between our
-/// close and the next open, failing it with `ERROR_SHARING_VIOLATION` (32)
-/// or `ERROR_LOCK_VIOLATION` (33). Back off and retry; any other error is
-/// returned immediately. No-op wrapper on non-Windows.
+/// redirector's handle caching can briefly hold a file we are about to open
+/// or replace. Back off and retry; any other error is returned immediately.
+/// No-op wrapper on non-Windows.
 #[cfg(windows)]
-fn retry_sharing_violation<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+fn retry_transient<T>(
+    codes: &[i32],
+    mut op: impl FnMut() -> std::io::Result<T>,
+) -> std::io::Result<T> {
     let mut delay = std::time::Duration::from_millis(10);
     for _ in 0..8 {
         match op() {
-            Err(e) if matches!(e.raw_os_error(), Some(32) | Some(33)) => {
+            Err(e) if e.raw_os_error().is_some_and(|c| codes.contains(&c)) => {
                 std::thread::sleep(delay);
                 delay *= 2;
             }
@@ -817,7 +825,10 @@ fn retry_sharing_violation<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std
 }
 
 #[cfg(not(windows))]
-fn retry_sharing_violation<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+fn retry_transient<T>(
+    _codes: &[i32],
+    mut op: impl FnMut() -> std::io::Result<T>,
+) -> std::io::Result<T> {
     op()
 }
 
@@ -827,16 +838,31 @@ fn persist_temp(original: &Path, temp: &Path) -> Result<()> {
     let finish = || -> std::io::Result<()> {
         // fsync needs a writable handle on Windows, and must happen before
         // the permission copy in case the original mode is read-only.
-        retry_sharing_violation(|| {
+        retry_transient(SHARING_ERRORS, || {
             std::fs::OpenOptions::new()
                 .write(true)
                 .open(temp)?
                 .sync_all()
         })?;
         if let Ok(meta) = std::fs::metadata(original) {
-            retry_sharing_violation(|| std::fs::set_permissions(temp, meta.permissions()))?;
+            retry_transient(SHARING_ERRORS, || {
+                std::fs::set_permissions(temp, meta.permissions())
+            })?;
         }
-        retry_sharing_violation(|| std::fs::rename(temp, original))
+        // Replacing a file that another process has open fails with
+        // ERROR_ACCESS_DENIED, not a sharing violation: Samba refuses the
+        // rename while any handle to the destination is open, and on a share
+        // Windows Defender cannot take the oplock that would make its scan of
+        // the original step aside (issue #358). A real denial is reported
+        // after the ~2.5s backoff.
+        retry_transient(
+            &[
+                ERROR_ACCESS_DENIED,
+                ERROR_SHARING_VIOLATION,
+                ERROR_LOCK_VIOLATION,
+            ],
+            || std::fs::rename(temp, original),
+        )
     };
     finish().map_err(|e| Error::io_write(original, e))
 }
@@ -864,7 +890,7 @@ where
         Ok(value)
     });
     if result.is_err() {
-        let _ = retry_sharing_violation(|| std::fs::remove_file(&temp_path));
+        let _ = retry_transient(SHARING_ERRORS, || std::fs::remove_file(&temp_path));
     }
     result
 }

@@ -289,6 +289,10 @@ Documentation only. No behaviour change: every command produces output identical
 - [x] Documented why mp3rgain reports a higher AAC peak than rsgain and foobar2000. AAC decoders disagree about whether to clamp samples above full scale, mp3rgain reports the decoded signal as it is, and both tools are right about their own input. `docs/COMPARISON.md` carries the measurements (#350)
 - [x] mp3rgui for macOS is signed with a Developer ID certificate and notarized, so it opens without a Gatekeeper warning from the DMG and from the Homebrew cask. Homebrew stopped installing casks that fail Gatekeeper on 2026-09-01 (#354)
 
+### Unreleased
+
+- [x] Applying gain on a Windows network share no longer fails at random with "Access is denied". Replacing the original with the finished temp file is refused while another process such as Windows Defender has the original open, and on a share Defender cannot take the oplock that makes it step aside locally. The rename now retries that error with the same short backoff as the sharing violations from #303. The original file was never damaged by the failure (#358)
+
 ## Upcoming Goals
 
 ### Future Enhancements
