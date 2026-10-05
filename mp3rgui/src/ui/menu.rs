@@ -6,7 +6,17 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             file_menu(app, ui, ctx);
             analysis_menu(app, ui, ctx);
             modify_menu(app, ui, ctx);
+            help_menu(app, ui);
         });
+    });
+}
+
+fn help_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
+    ui.menu_button("Help", |ui| {
+        if ui.button("About mp3rgui").clicked() {
+            app.show_about = true;
+            ui.close_menu();
+        }
     });
 }
 

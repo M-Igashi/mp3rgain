@@ -17,6 +17,24 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     render_delete_confirm(app, ctx);
     render_manual_gain_modal(app, ctx);
     render_channel_gain_modal(app, ctx);
+    render_about(app, ctx);
+}
+
+/// Help > About. The only other place the version appeared was the crash
+/// message, so a GUI user could not say which release they were on (#367).
+fn render_about(app: &mut Mp3rgainApp, ctx: &egui::Context) {
+    egui::Window::new("About mp3rgui")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .open(&mut app.show_about)
+        .show(ctx, |ui| {
+            ui.heading(format!("mp3rgui {}", env!("CARGO_PKG_VERSION")));
+            ui.label("Lossless MP3 and AAC volume normalizer using ReplayGain");
+            ui.add_space(8.0);
+            ui.hyperlink(env!("CARGO_PKG_REPOSITORY"));
+            ui.label(format!("{} License", env!("CARGO_PKG_LICENSE")));
+        });
 }
 
 /// Shared scaffolding for the small centered modals: fixed window chrome,
@@ -186,8 +204,10 @@ fn handle_selection_shortcuts(app: &mut Mp3rgainApp, ctx: &egui::Context) {
         app.select_all();
     }
 
-    let modal_open =
-        app.confirm_delete_tags || app.manual_gain_modal.open || app.channel_gain_modal.open;
+    let modal_open = app.confirm_delete_tags
+        || app.show_about
+        || app.manual_gain_modal.open
+        || app.channel_gain_modal.open;
     if !modal_open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         app.clear_selection();
     }
