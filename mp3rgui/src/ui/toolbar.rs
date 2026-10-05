@@ -1,4 +1,5 @@
-use crate::app::Mp3rgainApp;
+use crate::app::{mode_reference, Mp3rgainApp};
+use mp3rgain::replaygain::REPLAYGAIN_REFERENCE_DB;
 
 pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
@@ -76,32 +77,31 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
 
             ui.separator();
 
-            // Target volume. Adjustable on the 89 dB scale in RG1 mode;
-            // the BS.1770 modes normalize to their fixed LUFS target
-            // (issue #272).
+            // Target volume. Stored on the 89 dB scale and shown on the
+            // selected mode's scale, so one offset carries across modes:
+            // 95 dB in RG 1.0 is -12 LUFS in RG 2.0 (issues #272, #364).
             ui.label("Target:");
-            match app.analysis_mode.target_lufs() {
-                Some(target_lufs) => {
-                    ui.label(format!("{} LUFS", target_lufs)).on_hover_text(
-                        "Fixed target of the selected analysis mode. \
-                         Switch back to RG 1.0 in the Options row to adjust \
-                         the target.",
-                    );
-                }
-                None => {
-                    let resp = ui.add_enabled(
-                        !app.is_processing(),
-                        egui::DragValue::new(&mut app.target_volume)
-                            .speed(0.1)
-                            .range(75.0..=100.0)
-                            .suffix(" dB"),
-                    );
-                    // The gain columns are derived from the Target, so a
-                    // sort on them must be redone (issue #161 item 1).
-                    if resp.changed() {
-                        app.mark_display_dirty();
-                    }
-                }
+            let shift = mode_reference(app.analysis_mode) - REPLAYGAIN_REFERENCE_DB;
+            let mut shown = app.target_volume + shift;
+            let resp = ui
+                .add_enabled(
+                    !app.is_processing(),
+                    egui::DragValue::new(&mut shown)
+                        .speed(0.1)
+                        .range(75.0 + shift..=100.0 + shift)
+                        .suffix(format!(" {}", app.analysis_mode.unit())),
+                )
+                .on_hover_text(
+                    "Level to normalize to. One setting shared by all analysis \
+                     modes as an offset from the reference: 95 dB in RG 1.0 is \
+                     -12 LUFS in RG 2.0 and -17 LUFS in R128. Equivalent to the \
+                     CLI's -d.",
+                );
+            // The gain columns are derived from the Target, so a sort on
+            // them must be redone (issue #161 item 1).
+            if resp.changed() {
+                app.target_volume = shown - shift;
+                app.mark_display_dirty();
             }
         });
     });
