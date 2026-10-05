@@ -14,7 +14,7 @@ assignees: ''
 
 ## mp3rgain Version
 
-- **Version**: (run `mp3rgain version`)
+- **Version**: (CLI: run `mp3rgain -v`; GUI: Help > About mp3rgui)
 - **Download source**: (GitHub Release / cargo install)
 
 ## Issue Type
