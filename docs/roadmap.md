@@ -294,7 +294,7 @@ Documentation only. No behaviour change: every command produces output identical
 - [x] Applying gain on a Windows network share no longer fails at random with "Access is denied". Replacing the original with the finished temp file is refused while another process such as Windows Defender has the original open, and on a share Defender cannot take the oplock that makes it step aside locally. The rename now retries that error with the same short backoff as the sharing violations from #303. The original file was never damaged by the failure (#358)
 - [x] The DJ section of `docs/use-cases.md` points at Bake'n Deck, formerly headroom, whose old install commands no longer worked
 
-### Unreleased
+### v3.9.2 - M4A Tags Visible in Mp3tag & GUI Target in LUFS Modes
 
 - [x] The ReplayGain and undo tags mp3rgain writes to M4A files are now visible in Mp3tag. Their `data` atom had the type indicator and locale swapped, so readers that check the type, Mp3tag among them, treated the values as binary and skipped them. Files tagged by older versions still read and undo normally, and processing them again rewrites the tags in the corrected form (#363)
 - [x] mp3rgui shows its version under Help > About mp3rgui. Until now the version appeared only in the crash message, so a GUI user filing a bug could not say which release they were running. The bug report template now points GUI users there (#367)
