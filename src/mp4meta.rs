@@ -444,7 +444,8 @@ fn parse_freeform_tag(data: &[u8]) -> Option<FreeformTag> {
                 }
             }
             DATA => {
-                // Skip 8-byte version/flags + type indicator
+                // Skip the type indicator and locale without checking them,
+                // so items written with the two swapped (#363) still read.
                 let string_start = content_start.saturating_add(8);
                 if string_start < content_end {
                     value =
@@ -485,11 +486,11 @@ fn serialize_freeform_tag(tag: &FreeformTag) -> Vec<u8> {
 
     // data box
     let value_data = tag.value().as_bytes();
-    let data_size = 16 + value_data.len() as u32; // 8 header + 4 version/flags + 4 type + data
+    let data_size = 16 + value_data.len() as u32; // 8 header + 4 type + 4 locale + data
     result.extend_from_slice(&data_size.to_be_bytes());
     result.extend_from_slice(b"data");
-    result.extend_from_slice(&[0u8; 4]); // version/flags
     result.extend_from_slice(&1u32.to_be_bytes()); // type = 1 (UTF-8 text)
+    result.extend_from_slice(&[0u8; 4]); // locale
     result.extend_from_slice(value_data);
 
     // Wrap in ---- box
@@ -985,6 +986,25 @@ fn is_undo_freeform(data: &[u8], pos: usize, header: &BoxHeader) -> bool {
     })
 }
 
+/// `data` box type indicator and locale as mp3rgain wrote them before #363:
+/// swapped, so readers saw type 0 (binary) and Mp3tag hid the item.
+const SWAPPED_DATA_HEADER: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 1];
+
+/// Re-serialize one of mp3rgain's own freeform items that still carries
+/// [`SWAPPED_DATA_HEADER`], so any tag write repairs a file tagged before #363.
+fn repair_swapped_data_header(data: &[u8], pos: usize, header: &BoxHeader) -> Option<Vec<u8>> {
+    if !is_replaygain_freeform(data, pos, header) && !is_undo_freeform(data, pos, header) {
+        return None;
+    }
+    let item = &data[pos + header.header_size as usize..pos + header.size as usize];
+    let (data_pos, data_header) = find_box_in_container(item, 0, item.len(), DATA)?;
+    let start = data_pos + data_header.header_size as usize;
+    if item.get(start..start + 8)? != SWAPPED_DATA_HEADER {
+        return None;
+    }
+    parse_freeform_tag(item).map(|tag| serialize_freeform_tag(&tag))
+}
+
 fn create_ilst_box_filtered(
     new_tags: &[FreeformTag],
     existing_content: &[u8],
@@ -1004,7 +1024,10 @@ fn create_ilst_box_filtered(
             let tag_data = &existing_content[pos..pos + header.size as usize];
 
             if !should_replace(existing_content, pos, &header) {
-                content.extend_from_slice(tag_data);
+                match repair_swapped_data_header(existing_content, pos, &header) {
+                    Some(repaired) => content.extend_from_slice(&repaired),
+                    None => content.extend_from_slice(tag_data),
+                }
             }
 
             pos += header.size as usize;
@@ -1607,6 +1630,49 @@ mod tests {
         assert_eq!(parsed.namespace(), tag.namespace());
         assert_eq!(parsed.name(), tag.name());
         assert_eq!(parsed.value(), tag.value());
+    }
+
+    /// Issue #363: the `data` box is type 1 (UTF-8) then locale 0. Items an
+    /// older version wrote with the two swapped still read, and any write
+    /// repairs mp3rgain's own while leaving other items byte-for-byte alone.
+    #[test]
+    fn test_data_box_header_and_swapped_repair() {
+        let item = |name: &str, value: &str| {
+            serialize_freeform_tag(&FreeformTag::new(
+                ITUNES_NAMESPACE.to_string(),
+                name.to_string(),
+                value.to_string(),
+            ))
+        };
+        let data_header_at = |item: &[u8]| item.windows(4).position(|w| w == b"data").unwrap() + 4;
+        let swapped = |name: &str, value: &str| {
+            let mut v = item(name, value);
+            let at = data_header_at(&v);
+            v[at..at + 8].copy_from_slice(&SWAPPED_DATA_HEADER);
+            v
+        };
+
+        let fresh = item(UNDO_TAG, "+002,+002,N");
+        let at = data_header_at(&fresh);
+        assert_eq!(&fresh[at..at + 8], &[0, 0, 0, 1, 0, 0, 0, 0]);
+
+        let legacy_undo = swapped(UNDO_TAG, "+002,+002,N");
+        let foreign = swapped("Label", "x");
+        let parsed = parse_freeform_tag(&legacy_undo[8..]).unwrap();
+        assert_eq!(parsed.value(), "+002,+002,N");
+
+        let mut existing = legacy_undo.clone();
+        existing.extend_from_slice(&foreign);
+        let mut rg = ReplayGainTags::default();
+        rg.set_track(1.0, 0.5);
+        let ilst = create_ilst_box(&rg, &existing);
+
+        let content = &ilst[8..];
+        assert!(content.starts_with(&fresh), "undo item repaired in place");
+        assert_eq!(
+            &content[fresh.len()..fresh.len() + foreign.len()],
+            &foreign[..]
+        );
     }
 
     #[test]

@@ -30,6 +30,8 @@ It exists because a whole-codebase review finds these reliably and proposes "fix
 
 **The MP4 freeform atom names are lowercase**, unlike the uppercase APEv2 / ID3v2 keys: `mp3rgain_undo`, `mp3rgain_minmax`, `replaygain_track_gain`, in the `com.apple.iTunes` namespace. `src/mp4meta.rs` holds the constants. This has drifted twice, once in `-s c` output and once in `docs/migrating-from-mp3gain.md`; both were fixed in `31265df` by using the constants instead of literals.
 
+**The freeform reader ignores the `data` box's type indicator and locale.** Until #363 mp3rgain wrote the two swapped (type 0, locale 1), which Mp3tag reads as a non-text item and hides. Writes now use type 1 (UTF-8) and locale 0, and every ilst rebuild re-serializes mp3rgain's own items still in the swapped form. The reader must keep accepting both, or files tagged by older versions lose their undo information. `src/mp4meta.rs::repair_swapped_data_header`. Issue #363.
+
 ## Bit-exactness constraints
 
 RG1 is the mp3gain-compatible path and its values have to match bit for bit. That is why:
