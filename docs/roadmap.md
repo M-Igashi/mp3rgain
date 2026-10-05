@@ -298,6 +298,7 @@ Documentation only. No behaviour change: every command produces output identical
 
 - [x] The ReplayGain and undo tags mp3rgain writes to M4A files are now visible in Mp3tag. Their `data` atom had the type indicator and locale swapped, so readers that check the type, Mp3tag among them, treated the values as binary and skipped them. Files tagged by older versions still read and undo normally, and processing them again rewrites the tags in the corrected form (#363)
 - [x] mp3rgui shows its version under Help > About mp3rgui. Until now the version appeared only in the crash message, so a GUI user filing a bug could not say which release they were running. The bug report template now points GUI users there (#367)
+- [x] mp3rgui's Target is adjustable in the RG 2.0 and R128 modes, which used to lock it at -18 / -23 LUFS. It is one setting shared by all modes as an offset from the reference, the same shift the CLI's `-d` gives with `--rg2` / `--r128`, so 95 dB in RG 1.0 shows as -12 LUFS in RG 2.0 (#364)
 
 ## Upcoming Goals
 

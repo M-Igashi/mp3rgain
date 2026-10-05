@@ -185,15 +185,12 @@ impl FileEntry {
         let stored = matches!(self.measurement, Some(Measurement::Stored { .. }));
         // `(volume, gain)` for one measured gain, shifted by the gain applied
         // since: the file got louder by `applied_db`, so it needs that much
-        // less. Stored tags outside RG1 carry no LUFS loudness, so the gain
-        // is shown as-is with an empty Volume column (issue #272).
+        // less. Stored tags outside RG1 carry no LUFS loudness, so they get
+        // an empty Volume column (issue #272).
         let columns = |gain_db: f64| -> (Option<f64>, f64) {
-            if stored && mode != AnalysisMode::Rg1 {
-                (None, gain_db - self.applied_db)
-            } else {
-                let (volume, gain) = volume_and_gain(gain_db, target_volume, mode);
-                (Some(volume + self.applied_db), gain - self.applied_db)
-            }
+            let (volume, gain) = volume_and_gain(gain_db, target_volume, mode);
+            let volume = (!stored || mode == AnalysisMode::Rg1).then_some(volume + self.applied_db);
+            (volume, gain - self.applied_db)
         };
 
         let mut d = RowDisplay::default();
@@ -562,7 +559,8 @@ pub struct Mp3rgainApp {
 
     /// Loudness measurement mode for Track / Album Analysis (issue #272).
     /// RG 1.0 (mp3gain-compatible) by default; the BS.1770 modes normalize
-    /// to their fixed LUFS targets and show loudness in LUFS.
+    /// to their LUFS targets, shifted by the Target, and show loudness in
+    /// LUFS.
     pub analysis_mode: AnalysisMode,
 
     /// When true, Apply Track / Album Gain reuses stored REPLAYGAIN_* tags
@@ -1828,20 +1826,21 @@ fn trusted_album_tags(file: &FileEntry) -> Option<StoredAlbumValues> {
     file.stored_tags.as_ref()?.tags.rg1_album_values()
 }
 
-/// Display pair for a ReplayGain value, mode-aware (issue #272).
-///
-/// RG1: volume relative to the 89 dB reference, and the gain re-targeted to
-/// the user-adjustable `target`. BS.1770 modes: measured loudness in LUFS,
-/// and the gain to the mode's fixed LUFS target (the Target control is
-/// disabled in those modes).
+/// Display pair for a ReplayGain value, mode-aware (issue #272): the volume
+/// on the mode's scale (89 dB-relative in RG1, LUFS otherwise), and the gain
+/// re-targeted by the Target's offset from 89 dB. Every mode shifts by the
+/// same offset, as the CLI's `-d` does (issue #364).
 fn volume_and_gain(gain_db: f64, target: f64, mode: AnalysisMode) -> (f64, f64) {
-    match mode.target_lufs() {
-        Some(target_lufs) => (target_lufs - gain_db, gain_db),
-        None => (
-            REPLAYGAIN_REFERENCE_DB - gain_db,
-            target - REPLAYGAIN_REFERENCE_DB + gain_db,
-        ),
-    }
+    (
+        mode_reference(mode) - gain_db,
+        target - REPLAYGAIN_REFERENCE_DB + gain_db,
+    )
+}
+
+/// The level a mode normalizes to with the Target left at 89 dB: 89 dB in
+/// RG1, the LUFS target in the BS.1770 modes.
+pub fn mode_reference(mode: AnalysisMode) -> f64 {
+    mode.target_lufs().unwrap_or(REPLAYGAIN_REFERENCE_DB)
 }
 
 /// Compare two `Option<f64>` values, putting `None` always at the bottom
@@ -2140,8 +2139,27 @@ mod tests {
         assert!((peak - apply_gain_to_peak(0.9, steps_to_db(1))).abs() < 1e-9);
     }
 
+    /// Issue #364: the Target shifts the gain in the BS.1770 modes too, by
+    /// its offset from 89 dB, the way the CLI's -d does. The Volume column
+    /// stays on the mode's own scale.
     #[test]
-    fn stored_tags_outside_rg1_show_gain_as_is_without_volume() {
+    fn target_offset_applies_in_every_mode() {
+        let file = analyzed(-3.0, 0.5);
+        for mode in [AnalysisMode::Rg1, AnalysisMode::Rg2, AnalysisMode::R128] {
+            let at_reference = file.display(89.0, mode);
+            let at_95 = file.display(95.0, mode);
+            assert!(close(at_95.volume, at_reference.volume), "{mode:?}");
+            assert!(close(at_95.track_gain, Some(3.0)), "{mode:?}");
+        }
+        let rg2 = file.display(95.0, AnalysisMode::Rg2);
+        assert!(
+            close(rg2.volume, Some(-15.0)),
+            "-18 LUFS minus a -3 dB gain"
+        );
+    }
+
+    #[test]
+    fn stored_tags_outside_rg1_show_gain_without_volume() {
         let file = FileEntry {
             measurement: Some(Measurement::Stored {
                 track_gain_db: Some(-2.5),
@@ -2156,6 +2174,8 @@ mod tests {
         assert!(close(rg2.track_gain, Some(-2.5)));
         assert_eq!(rg2.album_volume, None);
         assert!(close(rg2.album_gain, Some(-1.0)));
+        let rg2_92 = file.display(92.0, AnalysisMode::Rg2);
+        assert!(close(rg2_92.track_gain, Some(0.5)), "shifted by the Target");
 
         let rg1 = file.display(91.0, AnalysisMode::Rg1);
         assert!(close(rg1.volume, Some(91.5)));
