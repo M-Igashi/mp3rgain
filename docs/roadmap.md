@@ -296,6 +296,7 @@ Documentation only. No behaviour change: every command produces output identical
 
 ### Unreleased
 
+- [x] The ReplayGain and undo tags mp3rgain writes to M4A files are now visible in Mp3tag. Their `data` atom had the type indicator and locale swapped, so readers that check the type, Mp3tag among them, treated the values as binary and skipped them. Files tagged by older versions still read and undo normally, and processing them again rewrites the tags in the corrected form (#363)
 - [x] mp3rgui shows its version under Help > About mp3rgui. Until now the version appeared only in the crash message, so a GUI user filing a bug could not say which release they were running. The bug report template now points GUI users there (#367)
 
 ## Upcoming Goals
