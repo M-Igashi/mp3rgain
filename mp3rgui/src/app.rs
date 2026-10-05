@@ -494,6 +494,9 @@ pub struct Mp3rgainApp {
     /// The destructive worker is only spawned after the user confirms.
     pub confirm_delete_tags: bool,
 
+    /// Set true while the Help > About window is up (issue #367).
+    pub show_about: bool,
+
     /// Manual-gain modal state. Lives across opens so the user can tweak
     /// the same value across runs.
     pub manual_gain_modal: ManualGainModal,
@@ -590,6 +593,7 @@ impl Mp3rgainApp {
             status_message: String::new(),
             apply_options: settings.apply_options,
             confirm_delete_tags: false,
+            show_about: false,
             manual_gain_modal: ManualGainModal::default(),
             channel_gain_modal: ChannelGainModal::default(),
             selection_anchor: None,
