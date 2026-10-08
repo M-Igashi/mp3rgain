@@ -63,7 +63,7 @@ These options do not exist in mp3gain. A migrated script does not need them, but
 | `-R` | Recurse into directory arguments, picking up `.mp3`, `.m4a`, `.aac` and `.mp4` files |
 | `-n`, `--dry-run` | Show what would be done without writing anything |
 | `-o text` / `-o json` / `-o tsv` | Choose the output format explicitly |
-| `-i <n>` | Which audio track of a multi-track MP4 to analyze (default `0`). The gain itself is always applied to the first audio track |
+| `-i <n>` | Which audio track of a multi-track MP4 to analyze (default `0`). Gain, undo and ReplayGain tags always apply to the first audio track, so a value other than `0` works only for analysis and is an error with `-r`, `-a`, `-e`, `-g`, `-l`, `-u`, `-s d` or `--tags-only` ([#375](https://github.com/M-Igashi/mp3rgain/issues/375)). `-x` and the `global_gain` range columns always describe the first track |
 | `-s R` | Reuse stored ReplayGain tags with `-r`/`-a` and rescan only files without them, which is mp3gain's default behaviour ([#298](https://github.com/M-Igashi/mp3rgain/issues/298)). In album mode, one file with missing or disagreeing album tags rescans the whole album. Ignored with `-s r`, `-d`/`-m`, `--rg2`/`--r128`, or when a tag was written by a BS.1770 analysis |
 | `-j <n>`, `--threads <n>` | Worker threads for every per-file command (default and `0`: one per CPU; `1`: serial, like mp3gain). `MP3RGAIN_THREADS` sets the default. See [perf-parallel.md](perf-parallel.md) |
 | `--skip-errors` | With `-a`, leave files that fail to decode out of the album instead of aborting |

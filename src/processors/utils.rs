@@ -173,6 +173,9 @@ pub fn emit_clipping_warning(
     Some(warn_msg)
 }
 
+/// Only called on paths that write to the file, and `parse_args` rejects
+/// `-i <n>` other than 0 for those (issue #375), so the first track is both
+/// the one analyzed and the one adjusted.
 pub fn warn_aac_multi_track(file: &Path, filename: &str, opts: &Options) {
     if opts.output_format != OutputFormat::Text || opts.quiet {
         return;

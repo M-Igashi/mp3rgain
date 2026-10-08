@@ -297,8 +297,25 @@ reported and excluded from the album gain calculation.
 .TP
 .BI \-i " n"
 Which audio track of a multi-track MP4 file to analyze (default: 0).
-The gain itself is always applied to the first audio track, with a warning
-when the file has more than one.
+Gain, undo and ReplayGain tags always apply to the first audio track, which
+is the one players apply the file's ReplayGain tags to, so a value other than 0
+is accepted only for analysis: combining it with
+.BR \-r ,
+.BR \-a ,
+.BR \-e ,
+.BR \-g ,
+.BR \-l ,
+.BR \-u ,
+.B \-s d
+or
+.B \-\-tags\-only
+is an error, with or without
+.BR \-n .
+The
+.I global_gain
+range in the analysis output, and
+.BR \-x ,
+always describe the first audio track.
 .SS "Undo and Tag Operations"
 .TP
 .B \-u
