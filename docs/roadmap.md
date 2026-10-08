@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current Status: v3.1.0 (Production Ready)
+## Current Status: v3.9.2 (Production Ready)
 
 **Positioning:** mp3rgain is a ReplayGain tool in the mp3gain lineage — it analyses, writes standard `REPLAYGAIN_*` tags, and bakes the correction into the bitstream — and it is the only actively maintained CLI doing that for AAC/M4A (aacgain has been abandoned since ~2009; foobar2000 is the reference-grade ReplayGain suite and its "Apply ReplayGain to file content" offers a comparable scalefactor-based AAC rewrite, but it is Windows GUI only with no undo). For MP3 it's a modern drop-in replacement for mp3gain; for AAC on the command line it has no equivalent.
 
@@ -9,7 +9,7 @@ All core functionality complete:
 - [x] Global gain modification (MP3 and AAC)
 - [x] ID3v2 tag preservation
 - [x] VBR/CBR support
-- [x] CLI interface (apply/info/undo commands)
+- [x] CLI interface (mp3gain-style flags: `-g` / `-r` / `-a` to apply, `-u` to undo, file info by default)
 - [x] ReplayGain analysis (track and album gain)
 - [x] AAC/M4A lossless bitstream gain adjustment and undo
 - [x] Full mp3gain command-line compatibility

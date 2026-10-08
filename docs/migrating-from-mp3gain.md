@@ -47,7 +47,7 @@ relying on this in scripts.
 
 ## Command and flag equivalence
 
-The flag list comes from `mp3rgain --help` (v2.8.0). All classic mp3gain
+The flag list comes from `mp3rgain --help` (v3.9.2). All classic mp3gain
 flags are accepted with the same semantics; mp3rgain adds a few extensions.
 
 ### Identical behaviour
@@ -88,6 +88,11 @@ are worth knowing:
 | `-s i` | Put *every* tag in ID3v2 `TXXX`, undo included. Since 3.2.0 the default already writes `REPLAYGAIN_*` to ID3v2, so this is only needed when you want `MP3GAIN_UNDO` there too |
 | `-j <n>` / `--threads <n>` | Worker threads for ReplayGain analysis (default: auto). `MP3RGAIN_THREADS` env var also honored. `-j 1` reproduces mp3gain's serial behavior. See [docs/perf-parallel.md](perf-parallel.md). |
 | `--skip-errors` | Keep album analysis (`-a`) going past unreadable files; failed files are reported and excluded from the album gain |
+| `--album-by <dir\|tag>` | With `-a`, choose what counts as one album instead of pooling every file into one, so a whole library can be album-tagged in one run: `dir` is one album per directory, `tag` is one album per release from `MUSICBRAINZ_ALBUMID` or ALBUMARTIST + ALBUM, so discs in subfolders share one album gain |
+| `--album-depth <n>` | With `-a -R`, one album per directory `n` levels below each directory argument, for untagged libraries (`2` suits an `Artist/Album` tree). Mutually exclusive with `--album-by` |
+| `--per-directory` | Alias for `--album-by=dir` |
+| `--rg2` / `--r128` | Measure loudness with ITU-R BS.1770 (ReplayGain 2.0 at -18 LUFS, or EBU R128 at -23 LUFS) instead of the default ReplayGain 1.0 |
+| `--true-peak` | Write the BS.1770-4 true peak to `REPLAYGAIN_*_PEAK` instead of the sample peak. Requires `--rg2` or `--r128` |
 | `--tags-only` | Write `REPLAYGAIN_*` tags and leave the audio untouched, the way `loudgain` / `rsgain` do, so the listener can still turn ReplayGain off in their player ([#308](https://github.com/M-Igashi/mp3rgain/issues/308)). The tag holds the full gain instead of mp3gain's residual, and no `MP3GAIN_UNDO` / `MP3GAIN_MINMAX` is written since there is no gain change to reverse. Requires `-r`/`-a`/`-e`; rejected with `-g`, `-l`, `-u`, `-w`, `-x` and `-s c`/`-s d`/`-s s`. Here `-d`/`-m` shift the written value (exactly, with no 1.5 dB step rounding) and `-k` caps it at the file's headroom |
 
 For the full list run `mp3rgain --help`.
@@ -215,7 +220,7 @@ Or install the static binary directly from a release artifact:
 
 | Distribution | Before | After |
 |--------------|--------|-------|
-| Ubuntu 25.10 | `apt install mp3gain` | `add-apt-repository ppa:m-igashi/mp3rgain && apt install mp3rgain` |
+| Ubuntu 26.04 LTS | `apt install mp3gain` | `add-apt-repository ppa:m-igashi/mp3rgain && apt install mp3rgain` |
 | Debian / older Ubuntu | `apt install mp3gain` | Download `.deb` from [releases](https://github.com/M-Igashi/mp3rgain/releases) |
 | Arch Linux | `pacman -S mp3gain` (AUR) | `yay -S mp3rgain-bin` |
 | macOS (Homebrew) | `brew install mp3gain` | `brew install M-Igashi/tap/mp3rgain` |
@@ -255,8 +260,7 @@ since 3.7.0; they have no container for freeform atoms, so their undo and
 
 mp3rgain is not the right tool if you need any of the following:
 
-- **EBU R128 / LUFS** loudness — mp3rgain implements ReplayGain 1.0 (89 dB
-  reference). For R128 use loudgain, ffmpeg `loudnorm`, or rsgain.
+- **An exact EBU R128 / LUFS level in the audio**: `--rg2` and `--r128` (since 3.0.0) measure BS.1770 loudness, but a lossless bitstream change moves in 1.5 dB steps, so the audio lands within about 0.75 dB of the target. `--tags-only` writes the exact value as a tag; for an exact level baked into the audio, use ffmpeg `loudnorm`, which re-encodes.
 - **FLAC / OGG / Opus / WAV / ALAC** — mp3rgain only handles MP3 and AAC.
   loudgain or rsgain cover lossless containers. An ALAC or DRM-protected M4P
   file in a scanned library is reported as skipped and left alone, without

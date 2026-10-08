@@ -2,7 +2,7 @@
 #
 # Multi-arch Docker image for mp3rgain.
 #
-# Built natively per arch (linux/amd64, linux/arm64) by .github/workflows/release.yml.
+# Built natively per arch (linux/amd64, linux/arm64) by .github/workflows/docker.yml.
 # rust:alpine produces a fully static musl binary, so the runtime stage is `scratch`.
 #
 # Usage (drop-in mp3gain replacement for cron / Plex maintenance):

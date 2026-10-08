@@ -1,7 +1,7 @@
 .\" mp3rgain - Lossless MP3 volume adjustment
 .\" Copyright (c) 2025 M-Igashi
 .\" Licensed under MIT License
-.TH MP3RGAIN 1 "September 2026" "mp3rgain 3.8.0" "User Commands"
+.TH MP3RGAIN 1 "October 2026" "mp3rgain 3.9.2" "User Commands"
 .SH NAME
 mp3rgain \- lossless MP3/AAC volume adjustment (modern mp3gain replacement)
 .SH SYNOPSIS
@@ -181,6 +181,17 @@ but normalizes to the EBU R128 broadcast target of \-23 LUFS.
 Mutually exclusive with
 .BR \-\-rg2 .
 .TP
+.B \-\-true\-peak
+Measure the true peak (ITU-R BS.1770-4 Annex 2) for the
+\fBREPLAYGAIN_*_PEAK\fR tags instead of the sample peak. The decoded signal is
+oversampled 4x below 88.2 kHz and 2x at or above it, so inter-sample peaks are
+caught and the value can exceed 1.0.
+Requires
+.B \-\-rg2
+or
+.BR \-\-r128 ;
+the default ReplayGain 1.0 analysis keeps mp3gain's sample peak.
+.TP
 .B \-\-tags\-only
 Write the analysis to \fBREPLAYGAIN_*\fR tags and leave the audio untouched, the way
 .BR loudgain (1)
@@ -250,10 +261,12 @@ Force recalculation, ignoring stored tags (the default; kept for mp3gain compati
 Reuse stored ReplayGain tags with \fB\-r\fR/\fB\-a\fR instead of re-analyzing, rescanning only files whose tags are missing. This is mp3gain's default behavior. Album mode requires a consistent set of album tags on every file; otherwise the whole album is rescanned. Ignored with \fB\-s r\fR, \fB\-d\fR/\fB\-m\fR modifiers, or \fB\-\-rg2\fR/\fB\-\-r128\fR.
 .TP
 .B i
-Use ID3v2 tags (not fully supported, falls back to APEv2).
+Put every tag in ID3v2 TXXX frames, \fBMP3GAIN_UNDO\fR and \fBMP3GAIN_MINMAX\fR
+included (\fBMP3GAIN_ALBUM_MINMAX\fR stays in APEv2). Without \fBi\fR or \fBa\fR,
+MP3 tags are split since 3.2.0: \fBREPLAYGAIN_*\fR in ID3v2, \fBMP3GAIN_*\fR in APEv2.
 .TP
 .B a
-Use APEv2 tags (default).
+Put every tag in APEv2, which is mp3gain's layout and was the default before 3.2.0.
 .RE
 .SS "Analysis Options"
 .TP
@@ -276,8 +289,8 @@ Wrap gain values around instead of clamping when they exceed the
 valid range (0-255).
 .TP
 .B \-t
-Use a temporary file for writing. Safer but slower.
-Required for some operations.
+Use a temporary file for writing. Accepted for compatibility and has no effect:
+since 2.9.6 every write goes to a temporary file that replaces the original.
 .TP
 .B \-f
 Assume MPEG 2 Layer III. Accepted for compatibility but has no effect.

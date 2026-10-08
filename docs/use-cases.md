@@ -279,13 +279,13 @@ Cron entry (host crontab) — runs at 03:00 daily during Plex maintenance:
 0 3 * * *  docker run --rm \
     --user 1000:1000 \
     -v /srv/plex/music:/music \
-    ghcr.io/m-igashi/mp3rgain:v2 \
+    ghcr.io/m-igashi/mp3rgain:v3 \
     -r -R /music
 ```
 
-Pin to a major tag (`:v2`) for stability — patch / minor releases land
+Pin to a major tag (`:v3`) for stability — patch / minor releases land
 automatically, breaking changes do not. Pin to an exact version
-(`:v2.8.0`) for fully reproducible runs. `--user $(id -u):$(id -g)`
+(`:v3.9.2`) for fully reproducible runs. `--user $(id -u):$(id -g)`
 keeps written files under your own UID instead of root.
 
 Because the image is `ENTRYPOINT`-only, every `mp3rgain` flag works

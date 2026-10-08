@@ -11,7 +11,7 @@ assignees: ''
 - **OS**: (e.g., Windows 11, macOS 14, Ubuntu 22.04)
 - **Architecture**: (e.g., x86_64, ARM64)
 - **mp3rgain version**: (CLI: run `mp3rgain -v`; GUI: Help > About mp3rgui)
-- **Installation method**: (cargo install / Homebrew / binary download)
+- **Installation method**: (cargo install / Homebrew / winget / AUR / PPA / .deb / Nix / Docker / Windows installer / binary download)
 
 ## Description
 

@@ -49,7 +49,7 @@ Do not propose a change to these paths on the grounds that it is equivalent. If 
 
 ## Product decisions that keep being re-proposed
 
-**winget ships the portable zip, not the Inno installer**, even though the release carries both. `InstallerType: zip` + `NestedInstallerType: portable` is what existing users installed through, winget tracks portable installs in its own link directory, and the transition was never tested on a real machine. Continuity beats the Start Menu entry. See `.claude/rules/winget.md`.
+**winget ships the portable zip, not the Inno installer**, even though the release carries both. `InstallerType: zip` + `NestedInstallerType: portable` is what existing users installed through, winget tracks portable installs in its own link directory, and the transition was never tested on a real machine. Switching the GUI to the Inno installer would not be a clean upgrade for those existing portable installs, so the installer stays a direct-download release asset only. Continuity beats the Start Menu entry.
 
 **Two editions of one album in sibling folders are left alone** in `--album-by=dir`. They are already grouped correctly by directory, and telling that user to switch to `--album-by=tag` would merge them wrongly, which is what the tag-mode collision report exists to warn about. PR #339.
 

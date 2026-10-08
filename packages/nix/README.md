@@ -51,7 +51,7 @@ release tarball by hash instead. To submit:
 
    rustPlatform.buildRustPackage rec {
      pname = "mp3rgain";
-     version = "2.7.2";
+     version = "3.9.2";
 
      src = fetchFromGitHub {
        owner = "M-Igashi";
@@ -77,4 +77,3 @@ release tarball by hash instead. To submit:
    hash-mismatch error on first build that reveals the correct hash), build with
    `nix-build -A mp3rgain`, then open a PR per the
    [nixpkgs contribution guide](https://github.com/NixOS/nixpkgs/blob/master/CONTRIBUTING.md).
-```

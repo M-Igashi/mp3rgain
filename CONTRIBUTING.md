@@ -6,7 +6,7 @@ Thank you for your interest in contributing to mp3rgain!
 
 ### Prerequisites
 
-- Rust 1.70 or later
+- Rust 1.85 or later
 - Git
 
 ### Building from Source
@@ -75,9 +75,8 @@ RG1 analysis and every apply path are byte-exact guarantees. `cargo test` passin
 We're especially looking for help with:
 
 1. **Windows compatibility** - Testing and fixing Windows-specific issues
-2. **ReplayGain support** - Implementing track/album gain analysis
-3. **Additional format support** - Extending to other audio formats
-4. **Documentation** - Improving docs and examples
+2. **Additional format support** - Extending to other audio formats
+3. **Documentation** - Improving docs and examples
 
 ## Questions?
 

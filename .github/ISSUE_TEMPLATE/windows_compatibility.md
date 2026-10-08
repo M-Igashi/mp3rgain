@@ -15,7 +15,7 @@ assignees: ''
 ## mp3rgain Version
 
 - **Version**: (CLI: run `mp3rgain -v`; GUI: Help > About mp3rgui)
-- **Download source**: (GitHub Release / cargo install)
+- **Download source**: (GitHub Release / winget / Windows installer / cargo install)
 
 ## Issue Type
 
@@ -34,9 +34,9 @@ Describe the problem in detail.
 ### If reporting compatibility (working):
 
 Confirm what you tested:
-- [ ] `mp3rgain info` command
-- [ ] `mp3rgain apply` command
-- [ ] `mp3rgain undo` command
+- [ ] Show file info (`mp3rgain file.mp3`)
+- [ ] Apply gain (`-g`, `-r` or `-a`)
+- [ ] Undo (`-u`)
 - [ ] Multiple file processing
 - [ ] Files with ID3v2 tags
 - [ ] VBR files

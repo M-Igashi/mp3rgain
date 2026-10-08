@@ -100,6 +100,10 @@ Under **Processors**, enable at minimum:
 - `AMD x86-64 (amd64)`
 - `ARM ARMv8 (arm64)`
 
+### 7. Register an SSH Key on Launchpad
+
+Uploads go over SFTP, authenticated with an SSH key registered on the Launchpad account. Register the public half of the key at https://launchpad.net/~/+editsshkeys.
+
 ## Building and Uploading Packages
 
 ### Build Environment
@@ -167,7 +171,18 @@ From the project root:
 
 ### Manual Upload
 
-If you built without `--upload`:
+Anonymous upload to `ppa.launchpad.net`, the stock `dput` path, no longer works. Uploads go over SFTP with the SSH key from step 7, so put the same stanza the workflow uses in `~/.dput.cf` (`--upload` needs it too):
+
+```ini
+[ppa]
+fqdn = ppa.launchpad.net
+method = sftp
+incoming = ~%(ppa)s/ubuntu/
+login = m-igashi
+allow_unsigned_uploads = 0
+```
+
+`login` is the Launchpad username. Then, if you built without `--upload`:
 
 ```bash
 dput ppa:m-igashi/mp3rgain build-ppa/mp3rgain/build-resolute/mp3rgain_*_source.changes
@@ -195,7 +210,7 @@ dput ppa:m-igashi/mp3rgui  build-ppa/mp3rgui/build-resolute/mp3rgui_*_source.cha
 Since `debuild` requires Linux, you can use Docker:
 
 ```bash
-docker run --rm -it -v "$(pwd):/workspace" ubuntu:24.04 bash
+docker run --rm -it -v "$(pwd):/workspace" ubuntu:26.04 bash
 
 # Inside container:
 apt update && apt install -y devscripts debhelper dput gpg cargo rustc git
@@ -209,7 +224,7 @@ For signing, you'll need to mount your GPG key:
 docker run --rm -it \
   -v "$(pwd):/workspace" \
   -v "$HOME/.gnupg:/root/.gnupg" \
-  ubuntu:24.04 bash
+  ubuntu:26.04 bash
 ```
 
 ## Release Workflow
@@ -222,6 +237,14 @@ PPA upload is **automatic**. When you push a release tag:
 4. Launchpad builds .deb packages for amd64 and arm64
 
 To manually trigger: Actions → PPA Upload → Run workflow
+
+The workflow needs three secrets. They are stored as secrets of the GitHub environment `ppa`, which both upload jobs declare with `environment: ppa` and which only the `master` branch can use:
+
+| Secret | Contents |
+|--------|----------|
+| `GPG_PRIVATE_KEY` | base64-encoded GPG private key (`gpg --export-secret-keys KEY_ID \| base64`) |
+| `GPG_PASSPHRASE` | Passphrase for the GPG key |
+| `LAUNCHPAD_SSH_PRIVATE_KEY` | OpenSSH-format private key (ed25519 or rsa) whose public half is registered at https://launchpad.net/~m-igashi/+editsshkeys |
 
 ## Troubleshooting
 

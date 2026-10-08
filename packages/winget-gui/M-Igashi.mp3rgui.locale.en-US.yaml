@@ -15,7 +15,7 @@ ShortDescription: GUI for lossless MP3 volume adjustment - a modern mp3gain repl
 Description: |-
   mp3rgui is the graphical interface for mp3rgain, a lossless MP3 volume normalizer.
   It provides an easy-to-use GUI for adjusting MP3 volume without re-encoding,
-  supporting ReplayGain analysis, AAC/M4A, FLAC, and OGG formats.
+  supporting ReplayGain analysis and AAC/M4A files.
 Moniker: mp3rgui
 Tags:
   - audio

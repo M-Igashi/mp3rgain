@@ -9,8 +9,10 @@ This directory contains the Debian packaging files for building `.deb` packages.
 ```bash
 # Install build dependencies
 sudo apt-get update
-sudo apt-get install -y build-essential debhelper cargo rustc
+sudo apt-get install -y build-essential debhelper
 ```
+
+Rust 1.85 or later is also required. The `rustc` in Debian 12 and Ubuntu 24.04 is older, so install it with [rustup](https://rustup.rs) as the release workflow does. The `cargo` / `rustc` Build-Depends are then not Debian packages, which is why the build commands below pass `-d`.
 
 ### Build Steps
 
@@ -27,7 +29,7 @@ sudo apt-get install -y build-essential debhelper cargo rustc
 
 3. Build the package:
    ```bash
-   dpkg-buildpackage -us -uc -b
+   dpkg-buildpackage -us -uc -b -d
    ```
 
 4. The `.deb` file will be created in the parent directory:
@@ -48,11 +50,12 @@ sudo dpkg -i ../mp3rgain_*-1_arm64.deb
 
 ```bash
 # Build using Docker
-docker run --rm -v "$(pwd):/src" -w /src debian:bookworm bash -c '
+docker run --rm -v "$(pwd):/src" -w /src rust:1 bash -c '
   apt-get update && \
-  apt-get install -y build-essential debhelper cargo rustc && \
+  apt-get install -y build-essential debhelper && \
   cp -r packages/debian/debian . && \
-  dpkg-buildpackage -us -uc -b
+  dpkg-buildpackage -us -uc -b -d && \
+  cp ../mp3rgain_*.deb /src/
 '
 ```
 
@@ -64,16 +67,7 @@ A separate GUI package (`mp3rgui`) is also available — see `packages/debian-gu
 
 ## Version Updates
 
-When releasing a new version:
-
-1. Update `packages/debian/debian/changelog`:
-   ```bash
-   dch -v NEW_VERSION-1 "Release NEW_VERSION"
-   ```
-
-2. Update the version in `Cargo.toml`
-
-3. Rebuild the package
+The release workflow overwrites `debian/changelog` with the release version before building, so no `dch` step is needed. The committed `changelog` is a placeholder; a local build takes its package version from it unless you edit the copied `debian/changelog` first.
 
 ## File Descriptions
 
@@ -81,5 +75,4 @@ When releasing a new version:
 - `rules`: Build instructions (Makefile)
 - `changelog`: Version history
 - `copyright`: License information
-- `compat`: Debhelper compatibility level
 - `source/format`: Source package format
