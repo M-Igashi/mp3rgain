@@ -6,11 +6,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   collect-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout gh-pages branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -21,7 +23,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api repos/${{ github.repository }}/releases --paginate \
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
             --jq '[.[] | {
               tag: .tag_name,
               date: .published_at,
@@ -222,39 +224,37 @@ jobs:
               ghcr: $ghcr[0]
             }' > /tmp/snapshot.json
 
-      - name: Append to history
+      # Full snapshots are archived one compact file per month, so no single
+      # file grows without bound (a single stats.json reached 23.6 MB in six
+      # months). The dashboard loads only latest.json and trend.json, and
+      # trend.json gets one row per day appended here. Its github_releases is
+      # the live sum without .sha256 assets (isReal in index.html); the page
+      # adds the archived pre-v2.0 downloads itself.
+      - name: Archive snapshot and update dashboard files
         run: |
-          mkdir -p data
-          if [ -f data/stats.json ]; then
-            # Remove existing entry for the same date, then append
-            DATE=$(date -u +%Y-%m-%d)
-            jq --arg date "$DATE" '[.[] | select(.date != $date)]' data/stats.json > /tmp/existing.json
-            jq -s '.[0] + [.[1]]' /tmp/existing.json /tmp/snapshot.json > data/stats.json
-          else
-            jq -s '.' /tmp/snapshot.json > data/stats.json
-          fi
-
-      # stats.json keeps every full snapshot as the archive, but the dashboard
-      # only needs the latest one plus a few totals per day, so it loads these
-      # instead. trend.json's github_releases is the live sum without
-      # .sha256 assets (isReal in index.html); the page adds the archived
-      # pre-v2.0 downloads itself.
-      - name: Derive dashboard files
-        run: |
-          jq '.[-1]' data/stats.json > data/latest.json
-          jq -c '[.[] | {
+          DATE=$(jq -r .date /tmp/snapshot.json)
+          ARCHIVE="data/archive/${DATE:0:7}.json"
+          mkdir -p data/archive
+          [ -f "$ARCHIVE" ] || echo '[]' > "$ARCHIVE"
+          [ -f data/trend.json ] || echo '[]' > data/trend.json
+          jq -c --slurpfile s /tmp/snapshot.json '[.[] | select(.date != $s[0].date)] + $s' "$ARCHIVE" > /tmp/archive.json
+          mv /tmp/archive.json "$ARCHIVE"
+          jq '.' /tmp/snapshot.json > data/latest.json
+          jq -c '{
             date,
             github_releases: ([.github_releases[].assets[] | select(.name | endswith(".sha256") | not) | .download_count] | add // 0),
             crates_io: .crates_io.total_downloads,
             ppa: ((.ppa_cli.total_downloads // 0) + (.ppa_gui.total_downloads // 0)),
             pkgstats: ([(.pkgstats // [])[].count // 0] | add // 0)
-          }]' data/stats.json > data/trend.json
+          }' /tmp/snapshot.json > /tmp/trend_row.json
+          jq -c --slurpfile r /tmp/trend_row.json '[.[] | select(.date != $r[0].date)] + $r' data/trend.json > /tmp/trend.json
+          mv /tmp/trend.json data/trend.json
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/stats.json data/latest.json data/trend.json
+          git add data/archive data/latest.json data/trend.json
           git diff --cached --quiet && echo "No changes" && exit 0
           git commit -m "Update download stats $(date -u +%Y-%m-%d)"
           git push
