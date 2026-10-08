@@ -223,10 +223,14 @@ function isReal(name) {
 const ARCHIVED_ASSET_DOWNLOADS = 2848;
 const ARCHIVED_FROM_DATE = '2026-08-07';
 
+function withArchived(date, live) {
+  return date >= ARCHIVED_FROM_DATE ? live + ARCHIVED_ASSET_DOWNLOADS : live;
+}
+
 function ghTotalFor(snapshot) {
   const live = snapshot.github_releases.reduce((sum, r) =>
     sum + r.assets.filter(a => isReal(a.name)).reduce((s, a) => s + a.download_count, 0), 0);
-  return snapshot.date >= ARCHIVED_FROM_DATE ? live + ARCHIVED_ASSET_DOWNLOADS : live;
+  return withArchived(snapshot.date, live);
 }
 
 function classifyAsset(name) {
@@ -258,16 +262,16 @@ function downloadsFor(assets, label) {
 }
 
 async function main() {
-  let data;
+  // data/stats.json is the full archive; stats.yml derives these two from it.
+  let latest, trend;
   try {
-    const resp = await fetch('data/stats.json');
-    data = await resp.json();
+    [latest, trend] = await Promise.all(
+      ['data/latest.json', 'data/trend.json'].map(url => fetch(url).then(r => r.json())));
   } catch {
     document.querySelector('.loading')?.remove();
     return;
   }
 
-  const latest = data[data.length - 1];
   document.getElementById('last-updated').textContent = latest.date;
 
   // Summary cards
@@ -394,23 +398,18 @@ async function main() {
   });
 
   // Trend chart (only if we have history)
-  if (data.length > 1) {
-    const trendLabels = data.map(d => d.date);
-    const trendGH = data.map(ghTotalFor);
-    // A snapshot carries null for any source whose fetch failed that day
-    // (crates.io on 2026-09-22); plot it as a gap instead of throwing.
-    const trendCrates = data.map(d => d.crates_io?.total_downloads ?? null);
-    const trendPPA = data.map(d => (d.ppa_cli?.total_downloads || 0) + (d.ppa_gui?.total_downloads || 0));
-    const trendPkgstats = data.map(d => (d.pkgstats || []).reduce((s, p) => s + (p.count || 0), 0));
+  // crates_io is null on a day its fetch failed (2026-09-22); spanGaps
+  // bridges it instead of breaking the line.
+  if (trend.length > 1) {
     new Chart(document.getElementById('chart-trend'), {
       type: 'line',
       data: {
-        labels: trendLabels,
+        labels: trend.map(d => d.date),
         datasets: [
-          { label: 'GitHub Releases', data: trendGH, borderColor: COLORS.blue, backgroundColor: 'transparent', tension: 0.3 },
-          { label: 'crates.io', data: trendCrates, borderColor: COLORS.orange, backgroundColor: 'transparent', tension: 0.3 },
-          { label: 'PPA', data: trendPPA, borderColor: COLORS.green, backgroundColor: 'transparent', tension: 0.3 },
-          { label: 'pkgstats (current month)', data: trendPkgstats, borderColor: COLORS.purple, backgroundColor: 'transparent', tension: 0.3 },
+          { label: 'GitHub Releases', data: trend.map(d => withArchived(d.date, d.github_releases)), borderColor: COLORS.blue, backgroundColor: 'transparent', tension: 0.3 },
+          { label: 'crates.io', data: trend.map(d => d.crates_io), borderColor: COLORS.orange, backgroundColor: 'transparent', tension: 0.3 },
+          { label: 'PPA', data: trend.map(d => d.ppa), borderColor: COLORS.green, backgroundColor: 'transparent', tension: 0.3 },
+          { label: 'pkgstats (current month)', data: trend.map(d => d.pkgstats), borderColor: COLORS.purple, backgroundColor: 'transparent', tension: 0.3 },
         ]
       },
       options: { ...CHART_DEFAULTS, spanGaps: true }
