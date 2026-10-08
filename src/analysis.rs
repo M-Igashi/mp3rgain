@@ -251,10 +251,6 @@ pub fn analyze_data(data: &[u8]) -> Result<Mp3Analysis> {
         }
     })?;
 
-    if frame_count == 0 {
-        return Err(Error::NoMp3Frames);
-    }
-
     let avg_gain = total_gain as f64 / gain_count as f64;
     let headroom_steps = (MAX_GAIN - max_gain) as i32;
 

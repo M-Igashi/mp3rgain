@@ -292,6 +292,24 @@ pub(crate) fn read_u32_le(data: &[u8]) -> u32 {
     u32::from_le_bytes([data[0], data[1], data[2], data[3]])
 }
 
+/// Where the APEv2 tag whose 32-byte footer is `footer` begins, header
+/// included, given the footer's position `footer_start`. `None` when the
+/// declared size is larger than everything before the footer, which only a
+/// corrupt tag claims; callers treat that as no valid tag rather than
+/// discarding the audio before it.
+pub(crate) fn ape_tag_start(footer: &[u8], footer_start: usize) -> Option<usize> {
+    let tag_size = read_u32_le(&footer[12..]) as usize;
+    let flags = read_u32_le(&footer[20..]);
+    let header_size = if (flags & APE_FLAG_HEADER_PRESENT) != 0 {
+        32
+    } else {
+        0
+    };
+    (footer_start + 32)
+        .checked_sub(tag_size)?
+        .checked_sub(header_size)
+}
+
 /// Find the end of audio data (before trailing tags)
 pub(crate) fn find_audio_end(data: &[u8]) -> usize {
     let mut audio_end = data.len();
@@ -304,13 +322,8 @@ pub(crate) fn find_audio_end(data: &[u8]) -> usize {
     // Check for APE tag before ID3v1 (or at end if no ID3v1)
     if audio_end >= 32 && &data[audio_end - 32..audio_end - 24] == APE_PREAMBLE {
         let footer_start = audio_end - 32;
-        let tag_size = read_u32_le(&data[footer_start + 12..]) as usize;
-        let flags = read_u32_le(&data[footer_start + 20..]);
-        let has_header = (flags & APE_FLAG_HEADER_PRESENT) != 0;
-        let header_size = if has_header { 32 } else { 0 };
-
-        if footer_start + 32 >= tag_size + header_size {
-            audio_end = footer_start + 32 - tag_size - header_size;
+        if let Some(start) = ape_tag_start(&data[footer_start..], footer_start) {
+            audio_end = start;
         }
     }
 
@@ -406,7 +419,8 @@ pub(crate) fn first_frame_header(data: &[u8]) -> Option<FrameHeader> {
     next_frame(data, skip_id3v2(data), audio_end, None).map(|(_, header, _)| header)
 }
 
-/// Internal function to iterate over frames
+/// Call `callback` for every frame in `data` and return the frame count.
+/// A stream with no frames at all is [`Error::NoMp3Frames`].
 pub(crate) fn iterate_frames<F>(data: &[u8], mut callback: F) -> Result<usize>
 where
     F: FnMut(usize, &FrameHeader, &[GainLocation]),
@@ -429,6 +443,9 @@ where
         pos = next_pos;
     }
 
+    if frame_count == 0 {
+        return Err(Error::NoMp3Frames);
+    }
     Ok(frame_count)
 }
 
@@ -437,6 +454,17 @@ where
 pub(crate) enum GainMode {
     Saturating,
     Wrapping,
+}
+
+impl GainMode {
+    /// The mode `-w` asks for.
+    pub(crate) fn from_wrap(wrap: bool) -> Self {
+        if wrap {
+            GainMode::Wrapping
+        } else {
+            GainMode::Saturating
+        }
+    }
 }
 
 /// Outcome of an [`apply_gain_to_data`] pass.
@@ -472,6 +500,12 @@ impl Default for SaturationStats {
 }
 
 impl SaturationStats {
+    /// Whether any value clamped, so the stored residual can no longer be
+    /// computed arithmetically.
+    pub fn saturated(&self) -> bool {
+        self.saturated_low > 0 || self.saturated_high > 0
+    }
+
     /// Record one saturating adjustment of `current` by `steps`, using the
     /// same `[-255, 255]` step clamp as [`adjust_gain_value`].
     fn tally(&mut self, current: u8, steps: i32) {
@@ -502,6 +536,25 @@ pub(crate) fn adjust_gain_value(current: u8, steps: i32, mode: GainMode) -> u8 {
     }
 }
 
+/// Adjust the global_gain at `loc` by `steps` and record the result in
+/// `stats`.
+fn adjust_gain_at(
+    data: &mut [u8],
+    loc: &GainLocation,
+    steps: i32,
+    mode: GainMode,
+    stats: &mut SaturationStats,
+) {
+    let current_gain = read_gain_at(data, loc);
+    let new_gain = adjust_gain_value(current_gain, steps, mode);
+    if mode == GainMode::Saturating {
+        stats.tally(current_gain, steps);
+    }
+    stats.min_gain = stats.min_gain.min(new_gain);
+    stats.max_gain = stats.max_gain.max(new_gain);
+    write_gain_at(data, loc, new_gain);
+}
+
 /// Internal function to apply gain to frames in data. With
 /// `channel_index = None` every gain location in each frame is adjusted;
 /// with `Some(ch)` only that channel's location per granule is touched
@@ -528,29 +581,14 @@ pub(crate) fn apply_gain_to_data(
         match channel_index {
             None => {
                 for loc in &locations[..len] {
-                    let current_gain = read_gain_at(data, loc);
-                    let new_gain = adjust_gain_value(current_gain, gain_steps, mode);
-                    if mode == GainMode::Saturating {
-                        stats.tally(current_gain, gain_steps);
-                    }
-                    stats.min_gain = stats.min_gain.min(new_gain);
-                    stats.max_gain = stats.max_gain.max(new_gain);
-                    write_gain_at(data, loc, new_gain);
+                    adjust_gain_at(data, loc, gain_steps, mode, &mut stats);
                 }
             }
             Some(ch) => {
                 let num_channels = header.channel_mode.channel_count();
                 for gr in 0..header.granule_count() {
-                    let loc_index = gr * num_channels + ch;
-                    if loc_index < len {
-                        let loc = &locations[loc_index];
-                        let current_gain = read_gain_at(data, loc);
-                        let new_gain =
-                            adjust_gain_value(current_gain, gain_steps, GainMode::Saturating);
-                        stats.tally(current_gain, gain_steps);
-                        stats.min_gain = stats.min_gain.min(new_gain);
-                        stats.max_gain = stats.max_gain.max(new_gain);
-                        write_gain_at(data, loc, new_gain);
+                    if let Some(loc) = locations[..len].get(gr * num_channels + ch) {
+                        adjust_gain_at(data, loc, gain_steps, GainMode::Saturating, &mut stats);
                     }
                 }
             }
@@ -572,17 +610,13 @@ pub(crate) fn scan_gain_range(data: &[u8]) -> Result<(u8, u8)> {
     let mut min_gain = 255u8;
     let mut max_gain = 0u8;
 
-    let frame_count = iterate_frames(data, |_pos, _header, locations| {
+    iterate_frames(data, |_pos, _header, locations| {
         for loc in locations {
             let gain = read_gain_at(data, loc);
             min_gain = min_gain.min(gain);
             max_gain = max_gain.max(gain);
         }
     })?;
-
-    if frame_count == 0 {
-        return Err(Error::NoMp3Frames);
-    }
 
     Ok((min_gain, max_gain))
 }

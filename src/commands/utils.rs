@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::threading::effective_threads;
-use crate::json_output::{FileStatus, JsonAlbumResult, JsonFileResult, JsonOutput, JsonSummary};
+use crate::json_output::{FileStatus, JsonFileResult, JsonOutput, JsonSummary};
 use crate::progress::{
     album_progress_callbacks, create_album_progress_pb_in, create_analysis_progress_bar,
     create_file_count_pb_in, create_progress_bar, progress_finish, progress_inc,
@@ -34,8 +34,7 @@ pub fn run_album_analysis(
 ) -> mp3rgain::error::Result<AlbumAnalysisReport> {
     let threads = effective_threads(opts);
     let parallel = threads > 1 && paths.len() > 1;
-    let show_progress =
-        shared_pb.is_none() && !opts.quiet && opts.output_format == OutputFormat::Text;
+    let show_progress = shared_pb.is_none() && opts.text_output();
     let mp = MultiProgress::new();
     let pb = if show_progress {
         Some(create_album_progress_pb_in(&mp, paths.len(), parallel))
@@ -184,7 +183,6 @@ where
     let parallel = effective_threads(opts) > 1 && files.len() > 1;
 
     if parallel {
-        let pb_ref = pb.as_ref();
         let flush = CompletionFlush::default();
         // Each file's block goes out as it finishes (issue #348). The JSON
         // records still come back in input order, because rayon's collect
@@ -196,10 +194,8 @@ where
                 if !text.is_empty() {
                     flush.submit(text.as_bytes(), &[], false)?;
                 }
-                if let Some(pb) = pb_ref {
-                    pb.set_message(get_filename(file).to_string());
-                    pb.inc(1);
-                }
+                progress_set_message(&pb, get_filename(file));
+                progress_inc(&pb);
                 Ok(result)
             })
             .collect::<Result<Vec<_>>>()?;
@@ -262,31 +258,30 @@ pub fn finish_with_summary(
     failed: usize,
     opts: &Options,
 ) -> Result<()> {
-    finish_with_album_summary(total_files, json_results, None, successful, failed, opts)
+    let output = JsonOutput {
+        files: Some(json_results),
+        ..Default::default()
+    };
+    finish_with_output(output, total_files, successful, failed, opts)
 }
 
-/// [`finish_with_summary`] carrying an album block, for the `-a` paths whose
-/// JSON output has one.
-pub fn finish_with_album_summary(
+/// [`finish_with_summary`] for an `output` the caller has filled in, for the
+/// `-a` paths whose JSON carries an `album` or `albums` block. The per-run
+/// summary is added here.
+pub fn finish_with_output(
+    mut output: JsonOutput,
     total_files: usize,
-    json_results: Vec<JsonFileResult>,
-    album: Option<JsonAlbumResult>,
     successful: usize,
     failed: usize,
     opts: &Options,
 ) -> Result<()> {
     if opts.output_format == OutputFormat::Json {
-        let output = JsonOutput {
-            files: Some(json_results),
-            album,
-            albums: None,
-            summary: Some(create_json_summary(
-                total_files,
-                successful,
-                failed,
-                opts.dry_run,
-            )),
-        };
+        output.summary = Some(create_json_summary(
+            total_files,
+            successful,
+            failed,
+            opts.dry_run,
+        ));
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         print_dry_run_notice(opts);
@@ -352,7 +347,7 @@ pub fn create_json_summary(
 }
 
 pub fn print_dry_run_notice(opts: &Options) {
-    if opts.dry_run && !opts.quiet && opts.output_format == OutputFormat::Text {
+    if opts.dry_run && opts.text_output() {
         println!();
         println!("{}", "No files were modified.".yellow());
     }

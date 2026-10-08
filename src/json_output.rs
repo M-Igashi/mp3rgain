@@ -13,7 +13,7 @@ pub enum FileStatus {
     NoTag,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 pub struct JsonOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<JsonFileResult>>,
@@ -99,6 +99,17 @@ impl JsonFileResult {
             file: file.display().to_string(),
             status: Some(FileStatus::Error),
             error: Some(e.to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// Skip record for `file`: an unsupported format, which stays out of the
+    /// failure count.
+    pub fn skipped(file: &Path, reason: &str) -> Self {
+        Self {
+            file: file.display().to_string(),
+            status: Some(FileStatus::Skipped),
+            warning: Some(reason.to_string()),
             ..Default::default()
         }
     }

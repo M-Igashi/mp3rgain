@@ -21,7 +21,7 @@ pub fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
         println!("{}", TSV_HEADER);
     }
 
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
+    if opts.text_output() {
         println!(
             "{}{} {} {} step(s) ({:+.1} dB) to {} file(s)",
             dry_run_prefix,
@@ -80,7 +80,7 @@ pub fn cmd_apply_channel(
         println!("{}", TSV_HEADER);
     }
 
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
+    if opts.text_output() {
         println!(
             "{}{} {} {} step(s) ({:+.1} dB) to {} channel of {} file(s)",
             dry_run_prefix,

@@ -399,6 +399,29 @@ fn undo_with_delete_tags_without_undo_info_still_deletes() {
     );
 }
 
+/// `-s d` leaves a file with no gain tags byte for byte as it was. It used to
+/// rewrite every file it was given: an MP3's ID3v2 tag was re-encoded and raw
+/// ADTS gained an empty ID3v2 header, so `-g` followed by `-u -s d` could not
+/// restore the original bytes.
+#[test]
+fn delete_tags_leaves_untagged_files_alone() {
+    let album = TempAlbum::new(&["test_stereo.mp3", "test_adts.aac", "test_aac.m4a"]);
+    let before: Vec<Vec<u8>> = album.files.iter().map(|f| fs::read(f).unwrap()).collect();
+
+    let mut args = vec!["-s", "d"];
+    args.extend(album.args());
+    let out = run(&args);
+    assert!(out.status.success(), "delete failed: {:?}", out);
+
+    for (file, original) in album.files.iter().zip(&before) {
+        assert!(
+            &fs::read(file).unwrap() == original,
+            "{} was rewritten",
+            file.display()
+        );
+    }
+}
+
 /// Issue #377: `-g` moves the stored ReplayGain values and the album
 /// `global_gain` range by the steps it actually applied, in whichever container
 /// holds them, as mp3gain does. They used to keep describing the old audio, so

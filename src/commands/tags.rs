@@ -1,9 +1,9 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::{
-    mp4meta, read_gain_tags_auto, GainTagSource, StoredGainTags, TAG_MP3GAIN_ALBUM_MINMAX,
-    TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
-    TAG_REPLAYGAIN_ALGORITHM, TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
+    read_gain_tags_auto, GainTagSource, StoredGainTags, TAG_MP3GAIN_ALBUM_MINMAX,
+    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_ALGORITHM,
+    TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -14,29 +14,15 @@ use crate::json_output::{FileStatus, JsonFileResult};
 use crate::processors::utils::{report_file_error, restore_timestamp, save_original_mtime};
 use crate::util::{get_filename, get_path};
 
-/// The `MP3GAIN_*` item names as they appear on disk in `source`'s container,
-/// plus what to say when the file carries no gain tags at all. Derived from
-/// the source rather than carried alongside the tags: all three follow from
-/// it, so there is nothing to keep in sync.
-fn container_labels(source: GainTagSource) -> (&'static str, &'static str, &'static str) {
+/// What to say when a file carries no gain tags at all, for `source`'s
+/// container.
+fn no_tags_message(source: GainTagSource) -> &'static str {
     match source {
-        // The MP4 freeform names are lowercase on disk. `-s c` exists to show
-        // what a tag dump would show, so it prints them as they are written.
-        GainTagSource::Aac => (mp4meta::UNDO_TAG, mp4meta::MINMAX_TAG, "no tags found"),
-        GainTagSource::Id3v2 => (
-            TAG_MP3GAIN_UNDO,
-            TAG_MP3GAIN_MINMAX,
-            "no ID3v2 ReplayGain tags found",
-        ),
-        GainTagSource::Ape { tag_present: true } => (
-            TAG_MP3GAIN_UNDO,
-            TAG_MP3GAIN_MINMAX,
-            "no mp3gain tags found",
-        ),
-        GainTagSource::Ape { tag_present: false } => {
-            (TAG_MP3GAIN_UNDO, TAG_MP3GAIN_MINMAX, "no APE tag found")
-        }
-        GainTagSource::Split => (TAG_MP3GAIN_UNDO, TAG_MP3GAIN_MINMAX, "no gain tags found"),
+        GainTagSource::Aac => "no tags found",
+        GainTagSource::Id3v2 => "no ID3v2 ReplayGain tags found",
+        GainTagSource::Ape { tag_present: true } => "no mp3gain tags found",
+        GainTagSource::Ape { tag_present: false } => "no APE tag found",
+        GainTagSource::Split => "no gain tags found",
     }
 }
 
@@ -49,7 +35,9 @@ fn render_tags(
     format: OutputFormat,
     out: &mut String,
 ) -> Option<JsonFileResult> {
-    let (undo_label, minmax_label, no_tag_msg) = container_labels(tags.source);
+    // `-s c` shows what a tag dump would show, so the undo and minmax keys
+    // are printed as they are written, lowercase in an MP4.
+    let (undo_label, minmax_label) = tags.source.undo_minmax_keys();
     match format {
         OutputFormat::Text => {
             writeln!(out, "{}", filename.cyan().bold()).ok();
@@ -73,7 +61,7 @@ fn render_tags(
                 }
             }
             if !tags.has_any() {
-                writeln!(out, "  ({})", no_tag_msg).ok();
+                writeln!(out, "  ({})", no_tags_message(tags.source)).ok();
             }
             writeln!(out).ok();
             None
@@ -112,7 +100,7 @@ fn render_tags(
 pub fn cmd_delete_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
     let dry_run_prefix = opts.dry_run_prefix();
 
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
+    if opts.text_output() {
         let action = match (opts.dry_run, opts.undo) {
             (true, true) => "Would undo gain changes and delete",
             (true, false) => "Would delete",
@@ -142,7 +130,7 @@ fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, S
     let mut out = String::new();
 
     if opts.dry_run {
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
+        if opts.text_output() {
             let action = if opts.undo {
                 "would undo gain changes, then delete tags"
             } else {
@@ -190,7 +178,7 @@ fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, S
                 restore_timestamp(file, mtime);
             }
 
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
+            if opts.text_output() {
                 let note = match undone_frames {
                     Some(frames) if frames > 0 => {
                         format!("{} frames restored, tags deleted", frames)
@@ -223,7 +211,7 @@ fn process_delete_tags(file: &Path, opts: &Options) -> Result<(JsonFileResult, S
 }
 
 pub fn cmd_check_tags(files: &[PathBuf], opts: &Options) -> Result<()> {
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
+    if opts.text_output() {
         println!(
             "{} Checking stored tag info for {} file(s)",
             "mp3rgain".green().bold(),

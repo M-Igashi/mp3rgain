@@ -11,7 +11,7 @@ pub mod utils;
 use anyhow::Result;
 use colored::*;
 
-use crate::cli::options::{AlbumGrouping, Options, OutputFormat, StoredTagMode};
+use crate::cli::options::{AlbumGrouping, Options, StoredTagMode};
 use crate::cli::parse_args::{dedup_files, expand_files_recursive};
 
 use apply::{cmd_apply, cmd_apply_channel};
@@ -44,7 +44,7 @@ pub fn run(mut opts: Options) -> Result<()> {
     // A file listed twice, directly, through a symlink or by overlapping -R
     // roots, is processed once (issue #370).
     let duplicates = dedup_files(&mut opts.files);
-    if duplicates > 0 && !opts.quiet && opts.output_format == OutputFormat::Text {
+    if duplicates > 0 && opts.text_output() {
         eprintln!(
             "{}: {} duplicate path(s) skipped; a file listed more than once is processed once",
             "note".cyan(),
@@ -62,7 +62,7 @@ pub fn run(mut opts: Options) -> Result<()> {
     opts.chunk_tracks = threads > 1 && opts.files.len() < threads;
 
     // -f option warning (assume MPEG2)
-    if opts.assume_mpeg2 && !opts.quiet && opts.output_format == OutputFormat::Text {
+    if opts.assume_mpeg2 && opts.text_output() {
         eprintln!(
             "{}: -f (assume MPEG2) is accepted for compatibility but has no effect",
             "note".cyan()
@@ -71,11 +71,7 @@ pub fn run(mut opts: Options) -> Result<()> {
 
     // -s r warning: recalculation is mp3rgain's default, so the flag only
     // matters as an override of -s R (issues #253, #298)
-    if opts.force_recalc
-        && !opts.use_stored_tags
-        && !opts.quiet
-        && opts.output_format == OutputFormat::Text
-    {
+    if opts.force_recalc && !opts.use_stored_tags && opts.text_output() {
         eprintln!(
             "{}: -s r (force recalculation) is accepted for compatibility but has no effect (recalculation is the default; use -s R to reuse stored tags)",
             "note".cyan()
@@ -84,11 +80,7 @@ pub fn run(mut opts: Options) -> Result<()> {
 
     // -s R warning: tell the user up front when stored tags will be ignored
     // (see Options::stored_tags_usable for the reasons)
-    if opts.use_stored_tags
-        && !opts.stored_tags_usable()
-        && !opts.quiet
-        && opts.output_format == OutputFormat::Text
-    {
+    if opts.use_stored_tags && !opts.stored_tags_usable() && opts.text_output() {
         eprintln!(
             "{}: -s R is ignored with -s r, -d/-m modifiers, or --rg2/--r128; files will be re-analyzed",
             "note".cyan()

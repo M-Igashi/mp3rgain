@@ -81,6 +81,12 @@ impl AnalysisMode {
         }
     }
 
+    /// The level this mode normalizes to: the LUFS target in the BS.1770
+    /// modes, 89 dB in RG1.
+    pub fn reference_level(&self) -> f64 {
+        self.target_lufs().unwrap_or(REPLAYGAIN_REFERENCE_DB)
+    }
+
     /// Unit label for loudness values measured in this mode.
     pub fn unit(&self) -> &'static str {
         if self.target_lufs().is_some() {
@@ -224,9 +230,7 @@ impl ReplayGainResult {
         file_type: AudioFileType,
         analysis_mode: AnalysisMode,
     ) -> Self {
-        let target = analysis_mode
-            .target_lufs()
-            .unwrap_or(REPLAYGAIN_REFERENCE_DB);
+        let target = analysis_mode.reference_level();
         Self {
             loudness_db: target - gain_db,
             gain_db,
@@ -346,9 +350,7 @@ impl AlbumGainResult {
         album_peak: f64,
         analysis_mode: AnalysisMode,
     ) -> Self {
-        let target = analysis_mode
-            .target_lufs()
-            .unwrap_or(REPLAYGAIN_REFERENCE_DB);
+        let target = analysis_mode.reference_level();
         Self {
             tracks,
             album_loudness_db: target - album_gain_db,
@@ -400,7 +402,7 @@ impl std::fmt::Display for AlbumGainResult {
 
 /// Report from a "lenient" album analysis that may skip files.
 ///
-/// Returned by `analyze_album_lenient_*` family. `album` is computed from the
+/// Returned by [`analyze_album_with_options`]. `album` is computed from the
 /// successfully-analyzed tracks only; `failures` lists `(file_index,
 /// error_message)` pairs in input order; `successful_indices` maps
 /// `album.tracks()[k]` back to `files[successful_indices[k]]`.
@@ -1121,12 +1123,6 @@ impl ReplayGainAnalyzer {
 // Main analysis functions
 // =============================================================================
 
-/// Detect file type from path
-#[cfg(feature = "replaygain")]
-fn detect_file_type(file_path: &Path) -> AudioFileType {
-    AudioFileType::from_path(file_path)
-}
-
 // =============================================================================
 // Progress-tracking media source
 // =============================================================================
@@ -1302,7 +1298,7 @@ fn analyze_track_decoded(
     // piece, so a saturated run tolerates this and not that.
     let pipeline = rayon::current_num_threads() > 1;
     // Detect file type
-    let file_type = detect_file_type(file_path);
+    let file_type = AudioFileType::from_path(file_path);
 
     // Open the media source
     let file = std::fs::File::open(file_path).map_err(|e| Error::io_open(file_path, e))?;
@@ -2314,7 +2310,7 @@ fn analyze_track_chunked(
         gain_db,
         peak,
         plan.sample_rate,
-        detect_file_type(file_path),
+        AudioFileType::from_path(file_path),
         mode,
     );
     result.true_peak = is_true_peak;
@@ -2899,13 +2895,7 @@ mod tests {
         // two-minute track without an encoder in the test. The ID3 tag and the
         // leading Xing/Info frame have to go: they declare a one-second frame
         // count, which the planner would believe over the file itself.
-        let id3_len = {
-            let s = &fixture[6..10];
-            10 + (((s[0] & 0x7f) as usize) << 21
-                | ((s[1] & 0x7f) as usize) << 14
-                | ((s[2] & 0x7f) as usize) << 7
-                | (s[3] & 0x7f) as usize)
-        };
+        let id3_len = crate::frame::skip_id3v2(&fixture);
         // 320 kbps at 44.1 kHz is a 1044-byte frame, plus one padding byte.
         let body = &fixture[id3_len + 1045..];
         std::fs::write(&long, body.repeat(120)).expect("write");

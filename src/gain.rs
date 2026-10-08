@@ -177,30 +177,22 @@ impl GainOptions {
     /// to `write_to`. When the two paths are the same, this is equivalent to
     /// [`Self::apply`].
     ///
-    /// Used by the `--temp-file` (`-t`) path so that the modified audio is written
-    /// directly to the temp file without an intermediate full-file copy of the
-    /// original (issue #135).
+    /// Writing straight to a temp file this way avoids an intermediate
+    /// full-file copy of the original (issue #135).
     pub fn apply_to_path(&self, read_from: &Path, write_to: &Path) -> Result<usize> {
-        Ok(self.apply_to_path_with_stats(read_from, write_to)?.frames)
+        Ok(self
+            .apply_to_path_with_stats_preread(read_from, write_to, None)?
+            .frames)
     }
 
-    /// [`apply_to_path`] variant that also reports global_gain saturation
-    /// (issue #207). The unified apply pipeline uses this to surface a
-    /// "values clamped at 0/255" warning; the public API keeps the bare
-    /// frame count.
-    pub(crate) fn apply_to_path_with_stats(
-        &self,
-        read_from: &Path,
-        write_to: &Path,
-    ) -> Result<SaturationStats> {
-        self.apply_to_path_with_stats_preread(read_from, write_to, None)
-    }
-
-    /// [`apply_to_path_with_stats`] variant that accepts the file's bytes if
-    /// a caller already read them. The apply pipeline's clipping check reads
-    /// the file for its headroom scan; handing that buffer through here saves
-    /// a second full read of the unchanged file (issue #251). `read_from` is
-    /// still used for error reporting and when `preread` is `None`.
+    /// [`apply_to_path`](Self::apply_to_path) variant that also reports
+    /// global_gain saturation (issue #207) and accepts the file's bytes if a
+    /// caller already read them. The apply pipeline uses the stats to surface
+    /// a "values clamped at 0/255" warning; the public API keeps the bare
+    /// frame count. Its clipping check reads the file for its headroom scan,
+    /// and handing that buffer through here saves a second full read of the
+    /// unchanged file (issue #251). `read_from` is still used for error
+    /// reporting and when `preread` is `None`.
     pub(crate) fn apply_to_path_with_stats_preread(
         &self,
         read_from: &Path,
@@ -243,11 +235,7 @@ impl GainOptions {
                 apply_gain_channel_impl(data, write_to, channel, self.steps)
             }
         } else {
-            let mode = if self.wrap {
-                GainMode::Wrapping
-            } else {
-                GainMode::Saturating
-            };
+            let mode = GainMode::from_wrap(self.wrap);
             if self.undo {
                 apply_gain_with_undo_impl_to_path(
                     data,
@@ -311,12 +299,7 @@ pub(crate) fn apply_undo_to_data(
     wrap: bool,
 ) -> Result<usize> {
     if left == right {
-        let mode = if wrap {
-            GainMode::Wrapping
-        } else {
-            GainMode::Saturating
-        };
-        Ok(apply_gain_to_data(data, left, mode, None).frames)
+        Ok(apply_gain_to_data(data, left, GainMode::from_wrap(wrap), None).frames)
     } else {
         ensure_channels_separable(data).map_err(|e| match e {
             Error::ChannelGainOnMono | Error::ChannelGainOnJointStereo => {
@@ -494,14 +477,12 @@ fn apply_gain_with_undo_impl_to_path(
 pub(crate) fn ensure_channels_separable(data: &[u8]) -> Result<()> {
     let mut mono = false;
     let mut joint = false;
-    let frames = iterate_frames(data, |_, header, _| match header.channel_mode {
+    iterate_frames(data, |_, header, _| match header.channel_mode {
         ChannelMode::Mono => mono = true,
         ChannelMode::JointStereo => joint = true,
         _ => {}
     })?;
-    if frames == 0 {
-        Err(Error::NoMp3Frames)
-    } else if mono {
+    if mono {
         Err(Error::ChannelGainOnMono)
     } else if joint {
         Err(Error::ChannelGainOnJointStereo)

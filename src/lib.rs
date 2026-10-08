@@ -296,6 +296,18 @@ pub enum GainTagSource {
     Split,
 }
 
+impl GainTagSource {
+    /// The undo and minmax item names as written in this container. The MP4
+    /// freeform atoms are lowercase `mp3rgain_*`, unlike the uppercase
+    /// `MP3GAIN_*` keys of APEv2 and ID3v2.
+    pub fn undo_minmax_keys(self) -> (&'static str, &'static str) {
+        match self {
+            GainTagSource::Aac => (mp4meta::UNDO_TAG, mp4meta::MINMAX_TAG),
+            _ => (TAG_MP3GAIN_UNDO, TAG_MP3GAIN_MINMAX),
+        }
+    }
+}
+
 /// Owned snapshot of the gain tags stored in one file, as returned by
 /// [`read_gain_tags_auto`]. `None` means the tag is absent (not an error).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -567,20 +579,6 @@ pub fn expand_audio_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
 /// matches what `undo_gain_auto` would actually reverse. Returns `None` if the
 /// tag is absent or unreadable.
 pub fn read_undo_steps(file_path: &Path, layout: TagLayout) -> Option<i32> {
-    #[cfg(feature = "aac")]
-    {
-        if mp4meta::is_aac_file(file_path) {
-            let undo_tags = mp4meta::read_undo_tags(file_path).ok()?;
-            // AAC already stores the applied gain.
-            return Some(ape::parse_undo_values(undo_tags.undo()).0);
-        }
-        if adts::is_adts_file(file_path) {
-            // Raw ADTS keeps the MP3 undo-delta convention, in ID3v2 only.
-            let rg = id3v2::read_id3v2_replaygain(file_path).ok()?;
-            let undo = rg.undo.as_deref()?;
-            return Some(ape::parse_undo_values(Some(undo)).0.wrapping_neg());
-        }
-    }
     // MP3 stores the undo delta (the value to re-add to restore the
     // original), so the applied gain is its negation.
     let from_ape = || {
@@ -596,6 +594,18 @@ pub fn read_undo_steps(file_path: &Path, layout: TagLayout) -> Option<i32> {
             .as_deref()
             .map(|u| ape::parse_undo_values(Some(u)).0.wrapping_neg())
     };
+    #[cfg(feature = "aac")]
+    {
+        if mp4meta::is_aac_file(file_path) {
+            let undo_tags = mp4meta::read_undo_tags(file_path).ok()?;
+            // AAC already stores the applied gain.
+            return Some(ape::parse_undo_values(undo_tags.undo()).0);
+        }
+        if adts::is_adts_file(file_path) {
+            // Raw ADTS keeps the MP3 undo-delta convention, in ID3v2 only.
+            return from_id3v2();
+        }
+    }
     // Same fallback order as undo_gain_auto, so the reported value matches
     // what an undo would actually roll back.
     if layout.mp3gain_in_id3v2() {

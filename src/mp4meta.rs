@@ -200,6 +200,23 @@ impl ReplayGainTags {
         self.algorithm.as_deref()
     }
 
+    /// A full set: the track pair, the album pair when an album was
+    /// analyzed, and the algorithm `mode` measured with.
+    pub fn new(
+        track_gain_db: f64,
+        track_peak: f64,
+        album: Option<(f64, f64)>,
+        mode: crate::replaygain::AnalysisMode,
+    ) -> Self {
+        let mut tags = Self::default();
+        tags.set_track(track_gain_db, track_peak);
+        if let Some((album_gain_db, album_peak)) = album {
+            tags.set_album(album_gain_db, album_peak);
+        }
+        tags.set_algorithm(mode);
+        tags
+    }
+
     /// Set the track pair, formatting both to the 6-decimal tag convention.
     pub fn set_track(&mut self, gain_db: f64, peak: f64) {
         self.track_gain = Some(crate::ape::format_rg_gain(gain_db));
@@ -1291,6 +1308,10 @@ pub fn delete_gain_tags(file_path: &Path) -> Result<()> {
             is_replaygain_freeform(data, pos, header) || is_undo_freeform(data, pos, header)
         })
     })?;
+    // Nothing to delete: leave the file, its mtime and its hard links alone.
+    if new_data == data {
+        return Ok(());
+    }
     crate::apply::atomic_write(file_path, &new_data)
 }
 

@@ -11,7 +11,7 @@ use crate::processors::utils::report_unsupported_format;
 use crate::util::{get_filename, get_path};
 
 pub fn cmd_max_amplitude(files: &[PathBuf], opts: &Options) -> Result<()> {
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
+    if opts.text_output() {
         println!(
             "{} Finding maximum amplitude for {} file(s)",
             "mp3rgain".green().bold(),

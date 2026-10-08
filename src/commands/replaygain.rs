@@ -3,7 +3,6 @@ use colored::*;
 use indicatif::{MultiProgress, ProgressBar};
 use mp3rgain::replaygain::{
     self, AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult,
-    REPLAYGAIN_REFERENCE_DB,
 };
 use mp3rgain::{mp4meta, AacAlbumInfo, AlbumLabel, Error};
 use rayon::prelude::*;
@@ -14,14 +13,13 @@ use crate::cli::options::{AlbumGrouping, Options, OutputFormat, StoredTagMode};
 use crate::commands::albumgroup::{group_files, AlbumGroup};
 use crate::commands::threading::effective_threads;
 use crate::commands::utils::{
-    create_json_summary, exit_if_failed, finish_with_album_summary, finish_with_summary,
-    for_each_file_with_analysis_bar, print_dry_run_notice, run_album_analysis, update_counters,
-    CompletionFlush, TSV_HEADER,
+    finish_with_output, finish_with_summary, for_each_file_with_analysis_bar, run_album_analysis,
+    update_counters, CompletionFlush, TSV_HEADER,
 };
 use crate::json_output::{
     FileStatus, JsonAlbumResult, JsonDirectoryAlbum, JsonFileResult, JsonOutput,
 };
-use crate::processors::info::{gain_range_fields, scan_gain_range_for_row, tsv_rg_row};
+use crate::processors::info::{scan_gain_range_for_row, tsv_album_row, tsv_rg_row};
 use crate::processors::replaygain::{
     apply_is_noop, capped_tag_gain, process_apply_replaygain_with_album, process_track_gain,
 };
@@ -34,7 +32,7 @@ use crate::util::get_filename;
 
 fn print_target_with_modifier(opts: &Options) {
     let mode = opts.analysis_mode;
-    let target = mode.target_lufs().unwrap_or(REPLAYGAIN_REFERENCE_DB);
+    let target = mode.reference_level();
     // `-d`/`-m` land on whole gain steps when frames are modified, but shift
     // the tag value exactly in --tags-only mode (issue #308).
     let modifier_db = opts.target_offset_db();
@@ -73,7 +71,7 @@ pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
         println!("{}", TSV_HEADER);
     }
 
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
+    if opts.text_output() {
         if opts.tags_only {
             println!(
                 "{}{} Analyzing and {} track ReplayGain tags for {} file(s) (audio unchanged)",
@@ -162,14 +160,10 @@ fn stored_album_report(files: &[PathBuf], opts: &Options) -> Option<AlbumAnalysi
 fn unanalyzed_result(file: &Path, msg: Option<&str>, unsupported: bool) -> JsonFileResult {
     let reason = msg.unwrap_or("analysis failed");
     if unsupported {
-        return JsonFileResult {
-            file: file.display().to_string(),
-            status: Some(FileStatus::Skipped),
-            warning: Some(reason.to_string()),
-            ..Default::default()
-        };
+        JsonFileResult::skipped(file, reason)
+    } else {
+        JsonFileResult::error(file, reason)
     }
-    JsonFileResult::error(file, reason)
 }
 
 /// Outcome of one album run, before the JSON / exit-code epilogue.
@@ -267,7 +261,7 @@ fn print_album_intro(file_count: usize, groups: Option<usize>, opts: &Options) {
     if opts.output_format == OutputFormat::Tsv {
         println!("{}", TSV_HEADER);
     }
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
+    if opts.text_output() {
         let unit = match opts.album_by {
             AlbumGrouping::Tag => "album(s)",
             _ => "directory(ies)",
@@ -297,14 +291,12 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
     require_replaygain_feature();
     print_album_intro(files.len(), None, opts);
     let run = run_album(files, opts, &mut AlbumSink::direct(), None)?;
-    finish_with_album_summary(
-        files.len(),
-        run.json_results,
-        run.album,
-        run.successful,
-        run.failed,
-        opts,
-    )
+    let output = JsonOutput {
+        files: Some(run.json_results),
+        album: run.album,
+        ..Default::default()
+    };
+    finish_with_output(output, files.len(), run.successful, run.failed, opts)
 }
 
 /// `-a --album-by=...`: several albums in one invocation, one per directory
@@ -320,9 +312,10 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 /// drops its per-track analysis state when it folds, so live memory tracks
 /// the albums in flight rather than the size of the library.
 ///
-/// Everything the caller can observe stays in group order: results are
-/// collected by index, text output is buffered per album and flushed in
-/// order, and the counters are summed afterwards rather than by the workers.
+/// The JSON records stay in group order, because results are collected by
+/// index, and the counters are summed afterwards rather than by the workers.
+/// Text output is buffered per album and each album's block is written whole
+/// as soon as it finishes, in completion order (issue #348).
 pub fn cmd_album_gain_grouped(files: &[PathBuf], opts: &Options) -> Result<()> {
     require_replaygain_feature();
     let (groups, warnings) = group_files(files, opts);
@@ -344,7 +337,7 @@ pub fn cmd_album_gain_grouped(files: &[PathBuf], opts: &Options) -> Result<()> {
     let concurrent = groups.len() > 1 && effective_threads(opts) > 1;
     let bars = concurrent.then(|| AlbumBars::new(files.len(), opts));
     let flush = CompletionFlush::default();
-    let text_groups = opts.output_format == OutputFormat::Text && !opts.quiet;
+    let text_groups = opts.text_output();
 
     let run_group = |i: usize, group: &AlbumGroup| -> Result<AlbumRun> {
         let mut sink = if concurrent {
@@ -415,24 +408,12 @@ pub fn cmd_album_gain_grouped(files: &[PathBuf], opts: &Options) -> Result<()> {
         failed += run.failed;
     }
 
-    if opts.output_format == OutputFormat::Json {
-        let output = JsonOutput {
-            files: Some(json_results),
-            album: None,
-            albums: Some(albums),
-            summary: Some(create_json_summary(
-                files.len(),
-                successful,
-                failed,
-                opts.dry_run,
-            )),
-        };
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        print_dry_run_notice(opts);
-    }
-    exit_if_failed(failed);
-    Ok(())
+    let output = JsonOutput {
+        files: Some(json_results),
+        albums: Some(albums),
+        ..Default::default()
+    };
+    finish_with_output(output, files.len(), successful, failed, opts)
 }
 
 /// Tick a shared progress bar past files that were never decoded or written,
@@ -465,7 +446,7 @@ fn run_album(
     // set; otherwise fall back to the full rescan (issue #298).
     let album_analysis = match stored_album_report(files, opts) {
         Some(report) => {
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
+            if opts.text_output() {
                 writeln!(
                     sink.out(),
                     "  {} Using stored tags (no rescan)",
@@ -478,7 +459,7 @@ fn run_album(
             Ok(report)
         }
         None => {
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
+            if opts.text_output() {
                 writeln!(sink.out(), "  {} Analyzing tracks...", "->".cyan())?;
             }
             run_album_analysis(
@@ -508,7 +489,7 @@ fn run_album(
             let mut failure_msgs: Vec<Option<String>> = vec![None; files.len()];
             let mut unsupported: Vec<bool> = vec![false; files.len()];
             let mut failure_count = 0usize;
-            let report_skipped = opts.output_format == OutputFormat::Text && !opts.quiet;
+            let report_skipped = opts.text_output();
             for (idx, msg) in failures {
                 let filename = get_filename(&files[idx]);
                 if mp4meta::unsupported_audio_format(&files[idx]).is_some() {
@@ -583,7 +564,7 @@ fn run_album(
                 emit_album_tsv_rows(files, &album_result, &file_to_track, opts, sink)?;
             }
 
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
+            if opts.text_output() {
                 let out = sink.out();
                 writeln!(out)?;
                 writeln!(
@@ -681,7 +662,6 @@ fn run_album(
             let mut range_by_idx: Vec<Option<(u8, u8)>> = vec![None; files.len()];
 
             if parallel {
-                let pb_ref = pb.as_ref();
                 // Process only successfully-analyzed files in parallel.
                 type Collected = (usize, JsonFileResult, String, Option<(u8, u8)>);
                 let collected: Vec<Collected> = successful_indices
@@ -697,10 +677,8 @@ fn run_album(
                             opts,
                             Some(&album_info),
                         )?;
-                        if let Some(pb) = pb_ref {
-                            pb.set_message(get_filename(file).to_string());
-                            pb.inc(1);
-                        }
+                        progress_set_message(&pb, get_filename(file));
+                        progress_inc(&pb);
                         Ok((file_idx, result, text, range))
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -886,8 +864,6 @@ fn emit_album_tsv_rows(
         .collect();
 
     let mut any_row = false;
-    let mut album_max_gain: Option<u8> = None;
-    let mut album_min_gain: Option<u8> = None;
     let handle = sink.out();
     for (i, file) in files.iter().enumerate() {
         let Some(track_idx) = file_to_track[i] else {
@@ -896,27 +872,10 @@ fn emit_album_tsv_rows(
         let track = &album_result.tracks()[track_idx];
         handle.write_all(tsv_rg_row(file, opts, track, gain_ranges[i]).as_bytes())?;
         any_row = true;
-        if let Some((max_gain, min_gain)) = gain_ranges[i] {
-            album_max_gain = album_max_gain.max(Some(max_gain));
-            album_min_gain = Some(album_min_gain.map_or(min_gain, |m: u8| m.min(min_gain)));
-        }
     }
 
     if any_row {
-        let (album_gain_steps, album_gain_db) = opts.modified_gain(
-            album_result.album_gain_steps(),
-            album_result.album_gain_db(),
-        );
-        let (max_gain, min_gain) = gain_range_fields(album_max_gain.zip(album_min_gain));
-        writeln!(
-            handle,
-            "\"Album\"\t{}\t{:.6}\t{:.6}\t{}\t{}",
-            album_gain_steps,
-            album_gain_db,
-            opts.tsv_peak(album_result.album_peak()),
-            max_gain,
-            min_gain
-        )?;
+        handle.write_all(tsv_album_row(opts, album_result, gain_ranges).as_bytes())?;
     }
 
     Ok(())

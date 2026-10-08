@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::*;
-use mp3rgain::replaygain::ReplayGainResult;
+use mp3rgain::replaygain::{AlbumGainResult, ReplayGainResult};
 use mp3rgain::{analyze, mp4meta, peak_to_pcm_sample};
 use std::fmt::Write as _;
 use std::path::Path;
@@ -51,6 +51,30 @@ pub fn tsv_rg_row(
         gain_steps,
         gain_db,
         opts.tsv_peak(rg_result.peak()),
+        max_gain,
+        min_gain
+    )
+}
+
+/// The `"Album"` row closing a TSV listing, whose global_gain columns span
+/// every per-file row that could be scanned. Shared by `-o tsv` and
+/// `-a -o tsv`, which print the same rows for the same files (issue #318).
+pub fn tsv_album_row(
+    opts: &Options,
+    album: &AlbumGainResult,
+    gain_ranges: impl IntoIterator<Item = Option<(u8, u8)>>,
+) -> String {
+    let range = gain_ranges
+        .into_iter()
+        .flatten()
+        .reduce(|(max_a, min_a), (max_b, min_b)| (max_a.max(max_b), min_a.min(min_b)));
+    let (gain_steps, gain_db) = opts.modified_gain(album.album_gain_steps(), album.album_gain_db());
+    let (max_gain, min_gain) = gain_range_fields(range);
+    format!(
+        "\"Album\"\t{}\t{:.6}\t{:.6}\t{}\t{}\n",
+        gain_steps,
+        gain_db,
+        opts.tsv_peak(album.album_peak()),
         max_gain,
         min_gain
     )

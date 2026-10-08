@@ -1319,8 +1319,9 @@ pub(crate) fn apply_aac_gain_to_data(
 /// Each gain step is approximately 1.5 dB; values are clamped to 0-255.
 /// When `read_from == write_to`, the file is modified in place. When the
 /// paths differ, reads `read_from` once and writes the modified bytes
-/// directly to `write_to` — the caller (e.g. `apply_with_temp_file`) is
-/// responsible for the rename to atomically swap the file (issue #135).
+/// directly to `write_to` — the caller (e.g. `apply_with_options`, through
+/// `with_temp_file`) is responsible for the rename to atomically swap the
+/// file (issue #135).
 ///
 /// Returns the number of modified gain locations.
 pub fn apply_aac_gain_to_path(read_from: &Path, write_to: &Path, gain_steps: i32) -> Result<usize> {
@@ -1344,7 +1345,8 @@ pub(crate) fn write_container(read_from: &Path, write_to: &Path, data: &[u8]) ->
 /// `read_from`, so callers that already analyzed the file (e.g. the clipping
 /// check in `apply_with_options`) don't pay for a second bitstream walk
 /// (issue #188). The caller guarantees the file is unchanged since the
-/// analysis — same contract as the MP3 `mp3_analysis` cache from #135.
+/// analysis, the same contract as the MP3 bytes the clipping check hands to
+/// the apply (issue #251).
 ///
 /// `replaygain`, when given, is folded into the same container rewrite. A
 /// separate `write_replaygain_tags` afterwards re-read the file, rebuilt the
@@ -1389,7 +1391,7 @@ pub(crate) fn apply_aac_gain_to_path_with_analysis(
 /// Undo tags are stored cumulatively: each application adds to the existing
 /// undo value, so multiple gain changes can be fully reversed with a single
 /// undo. The atomic-write step targets `write_to`, so when this is called
-/// from `apply_with_temp_file` with `write_to == temp_path`, the temp file
+/// from `with_temp_file` with `write_to == temp_path`, the temp file
 /// ends up containing the fully-rewritten MP4 ready to be renamed over the
 /// original (issue #135). Takes an optional pre-computed analysis of
 /// `read_from` — see [`apply_aac_gain_to_path_with_analysis`] (issue #188).

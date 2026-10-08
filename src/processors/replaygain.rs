@@ -44,7 +44,7 @@ fn process_track_gain_into(
     // through to a normal analysis of just this file (issue #298).
     let stored = stored_track_result(file, opts);
 
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
+    if opts.text_output() {
         writeln!(
             out,
             "  {} {}{} {}...",
@@ -83,7 +83,7 @@ fn process_track_gain_into(
             let modifier_steps = opts.gain_modifier_steps();
             let modified_steps = base_steps + modifier_steps;
 
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
+            if opts.text_output() {
                 if opts.tags_only {
                     // No frames are touched, so there are no gain steps to
                     // report, only the dB value headed for the tag.
@@ -120,7 +120,7 @@ fn process_track_gain_into(
             }
 
             if apply_is_noop(opts, modified_steps, result.peak()) {
-                if opts.output_format == OutputFormat::Text && !opts.quiet {
+                if opts.text_output() {
                     writeln!(out, "  {} {} (no adjustment needed)", ".".cyan(), filename)?;
                 }
                 return Ok(JsonFileResult {
@@ -206,7 +206,7 @@ fn apply_replaygain_with_album_into(
         let warning_msg =
             emit_clipping_warning(steps, &report, opts, filename, Some(result.peak()));
         let actual_steps = report.actual_steps;
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
+        if opts.text_output() {
             writeln!(
                 out,
                 "  {} [DRY RUN] {} (would apply {:+.1} dB, {} steps)",
@@ -259,7 +259,7 @@ fn apply_replaygain_with_album_into(
             let warning_msg =
                 emit_clipping_warning(steps, &report, opts, filename, Some(result.peak()));
 
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
+            if opts.text_output() {
                 writeln!(
                     out,
                     "  {} {} ({} {}, {:+.1} dB)",
@@ -424,7 +424,7 @@ fn write_tags_only_into(
     };
 
     if opts.dry_run {
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
+        if opts.text_output() {
             writeln!(
                 out,
                 "  {} [DRY RUN] {} (would write {}, {})",
@@ -448,7 +448,7 @@ fn write_tags_only_into(
 
     match write_replaygain_tags_only(file, &tag_opts) {
         Ok(()) => {
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
+            if opts.text_output() {
                 writeln!(
                     out,
                     "  {} {} ({} written, {})",
@@ -529,12 +529,12 @@ fn apply_replaygain_aac_with_album_into(
             // No gain was baked into the bitstream, so the tags carry the
             // full measured values rather than a residual that would claim
             // a loudness shift that never happened.
-            let mut tags = mp4meta::ReplayGainTags::default();
-            tags.set_track(result.gain_db(), result.peak());
-            if let Some(album) = album_info {
-                tags.set_album(album.album_gain_db, album.album_peak);
-            }
-            tags.set_algorithm(result.analysis_mode());
+            let tags = mp4meta::ReplayGainTags::new(
+                result.gain_db(),
+                result.peak(),
+                album_info.map(|album| (album.album_gain_db, album.album_peak)),
+                result.analysis_mode(),
+            );
             if let Err(e) = mp4meta::write_replaygain_tags(file, &tags) {
                 return Ok(report_file_error(file, filename, e, opts));
             }
@@ -552,7 +552,7 @@ fn apply_replaygain_aac_with_album_into(
         "tags"
     };
 
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
+    if opts.text_output() {
         if !write_tags {
             writeln!(
                 out,

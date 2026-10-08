@@ -1,4 +1,4 @@
-use crate::app::{mode_reference, Mp3rgainApp};
+use crate::app::Mp3rgainApp;
 use mp3rgain::replaygain::REPLAYGAIN_REFERENCE_DB;
 
 pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
@@ -9,18 +9,11 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             // Add Files button
             ui.add_enabled_ui(!app.is_processing(), |ui| {
                 if ui.button("Add Files").clicked() {
-                    if let Some(paths) = rfd::FileDialog::new()
-                        .add_filter("Audio files", mp3rgain::SUPPORTED_EXTENSIONS)
-                        .pick_files()
-                    {
-                        app.add_files(paths);
-                    }
+                    super::pick_files(app);
                 }
 
                 if ui.button("Add Folder").clicked() {
-                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-                        app.add_folder(folder, true);
-                    }
+                    super::pick_folder(app, true);
                 }
             });
 
@@ -81,7 +74,7 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             // selected mode's scale, so one offset carries across modes:
             // 95 dB in RG 1.0 is -12 LUFS in RG 2.0 (issues #272, #364).
             ui.label("Target:");
-            let shift = mode_reference(app.analysis_mode) - REPLAYGAIN_REFERENCE_DB;
+            let shift = app.analysis_mode.reference_level() - REPLAYGAIN_REFERENCE_DB;
             let mut shown = app.target_volume + shift;
             let resp = ui
                 .add_enabled(

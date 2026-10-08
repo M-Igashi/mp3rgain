@@ -11,7 +11,7 @@ use crate::commands::utils::{
     exit_if_failed, finish_without_summary, for_each_file, run_album_analysis, TSV_HEADER,
 };
 use crate::processors::info::{
-    format_rg_row, gain_range_fields, process_info, scan_gain_range_for_row,
+    format_rg_row, process_info, scan_gain_range_for_row, tsv_album_row,
 };
 use crate::util::get_filename;
 
@@ -111,27 +111,20 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
         })
         .collect();
 
-    // Emit rows in input order and collect the album-level gain bounds.
+    // Emit rows in input order.
     let mut any_ok = false;
     let mut failed = 0;
-    let mut album_max_gain: Option<u8> = None;
-    let mut album_min_gain: Option<u8> = None;
     {
         let stdout = io::stdout();
         let mut handle = stdout.lock();
         for (i, file) in files.iter().enumerate() {
             match &rows[i] {
                 Some(Row::Analyzed(rg)) => {
-                    let (result, text) = format_rg_row(file, opts, rg, gain_ranges[i])?;
+                    let (_, text) = format_rg_row(file, opts, rg, gain_ranges[i])?;
                     if !text.is_empty() {
                         handle.write_all(text.as_bytes())?;
                     }
                     any_ok = true;
-                    album_max_gain = album_max_gain.max(result.max_gain);
-                    album_min_gain = match (album_min_gain, result.min_gain) {
-                        (Some(a), Some(b)) => Some(a.min(b)),
-                        (a, b) => a.or(b),
-                    };
                 }
                 Some(Row::Failed(msg)) => {
                     eprintln!("{} - {}", get_filename(file).red(), msg);
@@ -153,38 +146,25 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
 
     if any_ok && !opts.skip_album {
         if let Some(report) = summary_report {
-            let (album_gain_steps, album_gain_db) = opts.modified_gain(
-                report.album.album_gain_steps(),
-                report.album.album_gain_db(),
-            );
-
-            match opts.output_format {
-                OutputFormat::Tsv => {
-                    let (max_gain, min_gain) =
-                        gain_range_fields(album_max_gain.zip(album_min_gain));
-                    println!(
-                        "\"Album\"\t{}\t{:.6}\t{:.6}\t{}\t{}",
-                        album_gain_steps,
-                        album_gain_db,
-                        opts.tsv_peak(report.album.album_peak()),
-                        max_gain,
-                        min_gain
-                    );
-                }
-                OutputFormat::Text => {
-                    if !opts.quiet {
-                        println!();
-                        println!(
-                            "Recommended \"Album\" dB change for all files: {:.6}",
-                            album_gain_db
-                        );
-                        println!(
-                            "Recommended \"Album\" mp3 gain change for all files: {}",
-                            album_gain_steps
-                        );
-                    }
-                }
-                OutputFormat::Json => {}
+            if opts.output_format == OutputFormat::Tsv {
+                print!(
+                    "{}",
+                    tsv_album_row(opts, &report.album, gain_ranges.iter().copied())
+                );
+            } else if opts.text_output() {
+                let (album_gain_steps, album_gain_db) = opts.modified_gain(
+                    report.album.album_gain_steps(),
+                    report.album.album_gain_db(),
+                );
+                println!();
+                println!(
+                    "Recommended \"Album\" dB change for all files: {:.6}",
+                    album_gain_db
+                );
+                println!(
+                    "Recommended \"Album\" mp3 gain change for all files: {}",
+                    album_gain_steps
+                );
             }
         }
     }

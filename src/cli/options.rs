@@ -109,6 +109,12 @@ pub struct Options {
 }
 
 impl Options {
+    /// Whether human-readable progress and results go to the terminal:
+    /// `-o text` (the default) without `-q`.
+    pub fn text_output(&self) -> bool {
+        self.output_format == OutputFormat::Text && !self.quiet
+    }
+
     pub fn dry_run_prefix(&self) -> &'static str {
         if self.dry_run {
             "[DRY RUN] "

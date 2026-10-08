@@ -217,10 +217,14 @@ pub(crate) fn write_rg_frames_direct(
     write_tag_direct(path, tag)
 }
 
-/// Delete all ReplayGain and undo TXXX frames from ID3v2 tag
+/// Delete all ReplayGain and undo TXXX frames from ID3v2 tag. A file without
+/// any is left untouched rather than rewritten with a re-encoded (or, when it
+/// had no tag at all, a new empty) ID3v2 tag.
 pub fn delete_id3v2_replaygain(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
-    strip_all_rg(&mut tag);
+    if !strip_txxx(&mut tag, ALL_RG_DESCRIPTIONS) {
+        return Ok(());
+    }
     write_tag(path, &mut tag)
 }
 
@@ -228,16 +232,26 @@ pub fn delete_id3v2_replaygain(path: &Path) -> Result<()> {
 /// already writing onto a not-yet-visible temp file (issue #232).
 pub(crate) fn delete_id3v2_replaygain_direct(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
-    strip_all_rg(&mut tag);
+    if !strip_txxx(&mut tag, ALL_RG_DESCRIPTIONS) {
+        return Ok(());
+    }
     write_tag_direct(path, &mut tag)
 }
 
-/// Drop every frame mp3rgain writes: the `REPLAYGAIN_*` values plus the
-/// `MP3GAIN_UNDO` / `MP3GAIN_MINMAX` pair.
-fn strip_all_rg(tag: &mut id3::Tag) {
-    for desc in ALL_RG_DESCRIPTIONS {
-        remove_txxx_ci(tag, desc);
+/// Remove every TXXX frame whose description matches one of `descriptions`,
+/// case-insensitively. `true` if any frame was removed.
+fn strip_txxx(tag: &mut id3::Tag, descriptions: &[&str]) -> bool {
+    let present = tag.extended_texts().any(|t| {
+        descriptions
+            .iter()
+            .any(|d| t.description.eq_ignore_ascii_case(d))
+    });
+    if present {
+        for desc in descriptions {
+            remove_txxx_ci(tag, desc);
+        }
     }
+    present
 }
 
 /// Undo gain changes based on ID3v2 undo tag information
@@ -286,7 +300,7 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
 /// costing a second full-file copy.
 pub(crate) fn remove_id3v2_rg_values_direct(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
-    if !strip_rg_values(&mut tag) {
+    if !strip_txxx(&mut tag, RG_VALUE_DESCRIPTIONS) {
         return Ok(());
     }
     write_tag_direct(path, &mut tag)
@@ -328,21 +342,6 @@ pub(crate) fn shift_id3v2_stored_gain_direct(path: &Path, steps: i32) -> Result<
         return Ok(());
     }
     write_tag_direct(path, &mut tag)
-}
-
-/// Remove the `REPLAYGAIN_*` frames from `tag`; `false` if there were none.
-fn strip_rg_values(tag: &mut id3::Tag) -> bool {
-    let has_rg = tag.extended_texts().any(|t| {
-        RG_VALUE_DESCRIPTIONS
-            .iter()
-            .any(|d| t.description.eq_ignore_ascii_case(d))
-    });
-    if has_rg {
-        for desc in RG_VALUE_DESCRIPTIONS {
-            remove_txxx_ci(tag, desc);
-        }
-    }
-    has_rg
 }
 
 #[cfg(test)]

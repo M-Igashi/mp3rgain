@@ -542,12 +542,11 @@ fn apply_adts_bytes(
             // The apply saturates at 0-255 like the M4A path, so the residual
             // is arithmetic; ADTS never takes the wrap branch.
             if let Some(res) = compute_rg_residual(w, opts, steps, false) {
-                let values = res.to_id3v2();
-                rg.track_gain = values.track_gain;
-                rg.track_peak = values.track_peak;
-                rg.album_gain = values.album_gain;
-                rg.album_peak = values.album_peak;
-                rg.algorithm = values.algorithm;
+                rg = id3v2::Id3v2ReplayGain {
+                    undo: rg.undo,
+                    minmax: rg.minmax,
+                    ..res.to_id3v2()
+                };
             }
         }
 
@@ -605,13 +604,7 @@ impl RgResidual {
     }
 
     fn to_mp4(&self) -> mp4meta::ReplayGainTags {
-        let mut tags = mp4meta::ReplayGainTags::default();
-        tags.set_track(self.track_gain_db, self.track_peak);
-        if let Some((album_gain, album_peak)) = self.album {
-            tags.set_album(album_gain, album_peak);
-        }
-        tags.set_algorithm(self.mode);
-        tags
+        mp4meta::ReplayGainTags::new(self.track_gain_db, self.track_peak, self.album, self.mode)
     }
 }
 
@@ -732,7 +725,7 @@ fn apply_mp3_ape_bytes(
         }
 
         if write_rg {
-            let reanalyze = opts.wrap || stats.saturated_low > 0 || stats.saturated_high > 0;
+            let reanalyze = opts.wrap || stats.saturated();
             if opts.tag_layout == TagLayout::Split {
                 if let Some(res) = compute_rg_residual(w, opts, steps, reanalyze) {
                     id3v2::write_id3v2_replaygain_direct(w, &res.to_id3v2())?;
@@ -819,14 +812,13 @@ fn apply_mp3_id3v2_bytes(
         }
 
         if opts.write_replaygain_tags {
-            let reanalyze = opts.wrap || stats.saturated_low > 0 || stats.saturated_high > 0;
+            let reanalyze = opts.wrap || stats.saturated();
             if let Some(res) = compute_rg_residual(w, opts, steps, reanalyze) {
-                let values = res.to_id3v2();
-                rg.track_gain = values.track_gain;
-                rg.track_peak = values.track_peak;
-                rg.album_gain = values.album_gain;
-                rg.album_peak = values.album_peak;
-                rg.algorithm = values.algorithm;
+                rg = id3v2::Id3v2ReplayGain {
+                    undo: rg.undo,
+                    minmax: rg.minmax,
+                    ..res.to_id3v2()
+                };
             }
         }
 

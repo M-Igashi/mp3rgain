@@ -1,7 +1,4 @@
-use crate::worker::{
-    self, ApplyJob, ApplyOptionsUi, CheckTagsJob, DeleteTagsJob, StoredTagsView, UndoJob,
-    WorkerEvent, WorkerHandle,
-};
+use crate::worker::{self, ApplyJob, ApplyOptionsUi, StoredTagsView, WorkerEvent, WorkerHandle};
 use mp3rgain::replaygain::{
     self, AnalysisMode, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB,
 };
@@ -805,13 +802,16 @@ impl Mp3rgainApp {
         if self.is_processing() {
             return;
         }
-        let mut indices = self.selected_indices.clone();
-        indices.sort_unstable();
-        for &idx in indices.iter().rev() {
-            if idx < self.files.len() {
-                self.files.remove(idx);
+        // One pass: removing row by row shifts the tail every time, which is
+        // quadratic for a scattered selection on a large table.
+        let mut remove = vec![false; self.files.len()];
+        for &idx in &self.selected_indices {
+            if let Some(flag) = remove.get_mut(idx) {
+                *flag = true;
             }
         }
+        let mut flags = remove.into_iter();
+        self.files.retain(|_| !flags.next().unwrap_or(false));
         self.selected_indices.clear();
         self.selection_dirty = true;
         // Removing rows shifts indices, so the anchor and any queued import
@@ -954,10 +954,7 @@ impl Mp3rgainApp {
             }
         }
 
-        let jobs: Vec<(usize, PathBuf)> = targets
-            .iter()
-            .filter_map(|&i| self.files.get(i).map(|f| (i, f.path.clone())))
-            .collect();
+        let jobs = self.rows_of(&targets);
         self.begin_worker(
             WorkerKind::TrackAnalysis,
             jobs.len(),
@@ -1097,11 +1094,16 @@ impl Mp3rgainApp {
     /// Album grouping shared by Album Analysis and Apply Album Gain
     /// (issues #159, #224, #338).
     fn album_groups(&self, targets: &[usize]) -> Vec<AlbumGroup> {
-        let rows: Vec<(usize, PathBuf)> = targets
+        group_albums(self.rows_of(targets), self.album_grouping)
+    }
+
+    /// `(row index, path)` for each of `indices` still in the table: the job
+    /// list of every worker that needs nothing else.
+    fn rows_of(&self, indices: &[usize]) -> Vec<(usize, PathBuf)> {
+        indices
             .iter()
             .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f.path.clone())))
-            .collect();
-        group_albums(rows, self.album_grouping)
+            .collect()
     }
 
     /// Stored-tag reuse (issue #302) is only trusted in RG 1.0 mode, the
@@ -1150,21 +1152,12 @@ impl Mp3rgainApp {
             return;
         }
 
-        let indices = self.target_indices();
-        let jobs: Vec<DeleteTagsJob> = indices
-            .iter()
-            .filter_map(|&idx| {
-                self.files.get(idx).map(|f| DeleteTagsJob {
-                    idx,
-                    path: f.path.clone(),
-                })
-            })
-            .collect();
+        let jobs = self.rows_of(&self.target_indices());
         if jobs.is_empty() {
             return;
         }
 
-        for &job_idx in jobs.iter().map(|j| &j.idx) {
+        for &(job_idx, _) in &jobs {
             self.files[job_idx].status = FileStatus::Pending;
         }
         let count = jobs.len();
@@ -1193,10 +1186,7 @@ impl Mp3rgainApp {
                 f.status = FileStatus::Pending;
             }
         }
-        let jobs: Vec<(usize, PathBuf)> = targets
-            .iter()
-            .filter_map(|&i| self.files.get(i).map(|f| (i, f.path.clone())))
-            .collect();
+        let jobs = self.rows_of(&targets);
         let count = jobs.len();
         self.begin_worker(
             WorkerKind::MaxAmplitude,
@@ -1214,16 +1204,7 @@ impl Mp3rgainApp {
 
         // Issue #254: scope to the current selection (or all files when none
         // selected) like every other start_* action.
-        let jobs: Vec<CheckTagsJob> = self
-            .target_indices()
-            .iter()
-            .filter_map(|&idx| {
-                self.files.get(idx).map(|f| CheckTagsJob {
-                    idx,
-                    path: f.path.clone(),
-                })
-            })
-            .collect();
+        let jobs = self.rows_of(&self.target_indices());
         let count = jobs.len();
         let layout = self.apply_options.tag_layout;
         self.begin_worker(
@@ -1243,15 +1224,7 @@ impl Mp3rgainApp {
             return;
         }
         let indices = std::mem::take(&mut self.pending_import_scan);
-        let jobs: Vec<CheckTagsJob> = indices
-            .into_iter()
-            .filter_map(|idx| {
-                self.files.get(idx).map(|f| CheckTagsJob {
-                    idx,
-                    path: f.path.clone(),
-                })
-            })
-            .collect();
+        let jobs = self.rows_of(&indices);
         if jobs.is_empty() {
             return;
         }
@@ -1353,22 +1326,13 @@ impl Mp3rgainApp {
             return;
         }
 
-        let jobs: Vec<UndoJob> = self
-            .target_indices()
-            .iter()
-            .filter_map(|&idx| {
-                self.files.get(idx).map(|f| UndoJob {
-                    idx,
-                    path: f.path.clone(),
-                })
-            })
-            .collect();
+        let jobs = self.rows_of(&self.target_indices());
 
         if jobs.is_empty() {
             return;
         }
 
-        for &job_idx in jobs.iter().map(|j| &j.idx) {
+        for &(job_idx, _) in &jobs {
             self.files[job_idx].status = FileStatus::Pending;
         }
         let count = jobs.len();
@@ -1389,19 +1353,19 @@ impl Mp3rgainApp {
         // neither a full fresh analysis nor a consistent stored set are
         // re-analyzed whole (all-or-nothing, like the CLI), then the apply
         // phase chains in via `pending_apply`.
+        // Grouped once for both phases: tag grouping (issue #338) reads the
+        // ALBUM tag of every row.
+        let groups = self.album_groups(&self.target_indices());
         if self.stored_reuse_active() {
-            let targets = self.target_indices();
-            let rescan: Vec<AlbumGroup> = self
-                .album_groups(&targets)
-                .into_iter()
-                .filter(|g| {
-                    let all_fresh = g.rows.iter().all(|&(idx, _)| {
-                        self.files.get(idx).is_some_and(|f| f.album_info.is_some())
-                    });
-                    !all_fresh && self.trusted_album_group(&g.rows).is_none()
-                })
-                .collect();
-            if !rescan.is_empty() {
+            let needs_rescan = |g: &AlbumGroup| {
+                let all_fresh = g
+                    .rows
+                    .iter()
+                    .all(|&(idx, _)| self.files.get(idx).is_some_and(|f| f.album_info.is_some()));
+                !all_fresh && self.trusted_album_group(&g.rows).is_none()
+            };
+            if groups.iter().any(needs_rescan) {
+                let rescan: Vec<AlbumGroup> = groups.into_iter().filter(needs_rescan).collect();
                 for &(idx, _) in rescan.iter().flat_map(|g| &g.rows) {
                     if let Some(f) = self.files.get_mut(idx) {
                         f.status = FileStatus::Pending;
@@ -1423,7 +1387,7 @@ impl Mp3rgainApp {
                 return;
             }
         }
-        self.apply_album_gain_now(ctx);
+        self.apply_album_gain_now(ctx, groups);
     }
 
     /// Apply phase of Apply Album Gain. With stored-tag reuse on (issue
@@ -1431,16 +1395,12 @@ impl Mp3rgainApp {
     /// its stored tags when the whole set is trusted and consistent;
     /// otherwise each row falls back to its displayed values, exactly like
     /// the reuse-off path.
-    fn apply_album_gain_now(&mut self, ctx: &egui::Context) {
-        // Issue #161: act on the current selection (or all files when none
-        // selected). Issue #159: use each file's per-folder album_info so
-        // tracks from different folders get the album RG tags for their own
-        // album.
-        let targets = self.target_indices();
-        // Grouped once and reused: tag grouping (issue #338) reads the ALBUM
-        // tag of every row, so calling this twice in one action would read
-        // them twice.
-        let groups = self.album_groups(&targets);
+    ///
+    /// `groups` covers the current selection (or all files when none is
+    /// selected, issue #161). Each file's per-folder album_info gives tracks
+    /// from different folders the album RG tags for their own album (issue
+    /// #159).
+    fn apply_album_gain_now(&mut self, ctx: &egui::Context, groups: Vec<AlbumGroup>) {
         let target = self.target_volume;
         let mode = self.analysis_mode;
         let mut jobs: Vec<ApplyJob> = Vec::new();
@@ -1500,9 +1460,10 @@ impl Mp3rgainApp {
                 }
             }
         } else {
-            jobs = targets
-                .iter()
-                .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
+            jobs = self
+                .target_indices()
+                .into_iter()
+                .filter_map(|idx| self.files.get(idx).map(|f| (idx, f)))
                 .filter_map(|(idx, f)| {
                     f.display(target, mode).album_gain.map(|gain_db| ApplyJob {
                         idx,
@@ -1610,7 +1571,10 @@ impl Mp3rgainApp {
             // new worker.
             match self.pending_apply.take() {
                 Some(PendingApply::Track) => self.apply_track_gain_now(ctx),
-                Some(PendingApply::Album) => self.apply_album_gain_now(ctx),
+                Some(PendingApply::Album) => {
+                    let groups = self.album_groups(&self.target_indices());
+                    self.apply_album_gain_now(ctx, groups);
+                }
                 None => {}
             }
             if !self.pending_drops.is_empty() {
@@ -1638,9 +1602,6 @@ impl Mp3rgainApp {
                         // user-visible status (e.g. Analyzed) for the row.
                         // The import scan fills values in its own handler.
                         Some(WorkerKind::CheckTags) | Some(WorkerKind::ImportScan) => {}
-                        Some(WorkerKind::MaxAmplitude) => {
-                            file.status = FileStatus::Analyzing;
-                        }
                         _ => file.status = FileStatus::Analyzing,
                     }
                 }
@@ -1836,15 +1797,9 @@ fn trusted_album_tags(file: &FileEntry) -> Option<StoredAlbumValues> {
 /// same offset, as the CLI's `-d` does (issue #364).
 fn volume_and_gain(gain_db: f64, target: f64, mode: AnalysisMode) -> (f64, f64) {
     (
-        mode_reference(mode) - gain_db,
+        mode.reference_level() - gain_db,
         target - REPLAYGAIN_REFERENCE_DB + gain_db,
     )
-}
-
-/// The level a mode normalizes to with the Target left at 89 dB: 89 dB in
-/// RG1, the LUFS target in the BS.1770 modes.
-pub fn mode_reference(mode: AnalysisMode) -> f64 {
-    mode.target_lufs().unwrap_or(REPLAYGAIN_REFERENCE_DB)
 }
 
 /// Compare two `Option<f64>` values, putting `None` always at the bottom

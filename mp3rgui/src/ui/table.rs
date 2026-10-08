@@ -9,14 +9,17 @@ use crate::worker::StoredTagsView;
 fn render_stored_tags_cell(ui: &mut egui::Ui, tags: Option<&StoredTagsView>) {
     let Some(view) = tags else { return };
     if view.is_empty() {
-        ui.weak("none")
-            .on_hover_text(format!("No stored tags found ({} container)", view.format));
+        ui.weak("none").on_hover_text(format!(
+            "No stored tags found ({} container)",
+            view.format()
+        ));
         return;
     }
     let tags = &view.tags;
+    let (undo_key, minmax_key) = tags.source.undo_minmax_keys();
     let label = tags.track_gain.as_deref().unwrap_or("—");
     ui.label(label).on_hover_ui(|ui| {
-        ui.label(format!("Container: {}", view.format));
+        ui.label(format!("Container: {}", view.format()));
         ui.separator();
         for (name, value) in [
             (
@@ -39,8 +42,8 @@ fn render_stored_tags_cell(ui: &mut egui::Ui, tags: Option<&StoredTagsView>) {
                 mp3rgain::TAG_REPLAYGAIN_ALGORITHM,
                 tags.algorithm.as_deref(),
             ),
-            (mp3rgain::TAG_MP3GAIN_UNDO, tags.undo.as_deref()),
-            (mp3rgain::TAG_MP3GAIN_MINMAX, tags.minmax.as_deref()),
+            (undo_key, tags.undo.as_deref()),
+            (minmax_key, tags.minmax.as_deref()),
             (
                 mp3rgain::TAG_MP3GAIN_ALBUM_MINMAX,
                 tags.album_minmax.as_deref(),

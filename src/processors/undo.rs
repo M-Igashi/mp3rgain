@@ -18,12 +18,11 @@ pub fn process_undo(file: &Path, opts: &Options) -> Result<(JsonFileResult, Stri
 
 fn process_undo_into(file: &Path, opts: &Options, out: &mut String) -> Result<JsonFileResult> {
     let filename = get_filename(file);
-    let dry_run_prefix = opts.dry_run_prefix();
 
     let original_mtime = save_original_mtime(file, opts);
 
     if opts.dry_run {
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
+        if opts.text_output() {
             writeln!(out, "  {} [DRY RUN] {} (would undo)", "~".cyan(), filename)?;
         }
         if opts.output_format == OutputFormat::Tsv {
@@ -42,14 +41,8 @@ fn process_undo_into(file: &Path, opts: &Options, out: &mut String) -> Result<Js
     match undo_result {
         Ok(frames) => {
             if frames == 0 {
-                if opts.output_format == OutputFormat::Text && !opts.quiet {
-                    writeln!(
-                        out,
-                        "  {} {}{} (no changes to undo)",
-                        ".".cyan(),
-                        dry_run_prefix,
-                        filename
-                    )?;
+                if opts.text_output() {
+                    writeln!(out, "  {} {} (no changes to undo)", ".".cyan(), filename)?;
                 }
                 if opts.output_format == OutputFormat::Tsv {
                     writeln!(out, "{}\t0\tno-change", get_path(file))?;
@@ -67,7 +60,7 @@ fn process_undo_into(file: &Path, opts: &Options, out: &mut String) -> Result<Js
                     restore_timestamp(file, mtime);
                 }
 
-                if opts.output_format == OutputFormat::Text && !opts.quiet {
+                if opts.text_output() {
                     writeln!(
                         out,
                         "  {} {} ({} frames restored)",

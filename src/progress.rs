@@ -9,7 +9,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::cli::options::{Options, OutputFormat};
+use crate::cli::options::Options;
 
 pub const PROGRESS_THRESHOLD: usize = 5;
 
@@ -35,7 +35,7 @@ fn bar_style(template: &str) -> ProgressStyle {
 
 /// Whether a file-count progress bar should be shown for `total` files.
 fn file_count_enabled(total: usize, opts: &Options) -> bool {
-    !opts.quiet && opts.output_format == OutputFormat::Text && total >= PROGRESS_THRESHOLD
+    opts.text_output() && total >= PROGRESS_THRESHOLD
 }
 
 pub fn create_progress_bar(total: usize, opts: &Options) -> Option<ProgressBar> {
@@ -167,7 +167,7 @@ pub fn create_analysis_progress_bar(
     file: &Path,
     opts: &Options,
 ) -> Option<ProgressBar> {
-    if opts.quiet || opts.output_format != OutputFormat::Text {
+    if !opts.text_output() {
         return None;
     }
     let file_size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);

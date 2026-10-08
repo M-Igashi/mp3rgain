@@ -24,17 +24,25 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 /// Stored-tag snapshot for one file, populated by `spawn_check_stored_tags`:
-/// the library's [`StoredGainTags`] (raw tag strings, `None` = absent) plus
-/// the container label the table shows.
+/// the library's [`StoredGainTags`] (raw tag strings, `None` = absent).
 #[derive(Clone)]
 pub struct StoredTagsView {
-    pub format: &'static str,
     pub tags: StoredGainTags,
 }
 
 impl StoredTagsView {
     pub fn is_empty(&self) -> bool {
         !self.tags.has_any()
+    }
+
+    /// The container label the table shows.
+    pub fn format(&self) -> &'static str {
+        match self.tags.source {
+            GainTagSource::Aac => "MP4",
+            GainTagSource::Id3v2 => "ID3v2",
+            GainTagSource::Ape { .. } => "APE",
+            GainTagSource::Split => "ID3v2+APE",
+        }
     }
 }
 
@@ -168,24 +176,6 @@ pub struct ApplyJob {
     pub from_stored: bool,
 }
 
-/// A single undo job.
-pub struct UndoJob {
-    pub idx: usize,
-    pub path: PathBuf,
-}
-
-/// A single stored-tag scan job.
-pub struct CheckTagsJob {
-    pub idx: usize,
-    pub path: PathBuf,
-}
-
-/// A single stored-tag deletion job.
-pub struct DeleteTagsJob {
-    pub idx: usize,
-    pub path: PathBuf,
-}
-
 /// User-facing apply toggles, captured at the moment the worker is
 /// spawned. Worker combines these with the per-job data to build the
 /// final `ApplyOptions`.
@@ -288,12 +278,10 @@ pub fn spawn_track_analysis(
     WorkerHandle { rx, cancel }
 }
 
-/// Spawn the album-analysis worker. Uses the parallel variant from the
-/// library (auto thread count) and reports per-file completion via the
-/// `on_complete` callback.
-/// Spawn an album-analysis worker for one or more groups of files.
+/// Spawn an album-analysis worker for one or more groups of files, reporting
+/// per-file completion via the library's `on_complete` callback.
 ///
-/// Each inner Vec is treated as its own album, so loading files from
+/// Each group is treated as its own album, so loading files from
 /// multiple folders no longer collapses them into a single album with
 /// the wrong gain (issue #159). Groups are analyzed sequentially; the
 /// per-group call still fans out across cores via the library's
@@ -352,8 +340,11 @@ pub fn spawn_album_analysis(
                     return;
                 }
                 if let Some(&original_idx) = indices_cb.get(idx_in_paths) {
-                    let _ = tx_cb.send(WorkerEvent::FileStart { idx: original_idx });
-                    ctx_cb.request_repaint();
+                    send(
+                        &tx_cb,
+                        &ctx_cb,
+                        WorkerEvent::FileStart { idx: original_idx },
+                    );
                 }
             };
 
@@ -475,15 +466,15 @@ pub fn spawn_apply(
         // album-wide MP3GAIN_ALBUM_MINMAX after all files are applied — the
         // same mp3gain-parity step the CLI does (issue #210). APEv2 only and
         // not in dry-run.
-        let album_minmax_paths: Vec<PathBuf> =
-            if !ui_opts.dry_run && !ui_opts.tag_layout.mp3gain_in_id3v2() {
-                jobs.iter()
-                    .filter(|j| j.album_info.is_some())
-                    .map(|j| j.path.clone())
-                    .collect()
-            } else {
-                Vec::new()
-            };
+        let writes_album_minmax = !ui_opts.dry_run && !ui_opts.tag_layout.mp3gain_in_id3v2();
+        let album_minmax_paths: Vec<PathBuf> = if writes_album_minmax {
+            jobs.iter()
+                .filter(|j| j.album_info.is_some())
+                .map(|j| j.path.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
         // Post-apply (max, min) global_gain range per album file, taken from
         // the apply reports so the MINMAX step below doesn't re-analyze every
         // file (issue #232).
@@ -497,9 +488,7 @@ pub fn spawn_apply(
             run_job_pool(jobs, &cancel_w, move |job: ApplyJob| {
                 send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
-                let album_member = !ui_opts.dry_run
-                    && !ui_opts.tag_layout.mp3gain_in_id3v2()
-                    && job.album_info.is_some();
+                let album_member = writes_album_minmax && job.album_info.is_some();
                 let opts = build_apply_options(
                     job.steps,
                     job.track_result,
@@ -608,14 +597,14 @@ pub fn spawn_apply(
 
 /// Spawn the undo worker. Runs jobs through [`run_job_pool`] (undo is
 /// dominated by per-file I/O and, for AAC, a bitstream re-analysis, so it
-/// parallelizes the same way apply does). Dispatches per file to the
-/// correct undo path:
-///   - AAC: `mp3rgain::aac::undo_aac_gain`
-///   - MP3 + `TagLayout::Id3v2`: `mp3rgain::undo_gain_id3v2`
-///   - MP3 (default APE): `mp3rgain::undo_gain`
-///
-/// Mirrors the CLI's `process_undo` dispatch so behavior matches.
-pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsUi) -> WorkerHandle {
+/// parallelizes the same way apply does). Each file goes through
+/// `mp3rgain::undo_gain_auto`, the container dispatch the CLI's
+/// `process_undo` uses, so behavior matches.
+pub fn spawn_undo(
+    ctx: egui::Context,
+    jobs: Vec<(usize, PathBuf)>,
+    ui_opts: ApplyOptionsUi,
+) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_w = Arc::clone(&cancel);
@@ -629,36 +618,29 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
             let tx = tx.clone();
             let ctx = ctx.clone();
             let (undone, skipped, errors) = (&undone, &skipped, &errors);
-            run_job_pool(jobs, &cancel_w, move |job: UndoJob| {
-                send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
+            run_job_pool(jobs, &cancel_w, move |(idx, path)| {
+                send(&tx, &ctx, WorkerEvent::FileStart { idx });
 
-                let original_mtime = read_mtime_if(&job.path, ui_opts.preserve_timestamp);
+                let original_mtime = read_mtime_if(&path, ui_opts.preserve_timestamp);
 
                 // Peek at the undo tag before running undo, so we can tell the
                 // UI how many steps to reverse on the display. We can't read
                 // it after undo because undo_gain_auto deletes the tag (issue #171).
                 let steps_undone =
-                    mp3rgain::read_undo_steps(&job.path, ui_opts.tag_layout).unwrap_or(0);
+                    mp3rgain::read_undo_steps(&path, ui_opts.tag_layout).unwrap_or(0);
 
-                let result = mp3rgain::undo_gain_auto(&job.path, ui_opts.tag_layout);
+                let result = mp3rgain::undo_gain_auto(&path, ui_opts.tag_layout);
                 match result {
                     Ok(0) => {
                         skipped.fetch_add(1, Ordering::Relaxed);
-                        send(&tx, &ctx, WorkerEvent::FileUndoSkipped { idx: job.idx });
+                        send(&tx, &ctx, WorkerEvent::FileUndoSkipped { idx });
                     }
                     Ok(_) => {
                         if let Some(mtime) = original_mtime {
-                            restore_timestamp(&job.path, mtime);
+                            restore_timestamp(&path, mtime);
                         }
                         undone.fetch_add(1, Ordering::Relaxed);
-                        send(
-                            &tx,
-                            &ctx,
-                            WorkerEvent::FileUndone {
-                                idx: job.idx,
-                                steps_undone,
-                            },
-                        );
+                        send(&tx, &ctx, WorkerEvent::FileUndone { idx, steps_undone });
                     }
                     Err(e) => {
                         errors.fetch_add(1, Ordering::Relaxed);
@@ -666,7 +648,7 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
                             &tx,
                             &ctx,
                             WorkerEvent::FileApplyFailed {
-                                idx: job.idx,
+                                idx,
                                 message: e.to_string(),
                             },
                         );
@@ -704,15 +686,11 @@ pub fn spawn_undo(ctx: egui::Context, jobs: Vec<UndoJob>, ui_opts: ApplyOptionsU
 
 /// Spawn the stored-tag deletion worker. Destructive: removes APE /
 /// ID3v2 RG / MP4 freeform RG+undo tags from each file, fanned out via
-/// [`run_job_pool`].
-///
-/// Dispatch mirrors the CLI's `process_delete_tags`:
-///   - AAC: `mp4meta::delete_replaygain_tags` + `delete_undo_tags`
-///   - MP3 + `TagLayout::Id3v2`: `mp3rgain::delete_id3v2_replaygain`
-///   - MP3 (default APE): `mp3rgain::delete_ape_tag`
+/// [`run_job_pool`]. Each file goes through `mp3rgain::delete_gain_tags_auto`,
+/// the container dispatch the CLI's `-s d` uses.
 pub fn spawn_delete_tags(
     ctx: egui::Context,
-    jobs: Vec<DeleteTagsJob>,
+    jobs: Vec<(usize, PathBuf)>,
     layout: TagLayout,
     preserve_timestamp: bool,
 ) -> WorkerHandle {
@@ -728,20 +706,20 @@ pub fn spawn_delete_tags(
             let tx = tx.clone();
             let ctx = ctx.clone();
             let (deleted, errors) = (&deleted, &errors);
-            run_job_pool(jobs, &cancel_w, move |job: DeleteTagsJob| {
-                send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
+            run_job_pool(jobs, &cancel_w, move |(idx, path)| {
+                send(&tx, &ctx, WorkerEvent::FileStart { idx });
 
-                let original_mtime = read_mtime_if(&job.path, preserve_timestamp);
+                let original_mtime = read_mtime_if(&path, preserve_timestamp);
 
-                let result = mp3rgain::delete_gain_tags_auto(&job.path, layout);
+                let result = mp3rgain::delete_gain_tags_auto(&path, layout);
 
                 match result {
                     Ok(()) => {
                         if let Some(m) = original_mtime {
-                            restore_timestamp(&job.path, m);
+                            restore_timestamp(&path, m);
                         }
                         deleted.fetch_add(1, Ordering::Relaxed);
-                        send(&tx, &ctx, WorkerEvent::TagsDeleted { idx: job.idx });
+                        send(&tx, &ctx, WorkerEvent::TagsDeleted { idx });
                     }
                     Err(e) => {
                         errors.fetch_add(1, Ordering::Relaxed);
@@ -749,7 +727,7 @@ pub fn spawn_delete_tags(
                             &tx,
                             &ctx,
                             WorkerEvent::FileApplyFailed {
-                                idx: job.idx,
+                                idx,
                                 message: e.to_string(),
                             },
                         );
@@ -848,13 +826,11 @@ pub fn spawn_find_max_amplitude(ctx: egui::Context, files: Vec<(usize, PathBuf)>
 /// I/O-light, but an AAC one parses the whole `moov` box, so importing a large
 /// library from network storage was noticeably serial.
 ///
-/// Dispatch is shared with the CLI via `mp3rgain::read_gain_tags_auto`:
-///   - AAC: MP4 freeform RG + undo
-///   - MP3 + `TagLayout::Id3v2`: ID3v2 TXXX RG
-///   - MP3: APE
+/// Dispatch is shared with the CLI via `mp3rgain::read_gain_tags_auto`, which
+/// picks the container from the file and the tag layout.
 pub fn spawn_check_stored_tags(
     ctx: egui::Context,
-    jobs: Vec<CheckTagsJob>,
+    jobs: Vec<(usize, PathBuf)>,
     layout: TagLayout,
 ) -> WorkerHandle {
     let (tx, rx) = mpsc::channel();
@@ -867,14 +843,10 @@ pub fn spawn_check_stored_tags(
         {
             let tx = tx.clone();
             let ctx = ctx.clone();
-            run_job_pool(jobs, &cancel_w, move |job: CheckTagsJob| {
-                send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
-                let view = read_stored_tags(&job.path, layout);
-                send(
-                    &tx,
-                    &ctx,
-                    WorkerEvent::StoredTagsRead { idx: job.idx, view },
-                );
+            run_job_pool(jobs, &cancel_w, move |(idx, path)| {
+                send(&tx, &ctx, WorkerEvent::FileStart { idx });
+                let view = read_stored_tags(&path, layout);
+                send(&tx, &ctx, WorkerEvent::StoredTagsRead { idx, view });
             });
         }
 
@@ -906,13 +878,7 @@ fn read_stored_tags(path: &Path, layout: TagLayout) -> StoredTagsView {
             TagLayout::Split => GainTagSource::Split,
         })
     });
-    let format = match tags.source {
-        GainTagSource::Aac => "MP4",
-        GainTagSource::Id3v2 => "ID3v2",
-        GainTagSource::Ape { .. } => "APE",
-        GainTagSource::Split => "ID3v2+APE",
-    };
-    StoredTagsView { format, tags }
+    StoredTagsView { tags }
 }
 
 /// Build the final `ApplyOptions` by combining always-on safety rails

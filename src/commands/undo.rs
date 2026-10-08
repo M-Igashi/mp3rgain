@@ -2,14 +2,14 @@ use anyhow::Result;
 use colored::*;
 use std::path::PathBuf;
 
-use crate::cli::options::{Options, OutputFormat};
+use crate::cli::options::Options;
 use crate::commands::utils::{finish_with_summary, for_each_file};
 use crate::processors::undo::process_undo;
 
 pub fn cmd_undo(files: &[PathBuf], opts: &Options) -> Result<()> {
     let dry_run_prefix = opts.dry_run_prefix();
 
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
+    if opts.text_output() {
         println!(
             "{}{} {} gain changes on {} file(s)",
             dry_run_prefix,

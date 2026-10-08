@@ -9,7 +9,7 @@ use std::time::SystemTime;
 pub use mp3rgain::apply::restore_timestamp;
 
 use crate::cli::options::{Options, OutputFormat};
-use crate::json_output::{FileStatus, JsonFileResult};
+use crate::json_output::JsonFileResult;
 
 /// One yellow `!` warning line for `filename` in text mode (never under
 /// `-q`), with an optional indented hint beneath it. Every per-file warning
@@ -17,7 +17,7 @@ use crate::json_output::{FileStatus, JsonFileResult};
 /// so the stderr shape stays uniform instead of each emitter re-spelling
 /// the format string.
 pub fn emit_file_warning(opts: &Options, filename: &str, msg: &str, hint: Option<&str>) {
-    if opts.output_format != OutputFormat::Text || opts.quiet {
+    if !opts.text_output() {
         return;
     }
     eprintln!(
@@ -66,12 +66,7 @@ pub fn report_unsupported_format(
     opts: &Options,
 ) -> JsonFileResult {
     emit_file_warning(opts, filename, &format!("{reason} - skipped"), None);
-    JsonFileResult {
-        file: file.display().to_string(),
-        status: Some(FileStatus::Skipped),
-        warning: Some(reason.to_string()),
-        ..Default::default()
-    }
+    JsonFileResult::skipped(file, reason)
 }
 
 /// Analyze one track with the selected analysis mode, driving the byte-level
@@ -177,7 +172,7 @@ pub fn emit_clipping_warning(
 /// `-i <n>` other than 0 for those (issue #375), so the first track is both
 /// the one analyzed and the one adjusted.
 pub fn warn_aac_multi_track(file: &Path, filename: &str, opts: &Options) {
-    if opts.output_format != OutputFormat::Text || opts.quiet {
+    if !opts.text_output() {
         return;
     }
     let track_count = mp4meta::count_audio_tracks(file);

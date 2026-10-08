@@ -6,7 +6,7 @@ use mp3rgain::{steps_to_db, Channel};
 use std::fmt::Write as _;
 use std::path::Path;
 
-use crate::cli::options::{Options, OutputFormat, StoredTagMode};
+use crate::cli::options::{Options, StoredTagMode};
 use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
 
@@ -36,37 +36,39 @@ fn process_apply_into(
         warn_aac_multi_track(file, filename, opts);
     }
 
-    // Dry run: don't touch the file. Headroom-based clipping prevention
-    // still needs to be reflected in the "would apply N steps" line, so
-    // drive the same clipping check through predict_apply.
-    //
     // Without -k the steps are never capped, and the clipping warning is
     // only emitted/recorded when neither -c (ignore) nor -q (quiet) is set.
-    // In that case the prediction feeds nothing the caller can observe, so
-    // skip it — a `--dry-run -c`/`-q` sweep then avoids a full read per file.
+    // In that case the headroom scan feeds nothing the caller can observe
+    // (issue #232).
+    let skip_clipping_check = !opts.prevent_clipping && (opts.ignore_clipping || opts.quiet);
+
+    // Dry run: don't touch the file. Headroom-based clipping prevention
+    // still needs to be reflected in the "would apply N steps" line, so
+    // drive the same clipping check through predict_apply, unless it is
+    // unobservable: a `--dry-run -c`/`-q` sweep then avoids a full read per
+    // file.
     if opts.dry_run {
-        let (actual_steps, warning_msg) =
-            if !opts.prevent_clipping && (opts.ignore_clipping || opts.quiet) {
-                (steps, None)
-            } else {
-                let mut apply_opts = ApplyOptions::new(steps);
-                apply_opts.prevent_clipping = opts.prevent_clipping;
-                apply_opts.wrap = opts.wrap_gain;
-                apply_opts.file_type = file_type;
-                match predict_apply(file, &apply_opts) {
-                    Ok(report) => {
-                        let warning = emit_clipping_warning(steps, &report, opts, filename, None);
-                        (report.actual_steps, warning)
-                    }
-                    Err(e) => {
-                        return Ok(JsonFileResult {
-                            dry_run: Some(true),
-                            ..report_file_error(file, filename, e, opts)
-                        });
-                    }
+        let (actual_steps, warning_msg) = if skip_clipping_check {
+            (steps, None)
+        } else {
+            let mut apply_opts = ApplyOptions::new(steps);
+            apply_opts.prevent_clipping = opts.prevent_clipping;
+            apply_opts.wrap = opts.wrap_gain;
+            apply_opts.file_type = file_type;
+            match predict_apply(file, &apply_opts) {
+                Ok(report) => {
+                    let warning = emit_clipping_warning(steps, &report, opts, filename, None);
+                    (report.actual_steps, warning)
                 }
-            };
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
+                Err(e) => {
+                    return Ok(JsonFileResult {
+                        dry_run: Some(true),
+                        ..report_file_error(file, filename, e, opts)
+                    });
+                }
+            }
+        };
+        if opts.text_output() {
             writeln!(
                 out,
                 "  {} [DRY RUN] {} (would apply {} steps)",
@@ -92,11 +94,7 @@ fn process_apply_into(
     apply_opts.preserve_timestamp = opts.preserve_timestamp;
     apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
     apply_opts.tag_layout = opts.tag_layout;
-    // Same reasoning as the dry-run branch above: without -k the steps are
-    // never capped, and under -c/-q the clipping warning is never emitted, so
-    // the headroom analyze inside check_clipping feeds nothing observable
-    // (issue #232).
-    apply_opts.skip_clipping_check = !opts.prevent_clipping && (opts.ignore_clipping || opts.quiet);
+    apply_opts.skip_clipping_check = skip_clipping_check;
     apply_opts.file_type = file_type;
 
     match apply_with_options(file, &apply_opts) {
@@ -105,7 +103,7 @@ fn process_apply_into(
             let sat_warn = emit_saturation_warning(&report, opts, filename);
             let warning_msg = combine_warnings(clip_warn, sat_warn);
 
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
+            if opts.text_output() {
                 if container.is_aac_bitstream() {
                     writeln!(
                         out,
@@ -218,7 +216,7 @@ fn process_apply_channel_into(
                 ..report_file_error(file, filename, e, opts)
             });
         }
-        if opts.output_format == OutputFormat::Text && !opts.quiet {
+        if opts.text_output() {
             writeln!(
                 out,
                 "  {} [DRY RUN] {} (would apply {} steps to {} channel)",
@@ -242,7 +240,7 @@ fn process_apply_channel_into(
         Ok(report) => {
             let warning_msg = emit_saturation_warning(&report, opts, filename);
 
-            if opts.output_format == OutputFormat::Text && !opts.quiet {
+            if opts.text_output() {
                 writeln!(
                     out,
                     "  {} {} ({} frames, {} channel)",

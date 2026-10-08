@@ -10,7 +10,7 @@
 //! counterparts in [`crate::mp4meta`] are lowercase.
 
 use crate::error::{Error, Result};
-use crate::frame::{read_u32_le, APE_FLAG_HEADER_PRESENT, APE_PREAMBLE};
+use crate::frame::{ape_tag_start, read_u32_le, APE_FLAG_HEADER_PRESENT, APE_PREAMBLE};
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -378,58 +378,42 @@ fn serialize_ape_tag(tag: &ApeTag) -> Vec<u8> {
     result
 }
 
-/// Remove existing APE tag from file data, returning the audio data portion
-fn remove_ape_tag(data: &[u8]) -> Vec<u8> {
-    let footer_start = match find_ape_footer(data) {
-        Some(pos) => pos,
-        None => return data.to_vec(),
+/// `data` split around its APEv2 tag: everything before the tag, and the
+/// ID3v1 block after it (empty when there is none). Data without a valid tag
+/// is all audio.
+fn split_ape_tag(data: &[u8]) -> (&[u8], &[u8]) {
+    let Some(footer_start) = find_ape_footer(data) else {
+        return (data, &[]);
     };
-
-    let tag_size = read_u32_le(&data[footer_start + 12..]) as usize;
-    let flags = read_u32_le(&data[footer_start + 20..]);
-    let has_header = (flags & APE_FLAG_HEADER_PRESENT) != 0;
-    let header_size = if has_header { 32 } else { 0 };
-
-    // A corrupt tag_size larger than the data before the footer would make
-    // audio_end underflow past the start of the file; treat it as "no valid
-    // tag" (mirroring read_ape_tag) instead of discarding the audio stream.
-    if footer_start + 32 < tag_size + header_size {
-        return data.to_vec();
-    }
-    let audio_end = footer_start + 32 - tag_size - header_size;
-
-    let id3v1_start = footer_start + 32;
-    let has_id3v1 = data.len() > id3v1_start + 3 && &data[id3v1_start..id3v1_start + 3] == b"TAG";
-
-    if has_id3v1 {
-        let mut result = data[..audio_end].to_vec();
-        result.extend_from_slice(&data[id3v1_start..]);
-        result
-    } else {
-        data[..audio_end].to_vec()
-    }
+    // A corrupt tag_size is treated as "no valid tag" (mirroring
+    // read_ape_tag) instead of discarding the audio stream.
+    let Some(audio_end) = ape_tag_start(&data[footer_start..], footer_start) else {
+        return (data, &[]);
+    };
+    // find_ape_footer only matches at EOF-32, or at EOF-160 in front of an
+    // ID3v1 block, so what follows the footer is nothing or that block.
+    (&data[..audio_end], &data[footer_start + 32..])
 }
 
 /// Replace (or remove, when `tag` is empty) the APEv2 tag in file data,
-/// keeping a trailing ID3v1 tag after the APE tag.
+/// keeping a trailing ID3v1 tag after the APE tag. The result is built in one
+/// allocation of its final size: the input is a whole file.
 pub(crate) fn replace_ape_tag(data: &[u8], tag: &ApeTag) -> Vec<u8> {
-    let mut audio_data = remove_ape_tag(data);
-
-    let has_id3v1 = audio_data.len() >= 128
-        && &audio_data[audio_data.len() - 128..audio_data.len() - 125] == b"TAG";
-
-    let tag_data = serialize_ape_tag(tag);
-
-    if has_id3v1 {
-        let id3v1 = audio_data[audio_data.len() - 128..].to_vec();
-        audio_data.truncate(audio_data.len() - 128);
-        audio_data.extend_from_slice(&tag_data);
-        audio_data.extend_from_slice(&id3v1);
-    } else {
-        audio_data.extend_from_slice(&tag_data);
+    let (mut audio, mut id3v1) = split_ape_tag(data);
+    // A bare ID3v1 block with no APE tag in front of it stays last too.
+    if id3v1.is_empty()
+        && audio.len() >= 128
+        && &audio[audio.len() - 128..audio.len() - 125] == b"TAG"
+    {
+        (audio, id3v1) = audio.split_at(audio.len() - 128);
     }
 
-    audio_data
+    let tag_data = serialize_ape_tag(tag);
+    let mut result = Vec::with_capacity(audio.len() + tag_data.len() + id3v1.len());
+    result.extend_from_slice(audio);
+    result.extend_from_slice(&tag_data);
+    result.extend_from_slice(id3v1);
+    result
 }
 
 /// Rewrite only the trailing metadata of `file_path` in place: parse the
@@ -460,22 +444,16 @@ fn rewrite_ape_tail(file_path: &Path, mutate: impl FnOnce(&mut ApeTag)) -> Resul
     // Defaults: no tag, no ID3v1 — the new tag is appended at EOF.
     let mut audio_end = file_len;
     let mut tag = ApeTag::new();
+    let mut had_tag = false;
     let mut id3v1: Vec<u8> = Vec::new();
 
     if let Some(footer_in_probe) = find_ape_footer(&probe) {
-        let tag_size = read_u32_le(&probe[footer_in_probe + 12..]) as usize;
-        let flags = read_u32_le(&probe[footer_in_probe + 20..]);
-        let header_size = if (flags & APE_FLAG_HEADER_PRESENT) != 0 {
-            32
-        } else {
-            0
-        };
         let footer_start = file_len - (probe.len() - footer_in_probe);
         // A corrupt tag_size larger than what precedes the footer is treated
         // as "no valid tag" (mirroring remove_ape_tag): keep the bytes as
         // audio and fall through to the bare-ID3v1 handling below.
-        if footer_start + 32 >= tag_size + header_size {
-            audio_end = footer_start + 32 - tag_size - header_size;
+        if let Some(start) = ape_tag_start(&probe[footer_in_probe..], footer_start) {
+            audio_end = start;
             // find_ape_footer only matches EOF-32 (no ID3v1) or EOF-160
             // (ID3v1 after the footer).
             if footer_in_probe + 160 == probe.len() {
@@ -484,6 +462,7 @@ fn rewrite_ape_tail(file_path: &Path, mutate: impl FnOnce(&mut ApeTag)) -> Resul
             // Parse the existing items from the metadata region only.
             let meta = read_tail(&mut file, file_path, file_len, file_len - audio_end)?;
             tag = read_ape_tag(&meta).unwrap_or_default();
+            had_tag = true;
         }
     }
     if audio_end == file_len
@@ -497,6 +476,11 @@ fn rewrite_ape_tail(file_path: &Path, mutate: impl FnOnce(&mut ApeTag)) -> Resul
     }
 
     mutate(&mut tag);
+    // No tag before and none after: the tail would be rewritten byte for byte,
+    // so leave the file (and its mtime) alone.
+    if !had_tag && tag.items.is_empty() {
+        return Ok(());
+    }
     let tag_bytes = serialize_ape_tag(&tag); // empty tag serializes to nothing
 
     file.seek(SeekFrom::Start(audio_end as u64))

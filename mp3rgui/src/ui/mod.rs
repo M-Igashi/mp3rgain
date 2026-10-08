@@ -215,6 +215,25 @@ fn handle_selection_shortcuts(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     }
 }
 
+/// Add Files: pick audio files and load them, shared by the toolbar and the
+/// File menu.
+fn pick_files(app: &mut Mp3rgainApp) {
+    if let Some(paths) = rfd::FileDialog::new()
+        .add_filter("Audio files", mp3rgain::SUPPORTED_EXTENSIONS)
+        .pick_files()
+    {
+        app.add_files(paths);
+    }
+}
+
+/// Add Folder: pick a folder and load its audio files, with or without
+/// subfolders.
+fn pick_folder(app: &mut Mp3rgainApp, recursive: bool) {
+    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+        app.add_folder(folder, recursive);
+    }
+}
+
 fn handle_dropped_files(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     let dropped: Vec<std::path::PathBuf> = ctx.input(|i| {
         i.raw
