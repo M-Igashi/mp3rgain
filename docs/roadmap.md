@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current status: v3.9.2 (2026-10-05)
+## Current status: v3.10.0 (2026-10-08)
 
 mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writes standard `REPLAYGAIN_*` tags, and can bake the correction into the bitstream losslessly. For MP3 it is a modern drop-in replacement for mp3gain. For AAC it is the only actively maintained command-line tool that does this: aacgain has been abandoned since about 2009, and foobar2000, the reference-grade ReplayGain suite, offers a comparable scalefactor-based AAC rewrite ("Apply ReplayGain to file content") but only as a Windows GUI with no undo.
 
@@ -17,6 +17,7 @@ What ships today:
 
 ## Open
 
+- [ ] `-l` on a joint-stereo MP3 changes both channels, where mp3gain refuses (#393)
 - [ ] Renew the Developer ID certificate before 2027-02-01 (#355)
 - [ ] Upgrade mp3rgui's egui/eframe stack, which also retires the quick-xml audit ignores in `ci.yml`
 - [ ] Homebrew core formula (#8); today it is in the `M-Igashi/tap` tap
@@ -37,15 +38,28 @@ What ships today:
 
 ## Unreleased
 
-No behaviour change: nothing under `src/` or `mp3rgui/src/` has changed since v3.9.2. The GUI's dependency set has.
+Nothing yet.
 
+## Release history
+
+### v3.10.0 - mp3gain Parity: -e, -g Tags & CRC Frames
+
+Behaviour changes: `-e` on its own no longer modifies files, `-g` now updates stored ReplayGain tags, `-i <n>` other than 0 is analysis-only, and RG1 loudness is reported 24.18 dB higher than before (gains and tags are unchanged).
+
+- [x] `-e` on its own only analyzes and prints no album summary, as in mp3gain. It used to apply track gain like `-r`. `-r -e`, `-a -e` and `-e --tags-only` keep their meaning, and `-e -g` / `-e -l` now apply the `-g` / `-l` gain (#378)
+- [x] `-g` shifts the `REPLAYGAIN_*` values and `MP3GAIN_ALBUM_MINMAX` already in the file by the gain it applied, in every container, as mp3gain does. They used to be left describing the old audio, so a tag-aware player landed off by the `-g` amount. `-l` still leaves them alone, as mp3gain does (#377)
+- [x] CRC-protected MP3s (`lame -p`) keep valid frame CRCs after a gain change, and their LAME Info frame is no longer gained as audio, which broke gapless playback in mpg123. Output is byte-identical to mp3gain's (#374)
+- [x] `-s s` writes no undo or ReplayGain tags on M4A under `-r`/`-a`, as it already did on MP3 and raw ADTS (#376)
+- [x] `-i <n>` other than 0 is analysis-only. On a multi-track MP4 it measured track N but applied the gain to track 0, which could push that track 30 dB into clipping without a warning. Combining it with an option that writes is now an error (#375)
+- [x] A file listed more than once in one run is processed once, whatever `-j` says; in parallel one of the two changes was lost. Symlinks are written through to their target instead of being replaced by a modified copy, in the CLI and the GUI. Found by @cfgnunes (#370)
+- [x] ReplayGain 1.0 loudness is reported on the 89 dB scale everywhere (loudness + gain = target), so a fresh analysis and a `-s R` run print the same value. Fresh RG1 values in the text output and `-o json` are 24.18 dB higher than before; for library users `loudness_db()` changes meaning in RG1 (#379)
+- [x] The PPA is built from the tagged commit rather than whatever `master` held when the PPA run started (#380), `scripts/build-ppa.sh` uploads each package to its own PPA (#381), and the mp3rgui Linux tarballs get `.sha256` files like every other asset (#382)
+- [x] crates.io publishing uses Trusted Publishing instead of a long-lived token
 - [x] mp3rgui updates webbrowser to 1.2.4 (RUSTSEC-2026-0257) and wayland-scanner to 0.31.11, which brings quick-xml 0.41 (RUSTSEC-2026-0194 / 0195). A quick-xml 0.30 copy reached only through eframe 0.31's accessibility stack stays until the egui upgrade, with an audit ignore in `ci.yml`
 - [x] mp3rgui no longer enables `egui_extras`' `all_loaders` feature, which dropped 32 crates (ureq and rustls among them) from its lockfile
 - [x] CI: release and PPA secrets are scoped to GitHub environments, checkouts that do not push drop their credentials, the AUR host key is pinned, and Dependabot and `cargo audit` cover `mp3rgui/` as well. The download stats archive is split into one file per month
 - [x] Removed the one-off `ppa-ftp-probe.yml` workflow and the `[package.metadata.deb]` cargo-deb section that no workflow used
 - [x] Documentation corrected against the code
-
-## Release history
 
 ### v3.9.2 - M4A Tags Visible in Mp3tag & GUI Target in LUFS Modes
 

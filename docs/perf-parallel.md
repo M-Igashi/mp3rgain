@@ -4,7 +4,7 @@ mp3rgain 2.4 introduced multi-file parallelism for ReplayGain analysis, addressi
 
 ## TL;DR
 
-Current behaviour (v3.9.2):
+Current behaviour (v3.10.0):
 
 - **Parallel by default.** Every per-file command runs on `std::thread::available_parallelism()` rayon worker threads: the default info scan, `-r` and `-a` since 2.4, and apply, undo and the tag commands since 2.5.0 ([#134]).
 - **`-j 1` is the legacy fallback** for behavioural parity with mp3gain or for debugging. `-j 0` and `MP3RGAIN_THREADS=0` mean "auto".

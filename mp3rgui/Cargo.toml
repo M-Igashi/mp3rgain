@@ -1,6 +1,6 @@
 [package]
 name = "mp3rgui"
-version = "3.9.2"
+version = "3.10.0"
 edition = "2021"
 authors = ["Jesse Pinkman <M-Igashi@users.noreply.github.com>"]
 description = "GUI for mp3rgain - lossless MP3 and AAC volume adjustment using ReplayGain"

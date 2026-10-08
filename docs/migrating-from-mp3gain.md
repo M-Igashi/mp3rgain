@@ -186,7 +186,7 @@ Or download a release binary. Asset names carry the version, so pin one:
 
 ```yaml
 - run: |
-    curl -fsSL https://github.com/M-Igashi/mp3rgain/releases/download/v3.9.2/mp3rgain-v3.9.2-linux-x86_64.tar.gz \
+    curl -fsSL https://github.com/M-Igashi/mp3rgain/releases/download/v3.10.0/mp3rgain-v3.10.0-linux-x86_64.tar.gz \
       | sudo tar -xz -C /usr/local/bin mp3rgain
     mp3rgain -r -k music/*.mp3
 ```
