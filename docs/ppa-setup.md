@@ -241,7 +241,7 @@ PPA upload is **automatic**. When you push a release tag:
 3. Source packages are built, signed, and uploaded to Launchpad
 4. Launchpad builds .deb packages for amd64 and arm64
 
-The PPA workflow runs on `master` as it is when it starts, not on the tagged commit, and takes the version from `Cargo.toml` there.
+After a release, the PPA workflow checks out the commit the Release workflow built (the tagged commit), so the version comes from that commit's `Cargo.toml` and the orig tarball is the tagged tree. Commits pushed to `master` in the meantime, such as the AUR update the Release workflow pushes itself, are not included. A manual run builds `master` as it is when the run starts.
 
 To manually trigger: Actions → PPA Upload → Run workflow. The inputs choose the package (`all`, `cli` or `gui`), the PPA revision, the two target PPAs and the target series (default `resolute`).
 
