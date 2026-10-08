@@ -121,11 +121,14 @@ impl Options {
     /// trusted when `-s r` forces recalculation, a `-d`/`-m` modifier shifts
     /// the target, or a BS.1770 mode is selected (`REPLAYGAIN_ALGORITHM`
     /// can't distinguish the RG2 and R128 targets), so those force a rescan.
+    /// The tags also describe the first audio track only, so they are not a
+    /// result for `-i <n>` with n other than 0 (issue #375).
     pub fn stored_tags_usable(&self) -> bool {
         self.use_stored_tags
             && !self.force_recalc
             && self.analysis_mode == AnalysisMode::Rg1
             && self.target_offset_db() == 0.0
+            && self.track_index.unwrap_or(0) == 0
     }
 
     /// The TSV `Max Amplitude` column for a normalized peak. RG1 keeps

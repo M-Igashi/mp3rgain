@@ -418,6 +418,31 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
         }
     }
 
+    // -i picks the track the analysis reads, but the gain apply, the undo
+    // atom and the ReplayGain tags all belong to the first audio track, which
+    // is the one players apply file-level tags to. A modifying run with -i N
+    // would measure one track and change another (issue #375). Checked even
+    // with -n, whose report would describe that same mismatched apply.
+    if let Some(index) = opts.track_index.filter(|&i| i != 0) {
+        let modifying = [
+            (opts.track_gain, "-r"),
+            (opts.album_gain, "-a"),
+            (opts.skip_album, "-e"),
+            (opts.gain_steps.is_some(), "-g"),
+            (opts.channel_gain.is_some(), "-l"),
+            (opts.undo, "-u"),
+            (opts.stored_tag_mode == StoredTagMode::Delete, "-s d"),
+            (opts.tags_only, "--tags-only"),
+        ];
+        if let Some((_, flag)) = modifying.iter().find(|(set, _)| *set) {
+            anyhow::bail!(
+                "-i {} cannot be combined with {}: -i <n> other than 0 is only supported for analysis; gain and tags always apply to the first audio track",
+                index,
+                flag
+            );
+        }
+    }
+
     // cmd.exe and PowerShell do not expand `*.mp3` for native programs.
     #[cfg(windows)]
     {
@@ -775,6 +800,49 @@ mod tests {
     fn track_index_attached() {
         let opts = parse_args(&args(&["-i1", "song.m4a"])).unwrap();
         assert_eq!(opts.track_index, Some(1));
+    }
+
+    #[test]
+    fn track_index_other_than_zero_is_analysis_only() {
+        // Issue #375: -i N measured track N while the apply, undo atom and
+        // tags went to track 0, so every run that writes is rejected, -n too.
+        for modifying in [
+            vec!["-r"],
+            vec!["-a"],
+            vec!["-e"],
+            vec!["-g", "2"],
+            vec!["-l", "0", "2"],
+            vec!["-u"],
+            vec!["-s", "d"],
+            vec!["-r", "--tags-only"],
+            vec!["-r", "-n"],
+        ] {
+            let mut argv = vec!["-i", "1"];
+            argv.extend_from_slice(&modifying);
+            argv.push("a.m4a");
+            let err = match parse_args(&args(&argv)) {
+                Err(e) => e.to_string(),
+                Ok(_) => panic!("{argv:?} should be rejected"),
+            };
+            assert!(
+                err.contains("only supported for analysis"),
+                "{argv:?}: {err}"
+            );
+            // -i 0 is the default track, so the same run stays valid.
+            argv[1] = "0";
+            assert!(parse_args(&args(&argv)).is_ok(), "{argv:?}");
+        }
+        for analysis in [vec![], vec!["-x"], vec!["-s", "c"], vec!["-o", "json"]] {
+            let mut argv = vec!["-i", "1"];
+            argv.extend_from_slice(&analysis);
+            argv.push("a.m4a");
+            assert!(parse_args(&args(&argv)).is_ok(), "{argv:?}");
+        }
+        // Stored tags describe the first track, so they are not track 1's.
+        let opts = parse_args(&args(&["-s", "R", "-i", "1", "a.m4a"])).unwrap();
+        assert!(!opts.stored_tags_usable());
+        let opts = parse_args(&args(&["-s", "R", "-i", "0", "-r", "a.m4a"])).unwrap();
+        assert!(opts.stored_tags_usable());
     }
 
     #[test]

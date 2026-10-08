@@ -46,7 +46,8 @@ pub fn print_usage() {
     println!("                listener can still turn ReplayGain off in their player.");
     println!("                Needs -r/-a; no undo tag is written (nothing to undo)");
     println!("    -e          Skip album analysis (even with multiple files)");
-    println!("    -i <n>      Specify which audio track to process (default: 0)");
+    println!("    -i <n>      Audio track of a multi-track MP4 to analyze (default: 0).");
+    println!("                Analysis only: gain and tags apply to the first track");
     println!("    -u          Undo gain changes (restore from APEv2 tag)");
     println!("    -x          Only find max amplitude of file");
     println!("    -s <mode>   Stored tag handling:");
