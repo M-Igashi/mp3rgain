@@ -1,7 +1,7 @@
 .\" mp3rgain - Lossless MP3 volume adjustment
 .\" Copyright (c) 2025 M-Igashi
 .\" Licensed under MIT License
-.TH MP3RGAIN 1 "October 2026" "mp3rgain 3.9.2" "User Commands"
+.TH MP3RGAIN 1 "October 8, 2026" "mp3rgain 3.9.2" "User Commands"
 .SH NAME
 mp3rgain \- lossless MP3/AAC volume adjustment (modern mp3gain replacement)
 .SH SYNOPSIS
@@ -14,57 +14,95 @@ adjusts MP3 and AAC volume without re-encoding by modifying the
 field in each frame.
 This preserves audio quality while achieving permanent volume changes.
 .PP
-All changes are lossless and reversible. For MP3, undo data is stored in APEv2 tags.
+Changes are lossless and reversible. For MP3, undo data is stored in APEv2 tags.
 For AAC in an MP4/M4A container, it is stored in iTunes freeform metadata tags.
 For a raw ADTS
 .I .aac
 stream, which has no container to hold them, it is stored in an ID3v2 tag.
 .PP
 .B mp3rgain
-is a modern, memory-safe replacement for the classic
+is a replacement for the classic
 .BR mp3gain (1)
-tool, written in Rust. It provides full command-line compatibility with the
-original mp3gain while adding lossless AAC gain adjustment and ReplayGain analysis.
+tool, written in Rust. It accepts mp3gain's options and adds lossless AAC gain
+adjustment, BS.1770 loudness analysis and recursive directory processing.
+See
+.B COMPATIBILITY
+for the few behaviours that differ.
+.PP
+Without an action option,
+.B mp3rgain
+analyzes each file and prints the recommended track and album gain without
+modifying anything.
+When several actions are given, only one runs, in this order of precedence:
+.BR \-x ,
+.BR "\-s d" ,
+.BR "\-s c" ,
+.BR \-u ,
+.B \-a
+(unless
+.BR \-e ),
+.B \-r
+or
+.BR \-e ,
+.BR \-l ,
+.BR \-g .
+For example,
+.B \-r\ \-g\ 2
+applies track gain and ignores
+.BR \-g .
 .SH OPTIONS
 .SS "Gain Options"
 .TP
 .BI \-g " i"
 Apply gain of
 .I i
-steps. Each step equals 1.5 dB (fixed by MP3 specification).
+steps without analysis. Each step equals 1.5 dB (fixed by the MP3
+specification).
 Positive values increase volume, negative values decrease it.
+Existing
+.B REPLAYGAIN_*
+tags are left unchanged, so they no longer describe the audio afterwards.
 .TP
 .BI \-d " n"
 Modify the suggested gain by
 .I n
-dB. Applied together with
+dB. With
 .B \-r
 or
 .B \-a
-to shift the target relative to the 89 dB reference level.
+it shifts the target relative to the reference level (89 dB, or the
+.B \-\-rg2
+/
+.B \-\-r128
+target), rounded to whole 1.5 dB steps; with
+.B \-\-tags\-only
+it is applied exactly. Without an action it shifts the recommendation the
+analysis prints.
 .TP
 .BI \-l " channel gain"
-Apply gain to a specific channel only.
+Apply gain to one channel only.
 .I channel
 is 0 for left or 1 for right.
 .I gain
-is the number of steps.
+is the number of steps. MP3 only; on AAC files this is an error.
 .TP
 .BI \-m " i"
-Modify suggested gain by integer
+Modify the suggested gain by integer
 .I i
-steps. Used with
+steps, in addition to any
+.BR \-d .
+Used with
 .B \-r
 or
 .BR \-a .
 .SS "ReplayGain Analysis"
 .TP
 .B \-r
-Analyze and apply Track gain using the ReplayGain 1.0 algorithm.
-Each file is normalized individually to the 89 dB reference level.
+Analyze and apply track gain. Each file is normalized individually to the
+reference level, 89 dB with the default ReplayGain 1.0 analysis.
 .TP
 .B \-a
-Analyze and apply Album gain using the ReplayGain 1.0 algorithm.
+Analyze and apply album gain.
 All files given on the command line are treated as one album and
 normalized together, which is the same rule as
 .BR mp3gain (1)'s
@@ -79,11 +117,12 @@ to split one invocation into several albums instead.
 With
 .BR \-a ,
 choose what counts as one album instead of pooling every file into one, so
-a whole library can be album\-tagged in a single run.
+a whole library can be album\-tagged in a single run. Cannot be combined with
+.BR \-e .
 .RS
 .TP
 .B dir
-One album per parent directory, as given on the command line.
+One album per parent directory.
 .B \-\-per\-directory
 is an alias for this. Works on untagged libraries, but a release whose discs
 live in subdirectories is scanned as one album per disc.
@@ -91,8 +130,7 @@ live in subdirectories is scanned as one album per disc.
 .B tag
 One album per release, keyed on MUSICBRAINZ_ALBUMID when present and
 otherwise on ALBUMARTIST (or ARTIST) plus ALBUM. Handles discs in
-subdirectories and a tree of mixed depth in one pass, which is what
-foobar2000's "Scan as albums (by tags)", beets and Picard all do. Files
+subdirectories and a tree of mixed depth in one pass. Files
 carrying no ALBUM tag fall back to directory grouping and are reported
 rather than pooled together. When two releases share one artist and album
 string, a repeated track number inside the group is reported with the
@@ -157,20 +195,26 @@ both group at
 .IR Artist/Album .
 When directory arguments overlap, the deepest one owns the file.
 Mutually exclusive with
-.BR \-\-album\-by .
+.B \-\-album\-by
+and
+.BR \-\-per\-directory .
 .TP
 .B \-\-rg2
 Measure loudness with the ReplayGain 2.0 algorithm (ITU-R BS.1770
 integrated loudness, gated) against the \-18 LUFS reference instead of
 the default ReplayGain 1.0 algorithm. The reference corresponds to the
 same perceived level as the classic 89 dB SPL reference; only the
-measurement is different. Combines with
+measurement is different. The gain applied to the audio is still rounded to
+whole 1.5 dB steps. Combines with
 .BR \-r ,
 .BR \-a ,
+.BR \-e ,
 .BR \-d ,
-.B \-m
+.BR \-m ,
+.BR \-k ,
+.B \-\-true\-peak
 and
-.BR \-k .
+.BR \-\-tags\-only .
 Mutually exclusive with
 .BR \-\-r128 .
 .TP
@@ -202,7 +246,7 @@ work. The frame-level
 fields are not modified, so a listener can still turn ReplayGain off in their player.
 The tag holds the full gain rather than a residual, and no
 \fBMP3GAIN_UNDO\fR, \fBMP3GAIN_MINMAX\fR or \fBMP3GAIN_ALBUM_MINMAX\fR is written since
-there is no gain change to undo or describe.
+there is no gain change to undo or describe; an existing undo tag is kept.
 Requires
 .BR \-r ,
 .B \-a
@@ -226,7 +270,18 @@ caps the written value at the file's headroom so a player applying the tag canno
 .TP
 .B \-e
 Skip album analysis even when processing multiple files.
-Apply track gain only.
+On its own, or with
+.BR \-a ,
+it analyzes and applies track gain like
+.BR \-r .
+(In
+.BR mp3gain (1),
+.B \-e
+without
+.B \-r
+or
+.B \-a
+only analyzes.)
 .TP
 .B \-\-skip\-errors
 Continue album analysis
@@ -235,11 +290,22 @@ past files that fail to read instead of aborting. Failed files are
 reported and excluded from the album gain calculation.
 .TP
 .BI \-i " n"
-Specify which audio track to process in multi-track files (default: 0).
+Which audio track of a multi-track MP4 file to analyze (default: 0).
+The gain itself is always applied to the first audio track, with a warning
+when the file has more than one.
 .SS "Undo and Tag Operations"
 .TP
 .B \-u
-Undo gain changes by restoring original values from APEv2 tags.
+Undo gain changes using the stored undo tag (APEv2 or ID3v2 for MP3, an
+iTunes freeform atom for AAC in MP4, ID3v2 for raw ADTS). The
+.B REPLAYGAIN_*
+values are removed as well, since they described the adjusted audio.
+Every audio frame is restored exactly, except frames whose
+.I global_gain
+was clamped at 0 or 255. The file as a whole is byte-identical to the original
+only when no ID3v2 tag was written: with the default MP3 layout, an existing
+ID3v2 tag stays rewritten as ID3v2.4 and a file that had none keeps an empty
+ID3v2 header. A file that was never adjusted is an error.
 .TP
 .BI \-s " mode"
 Stored tag handling mode:
@@ -249,25 +315,33 @@ Stored tag handling mode:
 Check/show stored tag information.
 .TP
 .B d
-Delete stored tag information. Combined with \fB\-u\fR, the frame-level gain is undone first, then the remaining tags are deleted; deleting alone would destroy the undo information.
+Delete stored tag information, the undo tag included. Combined with \fB\-u\fR, the frame-level gain is undone first, then the remaining tags are deleted; deleting alone would destroy the undo information.
 .TP
 .B s
-Skip (ignore) stored tag information.
+Skip stored tags: write no undo or ReplayGain tags, so an MP3 change cannot be undone. For AAC files under \fB\-r\fR/\fB\-a\fR this mode is ignored and the tags are written.
 .TP
 .B r
-Force recalculation, ignoring stored tags (the default; kept for mp3gain compatibility).
+Force recalculation, ignoring stored tags (the default; kept for mp3gain compatibility). Overrides \fB\-s R\fR.
 .TP
 .B R
-Reuse stored ReplayGain tags with \fB\-r\fR/\fB\-a\fR instead of re-analyzing, rescanning only files whose tags are missing. This is mp3gain's default behavior. Album mode requires a consistent set of album tags on every file; otherwise the whole album is rescanned. Ignored with \fB\-s r\fR, \fB\-d\fR/\fB\-m\fR modifiers, or \fB\-\-rg2\fR/\fB\-\-r128\fR.
+Reuse stored ReplayGain tags with \fB\-r\fR/\fB\-a\fR instead of re-analyzing, rescanning only files whose tags are missing. This is mp3gain's default behavior. In album mode, one file with missing album tags, or album tags that disagree, rescans the whole album. Ignored with \fB\-s r\fR, \fB\-d\fR/\fB\-m\fR, \fB\-\-rg2\fR/\fB\-\-r128\fR, or when a stored tag came from a BS.1770 analysis.
 .TP
 .B i
-Put every tag in ID3v2 TXXX frames, \fBMP3GAIN_UNDO\fR and \fBMP3GAIN_MINMAX\fR
-included (\fBMP3GAIN_ALBUM_MINMAX\fR stays in APEv2). Without \fBi\fR or \fBa\fR,
+Put every MP3 tag in ID3v2 TXXX frames, \fBMP3GAIN_UNDO\fR and \fBMP3GAIN_MINMAX\fR
+included (\fBMP3GAIN_ALBUM_MINMAX\fR exists only in APEv2, so it is not written).
+Without \fBi\fR or \fBa\fR,
 MP3 tags are split since 3.2.0: \fBREPLAYGAIN_*\fR in ID3v2, \fBMP3GAIN_*\fR in APEv2.
 .TP
 .B a
-Put every tag in APEv2, which is mp3gain's layout and was the default before 3.2.0.
+Put every MP3 tag in APEv2, which is mp3gain's layout and was the default before 3.2.0.
 .RE
+.IP
+.B i
+and
+.B a
+affect MP3 only: AAC in MP4 always uses freeform atoms and raw ADTS always
+uses ID3v2.
+If both are given, the last one wins.
 .SS "Analysis Options"
 .TP
 .B \-x
@@ -276,17 +350,32 @@ Does not apply any changes.
 .SS "Behavior Options"
 .TP
 .B \-p
-Preserve original file timestamp after modification.
+Preserve the original file modification time after writing.
 .TP
 .B \-c
-Ignore clipping warnings.
+Do not print clipping warnings.
 .TP
 .B \-k
-Prevent clipping by automatically limiting gain.
+Prevent clipping by automatically limiting gain. With
+.BR \-r ,
+.B \-a
+or
+.B \-e
+the limit comes from the decoded peak and is rounded down to whole steps, so a
+file that already clips can end up attenuated. With
+.B \-g
+it only stops any frame's
+.I global_gain
+from exceeding 255; the decoded peak is not measured.
+Without
+.BR \-k ,
+a gain that would clip is applied anyway and a warning is printed;
+.B mp3rgain
+never prompts.
 .TP
 .B \-w
 Wrap gain values around instead of clamping when they exceed the
-valid range (0-255).
+valid range (0\-255). Disables the clipping check.
 .TP
 .B \-t
 Use a temporary file for writing. Accepted for compatibility and has no effect:
@@ -299,10 +388,19 @@ Assume MPEG 2 Layer III. Accepted for compatibility but has no effect.
 Quiet mode. Suppress most output.
 .TP
 .B \-R
-Process directories recursively. Finds all MP3, M4A, AAC, and MP4 files.
+Process directories recursively, collecting files with the extensions
+.IR .mp3 ,
+.IR .m4a ,
+.I .aac
+and
+.I .mp4
+(case-insensitive). Symbolic links to directories are not followed. Without
+.BR \-R ,
+a directory argument is not expanded.
 .TP
 \fB\-j\fR \fIn\fR, \fB\-\-threads\fR \fIn\fR
-Number of worker threads for ReplayGain analysis. Default is the number of
+Number of worker threads for the per-file work: analysis, gain application,
+undo and tag writes. Default is the number of
 available CPUs; 0 also means auto, and 1 forces the legacy serial path.
 See also the
 .B MP3RGAIN_THREADS
@@ -326,8 +424,12 @@ Dry-run mode. Show what would be done without making changes.
 Output format:
 .BR text " (default),"
 .BR json ", or"
-.BR tsv " (tab-separated values)."
-.BR tsv
+.BR tsv " (tab-separated values; " db " is an alias)."
+.B \-o
+not followed by one of these words selects
+.BR tsv ,
+as in mp3gain.
+.B tsv
 prints the mp3gain-compatible header and one row per file, with the
 .B File
 column holding the path as given on the command line. The rows are also
@@ -339,16 +441,23 @@ column uses mp3gain's 16-bit sample scale (peak multiplied by 32768) in the
 default ReplayGain 1.0 mode, and the ReplayGain float peak (the value written
 to REPLAYGAIN_*_PEAK) under
 .BR \-\-rg2 " and " \-\-r128 .
+Without an action,
+.B json
+reports frame statistics only (frame count, MPEG version, channel mode and the
+.I global_gain
+range), not the loudness analysis.
 .TP
 .BR \-v ", " \-\-version
-Show version information and exit.
+Show version information and exit. (\fB\-v\fR is not verbose mode.)
 .TP
 .BR \-h ", " \-\-help
 Show help message and exit.
 .SH EXAMPLES
 .TP
 .B mp3rgain song.mp3
-Show file information (gain values, amplitude).
+Show the recommended gain, peak and
+.I global_gain
+range without modifying the file.
 .TP
 .B mp3rgain \-g 2 song.mp3
 Apply +2 steps (+3.0 dB).
@@ -360,7 +469,10 @@ Apply \-3 steps (\-4.5 dB).
 Analyze and apply track gain (ReplayGain).
 .TP
 .B mp3rgain \-a *.mp3
-Analyze and apply album gain to all MP3 files.
+Analyze and apply album gain, treating all the files as one album.
+.TP
+.B mp3rgain \-a \-\-album\-by=tag \-R /music
+Album gain for a whole library, one album per release.
 .TP
 .B mp3rgain \-a \-\-tags\-only *.mp3
 Write album and track ReplayGain tags without modifying the audio.
@@ -369,18 +481,19 @@ Write album and track ReplayGain tags without modifying the audio.
 Undo previous gain changes.
 .TP
 .B mp3rgain \-k \-g 5 song.mp3
-Apply gain with automatic clipping prevention.
+Apply gain, limited so that no frame's global_gain exceeds 255.
 .TP
 .B mp3rgain \-n \-r *.mp3
 Preview track gain changes without modifying files.
 .TP
-.B mp3rgain \-o json song.mp3
-Output analysis results in JSON format.
+.B mp3rgain \-r \-n \-o json song.mp3
+Report the track gain that would be applied, in JSON.
 .TP
 .B mp3rgain \-R /path/to/music
-Process all audio files in directory recursively.
+Analyze all audio files in a directory tree.
 .SH GAIN VALUES
-Each gain step corresponds to 1.5 dB, which is fixed by the MP3 specification.
+Each gain step corresponds to 1.5 dB (20\(mulog10(2)/4 = 1.5051 dB), which is
+fixed by the MP3 specification.
 The
 .I global_gain
 field has a valid range of 0\-255, limiting the effective gain adjustment.
@@ -397,6 +510,7 @@ Steps  dB
 .fi
 .RE
 .SH REPLAYGAIN
+By default
 .B mp3rgain
 implements the original ReplayGain 1.0 algorithm:
 .IP \(bu 2
@@ -408,9 +522,13 @@ RMS calculation in 50ms windows
 .IP \(bu 2
 89 dB reference level
 .PP
-This provides compatibility with the original mp3gain. Note that loudness values
-will differ from tools using EBU R128/LUFS-based analysis (such as foobar2000's
-ReplayGain scanner or ffmpeg's loudnorm filter), which use a \-23 LUFS reference.
+This gives the same values as the original mp3gain. Tools based on ITU-R
+BS.1770 (rsgain, loudgain, foobar2000's scanner, ffmpeg's loudnorm filter)
+measure loudness differently, so their values differ unless
+.B \-\-rg2
+or
+.B \-\-r128
+is used.
 .PP
 On AAC,
 .B mp3rgain
@@ -426,25 +544,30 @@ for the measurements.
 .SH SUPPORTED FORMATS
 .TP
 .B MP3
-Full support for reading, analyzing, and modifying gain.
+MPEG-1, MPEG-2 and MPEG-2.5 Layer III: reading, analyzing, and modifying gain.
 .TP
 .B AAC/M4A/MP4
-Full lossless bitstream gain adjustment and undo. HE-AAC/SBR supported (base layer).
-The audio track of a video MP4 is adjusted as well.
+Lossless bitstream gain adjustment and undo, including the audio track of a
+video MP4. For HE-AAC only the AAC core is adjusted and the SBR data is left as
+it is; this case is untested.
 .TP
 .B AAC (raw ADTS, .aac)
-Full lossless bitstream gain adjustment and undo, as for AAC in MP4. Undo and
+Lossless bitstream gain adjustment and undo, as for AAC in MP4. Undo and
 .B REPLAYGAIN_*
-go into an ID3v2 tag, since a raw stream has no container for them, so
-.BR \-s " a and " \-s " i do not apply."
+go into an ID3v2 tag, since a raw stream has no container for them.
 .TP
 .B ALAC, DRM-protected M4P
 Recognized but not adjustable. Reported as skipped, without affecting the exit
 status of a batch.
+.TP
+.B FLAC, Ogg, Opus, WAV
+Not supported. Named on the command line they fail with an error;
+.B \-R
+ignores them.
 .SH ENVIRONMENT
 .TP
 .B MP3RGAIN_THREADS
-Number of worker threads for ReplayGain analysis, equivalent to
+Number of worker threads, equivalent to
 .BR \-j .
 The explicit
 .B \-j
@@ -458,51 +581,117 @@ frames and the
 .B MP3GAIN_*
 values in an APEv2 tag, which is where each family's readers look; see
 .BR \-s " a and " \-s " i to put both in one container."
-For AAC in MP4 both families go into iTunes freeform atoms, and for raw ADTS
-into ID3v2. The values written are:
+For AAC in MP4 both families go into iTunes freeform atoms (with lowercase
+names, such as
+.BR mp3rgain_undo ),
+and for raw ADTS into ID3v2. The values written are:
 .TP
 .B REPLAYGAIN_TRACK_GAIN
-Track gain value in dB.
+Track gain in dB. After gain is applied, the residual relative to the
+adjusted audio.
 .TP
 .B REPLAYGAIN_TRACK_PEAK
-Track peak amplitude (0.0\-1.0).
+Track peak, linear, where 1.0 is full scale. Can exceed 1.0.
 .TP
 .B REPLAYGAIN_ALBUM_GAIN
-Album gain value in dB.
+Album gain in dB (with
+.BR \-a ).
 .TP
 .B REPLAYGAIN_ALBUM_PEAK
-Album peak amplitude (0.0\-1.0).
+Album peak, linear (with
+.BR \-a ).
+.TP
+.B REPLAYGAIN_ALGORITHM
+.B ITU\-R BS.1770
+under
+.B \-\-rg2
+and
+.BR \-\-r128 ;
+not written by the default ReplayGain 1.0 analysis.
 .TP
 .B MP3GAIN_UNDO
 Information required to restore original gain values.
 .TP
 .B MP3GAIN_MINMAX
-Original minimum and maximum gain values.
+Minimum and maximum
+.I global_gain
+values of the file.
+.TP
+.B MP3GAIN_ALBUM_MINMAX
+Minimum and maximum
+.I global_gain
+values across the album (MP3 with
+.BR \-a ,
+APEv2 only).
+.PP
+Every write goes to a temporary file
+.RI .mp3rgain_temp_ pid _ n . ext
+in the same directory, which is synced to disk and then renamed over the
+original, so a failure leaves the original untouched. The original's
+permissions are copied to the new file; as with any rename, hard links to the
+old file are not carried over.
 .SH EXIT STATUS
 .TP
 .B 0
-Success.
+Success. Files skipped as unsupported (ALAC, M4P) do not change this. An
+unknown short option, such as
+.BR \-Z ,
+only prints a warning, as in mp3gain.
 .TP
 .B 1
-Error occurred (invalid arguments, file not found, etc.). A batch in which any
-single file failed exits 1, including the read-only commands (plain analysis,
+Error occurred (invalid arguments, unknown long option, file not found, etc.).
+A batch in which any single file failed exits 1, including the read-only
+commands (plain analysis,
 .BR \-s " c and " \-x ),
 so a scripted scan cannot mistake an unreadable file for a clean run.
 .SH SECURITY
 .B mp3rgain
-is written in Rust, providing memory safety guarantees.
-It is not affected by any vulnerabilities found in the original C implementation
-or its dependencies.
+is written in Rust, and its source contains no
+.B unsafe
+blocks. It does not contain the C code behind the published mp3gain and
+aacgain CVEs (mpglib, mpglibDBL,
+.IR apetag.c ,
+faad2, mp4v2), so those bugs do not carry over.
 .SH COMPATIBILITY
 .B mp3rgain
 is designed as a drop-in replacement for the original
-.BR mp3gain (1).
-Command-line options are compatible, allowing it to work with existing scripts
-and integrations (e.g., beets replaygain plugin).
+.BR mp3gain (1)
+and works with existing scripts and integrations (e.g., the beets replaygain
+plugin). The audio frames it writes for
+.B \-g
+are byte-identical to mp3gain's, except in files with CRC-protected frames,
+whose CRCs mp3gain updates and
+.B mp3rgain
+does not. Differences to be aware of:
+.IP \(bu 2
+Stored analysis is re-computed by default; use
+.B \-s\ R
+for mp3gain's reuse behaviour.
+.IP \(bu 2
+.B \-e
+on its own applies track gain.
+.IP \(bu 2
+A gain that may clip is applied with a warning instead of an interactive prompt.
+.IP \(bu 2
+The plain analysis never writes tags.
+.IP \(bu 2
+.B \-g
+and
+.B \-l
+do not update existing
+.B REPLAYGAIN_*
+tags, and
+.B \-u
+removes them.
+.IP \(bu 2
+Since 3.2.0, MP3 ReplayGain tags go to ID3v2 instead of APEv2;
+.B \-s\ a
+restores mp3gain's layout.
 .SH SEE ALSO
 .BR mp3gain (1),
-.BR vorbisgain (1),
-.BR loudgain (1)
+.BR rsgain (1),
+.BR loudgain (1),
+.BR vorbisgain (1)
 .PP
 Project homepage: https://github.com/M-Igashi/mp3rgain
 .SH AUTHORS

@@ -4,8 +4,7 @@ This guide covers the complete setup for distributing mp3rgain and mp3rgui via U
 
 ## Overview
 
-PPA allows Ubuntu users to install mp3rgain and mp3rgui. The CLI and GUI
-are distributed via **separate PPAs**:
+The CLI and GUI are distributed through **separate PPAs**:
 
 ```bash
 # CLI (mp3rgain)
@@ -19,9 +18,9 @@ sudo apt update
 sudo apt install mp3rgui
 ```
 
-**Supported platform**: Ubuntu 26.04 LTS (resolute), amd64 and arm64.
-Older Ubuntu releases (including 24.04 LTS noble) ship Cargo 1.75, below the
-Rust 1.85 that `symphonia` and `id3` require.
+They are separate so that the GUI, whose vendored dependencies are much larger, can be re-uploaded or fixed without touching a CLI upload that already succeeded.
+
+**Supported platform**: Ubuntu 26.04 LTS (resolute), amd64 and arm64. Older Ubuntu releases (including 24.04 LTS noble) ship Cargo 1.75, below the Rust 1.85 that `symphonia` and `id3` require.
 
 ## Prerequisites
 
@@ -72,15 +71,15 @@ gpg --keyserver keyserver.ubuntu.com --send-keys YOUR_KEY_ID
 
 ### 5. Create PPAs
 
-Create two separate PPAs — one for CLI and one for GUI.
+Create two PPAs, one for the CLI and one for the GUI.
 
-**PPA 1 — mp3rgain (CLI):**
+**PPA 1: mp3rgain (CLI)**
 1. Go to https://launchpad.net/~/+activate-ppa
 2. PPA name: `mp3rgain`
 3. Display name: `mp3rgain - Lossless MP3 volume adjustment`
 4. Click "Activate"
 
-**PPA 2 — mp3rgui (GUI):**
+**PPA 2: mp3rgui (GUI)**
 1. Go to https://launchpad.net/~/+activate-ppa
 2. PPA name: `mp3rgui`
 3. Display name: `mp3rgui - GUI for mp3rgain`
@@ -90,8 +89,7 @@ The URLs will be: `ppa:m-igashi/mp3rgain` and `ppa:m-igashi/mp3rgui`.
 
 ### 6. Enable arm64 Processors
 
-For each PPA, the default enabled processor is amd64 only. To build for
-arm64 as well, visit the admin edit page for each PPA and check `arm64`:
+A new PPA builds for amd64 only. To build for arm64 as well, open each PPA's admin edit page and check `arm64`:
 
 - https://launchpad.net/~m-igashi/+archive/ubuntu/mp3rgain/+edit
 - https://launchpad.net/~m-igashi/+archive/ubuntu/mp3rgui/+edit
@@ -121,21 +119,24 @@ sudo apt install devscripts debhelper dput gpg cargo rustc
 From the project root:
 
 ```bash
-# Build for all Ubuntu releases (both CLI and GUI)
+# Build both packages for every supported series (resolute)
 ./scripts/build-ppa.sh
 
-# Build only CLI for resolute
+# Build only the CLI for resolute
 ./scripts/build-ppa.sh --package=cli --distro=resolute
 
-# Build and upload
-./scripts/build-ppa.sh --upload
+# Build and upload, one package per PPA
+./scripts/build-ppa.sh --package=cli --upload
+./scripts/build-ppa.sh --package=gui --ppa=ppa:m-igashi/mp3rgui --upload
 
 # Specify GPG key
-./scripts/build-ppa.sh --key=YOUR_KEY_ID --upload
+./scripts/build-ppa.sh --package=cli --key=YOUR_KEY_ID --upload
 
 # Dry run (show what would be done)
 ./scripts/build-ppa.sh --dry-run
 ```
+
+`--upload` sends every package the run built to the one `--ppa` target, so do not combine it with the default `--package=all`: that would put mp3rgui into the CLI PPA.
 
 ### Script Options
 
@@ -143,8 +144,8 @@ From the project root:
 |--------|-------------|
 | `--upload` | Upload to PPA after building |
 | `--package=PKG` | `cli`, `gui`, or `all` (default: `all`) |
-| `--distro=DISTRO` | Build for specific distro (default: all supported) |
-| `--ppa=PPA` | PPA target (default: `ppa:m-igashi/mp3rgain` for CLI, `ppa:m-igashi/mp3rgui` for GUI in the GitHub Actions workflow) |
+| `--distro=DISTRO` | Build for one series only (default: every series in `ALL_DISTROS`, currently `resolute`) |
+| `--ppa=PPA` | Upload target for both packages (default: `ppa:m-igashi/mp3rgain`). The GitHub Actions workflow has separate defaults: `ppa:m-igashi/mp3rgain` for the CLI and `ppa:m-igashi/mp3rgui` for the GUI |
 | `--key=KEYID` | GPG key ID for signing |
 | `--dry-run` | Show commands without executing |
 
@@ -152,22 +153,24 @@ From the project root:
 
 | Codename | Version | Status | Notes |
 |----------|---------|--------|-------|
-| resolute | 26.04 LTS | Supported (default) | Rust 1.93 — comfortably above the 1.85 MSRV |
-| stonking | 26.10 | Should work, untested | Development series; same Rust 1.93 |
+| resolute | 26.04 LTS | Supported (default) | rustc 1.93, comfortably above the 1.85 MSRV |
+| stonking | 26.10 | Should work, untested | In pre-release freeze as of 2026-10-08; rustc 1.97 |
 | questing | 25.10 | **Dead** | End of life. Launchpad rejects uploads: "questing is obsolete and will not accept new uploads" |
 | noble | 24.04 LTS | Not supported | Cargo 1.75, below the 1.85 MSRV |
 
 ### What the Script Does
 
-1. Exports clean source from git
-2. Converts `Cargo.lock` v4 to v3, downgrades `edition = "2024"` to `"2021"`, strips `rust-version` declarations and `checksum` lines (compatibility shims for older distros; no-ops on resolute)
+1. Exports clean source from git (`git archive HEAD`)
+2. Converts `Cargo.lock` v4 to v3, then, in the vendored crates, downgrades `edition = "2024"` to `"2021"` and strips `rust-version` lines; the `checksum` lines are removed from `Cargo.lock` after vendoring. These are compatibility shims for older distros and no-ops on resolute
 3. Runs `cargo vendor` to bundle all Rust dependencies
-4. Removes Windows/macOS-only binaries and stubs platform-specific crates
+4. Removes prebuilt Windows/macOS libraries (`.a`, `.dll`, `.lib`) and the tests, benches and extra Markdown files from the vendored crates, and clears their checksums
 5. Creates `.cargo/config.toml` for offline builds
-6. Creates `.orig.tar.xz` with maximum compression (source + vendored deps)
+6. Creates the `.orig.tar.xz` (source + vendored deps)
 7. Generates `debian/changelog` for each Ubuntu release
-8. Builds signed source packages with `debuild -S`
+8. Builds signed source packages with `debuild -S -sa`
 9. Optionally uploads with `dput`
+
+The workflow does the same, plus two things the script does not: for the GUI it stubs out Windows- and macOS-only crates (`windows-*`, `objc*`, `cocoa-*`, `metal-*` and similar) and compresses the tarball with `xz -9e`, both to keep the orig tarball small.
 
 ### Manual Upload
 
@@ -193,9 +196,11 @@ dput ppa:m-igashi/mp3rgui  build-ppa/mp3rgui/build-resolute/mp3rgui_*_source.cha
 
 ### Check Build Status
 
-1. Go to https://launchpad.net/~m-igashi/+archive/ubuntu/mp3rgain
+1. Go to https://launchpad.net/~m-igashi/+archive/ubuntu/mp3rgain (CLI) or https://launchpad.net/~m-igashi/+archive/ubuntu/mp3rgui (GUI)
 2. Click on the package name to see build status
 3. Builds typically take 10-30 minutes
+
+Use the PPA pages rather than the Launchpad API: `getBuildRecords` leaves out builds that are still in "Pending publication", so an empty API response does not mean nothing was built.
 
 ### If Build Fails
 
@@ -232,11 +237,13 @@ docker run --rm -it \
 PPA upload is **automatic**. When you push a release tag:
 
 1. Release workflow builds binaries and creates GitHub Release
-2. On success, PPA workflow triggers automatically
+2. On success, the PPA workflow (`.github/workflows/ppa.yml`) triggers automatically
 3. Source packages are built, signed, and uploaded to Launchpad
 4. Launchpad builds .deb packages for amd64 and arm64
 
-To manually trigger: Actions → PPA Upload → Run workflow
+The PPA workflow runs on `master` as it is when it starts, not on the tagged commit, and takes the version from `Cargo.toml` there.
+
+To manually trigger: Actions → PPA Upload → Run workflow. The inputs choose the package (`all`, `cli` or `gui`), the PPA revision, the two target PPAs and the target series (default `resolute`).
 
 The workflow needs three secrets. They are stored as secrets of the GitHub environment `ppa`, which both upload jobs declare with `environment: ppa` and which only the `master` branch can use:
 
@@ -260,9 +267,7 @@ Each version's orig tarball can only be uploaded once. Options:
 
 ### "lock file version 4 requires -Znext-lockfile-bump"
 
-Ubuntu noble's cargo (Rust 1.75) doesn't support Cargo.lock v4. This is
-one of several reasons we target resolute (26.04 LTS) instead. The workflow
-still runs the v4→v3 conversion for compatibility.
+Ubuntu noble's cargo (Rust 1.75) doesn't support Cargo.lock v4. This is one of several reasons we target resolute (26.04 LTS) instead. The workflow still runs the v4→v3 conversion for compatibility.
 
 ### "Build-Depends not satisfiable"
 
@@ -273,5 +278,10 @@ rmadison -u ubuntu <package-name>
 
 ### "obsolete and will not accept new uploads"
 
-The Ubuntu release has reached EOL. Remove it from the distro list in
-`.github/workflows/ppa.yml`.
+The Ubuntu release has reached EOL and Launchpad will never accept it again. Move to a supported series: change the `target_distro` default and the `|| 'resolute'` fallbacks in `.github/workflows/ppa.yml`, and `ALL_DISTROS` in `scripts/build-ppa.sh`. To list the active series and check that a series' rustc meets the MSRV:
+
+```bash
+curl -s https://api.launchpad.net/devel/ubuntu/series | \
+  python3 -c "import sys,json;[print(e['name'],e['version'],e['status']) for e in json.load(sys.stdin)['entries'] if e.get('active')]"
+curl -s https://packages.ubuntu.com/<series>/rustc | grep -oE 'Package: rustc \(([^)]+)\)'
+```

@@ -1,9 +1,6 @@
 # mp3rgain Nix Package
 
-mp3rgain ships a flake at the **repository root** (`flake.nix` / `flake.lock`).
-It builds straight from the checked-out source (`src = self`) and pins
-dependencies from the committed `Cargo.lock`, so there are no per-release
-hashes to maintain.
+mp3rgain ships a flake at the **repository root** (`flake.nix` / `flake.lock`). It builds the CLI straight from the checked-out source (`src = self`) and pins dependencies from the committed `Cargo.lock`, so there are no per-release hashes to maintain. The GUI is not packaged for Nix, and mp3rgain is not in nixpkgs yet (#314).
 
 ## Installation
 
@@ -40,11 +37,9 @@ nix build            # build the package
 
 ## Submitting to nixpkgs
 
-The root flake is for installing directly from GitHub. A nixpkgs package pins a
-release tarball by hash instead. To submit:
+The root flake is for installing directly from GitHub. A nixpkgs package pins a release tarball by hash instead. To submit:
 
-1. Fork [nixpkgs](https://github.com/NixOS/nixpkgs) and add
-   `pkgs/by-name/mp/mp3rgain/package.nix`:
+1. Fork [nixpkgs](https://github.com/NixOS/nixpkgs) and add `pkgs/by-name/mp/mp3rgain/package.nix`:
 
    ```nix
    { lib, rustPlatform, fetchFromGitHub }:
@@ -63,7 +58,7 @@ release tarball by hash instead. To submit:
      cargoHash = lib.fakeHash; # replaced by the value Nix prints on first build
 
      meta = {
-       description = "Lossless MP3 volume adjustment - a modern mp3gain replacement written in Rust";
+       description = "Lossless MP3/AAC volume adjustment - a modern mp3gain / aacgain replacement written in Rust";
        homepage = "https://github.com/M-Igashi/mp3rgain";
        changelog = "https://github.com/M-Igashi/mp3rgain/releases/tag/v${version}";
        license = lib.licenses.mit;
@@ -73,7 +68,4 @@ release tarball by hash instead. To submit:
    }
    ```
 
-2. Replace both `lib.fakeHash` placeholders with the real values (each prints a
-   hash-mismatch error on first build that reveals the correct hash), build with
-   `nix-build -A mp3rgain`, then open a PR per the
-   [nixpkgs contribution guide](https://github.com/NixOS/nixpkgs/blob/master/CONTRIBUTING.md).
+2. Replace both `lib.fakeHash` placeholders with the real values (each prints a hash-mismatch error on first build that reveals the correct hash), build with `nix-build -A mp3rgain`, then open a PR per the [nixpkgs contribution guide](https://github.com/NixOS/nixpkgs/blob/master/CONTRIBUTING.md).

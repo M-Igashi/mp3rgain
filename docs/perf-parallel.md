@@ -1,26 +1,16 @@
-# Parallel ReplayGain analysis — `-j` / `--threads`
+# Parallel ReplayGain analysis: `-j` / `--threads`
 
-mp3rgain 2.4 introduces multi-file parallelism for ReplayGain analysis,
-addressing issues [#125] and [#126]. This document records the design
-decisions and the real-corpus benchmark numbers that motivated the
-default-on choice.
+mp3rgain 2.4 introduced multi-file parallelism for ReplayGain analysis, addressing issues [#125] and [#126]. This document records the design decisions and the real-corpus benchmark numbers behind the default-on choice. The TL;DR describes current behaviour, the sections from the benchmark methodology to "Concurrency safety" describe 2.4, and the sections marked 3.8 cover the later album-crossing, pipelining and file-splitting work. Every benchmark is reported as measured at the time and has not been re-run since.
 
 ## TL;DR
 
-- **Parallel by default.** `mp3rgain *.mp3`, `-r`, `-a`, recursive
-  `-R <dir>`, and the default info command all use
-  `std::thread::available_parallelism()` worker threads via rayon.
-- **`-j 1` is the legacy fallback** for behavioral parity with mp3gain
-  or for debugging. `-j 0` and `MP3RGAIN_THREADS=0` mean "auto".
-- **`-o json` is byte-identical regardless of `-j`**, and so are all the
-  numbers in every format. Since [#348] the TSV and text output is written
-  as each unit finishes, so its *line order* follows completion rather than
-  input; `-j 1` still emits in input order.
-- On a 124-track / 2.1 GB corpus, an Apple M3 (4 performance + 4
-  efficiency cores) sees **~3x wall-clock speedup** for the default
-  recursive analysis (`mp3rgain -R -o tsv .`), going from 110.2s →
-  35.5s with `-j 8`. Per-track gain (`-r -n`) and album gain
-  (`-a -n`) both go from ~44s → ~14–16s in the same setup.
+Current behaviour (v3.9.2):
+
+- **Parallel by default.** Every per-file command runs on `std::thread::available_parallelism()` rayon worker threads: the default info scan, `-r` and `-a` since 2.4, and apply, undo and the tag commands since 2.5.0 ([#134]).
+- **`-j 1` is the legacy fallback** for behavioural parity with mp3gain or for debugging. `-j 0` and `MP3RGAIN_THREADS=0` mean "auto".
+- **`-o json` keeps input order at every `-j`.** Since [#348] (3.9.0) the TSV and text output is written as each unit finishes, so its *line order* follows completion rather than input; `-j 1` still emits in input order.
+- **The numbers do not depend on `-j`**, with one exception: under `--rg2` / `--r128` a long file divided across workers (3.8) can differ in the last bit, at most 7.1e-15 dB as measured. See [Accuracy](#accuracy). RG1 is never divided and stays bit-identical.
+- On a 124-track / 2.1 GB corpus, an Apple M3 (4 performance + 4 efficiency cores) saw a **~3x wall-clock speedup** for the default recursive analysis (`mp3rgain -R -o tsv .`) in 2.4, going from 110.2s → 35.5s with `-j 8`. Per-track gain (`-r -n`) and album gain (`-a -n`) both went from ~44s → ~14–16s in the same setup.
 
 ## CLI surface
 
@@ -28,30 +18,20 @@ default-on choice.
 |-------------------------|------------------------------------------------------|
 | _omitted_               | Use `available_parallelism()` (typically num cores)  |
 | `-j 0` / `--threads 0`  | Same as omitted (auto)                               |
-| `-j 1` / `--threads 1`  | Serial — matches legacy mp3gain behavior             |
+| `-j 1` / `--threads 1`  | Serial, matches legacy mp3gain behavior              |
 | `-j N`                  | Use exactly N rayon worker threads                   |
 | `MP3RGAIN_THREADS=N`    | Same effect as `-j N`; explicit flag wins            |
 
-`-j` does not collide with any short flag in mp3gain's reference set
-(`-? -h -v -g -l -d -r -a -k -m -p -s -c -e -x -t -T -q -f -o`) or in
-aacgain.
+`-j` does not collide with any short flag in mp3gain's reference set (`-? -h -v -g -l -d -r -a -k -m -p -s -c -e -x -t -T -q -f -o`) or in aacgain.
 
-## Benchmark methodology
+## Benchmark methodology (2.4)
 
-- **Corpus**: Crossfader Music Pack (2019 + 2021 editions) — 124 actual
-  audio files (236 .mp3 + 12 .m4a entries minus 124 macOS resource-fork
-  shadows), 2.1 GB on disk.
-- **Hardware**: Apple MacBook Air (M3, 2024) — 8 logical cores
-  (4 performance + 4 efficiency), 24 GB RAM, internal SSD.
-- **Build**: `cargo build --release` from
-  `perf/parallel-replaygain-126`,  `[profile.release] lto = "thin",
-  codegen-units = 1, strip = "debuginfo"`.
-- **Tool**: [hyperfine](https://github.com/sharkdp/hyperfine) 1.20
-  with `--warmup 1 --runs 3`. Corpus is pre-staged on the internal
-  SSD (not the original USB volume) to remove disk-bandwidth variance.
+- **Corpus**: Crossfader Music Pack (2019 + 2021 editions): 124 actual audio files (236 .mp3 + 12 .m4a entries minus 124 macOS resource-fork shadows), 2.1 GB on disk.
+- **Hardware**: Apple MacBook Air (M3, 2024): 8 logical cores (4 performance + 4 efficiency), 24 GB RAM, internal SSD.
+- **Build**: `cargo build --release` from `perf/parallel-replaygain-126`, `[profile.release] lto = "thin", codegen-units = 1, strip = "debuginfo"`.
+- **Tool**: [hyperfine](https://github.com/sharkdp/hyperfine) 1.20 with `--warmup 1 --runs 3`. Corpus is pre-staged on the internal SSD (not the original USB volume) to remove disk-bandwidth variance.
 - **Workloads** (run from the corpus root):
-  - `mp3rgain -j N -R -q -o tsv .` (default info — analyze + album
-    summary)
+  - `mp3rgain -j N -R -q -o tsv .` (default info: analyze + album summary)
   - `mp3rgain -j N -R -r -n -q -o tsv .` (track gain dry-run)
   - `mp3rgain -j N -R -a -n -q -o tsv .` (album gain dry-run)
 
@@ -65,10 +45,9 @@ scripts/bench-parallel.sh "/tmp/mp3rgain-bench/<dir>"
 # Outputs: /tmp/bench-info.md /tmp/bench-track.md /tmp/bench-album.md
 ```
 
-## Results — default info (`mp3rgain -R -q -o tsv .`)
+## Results: default info (`mp3rgain -R -q -o tsv .`)
 
-Workload: per-file ReplayGain analysis **plus** the trailing
-album-summary `analyze_album_parallel` pass (decodes every file twice).
+Workload in 2.4: per-file ReplayGain analysis **plus** the trailing album-summary `analyze_album_parallel` pass (decodes every file twice). Since 2.8.0 the default command analyzes each file once, so today's default command is a lighter workload than the one measured here.
 
 | `-j` | Mean (s)        | Speedup vs `-j 1` | Aggregate CPU usage |
 |-----:|----------------:|------------------:|--------------------:|
@@ -79,10 +58,9 @@ album-summary `analyze_album_parallel` pass (decodes every file twice).
 
 Source: `/tmp/bench-info.md` from the bench script run.
 
-## Results — track gain dry-run (`mp3rgain -r -n -R -q -o tsv .`)
+## Results: track gain dry-run (`mp3rgain -r -n -R -q -o tsv .`)
 
-Workload: single ReplayGain analysis pass per file. No second pass,
-no file modification (dry-run).
+Workload: single ReplayGain analysis pass per file. No second pass, no file modification (dry-run).
 
 | `-j` | Mean (s)       | Speedup vs `-j 1` | Aggregate CPU usage |
 |-----:|---------------:|------------------:|--------------------:|
@@ -91,16 +69,11 @@ no file modification (dry-run).
 | 4    | 16.115 ± 0.562 | **2.76×**         | 95% × 3.80 cores    |
 | 8    | 19.309 ± 3.221 | 2.31×             | 76% × 6.12 cores    |
 
-Note: `-j 8` is **slower** than `-j 4` here. The track-gain workload
-fits in ~16s, and on a 4P+4E hybrid CPU the overhead of pushing four
-extra threads onto efficiency cores outweighs their throughput
-contribution for jobs of this size. The same workload on a homogeneous
-8-core CPU is expected to scale further.
+Note: `-j 8` is **slower** than `-j 4` here. The track-gain workload fits in ~16s, and on a 4P+4E hybrid CPU the overhead of pushing four extra threads onto efficiency cores outweighs their throughput contribution for jobs of this size. The same workload on a homogeneous 8-core CPU is expected to scale further.
 
-## Results — album gain dry-run (`mp3rgain -a -n -R -q -o tsv .`)
+## Results: album gain dry-run (`mp3rgain -a -n -R -q -o tsv .`)
 
-Workload: `analyze_album_parallel` decodes every track once and folds
-histograms.
+Workload: `analyze_album_parallel` decodes every track once and folds histograms.
 
 | `-j` | Mean (s)       | Speedup vs `-j 1` | Aggregate CPU usage |
 |-----:|---------------:|------------------:|--------------------:|
@@ -111,8 +84,7 @@ histograms.
 
 ## Acceptance-criteria check (issue #126)
 
-> `mp3rgain *.mp3 -r` is ≥ N×/2 faster on N cores for a corpus
-> large enough to amortize startup (e.g. 50+ tracks).
+> `mp3rgain *.mp3 -r` is ≥ N×/2 faster on N cores for a corpus large enough to amortize startup (e.g. 50+ tracks).
 
 | Cores | Bar (N/2) | Achieved (track-gain) | Achieved (album-gain) | Achieved (info) |
 |------:|----------:|----------------------:|----------------------:|----------------:|
@@ -120,20 +92,13 @@ histograms.
 |     4 |      2.0× |                  2.76× |                 1.99× |           2.13× |
 |     8 |      4.0× |                  2.31× |                 3.03× |           3.10× |
 
-The 2-core and 4-core bars are met across all three workloads. The
-8-core bar is missed because M3 has 4 performance + 4 efficiency
-cores, so "8 cores" overstates the available compute throughput. On
-a homogeneous 8-core CPU (Ryzen 7, Xeon E-23xx, etc.) we expect the
-8-core bar to be cleared too.
+The 2-core and 4-core bars are met across all three workloads. The 8-core bar is missed because M3 has 4 performance + 4 efficiency cores, so "8 cores" overstates the available compute throughput. On a homogeneous 8-core CPU (Ryzen 7, Xeon E-23xx, etc.) we expect the 8-core bar to be cleared too.
 
-## Output identity
+## Output identity (2.4)
 
-Across every `-j` value tested on this corpus, the TSV/Text/JSON
-output and the modified MP3 byte stream (after `-r` apply) are
-**byte-identical** to the serial `-j 1` path. The album-fold is
-associative and rayon's `par_iter().collect::<Vec<_>>()` preserves
-input order, so `album_peak`, `album_loudness_db`, and
-`album_gain_db` all match `-j 1` exactly.
+Across every `-j` value tested on this corpus, the TSV/Text/JSON output and the modified MP3 byte stream (after `-r` apply) were **byte-identical** to the serial `-j 1` path. The album-fold is associative and rayon's `par_iter().collect::<Vec<_>>()` preserves input order, so `album_peak`, `album_loudness_db`, and `album_gain_db` all match `-j 1` exactly.
+
+Two things have changed since: text and TSV lines now come out in completion order ([#348]), so the `diff` below only passes with `-o json` or after sorting the lines, and `--rg2` / `--r128` on a divided file can move the last bit (see [Accuracy](#accuracy)).
 
 ```sh
 # Verification (run during PR validation):
@@ -142,61 +107,36 @@ mp3rgain -j 8 -R -q -o tsv . > /tmp/parallel.tsv
 diff /tmp/serial.tsv /tmp/parallel.tsv  # exits 0
 ```
 
-## What gets parallelized
+## What gets parallelized (2.4)
 
 The two hot loops called out in [#126]:
 
 1. `cmd_info` per-file ReplayGain analysis loop.
-2. `analyze_album_internal` per-track decode + filter loop, exposed
-   via two new public APIs in `src/replaygain.rs`:
-   - `analyze_album_parallel(files, track_index, threads)`
-   - `analyze_album_parallel_with_completion(files, track_index, threads, on_complete)`
-   Both fall back to the existing serial implementation for
-   `threads <= 1` or `files.len() <= 1`.
+2. `analyze_album_internal` per-track decode + filter loop, exposed via two new public APIs in `src/replaygain.rs`: `analyze_album_parallel(files, track_index, threads)` and `analyze_album_parallel_with_completion(files, track_index, threads, on_complete)`. Both fell back to the serial implementation for `threads <= 1` or `files.len() <= 1`. v2.10.0 consolidated them into `analyze_album_with_options` ([#258]).
 
-Plus, in this PR's scope:
+Plus, in the same PR:
 
-3. `cmd_info`'s second album-summary pass — switched from
-   `analyze_album` (serial) to `analyze_album_parallel` when `-j > 1`.
-   Without this, the album-summary pass becomes the wall-clock
-   bottleneck and limits the overall speedup to ~2× even with 8 cores.
+3. `cmd_info`'s second album-summary pass, switched from `analyze_album` (serial) to `analyze_album_parallel` when `-j > 1`. Without this, the album-summary pass becomes the wall-clock bottleneck and limits the overall speedup to ~2× even with 8 cores. (2.8.0 removed the second pass altogether.)
 4. `cmd_track_gain` per-file analyze + apply loop.
-5. `cmd_album_gain` per-file apply loop (after the parallel
-   `analyze_album_parallel_with_completion` analysis pass).
+5. `cmd_album_gain` per-file apply loop (after the parallel `analyze_album_parallel_with_completion` analysis pass).
 
-## What is *not* parallelized
+## What was *not* parallelized in 2.4
 
-- **Per-sample DSP inside a single track.** The equal-loudness IIR
-  filter has tight inter-sample data dependency, so it doesn't
-  parallelize without changing the algorithm. SIMD packing of L+R
-  samples is the right answer there — see [#125] for follow-up.
-- **`cmd_apply` / `cmd_apply_channel` / `cmd_undo` / `cmd_max_amplitude`
-  / `cmd_check_tags` / `cmd_delete_tags`.** These are I/O-bound
-  per-file (read tag, modify global_gain bytes, write file). They
-  benefit much less from parallelism, and parallelizing them would
-  require the same `(JsonFileResult, String)` output-buffer refactor
-  applied to ReplayGain processors. They remain serial in this PR;
-  open a follow-up if a real workload shows them as a bottleneck.
+Both of these have since changed:
+
+- **Per-sample DSP inside a single track.** The equal-loudness IIR filter has tight inter-sample data dependency, so it does not parallelize without changing the algorithm; SIMD packing of L+R samples was the suggested follow-up in [#125]. 3.8 found another way for `--rg2` / `--r128`: overlapping the decode with the analysis and dividing one file across workers (the last two sections below). RG1 is still analyzed whole.
+- **`cmd_apply` / `cmd_apply_channel` / `cmd_undo` / `cmd_max_amplitude` / `cmd_check_tags` / `cmd_delete_tags`.** These are I/O-bound per file (read tag, modify global_gain bytes, write file), benefit much less from parallelism, and needed the same `(JsonFileResult, String)` output-buffer refactor as the ReplayGain processors. They stayed serial in 2.4 and became parallel in 2.5.0 ([#134]).
 
 ## Concurrency safety
 
-- Each track gets its own Symphonia decoder, format reader,
-  `EqualLoudnessFilter` array, and `LoudnessHistogram` — no shared
-  mutable state.
-- The album histogram fold is associative
-  (`LoudnessHistogram::accumulate` is bin-wise sum), so reordering
-  is safe; we still iterate in input order to keep the result
-  bit-identical.
-- Stdout output is buffered into per-file `String` instances inside
-  `process_*` functions. The cmd layer writes each one under a single lock
-  as soon as its unit finishes ([#348]), so a block is never split or
-  interleaved, but blocks appear in completion order. The JSON records are
-  still collected in input order, which is what keeps `-o json` stable.
-- Stderr (warnings/errors) stays on `eprintln!`; OS-level per-line
-  atomicity is sufficient for diagnostics. Order across files may
-  differ between runs.
+- Each track gets its own Symphonia decoder, format reader, `EqualLoudnessFilter` array, and `LoudnessHistogram`, so there is no shared mutable state.
+- The album histogram fold is associative (`LoudnessHistogram::accumulate` is bin-wise sum), so reordering is safe; we still iterate in input order to keep the result bit-identical.
+- Stdout output is buffered into per-file `String` instances inside `process_*` functions. The cmd layer writes each one under a single lock as soon as its unit finishes ([#348]), so a block is never split or interleaved, but blocks appear in completion order. The JSON records are still collected in input order, which is what keeps `-o json` stable.
+- Stderr (warnings/errors) stays on `eprintln!`; OS-level per-line atomicity is sufficient for diagnostics. Order across files may differ between runs.
 
 ## Album-crossing parallelism for `-a --per-directory` (3.8, issue [#332])
+
+Since 3.8.0 `--per-directory` is an alias for `--album-by=dir`, and the same scheduling applies to every `--album-by` mode.
 
 Until 3.7.0, `-a --per-directory` walked the album groups in a sequential loop and parallelized only *within* an album. Every album boundary was a barrier: while the last and longest track of an album finished on one core, the rest of the pool sat idle, and with N albums in one invocation that tail was paid N times. skamp saw it from the outside on the Hydrogenaudio thread, without instrumentation: "with foobar2000, all CPU cores remain fully active until the very last *file* (not album, file). With mp3rgain, I see short drops of CPU as it is scanning albums one by one."
 
@@ -250,7 +190,7 @@ One thing does move: per-file warnings (clipping, saturation) are emitted by the
 
 ### Not in scope
 
-The other half of [#332] is granularity: the smallest schedulable unit is still one whole file, so a 9-minute track cannot be split or stolen once a worker picks it up, and thread efficiency is down to 71% at 4 threads even with no album boundary anywhere. Splitting a file into chunks with overlap-warmup is a separate design problem, and [#334] (the true-peak inner loop, a measured 2.1x on 68% of the analysis cost) is a bigger and cheaper win that should land before either.
+The other half of [#332] is granularity: the smallest schedulable unit is still one whole file, so a 9-minute track cannot be split or stolen once a worker picks it up, and thread efficiency is down to 71% at 4 threads even with no album boundary anywhere. Splitting a file into chunks with overlap-warmup is a separate design problem, and [#334] (the true-peak inner loop, a measured 2.1x on 68% of the analysis cost) is a bigger and cheaper win that should land before either. Both landed later in 3.8: the true-peak restructuring ([#334]) and file splitting ([#337], the next two sections).
 
 ## Overlapping the decode with the analysis (3.8, issue [#337])
 
@@ -271,7 +211,7 @@ Batching matters. Handing one 26 ms packet across the channel at a time costs mo
 
 ### What this does not do
 
-The work unit is still a whole file for the *decode*, so one file is now decode-bound rather than decode-plus-DSP bound. Going further means splitting the decode itself across workers, which needs container-level seeking: on MP3 that works (`n_frames` is reported and an accurate seek lands a known distance before the target, 1,249 samples in the case measured), but some M4A files report no frame count at all, so a correct implementation needs a fallback and a way to verify each chunk landed exactly where it expected. [#337] stays open for that.
+The work unit is still a whole file for the *decode*, so one file is now decode-bound rather than decode-plus-DSP bound. Going further means splitting the decode itself across workers, which needs container-level seeking: on MP3 that works (`n_frames` is reported and an accurate seek lands a known distance before the target, 1,249 samples in the case measured), but some M4A files report no frame count at all, so a correct implementation needs a fallback and a way to verify each chunk landed exactly where it expected. [#337] stayed open for that, and the next section is the follow-up.
 
 ## Dividing one file across workers (3.8, issue [#337])
 
@@ -330,10 +270,11 @@ Detecting per file whether a decode actually used noise substitution would need 
 [#125]: https://github.com/M-Igashi/mp3rgain/issues/125
 [#126]: https://github.com/M-Igashi/mp3rgain/issues/126
 
+[#134]: https://github.com/M-Igashi/mp3rgain/issues/134
+[#258]: https://github.com/M-Igashi/mp3rgain/pull/258
 [#332]: https://github.com/M-Igashi/mp3rgain/issues/332
 [#334]: https://github.com/M-Igashi/mp3rgain/issues/334
 [#337]: https://github.com/M-Igashi/mp3rgain/issues/337
-[#334]: https://github.com/M-Igashi/mp3rgain/issues/334
 [#341]: https://github.com/M-Igashi/mp3rgain/pull/341
 [#348]: https://github.com/M-Igashi/mp3rgain/issues/348
 [#349]: https://github.com/M-Igashi/mp3rgain/issues/349

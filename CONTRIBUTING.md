@@ -21,6 +21,7 @@ cargo build --release
 
 ```bash
 cargo test
+cargo test --manifest-path mp3rgui/Cargo.toml   # GUI (not a workspace member)
 ```
 
 ## How to Contribute
@@ -28,9 +29,9 @@ cargo test
 ### Reporting Bugs
 
 - Use the [Bug Report](https://github.com/M-Igashi/mp3rgain/issues/new?template=bug_report.md) template
-- Include your OS, architecture, and mp3rgain version
+- Include your OS, architecture, and mp3rgain version (`mp3rgain -v`)
 - Provide steps to reproduce the issue
-- If possible, include a sample MP3 file
+- If possible, include a sample audio file
 
 ### Windows Compatibility Testing
 
@@ -48,7 +49,7 @@ We especially welcome Windows testing reports! Please use the [Windows Compatibi
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
 4. Run tests (`cargo test`)
-5. Run clippy (`cargo clippy`)
+5. Run clippy (`cargo clippy -- -D warnings`, as CI does)
 6. Format code (`cargo fmt`)
 7. Commit your changes (`git commit -m 'Add amazing feature'`)
 8. Push to the branch (`git push origin feature/amazing-feature`)
@@ -58,7 +59,7 @@ We especially welcome Windows testing reports! Please use the [Windows Compatibi
 
 - Follow standard Rust conventions
 - Run `cargo fmt` before committing. `mp3rgui/` is not a workspace member, so a GUI change also needs `cargo fmt --manifest-path mp3rgui/Cargo.toml`
-- Run `cargo clippy` and address warnings
+- Run `cargo clippy -- -D warnings` (CI fails on any warning; for a GUI change, also with `--manifest-path mp3rgui/Cargo.toml`)
 - Add tests for new functionality
 - Update documentation as needed
 
@@ -80,4 +81,4 @@ We're especially looking for help with:
 
 ## Questions?
 
-Feel free to open an issue or start a discussion if you have questions!
+Feel free to open an issue if you have questions!

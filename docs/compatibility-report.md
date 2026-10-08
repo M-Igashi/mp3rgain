@@ -2,26 +2,26 @@
 
 [![mp3gain compatible](https://img.shields.io/badge/mp3gain-compatible-brightgreen.svg)](#verification-results)
 
-This document verifies that mp3rgain produces **identical output** to the original mp3gain tool.
+This document verifies that mp3rgain produces **identical output** to the original mp3gain tool. Last reviewed against v3.9.2 (2026-10-08); the CI comparison runs on every code change, and [Historical Results](#historical-results) records earlier runs.
 
 ## Summary
 
-mp3rgain is a drop-in replacement for the original mp3gain. Both tools modify the `global_gain` field in MP3 frame headers identically, producing bit-for-bit identical output files when given the same input and parameters.
+mp3rgain is a drop-in replacement for the original mp3gain. Both tools modify the `global_gain` field in each MP3 frame's side information identically, so the audio frames come out bit-for-bit identical for the same input and parameters. With tag writing turned off (`-s s`) the whole files are byte-identical; with tags on, the APE tag can differ slightly (see [Known Differences](#known-differences)).
 
 ## Verification Method
 
 ### Binary Exact Match Testing
 
-We verify compatibility by applying identical operations to the same MP3 files using both tools and comparing SHA-256 hashes of the output:
+We verify compatibility by applying identical operations to the same MP3 files using both tools and comparing SHA-256 hashes of the output. Both runs use `-s s` so that neither tool writes a tag and the comparison covers the audio frames:
 
 ```bash
 # Prepare identical copies
 cp original.mp3 test_mp3gain.mp3
 cp original.mp3 test_mp3rgain.mp3
 
-# Apply same operation with each tool
-mp3gain -g 2 test_mp3gain.mp3
-mp3rgain -g 2 test_mp3rgain.mp3
+# Apply same operation with each tool, without writing tags
+mp3gain -s s -g 2 test_mp3gain.mp3
+mp3rgain -s s -g 2 test_mp3rgain.mp3
 
 # Compare SHA-256 hashes
 sha256sum test_mp3gain.mp3 test_mp3rgain.mp3
@@ -46,7 +46,7 @@ MP3GAIN_BIN=/usr/bin/mp3gain MP3RGAIN_BIN=./target/release/mp3rgain ./scripts/co
 
 ### CI/CD Integration
 
-Compatibility tests run automatically on every pull request in GitHub Actions. See the [CI workflow](../.github/workflows/ci.yml) for details.
+Compatibility tests run in GitHub Actions on every push to `master` and every pull request that changes code (documentation-only changes skip CI). The job installs mp3gain from Ubuntu's apt and generates the fixtures with ffmpeg. See the [CI workflow](../.github/workflows/ci.yml) for details.
 
 ## Test Cases
 
@@ -77,6 +77,21 @@ Compatibility tests run automatically on every pull request in GitHub Actions. S
 | Left channel +2 | `-l 0 2` | Verified |
 | Right channel -2 | `-l 1 -2` | Verified |
 
+#### Phase 4: Cross-Tool Undo
+
+| Test | Command | Status |
+|------|---------|--------|
+| mp3gain applies, mp3rgain undoes | `mp3gain -g -3`, then `mp3rgain -u` | Verified |
+| mp3rgain applies, mp3gain undoes | `mp3rgain -g -3`, then `mp3gain -u` | Verified |
+
+The check is that the `global_gain` range returns to the original, which catches a wrong `MP3GAIN_UNDO` sign (issue #210).
+
+#### Phase 5: ReplayGain Analysis
+
+| Test | Command | Status |
+|------|---------|--------|
+| Recommended track gain | `mp3gain -s s -o` vs `mp3rgain -o tsv` | Within 0.1 dB and 1 step |
+
 ### AAC/M4A Tests (v2.0.0+)
 
 | Test | Command | Status |
@@ -89,6 +104,8 @@ Compatibility tests run automatically on every pull request in GitHub Actions. S
 | AAC tag deletion | `-s d file.m4a` | Verified |
 | HE-AAC/SBR gain | `-g 2 he-aac.m4a` | Verified |
 
+These rows date from v2.0.0. mp3gain has no AAC support, so they are not a comparison with another tool and `scripts/compatibility-test.sh` does not run them; the AAC path is covered by the Rust test suite instead, which has an LC-AAC fixture but no HE-AAC one.
+
 ## MP3 Format Coverage
 
 Tests are performed on the following MP3 formats:
@@ -99,6 +116,7 @@ Tests are performed on the following MP3 formats:
 | Mono CBR | `test_mono.mp3` | Verified |
 | Joint Stereo | `test_joint_stereo.mp3` | Verified |
 | VBR | `test_vbr.mp3` | Verified |
+| Pink noise (analysis cross-check only) | `test_pink.mp3` | Verified |
 
 ### MPEG Version Coverage
 
@@ -133,7 +151,7 @@ Both mp3gain and mp3rgain adjust volume by modifying the `global_gain` field in 
 3. Add/subtract the specified gain steps
 4. Write modified frame back to file
 
-Each gain step equals **1.5 dB** (defined by the MP3 specification).
+Each gain step equals **1.5051 dB** (20·log10(2)/4, fixed by the MP3 specification).
 
 ### Why Binary Compatibility Matters
 
@@ -150,16 +168,20 @@ Binary compatibility ensures:
 |---------|---------|----------|
 | `-d` option | Modifies suggested gain | Identical (v1.2.1+) |
 | `-o` option | TSV output (no argument) | Identical (v1.2.1+) |
-| Undo tag cleanup | Keeps empty APE tags after undo | Removes APE tags completely after undo |
-| ReplayGain algorithm | Uses LAME routines | Uses Symphonia + native Rust |
+| Tags written by `-g` | `MP3GAIN_UNDO` | `MP3GAIN_UNDO` and `MP3GAIN_MINMAX` |
+| `REPLAYGAIN_*` location | APEv2 | ID3v2 `TXXX` by default since v3.2.0; `-s a` keeps everything in APEv2 |
+| Stored tags on `-r` / `-a` | Reused | Re-analyzed; `-s R` reuses them |
+| Undo tag cleanup | Leaves the APE tag with a zeroed `MP3GAIN_UNDO` | Removes the tag; `-g` then `-u` restores the original bytes |
+| ReplayGain decoding | mpg123 (libmpg123 or the bundled mpglib) | Symphonia |
 | ReplayGain results | May differ slightly | May differ slightly |
 | Gain adjustment (`-g`) | Identical | Identical |
 | AAC gain adjustment | N/A (mp3gain has no AAC support) | Lossless bitstream modification (v2.0.0+) |
 
 **Notes**:
 - As of v1.2.1, the `-d` and `-o` options are fully mp3gain-compatible. The `-d` option modifies the suggested ReplayGain value, and `-o` without an argument outputs TSV format.
-- After undo, mp3gain leaves empty APE tags in the file while mp3rgain removes them completely. The audio data is identical in both cases.
+- After undo, mp3gain 1.6.2 leaves an APE tag holding `MP3GAIN_UNDO=+000,+000,N`, while mp3rgain removes the tag it wrote. The audio data is identical in both cases.
 - ReplayGain analysis results may have minor differences due to different audio decoding libraries, but the gain *application* mechanism is identical.
+- [migrating-from-mp3gain.md](migrating-from-mp3gain.md) lists every behaviour difference, not only the ones that affect file contents.
 
 ## Reproducing Tests
 
@@ -176,6 +198,7 @@ ffmpeg -y -f lavfi -i "sine=frequency=440:duration=1" -ac 2 -ar 44100 -b:a 128k 
 ffmpeg -y -f lavfi -i "sine=frequency=440:duration=1" -ac 1 -ar 44100 -b:a 64k tests/fixtures/test_mono.mp3
 ffmpeg -y -f lavfi -i "sine=frequency=440:duration=1" -ac 2 -ar 44100 -b:a 128k -joint_stereo 1 tests/fixtures/test_joint_stereo.mp3
 ffmpeg -y -f lavfi -i "sine=frequency=440:duration=1" -ac 2 -ar 44100 -q:a 2 tests/fixtures/test_vbr.mp3
+ffmpeg -y -f lavfi -i "anoisesrc=color=pink:seed=42:duration=3:amplitude=0.5" -ac 2 -ar 44100 -b:a 128k tests/fixtures/test_pink.mp3
 ```
 
 ### Running Tests
@@ -197,8 +220,8 @@ cargo build --release
 cp tests/fixtures/test_stereo.mp3 /tmp/test_mp3gain.mp3
 cp tests/fixtures/test_stereo.mp3 /tmp/test_mp3rgain.mp3
 
-mp3gain -g 2 /tmp/test_mp3gain.mp3
-./target/release/mp3rgain -g 2 /tmp/test_mp3rgain.mp3
+mp3gain -s s -g 2 /tmp/test_mp3gain.mp3
+./target/release/mp3rgain -s s -g 2 /tmp/test_mp3rgain.mp3
 
 # Compare (should show identical hashes)
 sha256sum /tmp/test_mp3gain.mp3 /tmp/test_mp3rgain.mp3
@@ -208,7 +231,7 @@ sha256sum /tmp/test_mp3gain.mp3 /tmp/test_mp3rgain.mp3
 
 ### Latest Test Run
 
-Tests are run automatically in CI on every pull request. See the latest workflow run for current results:
+Tests run automatically in CI on every code change. See the latest workflow run for current results:
 
 [![CI Status](https://github.com/M-Igashi/mp3rgain/actions/workflows/ci.yml/badge.svg)](https://github.com/M-Igashi/mp3rgain/actions/workflows/ci.yml)
 
@@ -225,15 +248,15 @@ Tests are run automatically in CI on every pull request. See the latest workflow
 
 ### Q: Why might ReplayGain values differ slightly?
 
-ReplayGain analysis requires decoding the MP3 to PCM audio. mp3gain uses LAME's internal routines, while mp3rgain uses the Symphonia library. Minor floating-point differences in audio decoding can result in slightly different loudness measurements (typically <0.1 dB).
+ReplayGain analysis requires decoding the MP3 to PCM audio. mp3gain decodes with mpg123 (the system libmpg123, or the mpglib copy it bundles), while mp3rgain uses the Symphonia library. Minor floating-point differences in audio decoding can result in slightly different loudness measurements (typically <0.1 dB, which is the tolerance CI allows).
 
-**The gain adjustment mechanism itself is identical** - only the analysis phase may differ.
+**The gain adjustment mechanism itself is identical**; only the analysis phase may differ.
 
 **Note**: Prior to v1.2.6, mp3rgain had a bug where filter coefficients for 44.1 kHz and 48 kHz were swapped, causing significant loudness calculation errors. This has been fixed in v1.2.6+.
 
 ### Q: Can I use APEv2 tags created by mp3gain with mp3rgain?
 
-Yes. Both tools use the same APEv2 tag format for storing undo information and ReplayGain data.
+Yes. mp3rgain reads mp3gain's APEv2 `MP3GAIN_UNDO`, `MP3GAIN_MINMAX` and `REPLAYGAIN_*` items, and each tool can undo a change made by the other (CI tests both directions). Since v3.2.0 mp3rgain writes `REPLAYGAIN_*` to ID3v2 by default, where most players look; use `-s a` to keep everything in APEv2 as mp3gain does.
 
 ### Q: Is mp3rgain compatible with mp3gain on all platforms?
 
@@ -241,7 +264,7 @@ Yes. mp3rgain produces identical output on macOS, Linux, and Windows.
 
 ### Q: Does mp3rgain support AAC/M4A gain adjustment?
 
-Yes. As of v2.0.0, mp3rgain supports lossless AAC bitstream gain adjustment by modifying `global_gain` fields in the AAC frames, similar to aacgain. Undo information is stored in iTunes freeform metadata tags. HE-AAC/SBR files are also supported (base layer gain adjustment).
+Yes. As of v2.0.0, mp3rgain supports lossless AAC bitstream gain adjustment by modifying `global_gain` fields in the AAC frames, similar to aacgain. Undo information is stored in iTunes freeform metadata tags. HE-AAC/SBR files are also supported (base layer gain adjustment). Since v3.7.0 raw ADTS `.aac` streams are supported too, with their tags in an ID3v2 tag because a raw stream has no container for freeform atoms.
 
 ### Q: Can I undo AAC gain changes?
 

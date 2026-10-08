@@ -61,9 +61,9 @@ docker run --rm -v "$(pwd):/src" -w /src rust:1 bash -c '
 
 ## GitHub Actions Build
 
-The `.deb` package is automatically built on each release for both amd64 and arm64 architectures. Download the artifact from the GitHub Actions workflow or the release assets.
+The release workflow builds the `.deb` for amd64 and arm64 on every release tag and attaches it to the GitHub release as `mp3rgain_X.Y.Z-1_amd64.deb` and `mp3rgain_X.Y.Z-1_arm64.deb`, each with a `.sha256`.
 
-A separate GUI package (`mp3rgui`) is also available — see `packages/debian-gui/`.
+The GUI has its own package (`mp3rgui`), built the same way from `packages/debian-gui/`.
 
 ## Version Updates
 

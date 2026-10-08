@@ -29,8 +29,12 @@ Instead, please use [GitHub's private vulnerability reporting](https://github.co
 
 ## Security Measures
 
-This project uses the following automated security tools:
+The library, CLI and GUI source contains no `unsafe` blocks, and audio is decoded with [symphonia](https://github.com/pdeljanov/Symphonia) (pure Rust), not mpglib. See [docs/security.md](docs/security.md) for how this relates to the known mp3gain CVEs.
 
-- **Dependabot** — dependency updates and vulnerability alerts
-- **CodeQL** — static analysis for Rust and GitHub Actions
-- **Secret scanning** — prevents accidental credential commits
+Automated checks:
+
+- **cargo audit**: RustSec advisory scan of both the CLI and GUI lockfiles in CI on pushes and pull requests to `master`
+- **Dependency review**: fails a pull request that adds a dependency with a known vulnerability of moderate severity or higher
+- **Dependabot**: dependency updates and vulnerability alerts
+- **CodeQL**: static analysis for Rust and GitHub Actions
+- **Secret scanning** with push protection: blocks accidental credential commits

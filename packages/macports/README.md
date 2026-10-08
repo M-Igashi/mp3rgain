@@ -1,10 +1,10 @@
 # MacPorts Packaging
 
-Portfile for submission to [macports/macports-ports](https://github.com/macports/macports-ports).
+The canonical Portfile for the `mp3rgain` port in [macports/macports-ports](https://github.com/macports/macports-ports) (CLI only; the GUI is not packaged here). The port is updated by hand after each release, by copying this file into a temporary clone of macports-ports.
 
 ## Files
 
-- `audio/mp3rgain/Portfile` — port definition (PortGroup `github 1.0` + `cargo 1.0`)
+- `audio/mp3rgain/Portfile`: the port definition (PortGroup `github 1.0` + `cargo 1.0`)
 
 ## Local Verification (on macOS with MacPorts installed)
 
@@ -27,9 +27,7 @@ sudo port uninstall mp3rgain
 
 The port is upstream as `audio/mp3rgain`, so each release is an update PR. MacPorts wants `<portname>: <description>` in the commit summary and PR title, without the `audio/` category prefix.
 
-The `M-Igashi/macports-ports` fork only lives on GitHub. Every time we touch
-the Portfile, clone upstream into `/tmp`, push a branch to the fork, open or
-update the PR, then delete the temp clone.
+The `M-Igashi/macports-ports` fork only lives on GitHub. Every time we touch the Portfile, clone upstream into `/tmp`, push a branch to the fork, open or update the PR, then delete the temp clone.
 
 ```sh
 # Fresh /tmp clone (fork is M-Igashi/macports-ports, already on github.com).
@@ -58,7 +56,7 @@ cd ~ && rm -rf /tmp/macports-ports /tmp/macports-ports-test /tmp/mp3rgain-*.tar.
 
 ## Updating the Portfile for a New Release
 
-1. Bump `github.setup` version in the Portfile.
+1. Bump `github.setup` version in the Portfile and reset `revision` to `0`. (For a Portfile-only fix against the same tag, bump `revision` instead.)
 2. Recompute checksums:
    ```sh
    curl -sL https://github.com/M-Igashi/mp3rgain/archive/refs/tags/v<version>.tar.gz -o /tmp/mp3rgain.tgz
@@ -66,17 +64,16 @@ cd ~ && rm -rf /tmp/macports-ports /tmp/macports-ports-test /tmp/mp3rgain-*.tar.
    openssl dgst -rmd160 /tmp/mp3rgain.tgz
    wc -c /tmp/mp3rgain.tgz
    ```
-3. Update the `cargo.crates` block from the new `Cargo.lock` (one line per dependency: `name version checksum`).
+3. Replace the `cargo.crates` block from the new `Cargo.lock`, one line per dependency (`name version checksum`), leaving out `mp3rgain` itself, which has no checksum.
 4. Re-run `port lint --nitpick` and a local install test.
 
-## Trac Ticket for aacgain Deprecation (Step 2)
+## aacgain Deprecation
 
-After this Portfile is merged, file at https://trac.macports.org/ :
+The follow-up to the port submission (issue #122) is done: Trac ticket [#73945](https://trac.macports.org/ticket/73945) proposes deprecating the orphaned `audio/aacgain` port in favour of `mp3rgain`. It argues that:
 
-- **Title:** `audio/aacgain: deprecate (orphaned, unmaintained upstream since 2010, multiple unpatched CVEs)`
-- **Body points:**
-  - aacgain bundles vulnerable mpglibDBL, faad2, and mp4v2 — see project [docs/security.md](../../docs/security.md)
-  - upstream inactive since 2010 (the `aacgain` Portfile itself notes this)
-  - Homebrew already deprecated `aacgain` in April 2023
-  - `mp3rgain` is now in tree as a safe Rust replacement that performs the same lossless AAC/M4A `global_gain` rewrite
-- Optional follow-up: PR adding `replaced_by mp3rgain` to `audio/aacgain/Portfile`.
+- aacgain bundles vulnerable mpglibDBL, faad2 and mp4v2 (see [docs/security.md](../../docs/security.md))
+- upstream has been inactive since 2010, as the `aacgain` Portfile itself notes
+- Homebrew deprecated `aacgain` in April 2023
+- `mp3rgain` is in tree as a safe Rust replacement that performs the same lossless AAC/M4A `global_gain` rewrite
+
+Still open: a PR adding `replaced_by mp3rgain` to `audio/aacgain/Portfile`, once the ticket discussion supports it.
