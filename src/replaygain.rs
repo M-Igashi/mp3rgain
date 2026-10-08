@@ -216,7 +216,8 @@ impl ReplayGainResult {
 
     /// Build a result from stored `REPLAYGAIN_*` tags instead of analysis
     /// (`-s R`, issue #298). Loudness is derived from the gain relative to
-    /// the mode's target; `sample_rate` is unknown and reported as 0.
+    /// the mode's target, the scale an analysis reports it on too;
+    /// `sample_rate` is unknown and reported as 0.
     pub fn from_stored_tags(
         gain_db: f64,
         peak: f64,
@@ -237,8 +238,16 @@ impl ReplayGainResult {
         }
     }
 
-    /// Measured loudness: the RG1 histogram value in [`AnalysisMode::Rg1`],
-    /// or the BS.1770 integrated loudness in LUFS in the other modes.
+    /// Measured loudness on the scale of the mode's target, so that
+    /// `loudness_db() + gain_db()` is the target: dB on the scale of the
+    /// 89 dB reference in [`AnalysisMode::Rg1`] (a file that needs no gain
+    /// reads 89.0), or the BS.1770 integrated loudness in LUFS in the other
+    /// modes.
+    ///
+    /// Until issue #379, a fresh RG1 analysis returned the raw
+    /// `gain_analysis.c` histogram value here, 24.18 dB (89 - 64.82) lower,
+    /// while a result from [`from_stored_tags`](Self::from_stored_tags) was
+    /// already on the 89 dB scale. The gain was the same either way.
     pub fn loudness_db(&self) -> f64 {
         self.loudness_db
     }
@@ -355,7 +364,9 @@ impl AlbumGainResult {
         &self.tracks
     }
     /// Loudness of the album measured as one continuous programme, not the
-    /// mean of the per-track values.
+    /// mean of the per-track values. On the same scale as
+    /// [`ReplayGainResult::loudness_db`], so it plus
+    /// [`album_gain_db`](Self::album_gain_db) is the mode's target.
     pub fn album_loudness_db(&self) -> f64 {
         self.album_loudness_db
     }
@@ -1185,13 +1196,21 @@ impl LoudnessState {
     /// `(loudness, gain_db)` of the accumulated state under `mode`.
     fn loudness_and_gain(&self, mode: AnalysisMode) -> (f64, f64) {
         match self {
-            LoudnessState::Rg1(histogram) => {
-                let loudness = histogram.get_loudness();
-                (loudness, PINK_REF - loudness)
-            }
+            LoudnessState::Rg1(histogram) => rg1_loudness_and_gain(histogram.get_loudness()),
             LoudnessState::Bs1770(blocks) => lufs_loudness_and_gain(blocks.integrated_lufs(), mode),
         }
     }
+}
+
+/// Convert an RG1 histogram value to `(loudness, gain_db)`. The gain is
+/// mp3gain's, `PINK_REF - histogram`. The loudness is reported on the 89 dB
+/// scale the target is quoted on, so loudness + gain = 89 dB, as in the
+/// BS.1770 modes and in results rebuilt from stored tags. The raw histogram
+/// value sits 24.18 dB lower and is not reported (issue #379).
+#[cfg(feature = "replaygain")]
+fn rg1_loudness_and_gain(histogram_db: f64) -> (f64, f64) {
+    let gain_db = PINK_REF - histogram_db;
+    (REPLAYGAIN_REFERENCE_DB - gain_db, gain_db)
 }
 
 /// Convert integrated LUFS to `(loudness, gain_db)` for the mode's target.
@@ -1463,10 +1482,10 @@ fn analyze_track_decoded(
         TrackAnalyzer::Rg1 { mut analyzer, .. } => {
             // Finish any remaining samples in the last window
             analyzer.finish_window();
-            let loudness_db = analyzer.get_loudness();
+            let (loudness_db, gain_db) = rg1_loudness_and_gain(analyzer.get_loudness());
             (
                 loudness_db,
-                PINK_REF - loudness_db,
+                gain_db,
                 LoudnessState::Rg1(analyzer.into_histogram()),
             )
         }
@@ -3034,6 +3053,43 @@ mod tests {
         };
         let result = analyze_album_with_options(&files, &lenient);
         assert!(matches!(result, Err(Error::AllFilesFailed { count: 2 })));
+    }
+
+    /// Issue #379: a fresh RG1 analysis reported the raw histogram value as
+    /// its loudness, 24.18 dB below what the same gain gives when rebuilt
+    /// from stored tags. Both now sit on the 89 dB scale; the gain is still
+    /// `PINK_REF - histogram`.
+    #[cfg(feature = "replaygain")]
+    #[test]
+    fn rg1_loudness_is_on_the_89_db_scale_like_stored_tags() {
+        let mono = Path::new("tests/fixtures/test_mono.mp3");
+        let vbr = Path::new("tests/fixtures/test_vbr.mp3");
+        let album = analyze_album(&[mono, vbr]).unwrap();
+
+        for track in album.tracks() {
+            let stored = ReplayGainResult::from_stored_tags(
+                track.gain_db(),
+                track.peak(),
+                track.file_type(),
+                AnalysisMode::Rg1,
+            );
+            assert_eq!(track.loudness_db(), stored.loudness_db());
+            assert!((track.loudness_db() + track.gain_db() - REPLAYGAIN_REFERENCE_DB).abs() < 1e-9);
+        }
+        let stored = AlbumGainResult::from_stored_tags(
+            album.tracks().to_vec(),
+            album.album_gain_db(),
+            album.album_peak(),
+            AnalysisMode::Rg1,
+        );
+        assert_eq!(album.album_loudness_db(), stored.album_loudness_db());
+
+        // 55.00 dB on the histogram scale.
+        let mut histogram = LoudnessHistogram::new();
+        histogram.data[5500] = 1;
+        let (loudness, gain) = LoudnessState::Rg1(histogram).loudness_and_gain(AnalysisMode::Rg1);
+        assert_eq!(gain, PINK_REF - 55.0, "the gain must not move");
+        assert!((loudness - (55.0 + 24.18)).abs() < 1e-9);
     }
 
     #[cfg(feature = "replaygain")]
