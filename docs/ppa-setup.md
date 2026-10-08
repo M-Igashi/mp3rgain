@@ -125,18 +125,15 @@ From the project root:
 # Build only the CLI for resolute
 ./scripts/build-ppa.sh --package=cli --distro=resolute
 
-# Build and upload, one package per PPA
-./scripts/build-ppa.sh --package=cli --upload
-./scripts/build-ppa.sh --package=gui --ppa=ppa:m-igashi/mp3rgui --upload
+# Build and upload both, each to its own PPA
+./scripts/build-ppa.sh --upload
 
 # Specify GPG key
 ./scripts/build-ppa.sh --package=cli --key=YOUR_KEY_ID --upload
 
-# Dry run (show what would be done)
-./scripts/build-ppa.sh --dry-run
+# Dry run (show what would be built and where it would be uploaded)
+./scripts/build-ppa.sh --dry-run --upload
 ```
-
-`--upload` sends every package the run built to the one `--ppa` target, so do not combine it with the default `--package=all`: that would put mp3rgui into the CLI PPA.
 
 ### Script Options
 
@@ -145,7 +142,8 @@ From the project root:
 | `--upload` | Upload to PPA after building |
 | `--package=PKG` | `cli`, `gui`, or `all` (default: `all`) |
 | `--distro=DISTRO` | Build for one series only (default: every series in `ALL_DISTROS`, currently `resolute`) |
-| `--ppa=PPA` | Upload target for both packages (default: `ppa:m-igashi/mp3rgain`). The GitHub Actions workflow has separate defaults: `ppa:m-igashi/mp3rgain` for the CLI and `ppa:m-igashi/mp3rgui` for the GUI |
+| `--ppa-cli=PPA` | Upload target for mp3rgain (default: `ppa:m-igashi/mp3rgain`), like the workflow's `target_ppa_cli` |
+| `--ppa-gui=PPA` | Upload target for mp3rgui (default: `ppa:m-igashi/mp3rgui`), like the workflow's `target_ppa_gui` |
 | `--key=KEYID` | GPG key ID for signing |
 | `--dry-run` | Show commands without executing |
 
