@@ -149,7 +149,8 @@ Both mp3gain and mp3rgain adjust volume by modifying the `global_gain` field in 
 1. Parse MP3 frame headers
 2. Locate `global_gain` field (8 bits, values 0-255)
 3. Add/subtract the specified gain steps
-4. Write modified frame back to file
+4. Recompute the frame's CRC if it has one (`lame -p`), since the CRC covers the side information
+5. Write modified frame back to file
 
 Each gain step equals **1.5051 dB** (20·log10(2)/4, fixed by the MP3 specification).
 

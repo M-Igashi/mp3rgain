@@ -32,6 +32,15 @@ impl FrameHeader {
             4
         }
     }
+
+    pub fn side_info_len(&self) -> usize {
+        match (self.version, self.channel_mode) {
+            (MpegVersion::Mpeg1, ChannelMode::Mono) => 17,
+            (MpegVersion::Mpeg1, _) => 32,
+            (_, ChannelMode::Mono) => 9,
+            (_, _) => 17,
+        }
+    }
 }
 
 /// Bitrate table for MPEG1 Layer III
@@ -236,6 +245,34 @@ pub(crate) fn write_gain_at(data: &mut [u8], loc: &GainLocation, value: u8) {
     write_bits_u8(data, loc.byte_offset, loc.bit_offset, value)
 }
 
+/// CRC-16 (polynomial 0x8005, initial value 0xFFFF) over header bytes 2-3
+/// and the side info, the region a Layer III frame's CRC protects.
+fn frame_crc(frame: &[u8], side_info_len: usize) -> u16 {
+    let mut crc = 0xFFFFu16;
+    for &byte in frame[2..4].iter().chain(&frame[6..6 + side_info_len]) {
+        crc ^= (byte as u16) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x8005
+            } else {
+                crc << 1
+            };
+        }
+    }
+    crc
+}
+
+/// Rewrite the CRC of a CRC-protected frame after its side info changed, as
+/// mp3gain's `crcWriteHeader` does. global_gain lives in the protected side
+/// info, so without this every gained frame fails a CRC check (issue #374).
+fn update_crc(data: &mut [u8], frame_offset: usize, header: &FrameHeader) {
+    let side_info_len = header.side_info_len();
+    if let Some(frame) = data.get_mut(frame_offset..frame_offset + 6 + side_info_len) {
+        let crc = frame_crc(frame, side_info_len);
+        frame[4..6].copy_from_slice(&crc.to_be_bytes());
+    }
+}
+
 /// Skip ID3v2 tag at beginning of data
 pub(crate) fn skip_id3v2(data: &[u8]) -> usize {
     if data.len() < 10 || &data[0..3] != b"ID3" {
@@ -280,16 +317,14 @@ pub(crate) fn find_audio_end(data: &[u8]) -> usize {
     audio_end
 }
 
-/// Check if a frame contains a Xing or Info VBR header
+/// Check if a frame contains a Xing or Info VBR header.
+///
+/// The marker sits at 4 + side info length even when the frame has a CRC:
+/// that is where LAME writes it and where mpg123, ffmpeg and symphonia look.
+/// Adding the 2 CRC bytes missed it, so the Info frame was gained as audio
+/// (issue #374).
 pub(crate) fn is_xing_frame(data: &[u8], frame_offset: usize, header: &FrameHeader) -> bool {
-    let side_info_len = match (header.version, header.channel_mode) {
-        (MpegVersion::Mpeg1, ChannelMode::Mono) => 17,
-        (MpegVersion::Mpeg1, _) => 32,
-        (_, ChannelMode::Mono) => 9,
-        (_, _) => 17,
-    };
-
-    let xing_offset = frame_offset + header.side_info_offset() + side_info_len;
+    let xing_offset = frame_offset + 4 + header.side_info_len();
 
     if xing_offset + 4 > data.len() {
         return false;
@@ -521,6 +556,10 @@ pub(crate) fn apply_gain_to_data(
             }
         }
 
+        if header.has_crc {
+            update_crc(data, frame_pos, &header);
+        }
+
         stats.frames += 1;
         pos = next_pos;
     }
@@ -645,6 +684,61 @@ mod tests {
         data[38] = 0x00;
         data[39] = 0x00;
         assert!(!is_xing_frame(&data, 0, &header));
+
+        // A CRC does not move the marker: LAME still writes it at 36 (issue #374).
+        data[1] = 0xFA;
+        data[36..40].copy_from_slice(b"Info");
+        let header = parse_header(&data).unwrap();
+        assert!(header.has_crc);
+        assert!(is_xing_frame(&data, 0, &header));
+    }
+
+    /// Header, CRC and side info of real `lame -p` frames (MPEG-1 stereo,
+    /// MPEG-1 mono, MPEG-2 stereo, MPEG-2.5 mono), before and after
+    /// `mp3gain -g 2`, which rewrites the CRC (issue #374).
+    const CRC_FRAMES: [(&str, &str); 4] = [
+        (
+            "fffa9264543c3d0df3b115430f7c400000000d20e000010d54550e2fec668000003480000004",
+            "fffa92647f6a3d0df3b115440f7c400000000d40e000010d5455122fec668000003500000004",
+        ),
+        (
+            "fffa52c463a6048209c421199de000016583e265af6848",
+            "fffa52c46264048209c4211d9de000016583e2e5af6848",
+        ),
+        (
+            "fff2826490c74e1805b91e02cf50000000034801800000",
+            "fff282649ebb4e1805b92202cf50000000035001800000",
+        ),
+        (
+            "ffe218c4f7ea060de8f29421943800",
+            "ffe218c47429060de8f29c21943800",
+        ),
+    ];
+
+    fn unhex(s: &str) -> Vec<u8> {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn test_crc_matches_mp3gain() {
+        for (before, after) in CRC_FRAMES {
+            let (before, after) = (unhex(before), unhex(after));
+            let header = parse_header(&before).unwrap();
+            assert!(header.has_crc);
+            assert_eq!(
+                frame_crc(&before, header.side_info_len()),
+                u16::from_be_bytes([before[4], before[5]])
+            );
+
+            let mut frame = before.clone();
+            frame.resize(header.frame_size, 0);
+            let stats = apply_gain_to_data(&mut frame, 2, GainMode::Saturating, None);
+            assert_eq!(stats.frames, 1);
+            assert_eq!(frame[..after.len()], after[..]);
+        }
     }
 
     /// Build a complete MPEG1 Layer III stereo frame (128 kbps, no CRC) at the

@@ -39,7 +39,7 @@ mp3rgain accepts every mp3gain option except `-T` (modify in place), which it ig
 
 | Option | Description | Notes on mp3rgain |
 |--------|-------------|-------------------|
-| `-g <i>` | Apply gain of `i` steps | Audio frames byte-identical to mp3gain's (except CRC-protected frames) |
+| `-g <i>` | Apply gain of `i` steps | Audio frames byte-identical to mp3gain's |
 | `-d <n>` | Modify suggested dB gain by `n` | Rounded to whole 1.5 dB steps |
 | `-m <i>` | Modify suggested gain by `i` steps | |
 | `-r` | Apply track gain | |
@@ -257,7 +257,7 @@ See [security.md](security.md) for the CVE details.
 - HE-AAC handling is untested (see [Supported formats](#supported-formats)).
 - `-g` and `-l` leave existing `REPLAYGAIN_*` tags unchanged (see [Avoiding double volume adjustment](#avoiding-double-volume-adjustment)).
 - Undo restores every audio frame, but after an ID3v2 tag write the file is not byte-identical to the original (the ID3v2 tag is rewritten as ID3v2.4). Frames whose `global_gain` clamped at 0 or 255 cannot be restored.
-- On MP3 files with CRC protection, the frame CRCs are not updated after a gain change, so decoders that check them report mismatches.
+- Raw ADTS streams with CRC protection (`protection_absent = 0`) keep their original CRC after a gain change. ffmpeg and Apple's encoder do not write ADTS CRCs, so there is nothing to test the update against.
 
 ### aacgain
 
