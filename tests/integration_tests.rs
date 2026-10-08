@@ -326,11 +326,15 @@ fn test_cumulative_gain_undo() {
 
 // =============================================================================
 // Channel-Specific Gain Tests
+//
+// `test_stereo.mp3` is stereo only in its Info frame header: every audio frame
+// is joint stereo, which `-l` refuses (issue #393). These use the
+// simple-stereo fixture.
 // =============================================================================
 
 #[test]
 fn test_apply_gain_left_channel() {
-    let path = copy_test_file("test_stereo.mp3");
+    let path = copy_test_file("test_simple_stereo.mp3");
 
     // Apply gain to left channel only
     let result = GainOptions::new(2).channel(Channel::Left).apply(&path);
@@ -346,7 +350,7 @@ fn test_apply_gain_left_channel() {
 
 #[test]
 fn test_apply_gain_right_channel() {
-    let path = copy_test_file("test_stereo.mp3");
+    let path = copy_test_file("test_simple_stereo.mp3");
 
     // Apply gain to right channel only
     let result = GainOptions::new(-2).channel(Channel::Right).apply(&path);
@@ -374,9 +378,50 @@ fn test_channel_gain_fails_on_mono() {
     cleanup(&path);
 }
 
+/// Issue #393: a joint-stereo frame may code mid and side, so moving "left"
+/// moves both output channels. The apply is refused and the file left as it
+/// was, as mp3gain does.
+#[test]
+fn test_channel_gain_fails_on_joint_stereo() {
+    let path = copy_test_file("test_joint_stereo.mp3");
+    let original = fs::read(&path).unwrap();
+
+    for channel in [Channel::Left, Channel::Right] {
+        let result = GainOptions::new(2).channel(channel).undo(true).apply(&path);
+        assert!(
+            matches!(result, Err(mp3rgain::Error::ChannelGainOnJointStereo)),
+            "{channel}: {result:?}"
+        );
+    }
+    assert_eq!(fs::read(&path).unwrap(), original);
+
+    cleanup(&path);
+}
+
+/// Issue #393: mp3gain refuses `-l` on joint stereo but still records
+/// `MP3GAIN_UNDO: -002,+000,N`, so that tag sits on a file whose audio was
+/// never changed. Undo must refuse it rather than move the left channel.
+#[test]
+fn test_undo_refuses_channel_undo_on_joint_stereo() {
+    let path = copy_test_file("test_joint_stereo.mp3");
+    let mut tag = mp3rgain::ape::ApeTag::new();
+    tag.set_undo_gain(-2, 0, false);
+    mp3rgain::ape::write_ape_tag(&path, &tag).unwrap();
+    let tagged = fs::read(&path).unwrap();
+
+    let result = undo_gain(&path);
+    assert!(
+        matches!(result, Err(mp3rgain::Error::ChannelUndoOnMonoOrJointStereo)),
+        "{result:?}"
+    );
+    assert_eq!(fs::read(&path).unwrap(), tagged);
+
+    cleanup(&path);
+}
+
 #[test]
 fn test_channel_zero_gain() {
-    let path = copy_test_file("test_stereo.mp3");
+    let path = copy_test_file("test_simple_stereo.mp3");
 
     // Zero gain should do nothing
     let result = GainOptions::new(0).channel(Channel::Left).apply(&path);
@@ -389,14 +434,16 @@ fn test_channel_zero_gain() {
 // =============================================================================
 // Channel/Wrap Undo Round-Trip Tests
 //
-// The fixture's global_gain values are all 255, so negative steps (and
-// wrapping in either direction) are exactly invertible — these tests assert
-// byte-for-byte restoration, the tool's core lossless guarantee.
+// `test_stereo.mp3`'s global_gain values are all 255, so negative steps (and
+// wrapping in either direction) are exactly invertible, and the small steps
+// the channel tests apply to `test_simple_stereo.mp3` (125..210) are too.
+// These tests assert byte-for-byte restoration, the tool's core lossless
+// guarantee.
 // =============================================================================
 
 #[test]
 fn test_undo_restores_asymmetric_channel_gain() {
-    let path = copy_test_file("test_stereo.mp3");
+    let path = copy_test_file("test_simple_stereo.mp3");
     let original = fs::read(&path).unwrap();
 
     GainOptions::new(-3)
@@ -418,7 +465,7 @@ fn test_undo_restores_asymmetric_channel_gain() {
 fn test_undo_restores_right_channel_only_gain() {
     // Left delta 0 / right delta != 0: the old undo read only the left value
     // and treated this as "nothing to undo".
-    let path = copy_test_file("test_stereo.mp3");
+    let path = copy_test_file("test_simple_stereo.mp3");
     let original = fs::read(&path).unwrap();
 
     GainOptions::new(-2)
@@ -437,7 +484,7 @@ fn test_undo_restores_right_channel_only_gain() {
 fn test_whole_file_apply_preserves_asymmetric_undo_values() {
     // A whole-file apply after a channel apply used to collapse the undo tag
     // to a single value, losing the right channel's history.
-    let path = copy_test_file("test_stereo.mp3");
+    let path = copy_test_file("test_simple_stereo.mp3");
     let original = fs::read(&path).unwrap();
 
     GainOptions::new(-3)
@@ -820,12 +867,13 @@ fn write_replaygain_tags_only_preserves_audio_and_mp3gain_tags() {
 // =============================================================================
 
 /// `read_channel_mode` reads one frame header instead of walking the file;
-/// it must agree with the full analysis on every fixture, including the
-/// joint-stereo one the `-l` warning exists for.
+/// it must agree with the full analysis on every fixture, joint stereo
+/// included.
 #[test]
 fn read_channel_mode_matches_full_analysis() {
     for name in [
         "test_stereo.mp3",
+        "test_simple_stereo.mp3",
         "test_mono.mp3",
         "test_joint_stereo.mp3",
         "test_vbr.mp3",

@@ -45,7 +45,7 @@ mp3rgain accepts every mp3gain option except `-T` (modify in place), which it ig
 | `-r` | Apply track gain | |
 | `-a` | Apply album gain | Every file given is one album, as in mp3gain |
 | `-e` | Skip album analysis | `-a -e` applies track gain (mp3gain applies nothing) |
-| `-l <c> <g>` | Channel-specific gain | MP3 only |
+| `-l <c> <g>` | Channel-specific gain | MP3 only, and refused on mono and joint-stereo files as in mp3gain ([#393](https://github.com/M-Igashi/mp3rgain/issues/393)) |
 | `-u` | Undo gain changes | Also removes the `REPLAYGAIN_*` values |
 | `-x` | Find max amplitude only | |
 | `-k` | Prevent clipping | With `-g`, only stops `global_gain` from exceeding 255 |

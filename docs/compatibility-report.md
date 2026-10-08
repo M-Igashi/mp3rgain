@@ -77,6 +77,8 @@ Compatibility tests run in GitHub Actions on every push to `master` and every pu
 | Left channel +2 | `-l 0 2` | Verified |
 | Right channel -2 | `-l 1 -2` | Verified |
 
+mp3gain refuses `-l` on mono and joint-stereo files, so the byte comparison runs on `test_simple_stereo.mp3` and is skipped on the other fixtures, which mp3rgain refuses as well ([#393](https://github.com/M-Igashi/mp3rgain/issues/393)).
+
 #### Phase 4: Cross-Tool Undo
 
 | Test | Command | Status |
@@ -112,7 +114,8 @@ Tests are performed on the following MP3 formats:
 
 | Format | File | Status |
 |--------|------|--------|
-| Stereo CBR | `test_stereo.mp3` | Verified |
+| Stereo CBR (stereo in the Info frame header only; the audio frames are joint stereo) | `test_stereo.mp3` | Verified |
+| Simple stereo CBR (L/R in every frame) | `test_simple_stereo.mp3` | Verified |
 | Mono CBR | `test_mono.mp3` | Verified |
 | Joint Stereo | `test_joint_stereo.mp3` | Verified |
 | VBR | `test_vbr.mp3` | Verified |

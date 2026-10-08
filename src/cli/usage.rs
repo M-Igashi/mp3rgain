@@ -24,7 +24,8 @@ pub fn print_usage() {
         GAIN_STEP_DB
     );
     println!("    -d <n>      Modify suggested/target gain by n dB (rounded to nearest step)");
-    println!("    -l <c> <g>  Apply gain to left (0) or right (1) channel only");
+    println!("    -l <c> <g>  Apply gain to left (0) or right (1) channel only. Not for");
+    println!("                mono or joint stereo MP3s, as in mp3gain");
     println!("    -m <i>      Modify suggested gain by integer i");
     println!("    -r          Apply Track gain (ReplayGain analysis)");
     println!("    -a          Apply Album gain (ReplayGain analysis). Every file given is");

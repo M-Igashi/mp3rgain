@@ -17,7 +17,6 @@ What ships today:
 
 ## Open
 
-- [ ] `-l` on a joint-stereo MP3 changes both channels, where mp3gain refuses (#393)
 - [ ] Renew the Developer ID certificate before 2027-02-01 (#355)
 - [ ] Upgrade mp3rgui's egui/eframe stack, which also retires the quick-xml audit ignores in `ci.yml`
 - [ ] Homebrew core formula (#8); today it is in the `M-Igashi/tap` tap
@@ -39,7 +38,10 @@ What ships today:
 
 ## Unreleased
 
-Nothing yet.
+Behaviour change: `-l` on a mono or joint-stereo MP3 is an error, and so is `-u` with different left and right undo values on such a file.
+
+- [x] `-l` refuses joint-stereo MP3s with an error and leaves the file untouched, as mp3gain does, in the CLI and the GUI. A joint-stereo frame may code mid and side rather than left and right, so the change reached both output channels while the undo tag recorded one; mp3rgain only warned, and only in text output without `-q`. Every frame is checked, so a stream that switches modes partway is refused as a whole. A dry run (`-n`, and the GUI's Dry run) now reports the refusal instead of "would apply". `-u` refuses a channel undo record on a mono or joint-stereo file, which mp3gain writes when it refuses `-l` there without changing the audio. A joint-stereo file adjusted with `-l` by 3.10.0 or earlier cannot be undone either, since the tag cannot tell the two apart (#393)
+- [x] Tests: `test_stereo.mp3` turned out to be joint stereo in every audio frame, so mp3gain refused `-l` on it and the compatibility script had been skipping its `-l` comparison on every fixture. A simple-stereo fixture, `test_simple_stereo.mp3`, now carries the channel tests and the `-l` comparison with mp3gain
 
 ## Release history
 

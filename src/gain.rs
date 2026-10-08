@@ -20,7 +20,7 @@ use crate::ape::{
 };
 use crate::error::{Error, Result};
 use crate::frame::{
-    apply_gain_to_data, first_frame_header, scan_gain_range, GainMode, SaturationStats,
+    apply_gain_to_data, iterate_frames, scan_gain_range, GainMode, SaturationStats,
 };
 
 use std::fs;
@@ -299,18 +299,34 @@ pub fn apply_gain_db(file_path: &Path, gain_db: f64) -> Result<usize> {
 /// convention — the gain to *re-add* to restore the original — so they are
 /// applied directly (issue #210). This is what makes cross-tool undo work:
 /// mp3gain stores `-N` after applying `+N`, and we apply that `-N` as-is.
-pub(crate) fn apply_undo_to_data(data: &mut [u8], left: i32, right: i32, wrap: bool) -> usize {
+///
+/// Unequal deltas on a mono or joint-stereo stream are refused, as mp3gain
+/// refuses them. mp3gain records them when it refuses `-l` on such a file and
+/// leaves the audio alone, so applying them would change a file that was
+/// never adjusted (issue #393).
+pub(crate) fn apply_undo_to_data(
+    data: &mut [u8],
+    left: i32,
+    right: i32,
+    wrap: bool,
+) -> Result<usize> {
     if left == right {
         let mode = if wrap {
             GainMode::Wrapping
         } else {
             GainMode::Saturating
         };
-        apply_gain_to_data(data, left, mode, None).frames
+        Ok(apply_gain_to_data(data, left, mode, None).frames)
     } else {
+        ensure_channels_separable(data).map_err(|e| match e {
+            Error::ChannelGainOnMono | Error::ChannelGainOnJointStereo => {
+                Error::ChannelUndoOnMonoOrJointStereo
+            }
+            e => e,
+        })?;
         let left_frames = apply_gain_to_data(data, left, GainMode::Saturating, Some(0)).frames;
         let right_frames = apply_gain_to_data(data, right, GainMode::Saturating, Some(1)).frames;
-        left_frames.max(right_frames)
+        Ok(left_frames.max(right_frames))
     }
 }
 
@@ -327,7 +343,7 @@ pub fn undo_gain(file_path: &Path) -> Result<usize> {
         return Ok(0);
     }
 
-    let frames = apply_undo_to_data(&mut data, left, right, wrap);
+    let frames = apply_undo_to_data(&mut data, left, right, wrap)?;
 
     tag.remove(TAG_MP3GAIN_UNDO);
     tag.remove(TAG_MP3GAIN_MINMAX);
@@ -470,15 +486,28 @@ fn apply_gain_with_undo_impl_to_path(
     Ok(stats)
 }
 
-/// Channel-specific gain needs two channels; one frame header answers that,
-/// where the previous `analyze_data` walked every frame and computed gain
-/// statistics that were then discarded.
-fn ensure_not_mono(data: &[u8]) -> Result<()> {
-    let header = first_frame_header(data).ok_or(Error::NoMp3Frames)?;
-    if header.channel_mode == ChannelMode::Mono {
-        return Err(Error::ChannelGainOnMono);
+/// Channel-specific gain needs every frame to carry a left and a right
+/// `global_gain`. A mono frame has one, and a joint-stereo frame may carry mid
+/// and side, so changing "left" there changes both output channels (issue
+/// #393). Like mp3gain, every frame is checked, so a stream that switches
+/// modes partway is refused as a whole rather than left half-adjusted.
+pub(crate) fn ensure_channels_separable(data: &[u8]) -> Result<()> {
+    let mut mono = false;
+    let mut joint = false;
+    let frames = iterate_frames(data, |_, header, _| match header.channel_mode {
+        ChannelMode::Mono => mono = true,
+        ChannelMode::JointStereo => joint = true,
+        _ => {}
+    })?;
+    if frames == 0 {
+        Err(Error::NoMp3Frames)
+    } else if mono {
+        Err(Error::ChannelGainOnMono)
+    } else if joint {
+        Err(Error::ChannelGainOnJointStereo)
+    } else {
+        Ok(())
     }
-    Ok(())
 }
 
 /// Apply gain to a specific channel (no undo)
@@ -488,7 +517,7 @@ fn apply_gain_channel_impl(
     channel: Channel,
     gain_steps: i32,
 ) -> Result<SaturationStats> {
-    ensure_not_mono(&data)?;
+    ensure_channels_separable(&data)?;
 
     let stats = apply_gain_to_data(
         &mut data,
@@ -509,7 +538,7 @@ fn apply_gain_channel_with_undo(
     channel: Channel,
     gain_steps: i32,
 ) -> Result<SaturationStats> {
-    ensure_not_mono(&data)?;
+    ensure_channels_separable(&data)?;
 
     let mut tag = read_ape_tag(&data).unwrap_or_default();
 
@@ -545,6 +574,44 @@ fn apply_gain_channel_with_undo(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// MPEG1 Layer III frames at 128 kbps / 44.1 kHz with zeroed side info,
+    /// one per mode value (0 stereo, 1 joint stereo, 2 dual channel, 3 mono).
+    fn frames(modes: &[u8]) -> Vec<u8> {
+        modes
+            .iter()
+            .flat_map(|&mode| {
+                let mut frame = vec![0u8; 417];
+                frame[..4].copy_from_slice(&[0xFF, 0xFB, 0x90, mode << 6]);
+                frame
+            })
+            .collect()
+    }
+
+    /// Issue #393: every frame is checked, as mp3gain does, so a joint-stereo
+    /// or mono frame anywhere refuses a channel apply and a channel undo.
+    #[test]
+    fn channel_gain_needs_left_and_right_in_every_frame() {
+        assert!(ensure_channels_separable(&frames(&[0, 2, 0])).is_ok());
+        assert!(matches!(
+            ensure_channels_separable(&frames(&[0, 0, 1])),
+            Err(Error::ChannelGainOnJointStereo)
+        ));
+        assert!(matches!(
+            ensure_channels_separable(&frames(&[0, 1, 3])),
+            Err(Error::ChannelGainOnMono)
+        ));
+
+        let mut data = frames(&[0, 0, 1]);
+        let before = data.clone();
+        assert!(matches!(
+            apply_undo_to_data(&mut data, -2, 0, false),
+            Err(Error::ChannelUndoOnMonoOrJointStereo)
+        ));
+        assert_eq!(data, before);
+        // Equal deltas move both fields together, which is right in any mode.
+        assert_eq!(apply_undo_to_data(&mut data, 2, 2, false).unwrap(), 3);
+    }
 
     #[test]
     fn test_db_to_steps() {

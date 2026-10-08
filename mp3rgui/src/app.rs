@@ -1306,7 +1306,8 @@ impl Mp3rgainApp {
 
     /// `-l`: apply gain to a single channel of the targeted files. AAC files,
     /// in MP4 or as a raw ADTS stream, are silently skipped (channel gain is
-    /// MP3-only).
+    /// MP3-only). Mono and joint-stereo MP3s are refused by the apply
+    /// pipeline and show as failed rows (issue #393).
     pub fn start_apply_channel_gain(&mut self, ctx: &egui::Context, channel: Channel, steps: i32) {
         if self.files.is_empty() || self.is_processing() || steps == 0 {
             return;

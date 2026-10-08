@@ -135,8 +135,8 @@ impl std::fmt::Display for MpegVersion {
 pub enum ChannelMode {
     /// Two independent channels.
     Stereo,
-    /// Two channels sharing information. Per-channel gain (`-l`) may not do
-    /// what the user expects here, so the CLI warns.
+    /// Two channels that may be coded as mid and side. Rejects per-channel
+    /// gain with [`crate::Error::ChannelGainOnJointStereo`].
     JointStereo,
     /// Two unrelated channels, e.g. two languages. Two channels for gain.
     DualChannel,
@@ -356,11 +356,10 @@ fn gain_range_of(data: &[u8]) -> Result<(u8, u8)> {
 /// Channel mode of the first MP3 frame, reading only the head of the file.
 ///
 /// [`analyze`] walks every frame to compute gain statistics, but a mono
-/// check or a Joint Stereo warning needs one header. The ID3v2 tag is
-/// skipped by its declared size (cover art can run to megabytes) and a
-/// 64 KiB window read after it, which holds the first frame plus the sync
-/// check on the one following. The rare stream that starts later than that
-/// falls back to a full read.
+/// check needs one header. The ID3v2 tag is skipped by its declared size
+/// (cover art can run to megabytes) and a 64 KiB window read after it, which
+/// holds the first frame plus the sync check on the one following. The rare
+/// stream that starts later than that falls back to a full read.
 pub fn read_channel_mode(file_path: &Path) -> Result<ChannelMode> {
     use std::io::{Read, Seek, SeekFrom};
     const WINDOW: usize = 64 * 1024;
