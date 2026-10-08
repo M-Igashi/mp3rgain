@@ -123,7 +123,7 @@ For the choice between rewriting `global_gain` and writing ReplayGain *tags*, se
 | Plain analysis (`mp3gain file.mp3`) | Stores the analysis in an APEv2 tag | Read-only: nothing is written, so a later `-s R` has nothing to reuse |
 | Stored analysis | Reused unless `-s r` | Re-analyzed unless `-s R` |
 | Tag layout | Everything in APEv2 | Since 3.2.0, `REPLAYGAIN_*` in ID3v2 and `MP3GAIN_*` in APEv2. `-s a` restores mp3gain's layout |
-| `-g` and stored ReplayGain tags | Shifts stored `REPLAYGAIN_*` values by the applied gain | Leaves existing `REPLAYGAIN_*` tags as they were (`-l` too), so they no longer match the audio. Re-run `-r`/`-a` (or `-r --tags-only`) afterwards, or use `-s d` to remove them (which also removes the undo tag) |
+| `-g` and stored ReplayGain tags | Shifts stored `REPLAYGAIN_*` values and `MP3GAIN_ALBUM_MINMAX` by the applied gain, at 1.505 dB per step. `-l` leaves them as they were | Shifts them too ([#377](https://github.com/M-Igashi/mp3rgain/issues/377)), in whichever container holds them (APEv2, ID3v2 or MP4), by the exact step of 1.50515 dB, so a value can differ from mp3gain's by 0.00015 dB per step. `-l` leaves them as they were, like mp3gain |
 | Tags written by `-g` | `MP3GAIN_UNDO` only | `MP3GAIN_UNDO` and `MP3GAIN_MINMAX`. The audio frames are byte-identical to mp3gain's ([compatibility-report.md](compatibility-report.md)); the tag block is not |
 | CRC-protected MP3 frames | Updates each frame's CRC after changing the gain | Leaves the CRC as it was, so decoders that check CRCs report mismatches |
 | Undo (`-u`) | Keeps its APEv2 tag, with the undo value reset to zero and the `REPLAYGAIN_*` values adjusted | Removes the undo tag and the `REPLAYGAIN_*` values in both containers |

@@ -155,6 +155,19 @@ impl ApplyOptions {
         self.file_type
             .unwrap_or_else(|| AudioFileType::from_path(file_path))
     }
+
+    /// Whether applying `steps` moves the ReplayGain values and
+    /// `MP3GAIN_ALBUM_MINMAX` already stored in the file along with the audio
+    /// (issue #377), as mp3gain does after `-g`. Only an apply that records
+    /// its undo value, covers every channel, and writes no fresh ReplayGain
+    /// values of its own: `-r`/`-a` replace them, `-s s` writes no tags at
+    /// all, and mp3gain leaves every tag alone after `-l`.
+    fn shifts_stored_gain(&self, steps: i32) -> bool {
+        steps != 0
+            && self.write_undo
+            && self.channel.is_none()
+            && !(self.write_replaygain_tags && self.track_result.is_some())
+    }
 }
 
 /// Outcome of an [`apply_with_options`] call.
@@ -212,6 +225,10 @@ pub enum ClippingDetection {
 ///    undo, `MP3GAIN_MINMAX` and ReplayGain tags land in whichever
 ///    container [`ApplyOptions::tag_layout`] selects (issue #204), and a
 ///    failure anywhere leaves the original untouched (issues #227, #232).
+///    An apply that records its undo value but writes no fresh ReplayGain
+///    values (`-g`) shifts the ones already stored, and
+///    `MP3GAIN_ALBUM_MINMAX`, in every container that holds them, by the
+///    steps actually applied (issue #377).
 /// 3. Mtime restoration when [`ApplyOptions::preserve_timestamp`] is on.
 pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
     apply_with_options_inner(file_path, opts).map_err(|e| e.refine_format(file_path))
@@ -262,11 +279,19 @@ fn apply_with_options_inner(file_path: &Path, opts: &ApplyOptions) -> Result<App
         adts_gain_range = range;
         modified
     } else if is_aac {
-        let rg = opts
-            .write_replaygain_tags
-            .then(|| compute_rg_residual(file_path, opts, actual_steps, false))
-            .flatten()
-            .map(|res| res.to_mp4());
+        let rg = if opts.shifts_stored_gain(actual_steps) {
+            // The shifted set replaces the stored one in the same container
+            // rebuild as the undo tag (issue #377); a file with nothing to
+            // shift is not rebuilt for it.
+            let stored = mp4meta::read_replaygain_tags(file_path)?;
+            let shifted = stored.shifted(actual_steps);
+            (shifted != stored).then_some(shifted)
+        } else {
+            opts.write_replaygain_tags
+                .then(|| compute_rg_residual(file_path, opts, actual_steps, false))
+                .flatten()
+                .map(|res| res.to_mp4())
+        };
         apply_aac_bytes(file_path, actual_steps, opts, aac_analysis, rg.as_ref())?
     } else if opts.tag_layout.mp3gain_in_id3v2() {
         saturation = apply_mp3_id3v2_bytes(file_path, actual_steps, opts, mp3_data.take())?;
@@ -498,6 +523,12 @@ fn apply_adts_bytes(
             }
         }
 
+        // Issue #377. The undo value above is always written when this
+        // holds, so the shifted frames ride along in that same tag write.
+        if opts.shifts_stored_gain(steps) {
+            id3v2::shift_stored_gain(&mut tag, steps);
+        }
+
         if opts.write_replaygain_tags {
             // The apply saturates at 0-255 like the M4A path, so the residual
             // is arithmetic; ADTS never takes the wrap branch.
@@ -683,6 +714,14 @@ fn apply_mp3_ape_bytes(
         }
         let stats = gain.apply_to_path_with_stats_preread(r, w, preread)?;
 
+        // Issue #377: whichever container holds stored values, they described
+        // the audio before this apply. Each write is skipped when its
+        // container has nothing to shift.
+        if opts.shifts_stored_gain(steps) {
+            ape::shift_ape_stored_gain(w, steps)?;
+            id3v2::shift_id3v2_stored_gain_direct(w, steps)?;
+        }
+
         if write_rg {
             let reanalyze = opts.wrap || stats.saturated_low > 0 || stats.saturated_high > 0;
             if opts.tag_layout == TagLayout::Split {
@@ -760,6 +799,14 @@ fn apply_mp3_id3v2_bytes(
                 };
                 rg.minmax = Some(ape::format_minmax(min, max));
             }
+        }
+
+        // Issue #377. A nonzero apply always writes the undo value above, so
+        // the shifted ID3v2 frames ride along in that tag write; values
+        // mp3gain left in APEv2 describe the old audio too.
+        if opts.shifts_stored_gain(steps) {
+            id3v2::shift_stored_gain(&mut tag, steps);
+            ape::shift_ape_stored_gain(w, steps)?;
         }
 
         if opts.write_replaygain_tags {
