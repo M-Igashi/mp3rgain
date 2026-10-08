@@ -234,11 +234,27 @@ jobs:
             jq -s '.' /tmp/snapshot.json > data/stats.json
           fi
 
+      # stats.json keeps every full snapshot as the archive, but the dashboard
+      # only needs the latest one plus a few totals per day, so it loads these
+      # instead. trend.json's github_releases is the live sum without
+      # .sha256 assets (isReal in index.html); the page adds the archived
+      # pre-v2.0 downloads itself.
+      - name: Derive dashboard files
+        run: |
+          jq '.[-1]' data/stats.json > data/latest.json
+          jq -c '[.[] | {
+            date,
+            github_releases: ([.github_releases[].assets[] | select(.name | endswith(".sha256") | not) | .download_count] | add // 0),
+            crates_io: .crates_io.total_downloads,
+            ppa: ((.ppa_cli.total_downloads // 0) + (.ppa_gui.total_downloads // 0)),
+            pkgstats: ([(.pkgstats // [])[].count // 0] | add // 0)
+          }]' data/stats.json > data/trend.json
+
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/stats.json
+          git add data/stats.json data/latest.json data/trend.json
           git diff --cached --quiet && echo "No changes" && exit 0
           git commit -m "Update download stats $(date -u +%Y-%m-%d)"
           git push
