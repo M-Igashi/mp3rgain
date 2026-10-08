@@ -50,6 +50,12 @@ For example,
 .B \-r\ \-g\ 2
 applies track gain and ignores
 .BR \-g .
+.PP
+Each file is processed once, however many times it is named: listed twice,
+through a symbolic link alongside its target, or found under overlapping
+.B \-R
+directories. The first name given is the one reported, and a note on standard
+error says how many were skipped.
 .SH OPTIONS
 .SS "Gain Options"
 .TP
@@ -628,8 +634,12 @@ Every write goes to a temporary file
 .RI .mp3rgain_temp_ pid _ n . ext
 in the same directory, which is synced to disk and then renamed over the
 original, so a failure leaves the original untouched. The original's
-permissions are copied to the new file; as with any rename, hard links to the
-old file are not carried over.
+permissions are copied to the new file. A symbolic link is written through:
+the temporary file is created next to the link's target and replaces it, so
+the link stays a link. Hard links are not carried over, as with any rename:
+the name given gets the new file and every other hard link keeps the old
+audio. Two hard-link names listed together are two files, and each ends up
+with its own adjusted copy.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -687,6 +697,15 @@ removes them.
 Since 3.2.0, MP3 ReplayGain tags go to ID3v2 instead of APEv2;
 .B \-s\ a
 restores mp3gain's layout.
+.IP \(bu 2
+A file listed more than once is processed once. mp3gain processes it once per
+listing:
+.B \-g\ 2
+on a file listed twice moves the audio by 4 steps and records 2 in the undo
+tag.
+.IP \(bu 2
+A symbolic link is written through to its target; mp3gain replaces the link
+with a modified copy.
 .SH SEE ALSO
 .BR mp3gain (1),
 .BR rsgain (1),

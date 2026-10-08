@@ -754,12 +754,15 @@ impl Mp3rgainApp {
         let mut skipped = 0;
 
         // Set lookup instead of scanning `files` per added path, which is
-        // O(n²) when dropping a large folder.
-        let mut known: HashSet<PathBuf> = self.files.iter().map(|f| f.path.clone()).collect();
+        // O(n²) when dropping a large folder. Keyed by canonical path so a
+        // symlink and its target are one row: two rows would be two parallel
+        // jobs writing the same file (issue #370).
+        let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        let mut known: HashSet<PathBuf> = self.files.iter().map(|f| canonical(&f.path)).collect();
 
         for path in paths {
             if mp3rgain::is_supported_audio_path(&path) && path.is_file() {
-                if !known.insert(path.clone()) {
+                if !known.insert(canonical(&path)) {
                     skipped += 1;
                     continue;
                 }

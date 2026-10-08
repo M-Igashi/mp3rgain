@@ -1900,6 +1900,72 @@ fn a_genuinely_unreadable_file_still_fails() {
     }
 }
 
+/// `fixture` after one `-g -2`, the result every run below must reproduce.
+fn applied_once(fixture: &str) -> Vec<u8> {
+    let reference = TempAlbum::new(&[fixture]);
+    let out = run(&["-q", "-c", "-g", "-2", reference.args()[0]]);
+    assert!(out.status.success(), "reference apply failed: {:?}", out);
+    fs::read(&reference.files[0]).expect("read reference")
+}
+
+/// Issue #370: a file listed twice used to lose one change in parallel (both
+/// jobs read the original, the later rename dropped the other's write) and get
+/// two under `-j 1`. It is now applied once at every thread count, whatever
+/// the spelling.
+#[test]
+fn a_file_listed_twice_is_applied_once() {
+    for fixture in ["test_stereo.mp3", "test_adts.aac", "test_aac.m4a"] {
+        let expected = applied_once(fixture);
+        for threads in ["1", "4"] {
+            let album = TempAlbum::new(&[fixture]);
+            let file = album.args()[0];
+            let respelled = format!("{}/./{}", album.dir.display(), fixture);
+            let out = run(&["-q", "-c", "-j", threads, "-g", "-2", file, &respelled]);
+            assert!(out.status.success(), "apply failed: {:?}", out);
+            assert!(
+                fs::read(&album.files[0]).expect("read applied") == expected,
+                "{} listed twice with -j {} was not applied exactly once",
+                fixture,
+                threads
+            );
+        }
+    }
+}
+
+/// Issue #370: the rename used to replace a symlink with a standalone copy and
+/// leave its target untouched. The write now lands on the target, and a link
+/// listed with its target is one file.
+#[cfg(unix)]
+#[test]
+fn a_symlink_is_written_through_to_its_target() {
+    for fixture in ["test_stereo.mp3", "test_adts.aac", "test_aac.m4a"] {
+        let expected = applied_once(fixture);
+        for with_target in [false, true] {
+            let album = TempAlbum::new(&[fixture]);
+            let link = album.dir.join(format!("link-{}", fixture));
+            std::os::unix::fs::symlink(fixture, &link).expect("create symlink");
+
+            let mut args = vec!["-q", "-c", "-g", "-2", link.to_str().unwrap()];
+            if with_target {
+                args.push(album.args()[0]);
+            }
+            let out = run(&args);
+            assert!(out.status.success(), "apply failed: {:?}", out);
+            assert!(
+                fs::symlink_metadata(&link).expect("stat link").is_symlink(),
+                "{}: the link was replaced by a regular file",
+                fixture
+            );
+            assert!(
+                fs::read(&album.files[0]).expect("read target") == expected,
+                "{}: the target was not changed exactly once (with target listed: {})",
+                fixture,
+                with_target
+            );
+        }
+    }
+}
+
 /// The ADTS audio, with any ID3v2 tag mp3rgain wrote skipped. Undo restores
 /// the frames byte-for-byte; the empty tag container the `id3` crate leaves
 /// behind is not part of that guarantee (MP3 undo behaves the same way).

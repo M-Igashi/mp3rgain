@@ -2,6 +2,7 @@ use anyhow::Result;
 use colored::*;
 use mp3rgain::replaygain::AnalysisMode;
 use mp3rgain::{Channel, TagLayout};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use super::options::{AlbumGrouping, Options, OutputFormat, StoredTagMode};
@@ -427,13 +428,26 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
     Ok(opts)
 }
 
+/// Expand `-R` directory arguments, sorted. Overlapping roots (e.g.
+/// `-R music music/album`) yield duplicates, which `dedup_files` drops.
 pub fn expand_files_recursive(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut result = mp3rgain::expand_audio_paths(paths)?;
     result.sort();
-    // Overlapping roots (e.g. `-R music music/album`) yield duplicates,
-    // which would apply gain twice to the same file.
-    result.dedup();
     Ok(result)
+}
+
+/// Drop every path naming a file already in the list, keeping the first
+/// spelling, and return how many went (issue #370). Two parallel jobs on one
+/// file each read the original and the later rename discards the other's
+/// change, while a serial run applies it twice, so each file is processed
+/// once whatever `-j` says. Paths compare canonically, so a symlink and its
+/// target are one file. A path that does not resolve (a missing file) is
+/// kept, so it still fails with its own error.
+pub fn dedup_files(files: &mut Vec<PathBuf>) -> usize {
+    let before = files.len();
+    let mut seen = HashSet::new();
+    files.retain(|path| std::fs::canonicalize(path).map_or(true, |key| seen.insert(key)));
+    before - files.len()
 }
 
 #[cfg(test)]

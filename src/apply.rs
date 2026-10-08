@@ -876,17 +876,32 @@ pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
     })
 }
 
+/// The path a rename has to replace for `file` to change: a symlink's
+/// target, so the link stays a link instead of becoming a standalone copy
+/// (issue #370). Anything else, or a link that cannot be resolved, is the
+/// path as given.
+fn rename_target(file: &Path) -> std::path::PathBuf {
+    match std::fs::symlink_metadata(file) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf())
+        }
+        _ => file.to_path_buf(),
+    }
+}
+
 /// Run `operation(original, temp)` against a fresh sibling temp path, then
 /// fsync the temp file and rename it over the original (issue #227). The temp
-/// file is removed on failure, leaving the original untouched.
+/// file is removed on failure, leaving the original untouched. A symlink is
+/// written through to its target (issue #370).
 pub(crate) fn with_temp_file<T, F>(file: &Path, operation: F) -> Result<T>
 where
     F: FnOnce(&Path, &Path) -> Result<T>,
 {
     let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("tmp");
-    let temp_path = temp_sibling_path(file, ext);
+    let target = rename_target(file);
+    let temp_path = temp_sibling_path(&target, ext);
     let result = operation(file, &temp_path).and_then(|value| {
-        persist_temp(file, &temp_path)?;
+        persist_temp(&target, &temp_path)?;
         Ok(value)
     });
     if result.is_err() {

@@ -12,7 +12,7 @@ use anyhow::Result;
 use colored::*;
 
 use crate::cli::options::{AlbumGrouping, Options, OutputFormat, StoredTagMode};
-use crate::cli::parse_args::expand_files_recursive;
+use crate::cli::parse_args::{dedup_files, expand_files_recursive};
 
 use apply::{cmd_apply, cmd_apply_channel};
 use info::cmd_info;
@@ -39,6 +39,17 @@ pub fn run(mut opts: Options) -> Result<()> {
             eprintln!("{}: no audio files found (MP3/M4A)", "error".red().bold());
             std::process::exit(1);
         }
+    }
+
+    // A file listed twice, directly, through a symlink or by overlapping -R
+    // roots, is processed once (issue #370).
+    let duplicates = dedup_files(&mut opts.files);
+    if duplicates > 0 && !opts.quiet && opts.output_format == OutputFormat::Text {
+        eprintln!(
+            "{}: {} duplicate path(s) skipped; a file listed more than once is processed once",
+            "note".cyan(),
+            duplicates
+        );
     }
 
     // Configure the global rayon pool from -j / --threads / MP3RGAIN_THREADS.

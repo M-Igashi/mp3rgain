@@ -17,7 +17,6 @@ What ships today:
 
 ## Open
 
-- [ ] Applying to the same file twice in one run loses a change, and symlinks are replaced by copies (#370)
 - [ ] Renew the Developer ID certificate before 2027-02-01 (#355)
 - [ ] Upgrade mp3rgui's egui/eframe stack, which also retires the quick-xml audit ignores in `ci.yml`
 - [ ] Homebrew core formula (#8); today it is in the `M-Igashi/tap` tap
