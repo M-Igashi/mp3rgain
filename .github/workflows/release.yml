@@ -310,6 +310,8 @@ jobs:
           cd artifacts/mp3rgui-x86_64-unknown-linux-gnu
           chmod +x mp3rgui
           tar -czvf "../../dist/mp3rgui-${TAG}-linux-x86_64.tar.gz" mp3rgui
+          cd ../../dist
+          shasum -a 256 "mp3rgui-${TAG}-linux-x86_64.tar.gz" > "mp3rgui-${TAG}-linux-x86_64.tar.gz.sha256"
 
       - name: Create GUI Linux ARM64 tarball
         env:
@@ -318,6 +320,8 @@ jobs:
           cd artifacts/mp3rgui-aarch64-unknown-linux-gnu
           chmod +x mp3rgui
           tar -czvf "../../dist/mp3rgui-${TAG}-linux-arm64.tar.gz" mp3rgui
+          cd ../../dist
+          shasum -a 256 "mp3rgui-${TAG}-linux-arm64.tar.gz" > "mp3rgui-${TAG}-linux-arm64.tar.gz.sha256"
 
       - name: Create GUI Windows x86_64 zip
         env:
@@ -383,7 +387,9 @@ jobs:
             dist/mp3rgui-${{ github.ref_name }}-macos-universal.tar.gz
             dist/mp3rgui-${{ github.ref_name }}-macos-universal.tar.gz.sha256
             dist/mp3rgui-${{ github.ref_name }}-linux-x86_64.tar.gz
+            dist/mp3rgui-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
             dist/mp3rgui-${{ github.ref_name }}-linux-arm64.tar.gz
+            dist/mp3rgui-${{ github.ref_name }}-linux-arm64.tar.gz.sha256
             dist/mp3rgui-${{ github.ref_name }}-windows-x86_64.zip
             dist/mp3rgui-${{ github.ref_name }}-windows-x86_64.zip.sha256
             dist/mp3rgui-${{ github.ref_name }}-windows-arm64.zip
