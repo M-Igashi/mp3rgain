@@ -30,7 +30,9 @@ jobs:
 
       - name: Collect crates.io stats
         run: |
-          curl -sf -H 'User-Agent: mp3rgain-stats' \
+          # Without pipefail a failed fetch leaves an empty file and the
+          # snapshot gets crates_io: null (2026-09-22), so retry first.
+          curl -sf --retry 3 --retry-all-errors -H 'User-Agent: mp3rgain-stats' \
             'https://crates.io/api/v1/crates/mp3rgain' \
             | jq '{
               total_downloads: .crate.downloads,
