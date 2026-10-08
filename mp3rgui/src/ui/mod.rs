@@ -85,7 +85,9 @@ fn modal(
 }
 
 /// Modal for the `-l`-equivalent "Apply Channel Gain" action. MP3 only
-/// (the apply pipeline rejects AAC files with `Error::ChannelGainOnAac`).
+/// (the apply pipeline rejects AAC files with `Error::ChannelGainOnAac`, and
+/// mono or joint-stereo MP3s with `ChannelGainOnMono` /
+/// `ChannelGainOnJointStereo`).
 fn render_channel_gain_modal(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     if !app.channel_gain_modal.open {
         return;
@@ -116,7 +118,7 @@ fn render_channel_gain_modal(app: &mut Mp3rgainApp, ctx: &egui::Context) {
                 let db = mp3rgain::steps_to_db(modal_state.steps);
                 ui.label(format!("= {:+.2} dB", db));
             });
-            ui.label("Stereo / Dual Channel MP3s only. Joint-Stereo files will warn.");
+            ui.label("Stereo / Dual Channel MP3s only. Mono and joint stereo files are refused.");
             modal_state.steps != 0
         },
     );

@@ -339,6 +339,15 @@ pub fn predict_apply(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyRepor
 
 fn predict_apply_inner(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
     let container = opts.container(file_path);
+    // A channel apply refuses AAC and mono or joint-stereo MP3 (issue #393);
+    // the dry run reports the same refusal instead of "would apply".
+    if opts.channel.is_some() && opts.steps != 0 {
+        if container.is_aac_bitstream() {
+            return Err(Error::ChannelGainOnAac);
+        }
+        let data = std::fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
+        crate::gain::ensure_channels_separable(&data)?;
+    }
     let mut aac_analysis: AacAnalysisCache = None;
     let (actual_steps, clipping_prevented, clipping_detected) =
         check_clipping(file_path, opts, container, &mut aac_analysis, &mut None)?;

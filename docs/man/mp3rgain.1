@@ -98,6 +98,9 @@ Apply gain to one channel only.
 is 0 for left or 1 for right.
 .I gain
 is the number of steps. MP3 only; on AAC files this is an error.
+It is also an error on mono and joint-stereo MP3s, as in mp3gain: a
+joint-stereo frame may code mid and side rather than left and right, so the
+change would reach both channels. The file is left unchanged.
 Existing
 .B REPLAYGAIN_*
 tags are left unchanged, as in mp3gain, so they no longer describe the audio
@@ -341,7 +344,11 @@ Every audio frame is restored exactly, except frames whose
 was clamped at 0 or 255. The file as a whole is byte-identical to the original
 only when no ID3v2 tag was written: with the default MP3 layout, an existing
 ID3v2 tag stays rewritten as ID3v2.4 and a file that had none keeps an empty
-ID3v2 header. A file that was never adjusted is an error.
+ID3v2 header. A file that was never adjusted is an error, and so is an undo
+tag with different left and right values on a mono or joint-stereo MP3: mp3gain
+writes one when it refuses
+.B \-l
+on such a file, without changing the audio.
 .TP
 .BI \-s " mode"
 Stored tag handling mode:

@@ -195,22 +195,29 @@ fn process_apply_channel_into(
     let filename = get_filename(file);
     let channel_name = channel.name();
 
-    // Warn if file is Joint Stereo (mp3gain only supports Stereo for -l).
-    // One frame header answers that; the whole-file analyze() it replaced
-    // walked every frame for statistics that were then thrown away.
-    if opts.output_format == OutputFormat::Text && !opts.quiet {
-        if let Ok(mp3rgain::ChannelMode::JointStereo) = mp3rgain::analysis::read_channel_mode(file)
-        {
-            emit_file_warning(
-                opts,
-                filename,
-                "Joint Stereo file: channel-specific gain may not work as expected",
-                None,
-            );
-        }
-    }
+    let mut apply_opts = ApplyOptions::new(steps);
+    apply_opts.channel = Some(channel);
+    apply_opts.preserve_timestamp = opts.preserve_timestamp;
+    apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
+    apply_opts.tag_layout = opts.tag_layout;
+    // The channel path never surfaces ApplyReport::clipping_detected and -l
+    // has no clipping prevention, so the headroom analyze inside
+    // check_clipping is pure waste (issue #232).
+    apply_opts.skip_clipping_check = true;
+    // -l is MP3-only. Detect the container so an AAC bitstream (MP4 or raw
+    // ADTS) is rejected with `ChannelGainOnAac` rather than run through the
+    // MP3 frame scanner.
+    apply_opts.file_type = Some(AudioFileType::from_path(file));
 
     if opts.dry_run {
+        // A mono or joint-stereo MP3 is refused (issue #393), and so is AAC;
+        // the dry run reports that rather than "would apply".
+        if let Err(e) = predict_apply(file, &apply_opts) {
+            return Ok(JsonFileResult {
+                dry_run: Some(true),
+                ..report_file_error(file, filename, e, opts)
+            });
+        }
         if opts.output_format == OutputFormat::Text && !opts.quiet {
             writeln!(
                 out,
@@ -230,20 +237,6 @@ fn process_apply_channel_into(
             ..Default::default()
         });
     }
-
-    let mut apply_opts = ApplyOptions::new(steps);
-    apply_opts.channel = Some(channel);
-    apply_opts.preserve_timestamp = opts.preserve_timestamp;
-    apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
-    apply_opts.tag_layout = opts.tag_layout;
-    // The channel path never surfaces ApplyReport::clipping_detected and -l
-    // has no clipping prevention, so the headroom analyze inside
-    // check_clipping is pure waste (issue #232).
-    apply_opts.skip_clipping_check = true;
-    // -l is MP3-only. Detect the container so an AAC bitstream (MP4 or raw
-    // ADTS) is rejected with `ChannelGainOnAac` rather than run through the
-    // MP3 frame scanner.
-    apply_opts.file_type = Some(AudioFileType::from_path(file));
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {

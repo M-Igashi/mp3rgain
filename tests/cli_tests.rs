@@ -403,7 +403,7 @@ fn undo_with_delete_tags_without_undo_info_still_deletes() {
 /// `global_gain` range by the steps it actually applied, in whichever container
 /// holds them, as mp3gain does. They used to keep describing the old audio, so
 /// a tag-aware player landed off by the `-g` amount. `REPLAYGAIN_ALGORITHM`
-/// stays as it is, and `-l` moves nothing: mp3gain leaves every tag alone there.
+/// stays as it is.
 #[test]
 fn manual_gain_shifts_stored_replaygain_values() {
     use mp3rgain::{apply_gain_to_peak, read_gain_tags_auto, steps_to_db, TagLayout};
@@ -473,19 +473,71 @@ fn manual_gain_shifts_stored_replaygain_values() {
             range(before.album_minmax.as_deref()),
             "{context}"
         );
+    }
+}
 
-        if fixture.ends_with(".mp3") {
-            run_ok(&["-l", "0", "-2"]);
-            let after_l = tags();
-            for (field, l, g) in [
-                ("track gain", &after_l.track_gain, &after.track_gain),
-                ("track peak", &after_l.track_peak, &after.track_peak),
-                ("album gain", &after_l.album_gain, &after.album_gain),
-                ("album peak", &after_l.album_peak, &after.album_peak),
-                ("album range", &after_l.album_minmax, &after.album_minmax),
-            ] {
-                assert_eq!(l, g, "{context}: -l moved the {field}");
-            }
+/// Issue #393: `-l` on joint stereo is an error that leaves the file alone, in
+/// every output format and in a dry run, where it used to print a text-only
+/// warning and change both channels.
+#[test]
+fn channel_gain_on_joint_stereo_is_refused() {
+    let album = TempAlbum::new(&["test_joint_stereo.mp3"]);
+    let file = album.files[0].to_str().unwrap();
+    let original = fs::read(file).unwrap();
+
+    for args in [
+        &["-l", "0", "2"][..],
+        &["-q", "-l", "1", "2"][..],
+        &["-o", "json", "-l", "0", "2"][..],
+        &["-n", "-l", "0", "2"][..],
+    ] {
+        let mut argv = args.to_vec();
+        argv.push(file);
+        let out = run(&argv);
+        assert!(!out.status.success(), "{args:?} succeeded: {out:?}");
+        assert_eq!(fs::read(file).unwrap(), original, "{args:?} wrote");
+    }
+
+    let out = run(&["-o", "json", "-l", "0", "2", file]);
+    assert_eq!(json_of(&out)["files"][0]["status"], "error");
+}
+
+/// Issue #377: `-l` moves no stored value, since mp3gain leaves every tag alone
+/// there. `test_vbr.mp3` above is joint stereo, which `-l` refuses (#393), so
+/// this runs on the simple-stereo fixture.
+#[test]
+fn channel_gain_leaves_stored_replaygain_values() {
+    use mp3rgain::{read_gain_tags_auto, TagLayout};
+
+    for (layout, layout_args) in [
+        (TagLayout::Split, &[][..]),
+        (TagLayout::Ape, &["-s", "a"][..]),
+        (TagLayout::Id3v2, &["-s", "i"][..]),
+    ] {
+        let album = TempAlbum::new(&["test_simple_stereo.mp3"]);
+        let file = &album.files[0];
+        let run_ok = |args: &[&str]| {
+            let mut argv = layout_args.to_vec();
+            argv.extend_from_slice(args);
+            argv.push(file.to_str().unwrap());
+            let out = run(&argv);
+            assert!(out.status.success(), "{argv:?} failed: {out:?}");
+        };
+        let tags = || read_gain_tags_auto(file, layout).expect("reading the stored tags");
+
+        run_ok(&["--rg2", "-a", "-c"]);
+        let before = tags();
+        assert!(before.track_gain.is_some(), "{layout:?}: setup");
+        run_ok(&["-l", "0", "-2"]);
+        let after = tags();
+        for (field, a, b) in [
+            ("track gain", &after.track_gain, &before.track_gain),
+            ("track peak", &after.track_peak, &before.track_peak),
+            ("album gain", &after.album_gain, &before.album_gain),
+            ("album peak", &after.album_peak, &before.album_peak),
+            ("album range", &after.album_minmax, &before.album_minmax),
+        ] {
+            assert_eq!(a, b, "{layout:?}: -l moved the {field}");
         }
     }
 }

@@ -255,7 +255,7 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
     }
 
     let mut data = std::fs::read(path).map_err(|e| Error::io_read(path, e))?;
-    let frames = apply_undo_to_data(&mut data, left, right, parse_undo_wrap(undo_str));
+    let frames = apply_undo_to_data(&mut data, left, right, parse_undo_wrap(undo_str))?;
 
     // Revert the audio and strip the undo/minmax frames in one visible write
     // (temp + rename) so a failed tag rewrite can't leave the delta applied

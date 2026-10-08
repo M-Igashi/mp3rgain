@@ -33,7 +33,7 @@ Every mp3gain 1.6.2 option is accepted except `-T`. Where mp3rgain's behaviour d
 | `-a` | Analyze and apply album gain. Every file given is one album, the same rule as mp3gain |
 | `-e` | Skip album analysis. On its own it analyzes each track and prints no album summary, as in mp3gain. **Differs:** `-a -e` applies track gain (see below) |
 | `-g <i>` | Apply `i` gain steps of 1.5 dB each, without analysis |
-| `-l <c> <g>` | Apply `g` steps to one channel only: `0` = left, `1` = right. MP3 only |
+| `-l <c> <g>` | Apply `g` steps to one channel only: `0` = left, `1` = right. MP3 only. Refused on mono and joint-stereo files, as in mp3gain, since a joint-stereo frame may code mid and side rather than left and right ([#393](https://github.com/M-Igashi/mp3rgain/issues/393)) |
 | `-d <n>` | Shift the target by `n` dB, rounded to whole 1.5 dB steps. Without `-r`/`-a` it shifts the recommendation the plain analysis prints |
 | `-m <i>` | Shift the suggested gain by `i` steps (adds to `-d`) |
 | `-u` | Undo from the stored `MP3GAIN_UNDO` tag. Either tool can undo the other's changes |
@@ -126,6 +126,7 @@ For the choice between rewriting `global_gain` and writing ReplayGain *tags*, se
 | `-g` and stored ReplayGain tags | Shifts stored `REPLAYGAIN_*` values and `MP3GAIN_ALBUM_MINMAX` by the applied gain, at 1.505 dB per step. `-l` leaves them as they were | Shifts them too ([#377](https://github.com/M-Igashi/mp3rgain/issues/377)), in whichever container holds them (APEv2, ID3v2 or MP4), by the exact step of 1.50515 dB, so a value can differ from mp3gain's by 0.00015 dB per step. `-l` leaves them as they were, like mp3gain |
 | Tags written by `-g` | `MP3GAIN_UNDO` only | `MP3GAIN_UNDO` and `MP3GAIN_MINMAX`. The audio frames are byte-identical to mp3gain's ([compatibility-report.md](compatibility-report.md)); the tag block is not |
 | Undo (`-u`) | Keeps its APEv2 tag, with the undo value reset to zero and the `REPLAYGAIN_*` values adjusted | Removes the undo tag and the `REPLAYGAIN_*` values in both containers |
+| `-l` on mono or joint stereo | Refuses the change but still records `MP3GAIN_UNDO` (for example `-002,+000,N`) on the untouched file. Its own `-u` refuses that record and resets it to zero | Refuses and writes nothing. `-u` refuses a record with different left and right values on such a file and leaves the file as it is; `-s d` removes the record. A joint-stereo file adjusted with `-l` by mp3rgain 3.10.0 or earlier cannot be undone either, since the tag cannot tell the two cases apart ([#393](https://github.com/M-Igashi/mp3rgain/issues/393)) |
 | ReplayGain analysis | Decodes with mpglib | Decodes with symphonia. Values normally match mp3gain's to the printed precision; CI checks that they agree within one gain step |
 | Formats | MP3 only | MP3, AAC in MP4/M4A (including the audio track of a video `.mp4`) and raw ADTS `.aac` |
 | A file listed more than once | Processed once per listing: `-g 2 a.mp3 a.mp3` moves the audio by 4 steps but records 2 in the undo tag, so `-u` restores only half | Processed once, whether it is listed twice, named through a symlink alongside its target, or found under overlapping `-R` directories; a note says how many paths were skipped ([#370](https://github.com/M-Igashi/mp3rgain/issues/370)) |

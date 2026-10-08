@@ -65,6 +65,20 @@ pub enum Error {
     #[error("Cannot apply channel-specific gain to mono file. Use -g for mono files.")]
     ChannelGainOnMono,
 
+    /// Per-channel gain (`-l`) was requested for a joint-stereo stream. A
+    /// joint-stereo frame may code mid and side rather than left and right, so
+    /// moving one channel's `global_gain` would move both output channels.
+    /// mp3gain refuses these files too.
+    #[error("Cannot apply channel-specific gain to joint stereo file")]
+    ChannelGainOnJointStereo,
+
+    /// The undo tag records a different gain for each channel, on a mono or
+    /// joint-stereo stream. mp3gain writes such a tag even when it refuses
+    /// `-l` and leaves the audio alone, so applying it could change a file
+    /// that was never adjusted.
+    #[error("Cannot undo channel-specific gain on a mono or joint stereo file")]
+    ChannelUndoOnMonoOrJointStereo,
+
     /// Per-channel gain (`-l`) was requested for an AAC bitstream, in MP4 or as
     /// a raw ADTS stream. The AAC path adjusts every channel element together
     /// and has no per-channel form.
