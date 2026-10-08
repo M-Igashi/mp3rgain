@@ -262,7 +262,7 @@ function downloadsFor(assets, label) {
 }
 
 async function main() {
-  // data/stats.json is the full archive; stats.yml derives these two from it.
+  // Full snapshots are archived in data/archive/YYYY-MM.json; stats.yml writes these two alongside.
   let latest, trend;
   try {
     [latest, trend] = await Promise.all(
