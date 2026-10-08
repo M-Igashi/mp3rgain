@@ -30,6 +30,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -37,20 +39,22 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --features replaygain --target ${{ matrix.target }}
+        shell: bash
+        run: cargo build --release --features replaygain --target "$TARGET"
         env:
+          TARGET: ${{ matrix.target }}
           RUSTFLAGS: ${{ contains(matrix.target, 'windows') && '-C target-feature=+crt-static' || '' }}
 
       - name: Upload artifact (Unix)
         if: runner.os != 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mp3rgain-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/mp3rgain
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mp3rgain-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/mp3rgain.exe
@@ -76,6 +80,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -89,20 +95,22 @@ jobs:
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev
 
       - name: Build GUI
-        run: cargo build --release --manifest-path mp3rgui/Cargo.toml --target ${{ matrix.target }}
+        shell: bash
+        run: cargo build --release --manifest-path mp3rgui/Cargo.toml --target "$TARGET"
         env:
+          TARGET: ${{ matrix.target }}
           RUSTFLAGS: ${{ contains(matrix.target, 'windows') && '-C target-feature=+crt-static' || '' }}
 
       - name: Upload artifact (Unix)
         if: runner.os != 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mp3rgui-${{ matrix.target }}
           path: mp3rgui/target/${{ matrix.target }}/release/mp3rgui
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mp3rgui-${{ matrix.target }}
           path: mp3rgui/target/${{ matrix.target }}/release/mp3rgui.exe
@@ -113,9 +121,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Download GUI Windows binaries
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: mp3rgui-*-pc-windows-msvc
           path: artifacts
@@ -132,7 +142,7 @@ jobs:
             artifacts/mp3rgui-aarch64-pc-windows-msvc/mp3rgui.exe
 
       - name: Upload installer
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mp3rgui-windows-installer
           path: target/windows-installer/mp3rgui-*-windows-setup.exe
@@ -141,6 +151,7 @@ jobs:
     name: Create Release
     needs: [build-cli, build-gui, build-installer]
     runs-on: macos-latest
+    environment: release
     permissions:
       contents: write
     outputs:
@@ -154,13 +165,15 @@ jobs:
       gui_windows_setup_sha256: ${{ steps.checksums.outputs.gui_windows_setup_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Get version
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
       - name: Download all artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
 
@@ -352,7 +365,7 @@ jobs:
           echo "gui_windows_setup_sha256=$(cat "dist/mp3rgui-${TAG}-windows-setup.exe.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             dist/mp3rgain-${{ github.ref_name }}-macos-universal.tar.gz
@@ -387,6 +400,7 @@ jobs:
     name: Update Homebrew Tap
     needs: release
     runs-on: ubuntu-latest
+    environment: release
     continue-on-error: true
     steps:
       - name: Checkout homebrew-tap
@@ -444,6 +458,8 @@ jobs:
             os: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install dependencies
         run: |
@@ -484,7 +500,7 @@ jobs:
       - name: Upload to release
         env:
           ARCH: ${{ matrix.arch }}
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             ../mp3rgain_${{ needs.release.outputs.version }}-1_${{ matrix.arch }}.deb
@@ -507,6 +523,8 @@ jobs:
             os: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install dependencies
         run: |
@@ -547,7 +565,7 @@ jobs:
       - name: Upload to release
         env:
           ARCH: ${{ matrix.arch }}
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             ../mp3rgui_${{ needs.release.outputs.version }}-1_${{ matrix.arch }}.deb
@@ -558,9 +576,12 @@ jobs:
     name: Publish to crates.io
     needs: release
     runs-on: ubuntu-latest
+    environment: release
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -575,6 +596,7 @@ jobs:
     name: Update AUR Package
     needs: release
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     continue-on-error: true
@@ -590,7 +612,9 @@ jobs:
           mkdir -p ~/.ssh
           echo "$AUR_SSH_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
-          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          # Pinned ED25519 host key, fingerprint SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4
+          # as published on https://aur.archlinux.org/
+          echo 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' >> ~/.ssh/known_hosts
           printf 'Host aur.archlinux.org\n  User aur\n  IdentityFile ~/.ssh/aur\n  IdentitiesOnly yes\n' >> ~/.ssh/config
 
       - name: Update GUI PKGBUILD version
