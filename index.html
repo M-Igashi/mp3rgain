@@ -274,7 +274,7 @@ async function main() {
   const ghReleases = latest.github_releases;
   const ghTotal = ghTotalFor(latest);
   document.getElementById('gh-total').textContent = num(ghTotal);
-  document.getElementById('crates-total').textContent = num(latest.crates_io.total_downloads);
+  document.getElementById('crates-total').textContent = latest.crates_io ? num(latest.crates_io.total_downloads) : '-';
   const ppaCliTotal = latest.ppa_cli?.total_downloads || 0;
   const ppaGuiTotal = latest.ppa_gui?.total_downloads || 0;
   document.getElementById('ppa-total').textContent = num(ppaCliTotal + ppaGuiTotal);
@@ -383,7 +383,7 @@ async function main() {
   renderPlatformPie('chart-platform-share-gui', 'gui');
 
   // crates.io versions chart
-  const cratesVersions = latest.crates_io.versions.slice(0, 15).reverse();
+  const cratesVersions = (latest.crates_io?.versions || []).slice(0, 15).reverse();
   new Chart(document.getElementById('chart-crates'), {
     type: 'bar',
     data: {
@@ -397,7 +397,9 @@ async function main() {
   if (data.length > 1) {
     const trendLabels = data.map(d => d.date);
     const trendGH = data.map(ghTotalFor);
-    const trendCrates = data.map(d => d.crates_io.total_downloads);
+    // A snapshot carries null for any source whose fetch failed that day
+    // (crates.io on 2026-09-22); plot it as a gap instead of throwing.
+    const trendCrates = data.map(d => d.crates_io?.total_downloads ?? null);
     const trendPPA = data.map(d => (d.ppa_cli?.total_downloads || 0) + (d.ppa_gui?.total_downloads || 0));
     const trendPkgstats = data.map(d => (d.pkgstats || []).reduce((s, p) => s + (p.count || 0), 0));
     new Chart(document.getElementById('chart-trend'), {
@@ -411,7 +413,7 @@ async function main() {
           { label: 'pkgstats (current month)', data: trendPkgstats, borderColor: COLORS.purple, backgroundColor: 'transparent', tension: 0.3 },
         ]
       },
-      options: CHART_DEFAULTS
+      options: { ...CHART_DEFAULTS, spanGaps: true }
     });
   } else {
     document.getElementById('chart-trend').parentElement.innerHTML =
