@@ -11,11 +11,10 @@ PackageName: mp3rgui
 PackageUrl: https://github.com/M-Igashi/mp3rgain
 License: MIT
 LicenseUrl: https://github.com/M-Igashi/mp3rgain/blob/master/LICENSE
-ShortDescription: GUI for lossless MP3 volume adjustment - a modern mp3gain replacement written in Rust
+ShortDescription: GUI for lossless MP3/AAC volume adjustment - a modern mp3gain / aacgain replacement written in Rust
 Description: |-
-  mp3rgui is the graphical interface for mp3rgain, a lossless MP3 volume normalizer.
-  It provides an easy-to-use GUI for adjusting MP3 volume without re-encoding,
-  supporting ReplayGain analysis and AAC/M4A files.
+  mp3rgui is the graphical interface for mp3rgain, a lossless MP3 and AAC volume normalizer.
+  It adjusts the volume of MP3 and AAC (M4A/MP4 and raw ADTS) files without re-encoding, with ReplayGain 1.0, ReplayGain 2.0 or EBU R128 track and album analysis, drag and drop of files and folders, clipping prevention and undo.
 Moniker: mp3rgui
 Tags:
   - audio

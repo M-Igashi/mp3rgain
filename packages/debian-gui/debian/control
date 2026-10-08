@@ -13,13 +13,15 @@ Package: mp3rgui
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Recommends: mp3rgain, fonts-noto-cjk
-Description: GUI for mp3rgain - lossless MP3 volume adjustment
- mp3rgui is a graphical interface for mp3rgain, a modern mp3gain
- replacement written in Rust that adjusts MP3 file volumes losslessly
- using ReplayGain analysis.
+Description: GUI for mp3rgain - lossless MP3 and AAC volume adjustment
+ mp3rgui is a graphical interface for mp3rgain, a modern mp3gain and
+ aacgain replacement written in Rust. It adjusts the volume of MP3 and
+ AAC files losslessly, without re-encoding, using ReplayGain analysis.
  .
  Features:
-  - Drag-and-drop file selection
-  - ReplayGain 2.0 analysis and tagging
-  - Album and track gain modes
-  - Visual progress display
+  - Drag-and-drop loading of files and folders
+  - Track and album gain: ReplayGain 1.0 (default), ReplayGain 2.0
+    or EBU R128
+  - Albums per folder, by tags, or as a single album
+  - Manual and per-channel gain, undo, stored tag inspection
+  - Clipping prevention, progress display and cancellation

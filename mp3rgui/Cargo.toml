@@ -3,7 +3,7 @@ name = "mp3rgui"
 version = "3.9.2"
 edition = "2021"
 authors = ["Jesse Pinkman <M-Igashi@users.noreply.github.com>"]
-description = "GUI application for mp3rgain - lossless MP3 volume adjustment"
+description = "GUI for mp3rgain - lossless MP3 and AAC volume adjustment using ReplayGain"
 license = "MIT"
 repository = "https://github.com/M-Igashi/mp3rgain"
 

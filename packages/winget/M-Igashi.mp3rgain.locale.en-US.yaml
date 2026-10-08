@@ -11,11 +11,11 @@ PackageName: mp3rgain
 PackageUrl: https://github.com/M-Igashi/mp3rgain
 License: MIT
 LicenseUrl: https://github.com/M-Igashi/mp3rgain/blob/master/LICENSE
-ShortDescription: Lossless MP3 volume adjustment - a modern mp3gain replacement written in Rust
+ShortDescription: Lossless MP3/AAC volume adjustment - a modern mp3gain / aacgain replacement written in Rust
 Description: |-
-  mp3rgain adjusts MP3 volume without re-encoding by modifying the global_gain field in each frame's side information.
-  This preserves audio quality while achieving permanent volume changes.
-  Features include ReplayGain analysis, AAC/M4A support, and full mp3gain command-line compatibility.
+  mp3rgain changes the volume of MP3 and AAC (M4A/MP4 and raw ADTS) files without re-encoding, by rewriting the global_gain field stored in each frame, so audio quality is preserved.
+  It analyzes track and album loudness with ReplayGain 1.0 by default (mp3gain-identical values), or ReplayGain 2.0 and EBU R128 as options, writes REPLAYGAIN_* tags, and stores an undo tag that -u uses to revert gain changes.
+  The command-line options, TSV output and undo tag follow mp3gain, so existing scripts keep working.
 Moniker: mp3rgain
 Tags:
   - audio

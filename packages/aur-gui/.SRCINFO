@@ -1,5 +1,5 @@
 pkgbase = mp3rgui
-	pkgdesc = GUI application for mp3rgain - lossless MP3 volume adjustment
+	pkgdesc = GUI for mp3rgain - lossless MP3 and AAC volume adjustment using ReplayGain
 	pkgver = 3.9.2
 	pkgrel = 1
 	url = https://mp3rgain.tyna.ninja/

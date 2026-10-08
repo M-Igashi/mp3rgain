@@ -1,5 +1,5 @@
 {
-  description = "mp3rgain - Lossless MP3 volume adjustment";
+  description = "mp3rgain - Lossless MP3/AAC volume adjustment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -19,7 +19,7 @@
           cargoLock.lockFile = ./Cargo.lock;
 
           meta = {
-            description = "Lossless MP3 volume adjustment - a modern mp3gain replacement written in Rust";
+            description = "Lossless MP3/AAC volume adjustment - a modern mp3gain / aacgain replacement written in Rust";
             homepage = "https://github.com/M-Igashi/mp3rgain";
             changelog = "https://github.com/M-Igashi/mp3rgain/releases/tag/v${cargoToml.package.version}";
             license = pkgs.lib.licenses.mit;
