@@ -1729,7 +1729,7 @@ fn tsv_rows_are_emitted_by_the_gain_applying_commands() {
     for args in [
         vec!["-r", "-n"],
         vec!["-a", "-n"],
-        vec!["-e", "-n"],
+        vec!["-a", "-e", "-n"],
         vec!["-g", "1", "-n"],
     ] {
         let album = TempAlbum::new(&["test_mono.mp3"]);
@@ -1769,6 +1769,46 @@ fn tsv_album_mode_matches_the_analysis_only_rows() {
     applied.extend(album.args());
     assert_eq!(stdout_of(&run(&applied)), expected);
     assert!(expected.contains("\"Album\"\t"), "{}", expected);
+}
+
+/// Issue #378: `-e` on its own is mp3gain's track-only analysis. It used to
+/// apply track gain, so a ported mp3gain scan rewrote every file it touched.
+/// `-a -e` and `-e --tags-only` keep their track-gain meaning.
+#[test]
+fn skip_album_on_its_own_only_analyzes() {
+    let album = TempAlbum::new(&["test_mono.mp3", "test_stereo.mp3"]);
+    let originals: Vec<Vec<u8>> = album.files.iter().map(|f| fs::read(f).unwrap()).collect();
+
+    for format in ["text", "tsv", "json"] {
+        let mut plain = vec!["-j", "1", "-o", format];
+        plain.extend(album.args());
+        let mut skip = vec!["-e", "-j", "1", "-o", format];
+        skip.extend(album.args());
+        let (plain, skip) = (stdout_of(&run(&plain)), stdout_of(&run(&skip)));
+
+        // The per-track rows of the plain analysis, without its album part.
+        assert!(!skip.contains("\"Album\""), "-o {format}: {skip}");
+        assert!(
+            plain.starts_with(&skip),
+            "-o {format}:\n{plain}\nvs\n{skip}"
+        );
+        assert!(skip.contains("test_stereo.mp3"), "-o {format}: {skip}");
+    }
+    for (file, original) in album.files.iter().zip(&originals) {
+        assert_eq!(&fs::read(file).unwrap(), original, "{}", file.display());
+    }
+
+    let out = run(&["-e", "--tags-only", album.args()[0]]);
+    assert!(out.status.success(), "{:?}", out);
+    assert!(track_gain_tag(&album.files[0]).is_some());
+    assert!(!ape_has_undo(&album.files[0]));
+
+    let out = run(&["-a", "-e", album.args()[1]]);
+    assert!(out.status.success(), "{:?}", out);
+    assert!(
+        ape_has_undo(&album.files[1]),
+        "-a -e should apply track gain"
+    );
 }
 
 /// Issue #228 gave the writing commands a non-zero exit on failure but left

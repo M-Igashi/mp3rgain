@@ -31,7 +31,7 @@ Every mp3gain 1.6.2 option is accepted except `-T`. Where mp3rgain's behaviour d
 |--------|---------------------|
 | `-r` | Analyze and apply track gain |
 | `-a` | Analyze and apply album gain. Every file given is one album, the same rule as mp3gain |
-| `-e` | Skip album analysis. **Differs:** on its own, `-e` applies track gain (see below) |
+| `-e` | Skip album analysis. On its own it analyzes each track and prints no album summary, as in mp3gain. **Differs:** `-a -e` applies track gain (see below) |
 | `-g <i>` | Apply `i` gain steps of 1.5 dB each, without analysis |
 | `-l <c> <g>` | Apply `g` steps to one channel only: `0` = left, `1` = right. MP3 only |
 | `-d <n>` | Shift the target by `n` dB, rounded to whole 1.5 dB steps. Without `-r`/`-a` it shifts the recommendation the plain analysis prints |
@@ -63,7 +63,7 @@ These options do not exist in mp3gain. A migrated script does not need them, but
 | `-R` | Recurse into directory arguments, picking up `.mp3`, `.m4a`, `.aac` and `.mp4` files |
 | `-n`, `--dry-run` | Show what would be done without writing anything |
 | `-o text` / `-o json` / `-o tsv` | Choose the output format explicitly |
-| `-i <n>` | Which audio track of a multi-track MP4 to analyze (default `0`). Gain, undo and ReplayGain tags always apply to the first audio track, so a value other than `0` works only for analysis and is an error with `-r`, `-a`, `-e`, `-g`, `-l`, `-u`, `-s d` or `--tags-only` ([#375](https://github.com/M-Igashi/mp3rgain/issues/375)). `-x` and the `global_gain` range columns always describe the first track |
+| `-i <n>` | Which audio track of a multi-track MP4 to analyze (default `0`). Gain, undo and ReplayGain tags always apply to the first audio track, so a value other than `0` works only for analysis and is an error with `-r`, `-a`, `-g`, `-l`, `-u`, `-s d` or `--tags-only` ([#375](https://github.com/M-Igashi/mp3rgain/issues/375)). `-x` and the `global_gain` range columns always describe the first track |
 | `-s R` | Reuse stored ReplayGain tags with `-r`/`-a` and rescan only files without them, which is mp3gain's default behaviour ([#298](https://github.com/M-Igashi/mp3rgain/issues/298)). In album mode, one file with missing or disagreeing album tags rescans the whole album. Ignored with `-s r`, `-d`/`-m`, `--rg2`/`--r128`, or when a tag was written by a BS.1770 analysis |
 | `-j <n>`, `--threads <n>` | Worker threads for every per-file command (default and `0`: one per CPU; `1`: serial, like mp3gain). `MP3RGAIN_THREADS` sets the default. See [perf-parallel.md](perf-parallel.md) |
 | `--skip-errors` | With `-a`, leave files that fail to decode out of the album instead of aborting |
@@ -88,7 +88,7 @@ Albums/Foo/01.mp3	0	0.0	17234	148	100
 - `File` is the path exactly as given on the command line, as mp3gain prints it (since 3.6.0; earlier versions printed the bare file name).
 - `Max Amplitude` is on mp3gain's 16-bit scale (peak × 32768) in the default ReplayGain 1.0 mode. Under `--rg2`/`--r128` it is the float peak instead, the value written to `REPLAYGAIN_*_PEAK`.
 - `Max global_gain` / `Min global_gain` cover MP3, AAC in MP4/M4A and raw ADTS `.aac`, matching what `-x` prints. A file whose gain fields cannot be scanned shows `-` (since 3.7.0, [#329](https://github.com/M-Igashi/mp3rgain/issues/329)).
-- Every command prints rows, not just the plain analysis: `-r`, `-a` and `-e` print the recommended change for each file (plus the `"Album"` row under `-a`) before rewriting it, so `mp3rgain -o tsv -a */*.mp3` reports the same numbers as `mp3rgain -o tsv */*.mp3`.
+- Every command prints rows, not just the plain analysis: `-r` and `-a` print the recommended change for each file (plus the `"Album"` row under `-a`) before rewriting it, so `mp3rgain -o tsv -a */*.mp3` reports the same numbers as `mp3rgain -o tsv */*.mp3`.
 
 Parsers written for mp3gain's output therefore keep working, including the command backend of the [beets](https://beets.io/) replaygain plugin:
 
@@ -119,7 +119,7 @@ For the choice between rewriting `global_gain` and writing ReplayGain *tags*, se
 | Area | mp3gain | mp3rgain |
 |------|---------|----------|
 | Clipping | Stops and asks before applying a gain that may clip, unless `-c` is given | Never prompts: applies the gain and prints a warning. Use `-k` to cap the gain, `-c` to silence the warning |
-| `-e` on its own | Analyzes and stores the result; the audio is not changed | Analyzes and applies track gain, like `-r` |
+| `-a -e` | Prints the file names and changes nothing | Analyzes and applies track gain, like `-r` |
 | Plain analysis (`mp3gain file.mp3`) | Stores the analysis in an APEv2 tag | Read-only: nothing is written, so a later `-s R` has nothing to reuse |
 | Stored analysis | Reused unless `-s r` | Re-analyzed unless `-s R` |
 | Tag layout | Everything in APEv2 | Since 3.2.0, `REPLAYGAIN_*` in ID3v2 and `MP3GAIN_*` in APEv2. `-s a` restores mp3gain's layout |

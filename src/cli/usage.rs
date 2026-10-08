@@ -45,7 +45,8 @@ pub fn print_usage() {
     println!("    --tags-only Write REPLAYGAIN_* tags without changing the audio, so the");
     println!("                listener can still turn ReplayGain off in their player.");
     println!("                Needs -r/-a; no undo tag is written (nothing to undo)");
-    println!("    -e          Skip album analysis (even with multiple files)");
+    println!("    -e          Skip album analysis (even with multiple files). On its own it");
+    println!("                only analyzes; with -a it applies track gain like -r");
     println!("    -i <n>      Audio track of a multi-track MP4 to analyze (default: 0).");
     println!("                Analysis only: gain and tags apply to the first track");
     println!("    -u          Undo gain changes (restore from APEv2 tag)");
@@ -89,7 +90,7 @@ pub fn print_usage() {
     println!("    mp3rgain -r --rg2 song.mp3     Track gain via ReplayGain 2.0 (BS.1770)");
     println!("    mp3rgain -a --r128 *.mp3       Album gain to the EBU R128 target");
     println!("    mp3rgain -r -m 2 *.mp3         Apply track gain + 2 steps");
-    println!("    mp3rgain -e *.mp3              Track gain only (skip album calc)");
+    println!("    mp3rgain -e *.mp3              Analyze each track, no album summary");
     println!("    mp3rgain -u song.mp3           Undo previous gain changes");
     println!("    mp3rgain -x song.mp3           Show max amplitude only");
     println!("    mp3rgain -s R -a *.mp3         Album gain from stored tags (rescan only");

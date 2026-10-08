@@ -32,7 +32,9 @@ for the few behaviours that differ.
 Without an action option,
 .B mp3rgain
 analyzes each file and prints the recommended track and album gain without
-modifying anything.
+modifying anything
+.RB ( \-e
+leaves out the album gain).
 When several actions are given, only one runs, in this order of precedence:
 .BR \-x ,
 .BR "\-s d" ,
@@ -42,8 +44,8 @@ When several actions are given, only one runs, in this order of precedence:
 (unless
 .BR \-e ),
 .B \-r
-or
-.BR \-e ,
+(and
+.BR "\-a \-e" ),
 .BR \-l ,
 .BR \-g .
 For example,
@@ -285,18 +287,21 @@ caps the written value at the file's headroom so a player applying the tag canno
 .TP
 .B \-e
 Skip album analysis even when processing multiple files.
-On its own, or with
-.BR \-a ,
-it analyzes and applies track gain like
-.BR \-r .
-(In
-.BR mp3gain (1),
-.B \-e
-without
-.B \-r
-or
+On its own it only analyzes, as
+.BR mp3gain (1)
+does: each file's track gain is printed and the album gain is not.
+Like the plain analysis, it writes nothing to the file.
+With
 .B \-a
-only analyzes.)
+it analyzes and applies track gain like
+.BR \-r ,
+and with
+.B \-\-tags\-only
+it writes track tags like
+.BR "\-r \-\-tags\-only" .
+.RB ( mp3gain (1)
+applies nothing with
+.BR "\-a \-e" .)
 .TP
 .B \-\-skip\-errors
 Continue album analysis
@@ -311,7 +316,6 @@ is the one players apply the file's ReplayGain tags to, so a value other than 0
 is accepted only for analysis: combining it with
 .BR \-r ,
 .BR \-a ,
-.BR \-e ,
 .BR \-g ,
 .BR \-l ,
 .BR \-u ,
@@ -389,10 +393,9 @@ Do not print clipping warnings.
 .TP
 .B \-k
 Prevent clipping by automatically limiting gain. With
-.BR \-r ,
-.B \-a
+.B \-r
 or
-.B \-e
+.B \-a
 the limit comes from the decoded peak and is rounded down to whole steps, so a
 file that already clips can end up attenuated. With
 .B \-g
@@ -466,7 +469,7 @@ prints the mp3gain-compatible header and one row per file, with the
 .B File
 column holding the path as given on the command line. The rows are also
 emitted while applying gain
-.RB ( \-r ", " \-a ", " \-e ", " \-g ", " \-l ).
+.RB ( \-r ", " \-a ", " \-g ", " \-l ).
 The
 .B Max Amplitude
 column uses mp3gain's 16-bit sample scale (peak multiplied by 32768) in the
@@ -702,8 +705,8 @@ Stored analysis is re-computed by default; use
 .B \-s\ R
 for mp3gain's reuse behaviour.
 .IP \(bu 2
-.B \-e
-on its own applies track gain.
+.B "\-a \-e"
+applies track gain, where mp3gain applies nothing.
 .IP \(bu 2
 A gain that may clip is applied with a warning instead of an interactive prompt.
 .IP \(bu 2
