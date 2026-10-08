@@ -341,7 +341,7 @@ Check/show stored tag information.
 Delete stored tag information, the undo tag included. Combined with \fB\-u\fR, the frame-level gain is undone first, then the remaining tags are deleted; deleting alone would destroy the undo information.
 .TP
 .B s
-Skip stored tags: write no undo or ReplayGain tags, so an MP3 change cannot be undone. For AAC files under \fB\-r\fR/\fB\-a\fR this mode is ignored and the tags are written.
+Skip stored tags: write no undo or ReplayGain tags, in any container, so the change cannot be undone with \fB\-u\fR.
 .TP
 .B r
 Force recalculation, ignoring stored tags (the default; kept for mp3gain compatibility). Overrides \fB\-s R\fR.

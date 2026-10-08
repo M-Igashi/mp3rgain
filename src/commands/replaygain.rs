@@ -623,16 +623,12 @@ fn run_album(
             // loses the per-track REPLAYGAIN_* tags for an album that merely
             // happens to sit on target (reported on the Hydrogenaudio forum:
             // album gain -0.04 dB, yet track 3 wants +1.46 dB).
-            let any_aac = album_result
-                .tracks()
-                .iter()
-                .any(|t| t.file_type() == AudioFileType::Aac);
             let max_peak = album_result
                 .tracks()
                 .iter()
                 .map(|t| t.peak())
                 .fold(0.0, f64::max);
-            if apply_is_noop(opts, steps, any_aac, max_peak) {
+            if apply_is_noop(opts, steps, max_peak) {
                 let json_results: Vec<JsonFileResult> = if opts.output_format == OutputFormat::Json
                 {
                     files
