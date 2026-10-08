@@ -150,6 +150,40 @@ fn album_at_zero_steps_skips_when_tags_are_disabled() {
     }
 }
 
+/// Issue #376: `-s s` writes no tags on M4A either. `-r` and `-a` used to
+/// write the undo atom and the `replaygain_*` atoms whatever `-s` said, and
+/// rewrote an already-on-target file just to tag it.
+#[test]
+fn skip_tags_mode_writes_no_mp4_atoms() {
+    let original = fs::read("tests/fixtures/test_aac.m4a").unwrap();
+    for mode in ["-r", "-a"] {
+        let album = TempAlbum::new(&["test_aac.m4a"]);
+        let file = &album.files[0];
+        let out = run(&[mode, "-s", "s", file.to_str().unwrap()]);
+        assert!(out.status.success(), "{mode}: {out:?}");
+        assert!(!stdout_of(&out).contains("written"), "{mode}: {out:?}");
+        assert_ne!(
+            fs::read(file).unwrap(),
+            original,
+            "{mode} should apply gain"
+        );
+
+        let undo = mp3rgain::mp4meta::read_undo_tags(file).unwrap();
+        assert_eq!((undo.undo(), undo.minmax()), (None, None), "{mode}");
+        let rg = mp3rgain::mp4meta::read_replaygain_tags(file).unwrap();
+        assert_eq!((rg.track_gain(), rg.album_gain()), (None, None), "{mode}");
+    }
+
+    let album = TempAlbum::new(&["test_aac.m4a"]);
+    let file = album.files[0].to_str().unwrap();
+    let dry_run = json_of(&run(&["-r", "-n", "-s", "s", "-o", "json", file]));
+    let steps = dry_run["files"][0]["gain_applied_steps"].as_i64().unwrap();
+    let offset = (-steps).to_string();
+    let out = run(&["-r", "-s", "s", "-m", offset.as_str(), file]);
+    assert!(stdout_of(&out).contains("no adjustment needed"), "{out:?}");
+    assert_eq!(fs::read(file).unwrap(), original);
+}
+
 fn id3v2_track_gain(file: &Path) -> Option<String> {
     mp3rgain::read_id3v2_replaygain(file)
         .expect("reading the ID3v2 tag should not fail")

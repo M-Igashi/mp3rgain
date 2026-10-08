@@ -231,7 +231,7 @@ That is a statement about the intersection, not a ranking. [foobar2000](https://
 
 For most modern listening setups **ReplayGain tags are the cleaner solution**. Change `global_gain` when the playback device does not support ReplayGain tags.
 
-With mp3rgain this is not either/or. Applying gain also writes the standard `REPLAYGAIN_*` tags with residual values, as mp3gain does, so tag-aware and tag-blind players converge on the same loudness. (`-s s` writes no tags, but on MP3 it also drops the undo tag.) `--tags-only` runs the same analysis but writes the full values without modifying a single frame, the way loudgain and rsgain work. Use it when listeners should be able to switch ReplayGain off in their player; use the default apply when the playback device ignores tags.
+With mp3rgain this is not either/or. Applying gain also writes the standard `REPLAYGAIN_*` tags with residual values, as mp3gain does, so tag-aware and tag-blind players converge on the same loudness. (`-s s` writes no tags, and that includes the undo tag.) `--tags-only` runs the same analysis but writes the full values without modifying a single frame, the way loudgain and rsgain work. Use it when listeners should be able to switch ReplayGain off in their player; use the default apply when the playback device ignores tags.
 
 ```bash
 mp3rgain -a --tags-only *.mp3   # tags only, audio frames untouched

@@ -119,12 +119,7 @@ fn process_track_gain_into(
                 }
             }
 
-            if apply_is_noop(
-                opts,
-                modified_steps,
-                result.file_type() == AudioFileType::Aac,
-                result.peak(),
-            ) {
+            if apply_is_noop(opts, modified_steps, result.peak()) {
                 if opts.output_format == OutputFormat::Text && !opts.quiet {
                     writeln!(out, "  {} {} (no adjustment needed)", ".".cyan(), filename)?;
                 }
@@ -146,17 +141,17 @@ fn process_track_gain_into(
 /// Whether a ReplayGain apply that nets `steps == 0` has genuinely nothing to
 /// do, so the file can take the cheap "no adjustment needed" skip. It still
 /// has work when (issue #206):
-///   - ReplayGain analysis tags would be written (AAC always, since mp3gain
-///     has no AAC to stay compatible with; MP3 in any mode that keeps tags,
-///     i.e. everything but `-s s`, issue #204), so an already-on-target
-///     track gets its REPLAYGAIN_* tags (re)written rather than skipped;
+///   - ReplayGain analysis tags would be written (every container in any
+///     mode that keeps tags, i.e. everything but `-s s`, issues #204 and
+///     #376), so an already-on-target track gets its REPLAYGAIN_* tags
+///     (re)written rather than skipped;
 ///   - `-k` must attenuate a track that already sits at the reference
 ///     loudness yet already clips (`peak > 1.0`);
 ///   - `--tags-only` always has a tag to write (issue #308).
 ///
-/// Album mode passes "any member is AAC" and the loudest member peak.
-pub fn apply_is_noop(opts: &Options, steps: i32, any_aac: bool, max_peak: f64) -> bool {
-    let writes_rg_tags = any_aac || opts.stored_tag_mode != StoredTagMode::Skip;
+/// Album mode passes the loudest member peak.
+pub fn apply_is_noop(opts: &Options, steps: i32, max_peak: f64) -> bool {
+    let writes_rg_tags = opts.stored_tag_mode != StoredTagMode::Skip;
     let clip_prevention_applies = opts.prevent_clipping && max_peak > 1.0;
     !opts.tags_only && steps == 0 && !writes_rg_tags && !clip_prevention_applies
 }
@@ -474,13 +469,11 @@ fn write_tags_only_into(
 
 /// Apply ReplayGain to AAC/M4A files with optional album info.
 ///
-/// Differs from the MP3 path in two ways:
-///   - the ReplayGain tags are always written (independent of
-///     `--stored-tag-mode`), since mp3gain has no AAC to stay compatible
-///     with;
-///   - bitstream gain failures are logged and swallowed, and the tags are
-///     still written, describing the unchanged audio (matches
-///     pre-issue-#153 behavior).
+/// Writes the undo atom and the ReplayGain freeform tags unless `-s s`, like
+/// the MP3 path (issue #376). Unlike it, a bitstream gain failure is logged
+/// and swallowed when there are tags to write, and the tags are still
+/// written, describing the unchanged audio (matches pre-issue-#153 behavior).
+/// Under `-s s` there is nothing to fall back to, so the failure is reported.
 ///
 /// The common case is one call: `apply_with_options` folds the ReplayGain
 /// freeform tags into the same container rewrite as the gain and undo tag.
@@ -495,6 +488,7 @@ fn apply_replaygain_aac_with_album_into(
     out: &mut String,
 ) -> Result<JsonFileResult> {
     let filename = get_filename(file);
+    let write_tags = opts.stored_tag_mode != StoredTagMode::Skip;
 
     warn_aac_multi_track(file, filename, opts);
 
@@ -508,7 +502,8 @@ fn apply_replaygain_aac_with_album_into(
     apply_opts.prevent_clipping = opts.prevent_clipping;
     apply_opts.wrap = opts.wrap_gain;
     apply_opts.preserve_timestamp = false;
-    apply_opts.write_replaygain_tags = true;
+    apply_opts.write_undo = write_tags;
+    apply_opts.write_replaygain_tags = write_tags;
     apply_opts.file_type = Some(AudioFileType::Aac);
 
     let (actual_steps, gain_modified, warning_msg) = match apply_with_options(file, &apply_opts) {
@@ -523,6 +518,7 @@ fn apply_replaygain_aac_with_album_into(
                 Some(result.peak()),
             ),
         ),
+        Err(e) if !write_tags => return Ok(report_file_error(file, filename, e, opts)),
         Err(e) => {
             emit_file_warning(
                 opts,
@@ -557,7 +553,16 @@ fn apply_replaygain_aac_with_album_into(
     };
 
     if opts.output_format == OutputFormat::Text && !opts.quiet {
-        if gain_modified > 0 {
+        if !write_tags {
+            writeln!(
+                out,
+                "  {} {} ({} gains modified, {:+.1} dB)",
+                "v".green(),
+                filename,
+                gain_modified,
+                result.gain_db()
+            )?;
+        } else if gain_modified > 0 {
             writeln!(
                 out,
                 "  {} {} ({} gains modified + {} written, {:+.1} dB)",
