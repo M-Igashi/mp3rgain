@@ -13,6 +13,16 @@ updates:
       rust-dependencies:
         patterns:
           - "*"
+    # egui 0.x releases break the API and eframe / egui / egui_extras must move
+    # together (#372 paired egui 0.33 with egui_extras 0.34), so the GUI stack
+    # is upgraded by hand. Patch releases still come through.
+    ignore:
+      - dependency-name: "egui*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "eframe"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "rfd"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: github-actions
     directory: /
