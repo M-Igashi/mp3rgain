@@ -22,7 +22,8 @@ What ships today:
 - [ ] Upgrade mp3rgui's egui/eframe stack, which also retires the quick-xml audit ignores in `ci.yml`
 - [ ] Homebrew core formula (#8); today it is in the `M-Igashi/tap` tap
 - [ ] nixpkgs package (#314); the flake in this repo already works, see [packages/nix/README.md](../packages/nix/README.md)
-- [ ] Official Debian repository (ITP submission)
+- [ ] Official Debian repository (ITP submission) (#394)
+- [ ] pkgx package (#395)
 - [ ] Fedora/RPM package
 - [ ] Flatpak package
 - [ ] FLAC support
