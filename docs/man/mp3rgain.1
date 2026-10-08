@@ -67,7 +67,12 @@ specification).
 Positive values increase volume, negative values decrease it.
 Existing
 .B REPLAYGAIN_*
-tags are left unchanged, so they no longer describe the audio afterwards.
+values and
+.B MP3GAIN_ALBUM_MINMAX
+are shifted by the gain actually applied, as mp3gain does, so they still
+describe the audio afterwards (not with
+.BR "\-s s" ,
+which writes no tags).
 .TP
 .BI \-d " n"
 Modify the suggested gain by
@@ -91,6 +96,10 @@ Apply gain to one channel only.
 is 0 for left or 1 for right.
 .I gain
 is the number of steps. MP3 only; on AAC files this is an error.
+Existing
+.B REPLAYGAIN_*
+tags are left unchanged, as in mp3gain, so they no longer describe the audio
+afterwards.
 .TP
 .BI \-m " i"
 Modify the suggested gain by integer
@@ -700,14 +709,10 @@ A gain that may clip is applied with a warning instead of an interactive prompt.
 .IP \(bu 2
 The plain analysis never writes tags.
 .IP \(bu 2
-.B \-g
-and
-.B \-l
-do not update existing
-.B REPLAYGAIN_*
-tags, and
 .B \-u
-removes them.
+removes existing
+.B REPLAYGAIN_*
+tags, where mp3gain adjusts them.
 .IP \(bu 2
 Since 3.2.0, MP3 ReplayGain tags go to ID3v2 instead of APEv2;
 .B \-s\ a

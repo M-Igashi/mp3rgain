@@ -24,6 +24,8 @@ It exists because a whole-codebase review finds these reliably and proposes "fix
 
 **`db_to_steps` rounds, the clipping cap floors.** `src/apply.rs::check_clipping` computes `(max_safe_db / GAIN_STEP_DB).floor()` rather than calling `db_to_steps`. Rounding would turn 0.8 dB of headroom into one 1.5 dB step and re-introduce the clipping it is preventing. Issues #162 and #173.
 
+**`-g` shifts the stored ReplayGain values, `-l` does not, and neither re-analyzes.** `ApplyOptions::shifts_stored_gain` in `src/apply.rs` excludes channel applies because mp3gain 1.6.2 leaves every tag alone after `-l`, `MP3GAIN_MINMAX` included, and a one-channel change has no single value to shift by. The `-g` shift is arithmetic even where frames saturate, unlike the `-r` residual, because nothing records how the stored values were measured and the album values cannot be re-measured from one file; mp3gain does the same. It uses the exact 1.50515 dB step (#291) where mp3gain uses 1.505 dB. Issue #377.
+
 **The collision scan keys on artist and album strings, not `release_key`.** `src/commands/albumgroup.rs::split_release_warnings` asks which folders share a *title*; keying on `MUSICBRAINZ_ALBUMID` would put two discs of one release in different buckets and find nothing to report. The id is consulted afterwards by `looks_like_one_release`, to decide what a shared title means. Commit `836deee`.
 
 ## On-disk formats that cannot be unified

@@ -226,6 +226,25 @@ impl ReplayGainTags {
             && self.album_peak.is_none()
             && self.algorithm.is_none()
     }
+
+    /// These values once `steps` of gain have been applied to the audio
+    /// (issue #377). Gains and peaks move as described on
+    /// [`crate::ape::shift_stored_value`]; the algorithm, and any value that
+    /// does not parse, stay as they are.
+    pub(crate) fn shifted(&self, steps: i32) -> Self {
+        let shift = |name: &str, value: &Option<String>| {
+            value.as_ref().map(|v| {
+                crate::ape::shift_stored_value(name, v, steps).unwrap_or_else(|| v.clone())
+            })
+        };
+        Self {
+            track_gain: shift(RG_TRACK_GAIN, &self.track_gain),
+            track_peak: shift(RG_TRACK_PEAK, &self.track_peak),
+            album_gain: shift(RG_ALBUM_GAIN, &self.album_gain),
+            album_peak: shift(RG_ALBUM_PEAK, &self.album_peak),
+            algorithm: self.algorithm.clone(),
+        }
+    }
 }
 
 impl std::fmt::Display for ReplayGainTags {

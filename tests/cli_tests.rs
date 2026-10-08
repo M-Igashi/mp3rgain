@@ -399,6 +399,97 @@ fn undo_with_delete_tags_without_undo_info_still_deletes() {
     );
 }
 
+/// Issue #377: `-g` moves the stored ReplayGain values and the album
+/// `global_gain` range by the steps it actually applied, in whichever container
+/// holds them, as mp3gain does. They used to keep describing the old audio, so
+/// a tag-aware player landed off by the `-g` amount. `REPLAYGAIN_ALGORITHM`
+/// stays as it is, and `-l` moves nothing: mp3gain leaves every tag alone there.
+#[test]
+fn manual_gain_shifts_stored_replaygain_values() {
+    use mp3rgain::{apply_gain_to_peak, read_gain_tags_auto, steps_to_db, TagLayout};
+
+    for (fixture, layout, layout_args) in [
+        ("test_vbr.mp3", TagLayout::Split, &[][..]),
+        ("test_vbr.mp3", TagLayout::Ape, &["-s", "a"][..]),
+        ("test_vbr.mp3", TagLayout::Id3v2, &["-s", "i"][..]),
+        ("test_aac.m4a", TagLayout::Split, &[][..]),
+        ("test_adts.aac", TagLayout::Split, &[][..]),
+    ] {
+        let album = TempAlbum::new(&[fixture]);
+        let file = &album.files[0];
+        let run_ok = |args: &[&str]| {
+            let mut argv = layout_args.to_vec();
+            argv.extend_from_slice(args);
+            argv.push(file.to_str().unwrap());
+            let out = run(&argv);
+            assert!(out.status.success(), "{argv:?} failed: {out:?}");
+            out
+        };
+        let tags = || read_gain_tags_auto(file, layout).expect("reading the stored tags");
+
+        run_ok(&["--rg2", "-a", "-c"]);
+        let before = tags();
+        assert!(before.algorithm.is_some(), "{fixture} {layout:?}: setup");
+        assert_eq!(
+            before.album_minmax.is_some(),
+            fixture.ends_with(".mp3") && layout != TagLayout::Id3v2,
+            "{fixture} {layout:?}: MP3GAIN_ALBUM_MINMAX setup"
+        );
+
+        // `-k` caps the MP3 request at its headroom; the shift has to follow
+        // the steps actually applied, not the 60 asked for.
+        let out = run_ok(&["-k", "-o", "json", "-g", "60"]);
+        let steps = json_of(&out)["files"][0]["gain_applied_steps"]
+            .as_i64()
+            .expect("applied steps") as i32;
+        let db = steps_to_db(steps);
+        let gain = |g: Option<f64>| Some(format!("{:+.6} dB", g.unwrap() - db));
+        let peak = |p: Option<f64>| Some(format!("{:.6}", apply_gain_to_peak(p.unwrap(), db)));
+        let range = |r: Option<&str>| {
+            r.map(|r| {
+                let (min, max) = r.split_once(',').unwrap();
+                let shift = |v: &str| (v.parse::<i32>().unwrap() + steps).min(255);
+                format!("{},{}", shift(min), shift(max))
+            })
+        };
+
+        let after = tags();
+        let context = format!("{fixture} {layout:?}, {steps} steps");
+        assert_eq!(after.track_gain, gain(before.track_gain_db()), "{context}");
+        assert_eq!(
+            after.track_peak,
+            peak(before.track_peak_value()),
+            "{context}"
+        );
+        assert_eq!(after.album_gain, gain(before.album_gain_db()), "{context}");
+        assert_eq!(
+            after.album_peak,
+            peak(before.album_peak_value()),
+            "{context}"
+        );
+        assert_eq!(after.algorithm, before.algorithm, "{context}");
+        assert_eq!(
+            after.album_minmax,
+            range(before.album_minmax.as_deref()),
+            "{context}"
+        );
+
+        if fixture.ends_with(".mp3") {
+            run_ok(&["-l", "0", "-2"]);
+            let after_l = tags();
+            for (field, l, g) in [
+                ("track gain", &after_l.track_gain, &after.track_gain),
+                ("track peak", &after_l.track_peak, &after.track_peak),
+                ("album gain", &after_l.album_gain, &after.album_gain),
+                ("album peak", &after_l.album_peak, &after.album_peak),
+                ("album range", &after_l.album_minmax, &after.album_minmax),
+            ] {
+                assert_eq!(l, g, "{context}: -l moved the {field}");
+            }
+        }
+    }
+}
+
 /// Track gain in dB parsed from wherever the tag was stored.
 fn track_gain_db(file: &Path) -> Option<f64> {
     track_gain_tag(file).and_then(|s| mp3rgain::ape::parse_rg_gain(&s))

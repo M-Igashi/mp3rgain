@@ -5,9 +5,9 @@
 //! subsumed by a broader rewrite of this module.
 
 use crate::ape::{
-    parse_undo_values, parse_undo_wrap, REPLAYGAIN_KEYS, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
-    TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_ALGORITHM,
-    TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
+    parse_undo_values, parse_undo_wrap, shift_stored_value, REPLAYGAIN_KEYS, TAG_MP3GAIN_MINMAX,
+    TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
+    TAG_REPLAYGAIN_ALGORITHM, TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use crate::error::{Error, Result};
 use crate::gain::apply_undo_to_data;
@@ -292,6 +292,44 @@ pub(crate) fn remove_id3v2_rg_values_direct(path: &Path) -> Result<()> {
     write_tag_direct(path, &mut tag)
 }
 
+/// Move every TXXX value [`shift_stored_value`] knows by `steps` of applied
+/// gain (issue #377). Frames are replaced where they stand, so each keeps its
+/// description as written (mp3gain's `-s i` uses lowercase) and its place in
+/// the tag. `true` if any frame changed.
+pub(crate) fn shift_stored_gain(tag: &mut id3::Tag, steps: i32) -> bool {
+    let mut shifted = false;
+    for frame in tag.frames_vec_mut() {
+        let replacement = match frame.content() {
+            id3::Content::ExtendedText(t) => shift_stored_value(&t.description, &t.value, steps)
+                .map(|value| id3::frame::ExtendedText {
+                    description: t.description.clone(),
+                    value,
+                }),
+            _ => None,
+        };
+        if let Some(t) = replacement {
+            *frame = t.into();
+            shifted = true;
+        }
+    }
+    shifted
+}
+
+/// [`shift_stored_gain`] on `path`'s tag, written without the temp+rename
+/// dance for callers already on a not-yet-visible temp file. Files with
+/// nothing to shift are left untouched, and so is a tag the `id3` crate
+/// cannot parse: it holds nothing that could be shifted, and the layouts that
+/// call this never needed to read ID3v2 before, so it must not fail the apply.
+pub(crate) fn shift_id3v2_stored_gain_direct(path: &Path, steps: i32) -> Result<()> {
+    let Ok(mut tag) = read_tag(path) else {
+        return Ok(());
+    };
+    if !shift_stored_gain(&mut tag, steps) {
+        return Ok(());
+    }
+    write_tag_direct(path, &mut tag)
+}
+
 /// Remove the `REPLAYGAIN_*` frames from `tag`; `false` if there were none.
 fn strip_rg_values(tag: &mut id3::Tag) -> bool {
     let has_rg = tag.extended_texts().any(|t| {
@@ -334,6 +372,40 @@ mod tests {
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].description, TAG_REPLAYGAIN_TRACK_GAIN);
         assert_eq!(frames[0].value, "+2.00 dB");
+    }
+
+    /// Issue #377: the shift replaces each frame where it stands, keeping the
+    /// lowercase description mp3gain's `-s i` writes, and leaves frames that do
+    /// not describe the audio's level alone.
+    #[test]
+    fn shift_keeps_description_and_order() {
+        let mut tag = id3::Tag::new();
+        for (description, value) in [
+            ("replaygain_reference_loudness", "89.0 dB"),
+            ("replaygain_track_gain", "-0.380000 dB"),
+            ("MP3GAIN_ALBUM_MINMAX", "128,228"),
+            ("MP3GAIN_UNDO", "-018,-018,N"),
+        ] {
+            tag.add_frame(ExtendedText {
+                description: description.to_string(),
+                value: value.to_string(),
+            });
+        }
+
+        assert!(shift_stored_gain(&mut tag, 2));
+        let frames: Vec<_> = tag
+            .extended_texts()
+            .map(|t| (t.description.as_str(), t.value.as_str()))
+            .collect();
+        assert_eq!(
+            frames,
+            [
+                ("replaygain_reference_loudness", "89.0 dB"),
+                ("replaygain_track_gain", "-3.390300 dB"),
+                ("MP3GAIN_ALBUM_MINMAX", "130,230"),
+                ("MP3GAIN_UNDO", "-018,-018,N"),
+            ]
+        );
     }
 
     #[test]

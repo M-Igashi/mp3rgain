@@ -191,7 +191,8 @@ mp3rgain processes files in parallel by default, one worker thread per CPU (`-j`
 A tag-aware player applies `REPLAYGAIN_*` on top of whatever is in the audio, so the tags have to describe the audio as it is now:
 
 - **After `-r` or `-a`**, mp3rgain writes the residual gain left after the bitstream change (mp3gain's convention), so a tag-aware player and a tag-blind one end up at the same loudness. Tagging the file again later with another tool is also safe, since it measures the modified audio.
-- **After `-g` or `-l`**, mp3rgain leaves any existing `REPLAYGAIN_*` tags unchanged, so they still describe the old audio. Refresh them with `mp3rgain -r --tags-only` (which keeps the undo tag), or remove them with `-s d` (which also removes the undo tag).
+- **After `-g`**, mp3rgain shifts any existing `REPLAYGAIN_*` values by the gain it applied, as mp3gain does, so they keep describing the audio ([#377](https://github.com/M-Igashi/mp3rgain/issues/377)).
+- **After `-l`**, existing `REPLAYGAIN_*` tags are left unchanged, as in mp3gain, so they still describe the old audio. Refresh them with `mp3rgain -r --tags-only` (which keeps the undo tag), or remove them with `-s d` (which also removes the undo tag).
 - **With `-s s`**, no tags are written, so tags from an earlier scan by another tool go stale the same way.
 - **To return to tags only**, undo first; `-u` also removes the `REPLAYGAIN_*` values:
 
