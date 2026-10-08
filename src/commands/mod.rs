@@ -127,8 +127,11 @@ pub fn run(mut opts: Options) -> Result<()> {
         return cmd_album_gain(&opts.files, &opts);
     }
 
-    if opts.track_gain || opts.skip_album {
-        // -r or -e: apply track gain (ReplayGain)
+    // -e on its own is not an action but mp3gain's track-only analysis,
+    // handled by cmd_info below (issue #378). -a -e and -e --tags-only still
+    // mean track gain.
+    if opts.track_gain || (opts.skip_album && (opts.album_gain || opts.tags_only)) {
+        // -r: apply track gain (ReplayGain)
         return cmd_track_gain(&opts.files, &opts);
     }
 
@@ -141,8 +144,8 @@ pub fn run(mut opts: Options) -> Result<()> {
         // -g: apply fixed gain steps
         cmd_apply(&opts.files, steps, &opts)
     } else {
-        // Default: analyze files (mp3gain compatible)
-        // With -d modifier, perform ReplayGain analysis
+        // Default: analyze files (mp3gain compatible), without the album
+        // summary under -e. With -d modifier, perform ReplayGain analysis
         cmd_info(&opts.files, &opts)
     }
 }

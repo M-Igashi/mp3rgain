@@ -148,9 +148,10 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
     // Print album summary (mp3gain compatible) from the same analysis pass.
     // Prefer the MP3 report, but fall back to the MP4 one if every MP3
     // failed — otherwise the album summary would silently disappear.
+    // -e leaves it out, as mp3gain -e does (issue #378).
     let summary_report = mp3_report.as_ref().or(mp4_report.as_ref());
 
-    if any_ok {
+    if any_ok && !opts.skip_album {
         if let Some(report) = summary_report {
             let (album_gain_steps, album_gain_db) = opts.modified_gain(
                 report.album.album_gain_steps(),

@@ -428,7 +428,6 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
         let modifying = [
             (opts.track_gain, "-r"),
             (opts.album_gain, "-a"),
-            (opts.skip_album, "-e"),
             (opts.gain_steps.is_some(), "-g"),
             (opts.channel_gain.is_some(), "-l"),
             (opts.undo, "-u"),
@@ -823,7 +822,8 @@ mod tests {
         for modifying in [
             vec!["-r"],
             vec!["-a"],
-            vec!["-e"],
+            vec!["-a", "-e"],
+            vec!["-e", "--tags-only"],
             vec!["-g", "2"],
             vec!["-l", "0", "2"],
             vec!["-u"],
@@ -846,7 +846,14 @@ mod tests {
             argv[1] = "0";
             assert!(parse_args(&args(&argv)).is_ok(), "{argv:?}");
         }
-        for analysis in [vec![], vec!["-x"], vec!["-s", "c"], vec!["-o", "json"]] {
+        // -e on its own only analyzes (issue #378).
+        for analysis in [
+            vec![],
+            vec!["-e"],
+            vec!["-x"],
+            vec!["-s", "c"],
+            vec!["-o", "json"],
+        ] {
             let mut argv = vec!["-i", "1"];
             argv.extend_from_slice(&analysis);
             argv.push("a.m4a");
