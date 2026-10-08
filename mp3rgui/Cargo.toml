@@ -10,7 +10,7 @@ repository = "https://github.com/M-Igashi/mp3rgain"
 [dependencies]
 eframe = { version = "0.31", features = ["persistence"] }
 egui = "0.31"
-egui_extras = { version = "0.31", features = ["all_loaders"] }
+egui_extras = "0.31"
 image = { version = "0.25", default-features = false, features = ["png"] }
 mp3rgain = { path = "..", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
