@@ -180,8 +180,12 @@ jobs:
       - name: Run cargo audit
         run: cargo audit
 
+      # RUSTSEC-2026-0194/0195 are DoS bugs in quick-xml 0.30, which only
+      # reaches the GUI through atspi-common's zbus-lockstep (eframe 0.31 ->
+      # accesskit). It parses the AT-SPI D-Bus interface XML bundled in that
+      # crate, never user input. Drop the ignores with the egui upgrade.
       - name: Run cargo audit (GUI)
-        run: cargo audit --file mp3rgui/Cargo.lock
+        run: cargo audit --file mp3rgui/Cargo.lock --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
 
   fmt:
     name: Format
