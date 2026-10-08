@@ -12,15 +12,15 @@
           "name": "mp3rgain-v3.9.2-linux-arm64.tar.gz.sha256"
         },
         {
-          "download_count": 59,
+          "download_count": 70,
           "name": "mp3rgain-v3.9.2-linux-x86_64.tar.gz"
         },
         {
-          "download_count": 1,
+          "download_count": 2,
           "name": "mp3rgain-v3.9.2-linux-x86_64.tar.gz.sha256"
         },
         {
-          "download_count": 14,
+          "download_count": 16,
           "name": "mp3rgain-v3.9.2-macos-universal.tar.gz"
         },
         {
@@ -36,7 +36,7 @@
           "name": "mp3rgain-v3.9.2-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 85,
+          "download_count": 97,
           "name": "mp3rgain-v3.9.2-windows-x86_64.zip"
         },
         {
@@ -64,7 +64,7 @@
           "name": "mp3rgui-v3.9.2-linux-arm64.tar.gz"
         },
         {
-          "download_count": 58,
+          "download_count": 67,
           "name": "mp3rgui-v3.9.2-linux-x86_64.tar.gz"
         },
         {
@@ -100,7 +100,7 @@
           "name": "mp3rgui-v3.9.2-windows-setup.exe.sha256"
         },
         {
-          "download_count": 60,
+          "download_count": 66,
           "name": "mp3rgui-v3.9.2-windows-x86_64.zip"
         },
         {
@@ -108,7 +108,7 @@
           "name": "mp3rgui-v3.9.2-windows-x86_64.zip.sha256"
         },
         {
-          "download_count": 92,
+          "download_count": 108,
           "name": "mp3rgui-windows-setup.exe"
         },
         {
@@ -116,7 +116,7 @@
           "name": "mp3rgui-windows-setup.exe.sha256"
         },
         {
-          "download_count": 8,
+          "download_count": 10,
           "name": "mp3rgui_3.9.2-1_amd64.deb"
         },
         {
@@ -170,7 +170,7 @@
           "name": "mp3rgain-v3.9.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 151,
+          "download_count": 152,
           "name": "mp3rgain-v3.9.1-windows-x86_64.zip"
         },
         {
@@ -2238,7 +2238,7 @@
           "name": "mp3rgain-v2.10.0-windows-x86_64.zip"
         },
         {
-          "download_count": 12,
+          "download_count": 14,
           "name": "mp3rgain-v2.10.0-windows-x86_64.zip.sha256"
         },
         {
@@ -2876,7 +2876,7 @@
           "name": "mp3rgui-v2.9.2-windows-arm64.zip"
         },
         {
-          "download_count": 2,
+          "download_count": 3,
           "name": "mp3rgui-v2.9.2-windows-arm64.zip.sha256"
         },
         {
@@ -5358,7 +5358,7 @@
           "name": "mp3rgui-v2.1.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 594,
+          "download_count": 595,
           "name": "mp3rgui-v2.1.0-windows-x86_64.zip"
         },
         {
@@ -5888,17 +5888,17 @@
     }
   ],
   "crates_io": {
-    "total_downloads": 3205,
-    "recent_downloads": 1337,
+    "total_downloads": 3232,
+    "recent_downloads": 1364,
     "versions": [
       {
         "num": "3.9.2",
-        "downloads": 17,
+        "downloads": 20,
         "created_at": "2026-10-05T18:00:54.426939Z"
       },
       {
         "num": "3.9.1",
-        "downloads": 74,
+        "downloads": 98,
         "created_at": "2026-09-30T11:12:57.087295Z"
       },
       {
