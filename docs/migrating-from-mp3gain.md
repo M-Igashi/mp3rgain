@@ -125,7 +125,6 @@ For the choice between rewriting `global_gain` and writing ReplayGain *tags*, se
 | Tag layout | Everything in APEv2 | Since 3.2.0, `REPLAYGAIN_*` in ID3v2 and `MP3GAIN_*` in APEv2. `-s a` restores mp3gain's layout |
 | `-g` and stored ReplayGain tags | Shifts stored `REPLAYGAIN_*` values by the applied gain | Leaves existing `REPLAYGAIN_*` tags as they were (`-l` too), so they no longer match the audio. Re-run `-r`/`-a` (or `-r --tags-only`) afterwards, or use `-s d` to remove them (which also removes the undo tag) |
 | Tags written by `-g` | `MP3GAIN_UNDO` only | `MP3GAIN_UNDO` and `MP3GAIN_MINMAX`. The audio frames are byte-identical to mp3gain's ([compatibility-report.md](compatibility-report.md)); the tag block is not |
-| CRC-protected MP3 frames | Updates each frame's CRC after changing the gain | Leaves the CRC as it was, so decoders that check CRCs report mismatches |
 | Undo (`-u`) | Keeps its APEv2 tag, with the undo value reset to zero and the `REPLAYGAIN_*` values adjusted | Removes the undo tag and the `REPLAYGAIN_*` values in both containers |
 | ReplayGain analysis | Decodes with mpglib | Decodes with symphonia. Values normally match mp3gain's to the printed precision; CI checks that they agree within one gain step |
 | Formats | MP3 only | MP3, AAC in MP4/M4A (including the audio track of a video `.mp4`) and raw ADTS `.aac` |

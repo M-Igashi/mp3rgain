@@ -659,10 +659,8 @@ is designed as a drop-in replacement for the original
 and works with existing scripts and integrations (e.g., the beets replaygain
 plugin). The audio frames it writes for
 .B \-g
-are byte-identical to mp3gain's, except in files with CRC-protected frames,
-whose CRCs mp3gain updates and
-.B mp3rgain
-does not. Differences to be aware of:
+are byte-identical to mp3gain's, including the CRCs of CRC-protected frames.
+Differences to be aware of:
 .IP \(bu 2
 Stored analysis is re-computed by default; use
 .B \-s\ R
