@@ -18,7 +18,8 @@
 #   --upload          Upload to PPA after building
 #   --package=PKG     Build only 'cli', 'gui', or 'all' (default: all)
 #   --distro=DISTRO   Build for specific distro only (default: all supported)
-#   --ppa=PPA         PPA target (default: ppa:m-igashi/mp3rgain)
+#   --ppa-cli=PPA     Upload target for mp3rgain (default: ppa:m-igashi/mp3rgain)
+#   --ppa-gui=PPA     Upload target for mp3rgui (default: ppa:m-igashi/mp3rgui)
 #   --key=KEYID       GPG key ID for signing (default: auto-detect)
 #   --dry-run         Show what would be done without executing
 #   --help            Show this help message
@@ -36,7 +37,8 @@ ALL_DISTROS=("resolute")
 UPLOAD=false
 PACKAGE="all"
 DISTROS=("${ALL_DISTROS[@]}")
-PPA="ppa:m-igashi/mp3rgain"
+PPA_CLI="ppa:m-igashi/mp3rgain"
+PPA_GUI="ppa:m-igashi/mp3rgui"
 GPG_KEY=""
 DRY_RUN=false
 
@@ -46,10 +48,12 @@ while [[ $# -gt 0 ]]; do
         --upload) UPLOAD=true; shift ;;
         --package=*) PACKAGE="${1#*=}"; shift ;;
         --distro=*) DISTROS=("${1#*=}"); shift ;;
-        --ppa=*) PPA="${1#*=}"; shift ;;
+        --ppa-cli=*) PPA_CLI="${1#*=}"; shift ;;
+        --ppa-gui=*) PPA_GUI="${1#*=}"; shift ;;
+        --ppa=*) echo "--ppa was split into --ppa-cli and --ppa-gui (each package has its own PPA)"; exit 1 ;;
         --key=*) GPG_KEY="${1#*=}"; shift ;;
         --dry-run) DRY_RUN=true; shift ;;
-        --help) head -20 "$0" | tail -15; exit 0 ;;
+        --help) awk 'NR > 2 && !/^#/ { exit } NR > 2 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -59,7 +63,7 @@ VERSION=$(grep '^version' "$PROJECT_DIR/Cargo.toml" | head -1 | sed 's/.*"\(.*\)
 echo "==> mp3rgain version: $VERSION"
 echo "==> Target distros: ${DISTROS[*]}"
 echo "==> Package: $PACKAGE"
-echo "==> PPA: $PPA"
+echo "==> PPAs: mp3rgain -> $PPA_CLI, mp3rgui -> $PPA_GUI"
 echo ""
 
 if $DRY_RUN; then
@@ -76,7 +80,16 @@ fi
 build_source_package() {
     local pkg_name="$1"     # mp3rgain or mp3rgui
     local ppa_dir="$2"      # packages/ppa or packages/ppa-gui
+    local ppa="$3"          # upload target for this package
     local orig_version="$VERSION"
+
+    if $DRY_RUN; then
+        echo "[DRY RUN] Would build $pkg_name source packages for: ${DISTROS[*]}"
+        if $UPLOAD; then
+            echo "[DRY RUN] Would upload $pkg_name to $ppa"
+        fi
+        return
+    fi
 
     echo ""
     echo "=========================================="
@@ -184,21 +197,13 @@ CHANGELOG
             debuild_opts="$debuild_opts -k${GPG_KEY}"
         fi
 
-        if $DRY_RUN; then
-            echo "[DRY RUN] Would run: debuild $debuild_opts (in $build_src)"
-        else
-            (cd "$build_src" && debuild $debuild_opts)
-        fi
+        (cd "$build_src" && debuild $debuild_opts)
 
         # Upload if requested
         if $UPLOAD; then
             local changes_file="$work_dir/${pkg_name}_${ppa_version}_source.changes"
-            if $DRY_RUN; then
-                echo "[DRY RUN] Would run: dput $PPA $changes_file"
-            else
-                echo "==> Uploading $pkg_name for $distro to $PPA..."
-                dput "$PPA" "$changes_file"
-            fi
+            echo "==> Uploading $pkg_name for $distro to $ppa..."
+            dput "$ppa" "$changes_file"
         fi
     done
 
@@ -207,25 +212,12 @@ CHANGELOG
 }
 
 # Main
-if $DRY_RUN; then
-    echo "[DRY RUN mode]"
-    echo ""
-fi
-
 if [[ "$PACKAGE" == "cli" || "$PACKAGE" == "all" ]]; then
-    if $DRY_RUN; then
-        echo "[DRY RUN] Would build mp3rgain CLI source package"
-    else
-        build_source_package "mp3rgain" "packages/ppa"
-    fi
+    build_source_package "mp3rgain" "packages/ppa" "$PPA_CLI"
 fi
 
 if [[ "$PACKAGE" == "gui" || "$PACKAGE" == "all" ]]; then
-    if $DRY_RUN; then
-        echo "[DRY RUN] Would build mp3rgui GUI source package"
-    else
-        build_source_package "mp3rgui" "packages/ppa-gui"
-    fi
+    build_source_package "mp3rgui" "packages/ppa-gui" "$PPA_GUI"
 fi
 
 echo ""
@@ -238,5 +230,10 @@ echo "Build artifacts are in: $BUILD_DIR"
 if ! $UPLOAD; then
     echo ""
     echo "To upload to PPA:"
-    echo "  dput $PPA $BUILD_DIR/<package>/build-<distro>/<package>_*_source.changes"
+    if [[ "$PACKAGE" != "gui" ]]; then
+        echo "  dput $PPA_CLI $BUILD_DIR/mp3rgain/build-<distro>/mp3rgain_*_source.changes"
+    fi
+    if [[ "$PACKAGE" != "cli" ]]; then
+        echo "  dput $PPA_GUI $BUILD_DIR/mp3rgui/build-<distro>/mp3rgui_*_source.changes"
+    fi
 fi
