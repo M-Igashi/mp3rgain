@@ -228,8 +228,9 @@ jobs:
       # file grows without bound (a single stats.json reached 23.6 MB in six
       # months). The dashboard loads only latest.json and trend.json, and
       # trend.json gets one row per day appended here. Its github_releases is
-      # the live sum without .sha256 assets (isReal in index.html); the page
-      # adds the archived pre-v2.0 downloads itself.
+      # the live sum without .sha256 assets and without the apt repository's
+      # index files, which apt fetches on every update (isReal in index.html);
+      # the page adds the archived pre-v2.0 downloads itself.
       - name: Archive snapshot and update dashboard files
         run: |
           DATE=$(jq -r .date /tmp/snapshot.json)
@@ -242,7 +243,9 @@ jobs:
           jq '.' /tmp/snapshot.json > data/latest.json
           jq -c '{
             date,
-            github_releases: ([.github_releases[].assets[] | select(.name | endswith(".sha256") | not) | .download_count] | add // 0),
+            github_releases: ([.github_releases[].assets[]
+              | select(.name | (endswith(".sha256") or IN("Packages", "Packages.gz", "Release", "Release.gpg", "InRelease") or endswith("-archive-keyring.gpg")) | not)
+              | .download_count] | add // 0),
             crates_io: .crates_io.total_downloads,
             ppa: ((.ppa_cli.total_downloads // 0) + (.ppa_gui.total_downloads // 0)),
             pkgstats: ([(.pkgstats // [])[].count // 0] | add // 0)
