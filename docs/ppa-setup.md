@@ -20,7 +20,7 @@ sudo apt install mp3rgui
 
 They are separate so that the GUI, whose vendored dependencies are much larger, can be re-uploaded or fixed without touching a CLI upload that already succeeded.
 
-**Supported platform**: Ubuntu 26.04 LTS (resolute), amd64 and arm64. Older Ubuntu releases (including 24.04 LTS noble) ship Cargo 1.75, below the Rust 1.85 that `symphonia` and `id3` require.
+**Supported platform**: Ubuntu 26.04 LTS (resolute), amd64 and arm64. Older Ubuntu releases (including 24.04 LTS noble) ship Cargo 1.75, below the Rust 1.85 that `symphonia` and `id3` require. Debian and older Ubuntu releases are served by the [apt repository](../README.md#debian-and-ubuntu-apt-repository) published with each GitHub release, which ships the prebuilt `.deb` files instead of building on Launchpad.
 
 ## Prerequisites
 

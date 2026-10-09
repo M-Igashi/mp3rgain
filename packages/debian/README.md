@@ -65,6 +65,8 @@ The release workflow builds the `.deb` for amd64 and arm64 on every release tag 
 
 The GUI has its own package (`mp3rgui`), built the same way from `packages/debian-gui/`.
 
+After the release workflow, `.github/workflows/apt.yml` indexes those `.deb` files into a signed flat apt repository (`Packages`, `Release`, `InRelease`, the public key) and uploads it to the same release, so users can install and update through apt from `releases/latest/download/`. Setup is in the [README](../../README.md#debian-and-ubuntu-apt-repository).
+
 ## Version Updates
 
 The release workflow overwrites `debian/changelog` with the release version before building, so no `dch` step is needed. The committed `changelog` is a placeholder; a local build takes its package version from it unless you edit the copied `debian/changelog` first.

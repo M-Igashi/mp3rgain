@@ -165,7 +165,7 @@ done
 Why it fits:
 
 - Works with any playback device or software, since the level is in the audio
-- Runs on a Raspberry Pi 4/5 with a 64-bit OS: Linux arm64 release binaries, `.deb` packages and a Docker image are provided
+- Runs on a Raspberry Pi 4/5 with a 64-bit OS: Linux arm64 release binaries, an apt repository and a Docker image are provided
 - Changes are reversible if needed
 
 ## Integration examples

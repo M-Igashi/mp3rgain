@@ -200,7 +200,7 @@ The Linux release binaries are linked against glibc 2.34 or newer (Ubuntu 22.04,
 | Platform | Before | After |
 |----------|--------|-------|
 | Ubuntu 26.04 LTS | `apt install mp3gain` | `sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgain` |
-| Debian / other Ubuntu releases | `apt install mp3gain` | `.deb` from the [releases page](https://github.com/M-Igashi/mp3rgain/releases) (amd64 and arm64) |
+| Debian 12+ / Ubuntu 22.04+ | `apt install mp3gain` | `sudo apt install mp3rgain` after adding the [apt repository](../README.md#debian-and-ubuntu-apt-repository) (amd64 and arm64) |
 | Arch Linux | `yay -S mp3gain` (AUR) | `yay -S mp3rgain-bin` (community-maintained AUR package) |
 | macOS | `brew install mp3gain` | `brew install M-Igashi/tap/mp3rgain` or `sudo port install mp3rgain` |
 | Windows | SourceForge download | `winget install M-Igashi.mp3rgain` |

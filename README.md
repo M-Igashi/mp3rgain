@@ -172,7 +172,7 @@ The original [mp3gain](http://mp3gain.sourceforge.net/) has had no release since
 - [Design Decisions](docs/design-decisions.md): things that look like defects but are deliberate, and where each was decided
 - [Security](docs/security.md): memory safety and CVE analysis
 - [Roadmap](docs/roadmap.md): development plans
-- [Man page](docs/man/mp3rgain.1): installed by the .deb and PPA packages
+- [Man page](docs/man/mp3rgain.1): installed by the apt repository / .deb and PPA packages
 - [FAQ](https://mp3rgain.tyna.ninja/faq) · [Download Stats](https://m-igashi.github.io/mp3rgain/)
 
 ## Contributing
