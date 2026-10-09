@@ -1,5 +1,7 @@
 # PPA (Personal Package Archive) Setup Guide
 
+> **Deprecated.** The PPAs keep receiving uploads until 2026-12-31 and stop after that. The [apt repository](../README.md#debian-and-ubuntu-apt-repository) published with every GitHub release covers Ubuntu 26.04 as well as Debian 12+ and Ubuntu 22.04+, and for the same version its packages take precedence over the PPA's. This guide stays for maintaining the PPA until then.
+
 This guide covers the complete setup for distributing mp3rgain and mp3rgui via Ubuntu PPA.
 
 ## Overview

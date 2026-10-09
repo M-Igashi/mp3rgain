@@ -38,8 +38,7 @@ mp3rgain changes the volume of MP3 and AAC files without re-encoding. It rewrite
 |----------|---------|
 | macOS (Homebrew) | `brew install M-Igashi/tap/mp3rgain` |
 | Windows (winget) | `winget install M-Igashi.mp3rgain` |
-| Ubuntu 26.04 LTS (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgain` |
-| Debian 12+ / Ubuntu 22.04+ (apt) | Add the [apt repository](#debian-and-ubuntu-apt-repository), then `sudo apt install mp3rgain` |
+| Debian 12+ / Ubuntu 22.04+ (apt, 26.04 included) | Add the [apt repository](#debian-and-ubuntu-apt-repository), then `sudo apt install mp3rgain` |
 | Arch Linux (AUR, third-party) | `yay -S mp3rgain-bin` |
 | Nix | `nix profile install github:M-Igashi/mp3rgain` |
 | Docker | `docker pull ghcr.io/m-igashi/mp3rgain:latest` |
@@ -51,8 +50,7 @@ mp3rgain changes the volume of MP3 and AAC files without re-encoding. It rewrite
 |----------|---------|
 | macOS (Homebrew) | `brew install --cask M-Igashi/tap/mp3rgui` |
 | Windows (winget) | `winget install M-Igashi.mp3rgui` (portable; use the installer above for a Start Menu entry) |
-| Ubuntu 26.04 LTS (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgui && sudo apt install mp3rgui` |
-| Debian 13+ / Ubuntu 24.04+ (apt) | Add the [apt repository](#debian-and-ubuntu-apt-repository), then `sudo apt install mp3rgui` |
+| Debian 13+ / Ubuntu 24.04+ (apt, 26.04 included) | Add the [apt repository](#debian-and-ubuntu-apt-repository), then `sudo apt install mp3rgui` |
 | Arch Linux (AUR) | `yay -S mp3rgui` |
 
 ### Debian and Ubuntu apt repository
@@ -68,12 +66,13 @@ sudo apt update && sudo apt install mp3rgain
 
 The signing key's fingerprint is `54E7 BDDA 7581 ED3A 9689 0E9D 1697 D52D 7E5A 289D`. The repository lives in the assets of the latest release, so for a few minutes after a new release is published `apt update` may report that it has no Release file; the next update succeeds. The `.deb` files can also be installed one at a time from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases) with `sudo apt install ./mp3rgain_*_amd64.deb`, without updates.
 
+**The Ubuntu PPA is deprecated.** `ppa:m-igashi/mp3rgain` and `ppa:m-igashi/mp3rgui` keep receiving updates until 2026-12-31 and stop after that. The apt repository covers Ubuntu 26.04 too, and for the same version its packages take precedence over the PPA's, so adding it is all it takes to move over. Then remove the PPA with `sudo add-apt-repository --remove ppa:m-igashi/mp3rgain` (and `ppa:m-igashi/mp3rgui` for the GUI).
+
 Notes:
 
-- Archives for every platform are on [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases). The **[install guide](https://mp3rgain.tyna.ninja/install)** covers checksum verification and troubleshooting (Windows Defender false positives, missing OpenGL, PPA on older Ubuntu).
+- Archives for every platform are on [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases). The **[install guide](https://mp3rgain.tyna.ninja/install)** covers checksum verification and troubleshooting (Windows Defender false positives, missing OpenGL, Ubuntu releases older than 22.04).
 - On macOS the GUI app and DMG are signed with a Developer ID and notarized. The CLI binary is not signed.
 - Windows binaries and the installer are not code-signed.
-- The PPA builds for Ubuntu 26.04 LTS only.
 - `mp3rgain-bin` on the AUR is maintained by a third party. This project publishes only `mp3rgui` there.
 - `mp3rgui` is not on crates.io. To build it from a clone, run `cargo build --release --manifest-path mp3rgui/Cargo.toml` (on Linux, install the GTK 3, xkbcommon and Wayland development packages first).
 
@@ -172,7 +171,7 @@ The original [mp3gain](http://mp3gain.sourceforge.net/) has had no release since
 - [Design Decisions](docs/design-decisions.md): things that look like defects but are deliberate, and where each was decided
 - [Security](docs/security.md): memory safety and CVE analysis
 - [Roadmap](docs/roadmap.md): development plans
-- [Man page](docs/man/mp3rgain.1): installed by the apt repository / .deb and PPA packages
+- [Man page](docs/man/mp3rgain.1): installed by the `.deb` packages (apt repository) and the PPA
 - [FAQ](https://mp3rgain.tyna.ninja/faq) · [Download Stats](https://m-igashi.github.io/mp3rgain/)
 
 ## Contributing

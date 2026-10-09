@@ -152,10 +152,7 @@ brew install M-Igashi/tap/mp3rgain
 # Windows (winget)
 winget install M-Igashi.mp3rgain
 
-# Ubuntu 26.04 LTS (PPA)
-sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgain
-
-# Debian 12+ / Ubuntu 22.04+ (apt repository, amd64 and arm64; key setup in the README)
+# Debian 12+ / Ubuntu 22.04+, 26.04 included (apt repository, amd64 and arm64; key setup in the README)
 sudo apt install mp3rgain
 
 # Arch Linux (community-maintained AUR package)
