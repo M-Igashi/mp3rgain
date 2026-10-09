@@ -16,7 +16,7 @@ use mp3rgain::replaygain::{self, AnalysisMode, ReplayGainResult};
 use mp3rgain::{
     read_gain_tags_auto, AacAlbumInfo, Channel, GainTagSource, StoredGainTags, TagLayout,
 };
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -461,30 +461,21 @@ pub fn spawn_apply(
         let applied = AtomicUsize::new(0);
         let errors = AtomicUsize::new(0);
 
-        // Album-gain applies carry `album_info` on every job. Capture their
-        // MP3 paths now (before `jobs` is consumed) so we can write the
-        // album-wide MP3GAIN_ALBUM_MINMAX after all files are applied — the
-        // same mp3gain-parity step the CLI does (issue #210). APEv2 only and
-        // not in dry-run.
+        // Album-gain applies carry `album_info` on every job. Each one that
+        // succeeds is recorded with its row and its post-apply (max, min)
+        // global_gain range, so the album-wide MP3GAIN_ALBUM_MINMAX can be
+        // written after all files are applied without re-analyzing them, the
+        // same mp3gain-parity step the CLI does (issues #210, #232). APEv2
+        // only and not in dry-run. A failed apply is left out (issue #398).
         let writes_album_minmax = !ui_opts.dry_run && !ui_opts.tag_layout.mp3gain_in_id3v2();
-        let album_minmax_paths: Vec<PathBuf> = if writes_album_minmax {
-            jobs.iter()
-                .filter(|j| j.album_info.is_some())
-                .map(|j| j.path.clone())
-                .collect()
-        } else {
-            Vec::new()
-        };
-        // Post-apply (max, min) global_gain range per album file, taken from
-        // the apply reports so the MINMAX step below doesn't re-analyze every
-        // file (issue #232).
-        let gain_ranges: Mutex<BTreeMap<PathBuf, (u8, u8)>> = Mutex::new(BTreeMap::new());
+        type AlbumMember = (usize, Option<(u8, u8)>);
+        let album_members: Mutex<BTreeMap<PathBuf, AlbumMember>> = Mutex::new(BTreeMap::new());
 
         {
             let tx = tx.clone();
             let ctx = ctx.clone();
             let (applied, errors) = (&applied, &errors);
-            let gain_ranges = &gain_ranges;
+            let album_members = &album_members;
             run_job_pool(jobs, &cancel_w, move |job: ApplyJob| {
                 send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
@@ -504,9 +495,10 @@ pub fn spawn_apply(
                 match result {
                     Ok(report) => {
                         if album_member {
-                            if let Some(range) = report.gain_range {
-                                gain_ranges.lock().unwrap().insert(job.path.clone(), range);
-                            }
+                            album_members
+                                .lock()
+                                .unwrap()
+                                .insert(job.path.clone(), (job.idx, report.gain_range));
                         }
                         applied.fetch_add(1, Ordering::Relaxed);
                         if ui_opts.dry_run {
@@ -553,24 +545,31 @@ pub fn spawn_apply(
 
         // Album-wide MP3GAIN_ALBUM_MINMAX, written once the whole album has
         // been applied (mp3gain parity, issue #210). No-op for track/manual
-        // gain (empty list) and for the dry-run / ID3v2 paths. The range is
-        // stamped over the groups the app grouped by, whichever of the three
-        // modes that was (issues #159, #224, #338).
-        if !album_minmax_paths.is_empty() {
-            type MinmaxEntry<'a> = (&'a Path, Option<(u8, u8)>);
-            let gain_ranges = gain_ranges.into_inner().unwrap();
-            let applied: HashSet<&Path> = album_minmax_paths.iter().map(PathBuf::as_path).collect();
-            for group in &album_minmax_groups {
-                // A group's rows that never reached the apply (skipped, or
-                // not MP3) carry no range and must not be stamped.
-                let entries: Vec<MinmaxEntry> = group
-                    .iter()
-                    .filter(|p| applied.contains(p.as_path()))
-                    .map(|p| (p.as_path(), gain_ranges.get(p).copied()))
-                    .collect();
-                if !entries.is_empty() {
-                    write_album_minmax(&entries);
-                }
+        // gain (no groups) and for the dry-run / ID3v2 paths (no members).
+        // The range is stamped over the groups the app grouped by, whichever
+        // of the three modes that was (issues #159, #224, #338). A row whose
+        // write fails is gained but incomplete, so it counts as an error.
+        let album_members = album_members.into_inner().unwrap();
+        for group in &album_minmax_groups {
+            // A group's rows that never reached the apply (skipped, not MP3)
+            // or failed it are not members and must not be stamped.
+            let entries: Vec<(&Path, Option<(u8, u8)>)> = group
+                .iter()
+                .filter_map(|p| album_members.get(p).map(|&(_, range)| (p.as_path(), range)))
+                .collect();
+            for (path, e) in write_album_minmax(&entries) {
+                applied.fetch_sub(1, Ordering::Relaxed);
+                errors.fetch_add(1, Ordering::Relaxed);
+                send(
+                    &tx,
+                    &ctx,
+                    WorkerEvent::FileApplyFailed {
+                        idx: album_members[path].0,
+                        message: format!(
+                            "Gain applied, but MP3GAIN_ALBUM_MINMAX was not written: {e}"
+                        ),
+                    },
+                );
             }
         }
 

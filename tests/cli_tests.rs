@@ -5,7 +5,9 @@
 //! logic is only reachable through the CLI. Cargo exposes the built binary as
 //! `CARGO_BIN_EXE_mp3rgain`, so no extra tooling is needed.
 
-use mp3rgain::{read_ape_tag_from_file, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_TRACK_GAIN};
+use mp3rgain::{
+    read_ape_tag_from_file, TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_TRACK_GAIN,
+};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -420,6 +422,84 @@ fn delete_tags_leaves_untagged_files_alone() {
             file.display()
         );
     }
+}
+
+/// Mark `file` read-only, returning the permissions to restore.
+fn make_read_only(file: &Path) -> fs::Permissions {
+    let original = fs::metadata(file).expect("stat").permissions();
+    let mut read_only = original.clone();
+    read_only.set_readonly(true);
+    fs::set_permissions(file, read_only).expect("set read-only");
+    original
+}
+
+/// Issue #398: every write path refuses a read-only file and leaves it as it
+/// was, as mp3gain does. The temp file paths used to replace it, keeping the
+/// read-only mode, and the tag-only paths failed with a raw permission error.
+/// A command with nothing to write still succeeds on it.
+#[test]
+fn read_only_files_are_refused_and_left_alone() {
+    let cases: [(&[&str], &[&str]); 5] = [
+        (&[], &["-g", "1"]),
+        (&[], &["-r", "--tags-only"]),
+        (&["-g", "1"], &["-u"]),
+        (&["-g", "1"], &["-s", "d"]),
+        (&["-g", "1"], &["-s", "a", "-s", "d"]),
+    ];
+    for fixture in ["test_stereo.mp3", "test_adts.aac", "test_aac.m4a"] {
+        for (setup, command) in cases {
+            let album = TempAlbum::new(&[fixture]);
+            let file = album.args()[0];
+            if !setup.is_empty() {
+                assert!(run(&[setup, &["-q", file]].concat()).status.success());
+            }
+            let before = fs::read(file).unwrap();
+            let original = make_read_only(&album.files[0]);
+
+            let out = run(&[command, &[file]].concat());
+            assert!(!out.status.success(), "{fixture} {command:?} succeeded");
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains("read-only"),
+                "{fixture} {command:?}: {out:?}"
+            );
+            assert!(
+                fs::read(file).unwrap() == before,
+                "{fixture} {command:?} changed the file"
+            );
+            fs::set_permissions(file, original).unwrap();
+        }
+
+        let album = TempAlbum::new(&[fixture]);
+        let original = make_read_only(&album.files[0]);
+        let out = run(&["-s", "d", album.args()[0]]);
+        assert!(out.status.success(), "{fixture}: -s d with no tags failed");
+        fs::set_permissions(&album.files[0], original).unwrap();
+    }
+}
+
+/// Issue #398: a read-only member of an album is refused while the others are
+/// applied, and only the applied ones carry `MP3GAIN_ALBUM_MINMAX`. The write
+/// on the read-only file used to fail silently with a zero exit status.
+#[test]
+fn album_apply_skips_a_read_only_member() {
+    let album = TempAlbum::new(&["test_vbr.mp3", "test_mono.mp3"]);
+    let before = fs::read(&album.files[0]).unwrap();
+    let original = make_read_only(&album.files[0]);
+
+    let mut args = vec!["-a", "-q"];
+    args.extend(album.args());
+    let out = run(&args);
+    assert!(!out.status.success(), "album apply succeeded: {:?}", out);
+    assert!(fs::read(&album.files[0]).unwrap() == before);
+    fs::set_permissions(&album.files[0], original).unwrap();
+
+    let album_minmax = |file: &Path| {
+        read_ape_tag_from_file(file)
+            .unwrap()
+            .and_then(|tag| tag.get(TAG_MP3GAIN_ALBUM_MINMAX).map(str::to_string))
+    };
+    assert_eq!(album_minmax(&album.files[0]), None);
+    assert!(album_minmax(&album.files[1]).is_some());
 }
 
 /// Issue #377: `-g` moves the stored ReplayGain values and the album

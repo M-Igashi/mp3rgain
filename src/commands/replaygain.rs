@@ -660,6 +660,8 @@ fn run_album(
             // apply pass so the album MINMAX step below doesn't re-analyze
             // every file (issue #232).
             let mut range_by_idx: Vec<Option<(u8, u8)>> = vec![None; files.len()];
+            // Whose apply succeeded: only those take part in the album MINMAX.
+            let mut applied = vec![false; files.len()];
 
             if parallel {
                 // Process only successfully-analyzed files in parallel.
@@ -689,8 +691,9 @@ fn run_album(
                     }
                 }
 
-                for (file_idx, _, _, range) in &collected {
+                for (file_idx, result, _, range) in &collected {
                     range_by_idx[*file_idx] = *range;
+                    applied[*file_idx] = result.status == Some(FileStatus::Success);
                 }
 
                 // Re-assemble json_results in input file order, interleaving
@@ -740,6 +743,7 @@ fn run_album(
                                 write!(sink.out(), "{}", text)?;
                             }
                             range_by_idx[i] = range;
+                            applied[i] = result.status == Some(FileStatus::Success);
                             result
                         }
                         None => unanalyzed_result(file, failure_msgs[i].as_deref(), unsupported[i]),
@@ -760,9 +764,10 @@ fn run_album(
 
             // MP3GAIN_ALBUM_MINMAX: the album-wide post-apply global_gain range,
             // matching mp3gain's album (`-a`) mode (issue #210). Written to every
-            // MP3 file after all gain is applied (the range is only known once the
-            // whole album is done). APEv2 only — mp3gain has no AAC, and `-s i`
-            // uses ID3v2; best-effort, so a tag hiccup never fails the album.
+            // applied MP3 file after all gain is applied (the range is only known
+            // once the whole album is done). APEv2 only — mp3gain has no AAC, and
+            // `-s i` uses ID3v2. A failed write fails that file without stopping
+            // the others (issue #398).
             // Skipped entirely in --tags-only mode: MP3GAIN_ALBUM_MINMAX
             // describes a global_gain range that a gain apply produced, and
             // no apply happened (issue #308).
@@ -771,11 +776,31 @@ fn run_album(
                 && opts.stored_tag_mode != StoredTagMode::Skip
                 && !opts.tag_layout.mp3gain_in_id3v2()
             {
-                let album_files: Vec<(&Path, Option<(u8, u8)>)> = successful_indices
-                    .iter()
-                    .map(|&i| (files[i].as_path(), range_by_idx[i]))
+                let album_files: Vec<(&Path, Option<(u8, u8)>)> = (0..files.len())
+                    .filter(|&i| applied[i])
+                    .map(|i| (files[i].as_path(), range_by_idx[i]))
                     .collect();
-                mp3rgain::write_album_minmax(&album_files);
+                for (file, e) in mp3rgain::write_album_minmax(&album_files) {
+                    let msg =
+                        format!("gain applied, but MP3GAIN_ALBUM_MINMAX was not written: {e}");
+                    if opts.output_format == OutputFormat::Json {
+                        let name = file.display().to_string();
+                        if let Some(entry) = json_results.iter_mut().find(|r| r.file == name) {
+                            entry.status = Some(FileStatus::Error);
+                            entry.error = Some(msg);
+                        }
+                    } else if !opts.quiet {
+                        writeln!(
+                            sink.err(),
+                            "  {} {} - {}",
+                            "x".red(),
+                            get_filename(file),
+                            msg
+                        )?;
+                    }
+                    successful -= 1;
+                    failed += 1;
+                }
             }
 
             Ok(AlbumRun {

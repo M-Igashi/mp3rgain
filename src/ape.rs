@@ -426,10 +426,14 @@ pub(crate) fn replace_ape_tag(data: &[u8], tag: &ApeTag) -> Vec<u8> {
 /// mid-write can corrupt or drop the trailing tag, but can never touch the
 /// audio stream — the write starts at `audio_end` and only extends or
 /// truncates from there. This matches how mp3gain has always updated tags.
+///
+/// A read-only file is opened for reading only and refused once a write turns
+/// out to be needed, so a no-op succeeds on it (issue #398).
 fn rewrite_ape_tail(file_path: &Path, mutate: impl FnOnce(&mut ApeTag)) -> Result<()> {
+    let read_only = crate::apply::is_read_only(file_path);
     let mut file = fs::OpenOptions::new()
         .read(true)
-        .write(true)
+        .write(!read_only)
         .open(file_path)
         .map_err(|e| Error::io_write(file_path, e))?;
     let file_len = file
@@ -480,6 +484,11 @@ fn rewrite_ape_tail(file_path: &Path, mutate: impl FnOnce(&mut ApeTag)) -> Resul
     // so leave the file (and its mtime) alone.
     if !had_tag && tag.items.is_empty() {
         return Ok(());
+    }
+    if read_only {
+        return Err(Error::ReadOnly {
+            path: file_path.to_path_buf(),
+        });
     }
     let tag_bytes = serialize_ape_tag(&tag); // empty tag serializes to nothing
 

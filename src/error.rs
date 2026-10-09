@@ -50,6 +50,15 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// The file is marked read-only (no write permission bit on Unix, the
+    /// read-only attribute on Windows), so it is left untouched. mp3gain
+    /// refuses these files too. Raised only when a write is actually needed.
+    #[error("Cannot modify '{path}': the file is read-only")]
+    ReadOnly {
+        /// The file that was not modified.
+        path: PathBuf,
+    },
+
     // MP3
     /// The MP3 frame scanner found no frame it would accept.
     ///

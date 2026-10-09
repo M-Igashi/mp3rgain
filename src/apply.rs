@@ -937,14 +937,29 @@ fn rename_target(file: &Path) -> std::path::PathBuf {
     }
 }
 
+/// Whether `path` (a symlink's target, for a link) is marked read-only. Every
+/// write path refuses such a file, as mp3gain does (issue #398): the temp
+/// file rename would otherwise replace it on Unix, while the in-place APEv2
+/// rewrite could not open it. The mode is checked rather than write access,
+/// so the answer does not change when running as root.
+pub(crate) fn is_read_only(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.permissions().readonly())
+}
+
 /// Run `operation(original, temp)` against a fresh sibling temp path, then
 /// fsync the temp file and rename it over the original (issue #227). The temp
 /// file is removed on failure, leaving the original untouched. A symlink is
-/// written through to its target (issue #370).
+/// written through to its target (issue #370). A read-only file is refused
+/// before anything is read (issue #398).
 pub(crate) fn with_temp_file<T, F>(file: &Path, operation: F) -> Result<T>
 where
     F: FnOnce(&Path, &Path) -> Result<T>,
 {
+    if is_read_only(file) {
+        return Err(Error::ReadOnly {
+            path: file.to_path_buf(),
+        });
+    }
     let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("tmp");
     let target = rename_target(file);
     let temp_path = temp_sibling_path(&target, ext);
@@ -1074,20 +1089,23 @@ pub fn write_replaygain_tags_only(file_path: &Path, opts: &TagsOnlyOptions) -> R
 /// the CLI (`cmd_album_gain`) and the GUI apply worker so both frontends stay
 /// in parity (the GUI path was missing it in 2.9.0).
 ///
-/// Each file is paired with the `(max, min)` range from
+/// Pass only the files whose apply succeeded: a file the apply left alone has
+/// no post-apply range to contribute, and must not be stamped with the album's
+/// (issue #398). Each file is paired with the `(max, min)` range from
 /// [`ApplyReport::gain_range`] so the apply pass's scan is reused instead of
 /// re-analyzing every file (issue #232); files without one (zero-frame
-/// applies, failed applies) fall back to a fresh `analyze()`.
+/// applies) fall back to a fresh `analyze()`.
 ///
 /// AAC members are dropped (issue #307): `MP3GAIN_ALBUM_MINMAX` is an
 /// MP3/APEv2 concept, and the `analyze()` fallback is the raw MP3 frame
 /// scanner, which can false-sync on MP4 bytes and "succeed" with garbage
 /// values, skewing the album range and appending an APEv2 tag after the MP4
-/// data. Best-effort: a failed scan or tag write on one file is ignored so a
-/// metadata hiccup never fails the album operation. Intended for the default
-/// APEv2 path; skip the call when writing ID3v2 (`-s i`) or when stored-tag
-/// writing is disabled.
-pub fn write_album_minmax(files: &[(&Path, Option<(u8, u8)>)]) {
+/// data. A file whose scan fails is left out of the range. A failed tag write
+/// does not stop the others and is returned, so the caller can report a file
+/// whose gain was applied but whose album range was not recorded. Intended for
+/// the default APEv2 path; skip the call when writing ID3v2 (`-s i`) or when
+/// stored-tag writing is disabled.
+pub fn write_album_minmax<'a>(files: &[(&'a Path, Option<(u8, u8)>)]) -> Vec<(&'a Path, Error)> {
     use rayon::prelude::*;
 
     // Both the container probe and the fallback analyze() read the file, so
@@ -1117,9 +1135,14 @@ pub fn write_album_minmax(files: &[(&Path, Option<(u8, u8)>)]) {
             mp3_files.push(file);
         }
     }
-    mp3_files.par_iter().for_each(|file| {
-        let _ = ape::write_ape_album_minmax(file, album_min, album_max);
-    });
+    mp3_files
+        .par_iter()
+        .filter_map(|&file| {
+            ape::write_ape_album_minmax(file, album_min, album_max)
+                .err()
+                .map(|e| (file, e))
+        })
+        .collect()
 }
 
 #[cfg(test)]

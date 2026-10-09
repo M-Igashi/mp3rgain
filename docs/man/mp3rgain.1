@@ -676,6 +676,10 @@ the link stays a link. Hard links are not carried over, as with any rename:
 the name given gets the new file and every other hard link keeps the old
 audio. Two hard-link names listed together are two files, and each ends up
 with its own adjusted copy.
+.PP
+A read-only file is refused with an error and left as it was whenever a
+command would change it, as in mp3gain, even when running as root. A command
+with nothing to write succeeds on it.
 .SH EXIT STATUS
 .TP
 .B 0

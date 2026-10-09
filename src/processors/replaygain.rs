@@ -518,7 +518,10 @@ fn apply_replaygain_aac_with_album_into(
                 Some(result.peak()),
             ),
         ),
-        Err(e) if !write_tags => return Ok(report_file_error(file, filename, e, opts)),
+        // A read-only file would refuse the fallback tag write too (#398).
+        Err(e) if !write_tags || matches!(e, mp3rgain::Error::ReadOnly { .. }) => {
+            return Ok(report_file_error(file, filename, e, opts))
+        }
         Err(e) => {
             emit_file_warning(
                 opts,
