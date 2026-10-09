@@ -11,7 +11,7 @@ How mp3rgain compares with the tools it replaces, mp3gain and aacgain, and where
 | | mp3rgain | aacgain | mp3gain |
 |---|----------|---------|---------|
 | **Language** | Rust | C | C |
-| **Latest release** | 3.10.0 (2026) | 2.0.0 | 1.6.2 |
+| **Latest release** | 3.11.0 (2026) | 2.0.0 | 1.6.2 |
 | **License** | MIT | LGPL | LGPL |
 | **Repository** | [M-Igashi/mp3rgain](https://github.com/M-Igashi/mp3rgain) | [dgilman/aacgain](https://github.com/dgilman/aacgain) | SourceForge |
 
@@ -155,8 +155,8 @@ winget install M-Igashi.mp3rgain
 # Ubuntu 26.04 LTS (PPA)
 sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgain
 
-# Debian/Ubuntu (.deb from the releases page, amd64 and arm64)
-sudo apt install ./mp3rgain_*_amd64.deb
+# Debian 12+ / Ubuntu 22.04+ (apt repository, amd64 and arm64; key setup in the README)
+sudo apt install mp3rgain
 
 # Arch Linux (community-maintained AUR package)
 yay -S mp3rgain-bin

@@ -39,7 +39,7 @@ mp3rgain changes the volume of MP3 and AAC files without re-encoding. It rewrite
 | macOS (Homebrew) | `brew install M-Igashi/tap/mp3rgain` |
 | Windows (winget) | `winget install M-Igashi.mp3rgain` |
 | Ubuntu 26.04 LTS (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgain && sudo apt install mp3rgain` |
-| Debian/Ubuntu (.deb) | `sudo apt install ./mp3rgain_*_amd64.deb` or `_arm64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) |
+| Debian 12+ / Ubuntu 22.04+ (apt) | Add the [apt repository](#debian-and-ubuntu-apt-repository), then `sudo apt install mp3rgain` |
 | Arch Linux (AUR, third-party) | `yay -S mp3rgain-bin` |
 | Nix | `nix profile install github:M-Igashi/mp3rgain` |
 | Docker | `docker pull ghcr.io/m-igashi/mp3rgain:latest` |
@@ -52,8 +52,21 @@ mp3rgain changes the volume of MP3 and AAC files without re-encoding. It rewrite
 | macOS (Homebrew) | `brew install --cask M-Igashi/tap/mp3rgui` |
 | Windows (winget) | `winget install M-Igashi.mp3rgui` (portable; use the installer above for a Start Menu entry) |
 | Ubuntu 26.04 LTS (PPA) | `sudo add-apt-repository ppa:m-igashi/mp3rgui && sudo apt install mp3rgui` |
-| Debian/Ubuntu (.deb) | `sudo apt install ./mp3rgui_*_amd64.deb` or `_arm64.deb` ([download](https://github.com/M-Igashi/mp3rgain/releases)) |
+| Debian 13+ / Ubuntu 24.04+ (apt) | Add the [apt repository](#debian-and-ubuntu-apt-repository), then `sudo apt install mp3rgui` |
 | Arch Linux (AUR) | `yay -S mp3rgui` |
+
+### Debian and Ubuntu apt repository
+
+Every release is also published as a signed apt repository for amd64 and arm64, so both packages update with `apt upgrade`:
+
+```sh
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo curl -fsSLo /etc/apt/keyrings/mp3rgain.gpg https://github.com/M-Igashi/mp3rgain/releases/latest/download/mp3rgain-archive-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/mp3rgain.gpg] https://github.com/M-Igashi/mp3rgain/releases/latest/download/ ./" | sudo tee /etc/apt/sources.list.d/mp3rgain.list
+sudo apt update && sudo apt install mp3rgain
+```
+
+The signing key's fingerprint is `54E7 BDDA 7581 ED3A 9689 0E9D 1697 D52D 7E5A 289D`. The repository lives in the assets of the latest release, so for a few minutes after a new release is published `apt update` may report that it has no Release file; the next update succeeds. The `.deb` files can also be installed one at a time from [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases) with `sudo apt install ./mp3rgain_*_amd64.deb`, without updates.
 
 Notes:
 

@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current status: v3.10.0 (2026-10-08)
+## Current status: v3.11.0 (2026-10-09)
 
 mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writes standard `REPLAYGAIN_*` tags, and can bake the correction into the bitstream losslessly. For MP3 it is a modern drop-in replacement for mp3gain. For AAC it is the only actively maintained command-line tool that does this: aacgain has been abandoned since about 2009, and foobar2000, the reference-grade ReplayGain suite, offers a comparable scalefactor-based AAC rewrite ("Apply ReplayGain to file content") but only as a Windows GUI with no undo.
 
@@ -13,7 +13,7 @@ What ships today:
 - Parallel processing across and within files, JSON and TSV output
 - GUI (mp3rgui) for macOS, Windows and Linux
 - A documented library API on crates.io and docs.rs
-- Distribution through crates.io, Homebrew, winget, .deb, Ubuntu PPA, AUR (GUI), MacPorts, a Nix flake and a GHCR Docker image
+- Distribution through crates.io, Homebrew, winget, .deb with an apt repository, Ubuntu PPA, AUR (GUI), MacPorts, a Nix flake and a GHCR Docker image
 
 ## Open
 
@@ -21,7 +21,7 @@ What ships today:
 - [ ] Upgrade mp3rgui's egui/eframe stack, which also retires the quick-xml audit ignores in `ci.yml`
 - [ ] Homebrew core formula (#8); today it is in the `M-Igashi/tap` tap
 - [ ] nixpkgs package (#314); the flake in this repo already works, see [packages/nix/README.md](../packages/nix/README.md)
-- [ ] Official Debian repository (ITP submission) (#394)
+- [ ] Official Debian archive package (ITP submission) (#394); meanwhile every release is an apt repository
 - [ ] pkgx package (#395)
 - [ ] Fedora/RPM package
 - [ ] Flatpak package
@@ -38,16 +38,21 @@ What ships today:
 
 ## Unreleased
 
+Nothing yet.
+
+## Release history
+
+### v3.11.0 - mp3gain Parity: Joint-stereo -l, Read-only Files & an apt Repository
+
 Behaviour changes: `-l` on a mono or joint-stereo MP3 is an error, and so is `-u` with different left and right undo values on such a file. `-s d` no longer rewrites a file that has no gain tags to delete. A read-only file is refused rather than replaced.
 
 - [x] `-l` refuses joint-stereo MP3s with an error and leaves the file untouched, as mp3gain does, in the CLI and the GUI. A joint-stereo frame may code mid and side rather than left and right, so the change reached both output channels while the undo tag recorded one; mp3rgain only warned, and only in text output without `-q`. Every frame is checked, so a stream that switches modes partway is refused as a whole. A dry run (`-n`, and the GUI's Dry run) now reports the refusal instead of "would apply". `-u` refuses a channel undo record on a mono or joint-stereo file, which mp3gain writes when it refuses `-l` there without changing the audio. A joint-stereo file adjusted with `-l` by 3.10.0 or earlier cannot be undone either, since the tag cannot tell the two apart (#393)
 - [x] Tests: `test_stereo.mp3` turned out to be joint stereo in every audio frame, so mp3gain refused `-l` on it and the compatibility script had been skipping its `-l` comparison on every fixture. A simple-stereo fixture, `test_simple_stereo.mp3`, now carries the channel tests and the `-l` comparison with mp3gain
 - [x] `-s d` leaves a file with no gain tags byte for byte as it was, as mp3gain does, in the CLI and the GUI. It used to rewrite every file it was given: the ID3v2 tag of an MP3 or raw ADTS stream was re-encoded as ID3v2.4, which drops ID3v2.2 frames that have no v2.4 form and adds an empty header to a stream that had no tag, and an M4A was replaced by an identical copy. `-g` followed by `-u -s d` now restores the original bytes on a file without ID3v2 gain tags, as the migration guide says undo does
 - [x] A read-only file is refused with an error and left as it was whenever a command would change it, as mp3gain does, in the CLI and the GUI. Gain applies (`-r`, `-a`, `-g`, `-u`) used to replace it through the temp file and keep its read-only mode, while tag-only writes (`-s d`, `--tags-only`) failed with a raw permission error on MP3 and raw ADTS and succeeded on M4A. The file's mode decides, so running as root changes nothing, and a command with nothing to write still succeeds. In album mode a member whose apply failed no longer takes part in `MP3GAIN_ALBUM_MINMAX`, and a failed `MP3GAIN_ALBUM_MINMAX` write is reported as an error on that file instead of being dropped with a zero exit status. Library: new `Error::ReadOnly`, and `write_album_minmax` returns the writes that failed (#398)
+- [x] Every release is published as a signed apt repository for amd64 and arm64, so the `.deb` packages update through `apt`: mp3rgain on Debian 12+ and Ubuntu 22.04+, mp3rgui on Debian 13+ and Ubuntu 24.04+. The index lives in the release's own assets and apt reads it from `releases/latest/download/`; setup is in the README. Packaging for the official Debian archive stays open (#394)
 - [x] mp3rgui: the Stored RG tooltip names an M4A's undo and minmax atoms `mp3rgain_undo` and `mp3rgain_minmax`, as they are written and as `-s c` prints them. It showed `MP3GAIN_UNDO`, the MP3 key, whose value has the opposite sign
 - [x] Cleanup from a whole-codebase review, with no other change in behaviour: shared helpers for the TSV album row, skip records, the JSON epilogue, MP4 ReplayGain tags and the APEv2 tag span; the GUI groups albums once per Apply Album Gain, removes rows in one pass and passes path-only jobs as `(row, path)`; an APEv2 tag replace allocates once instead of holding about three copies of the file
-
-## Release history
 
 ### v3.10.0 - mp3gain Parity: -e, -g Tags & CRC Frames
 
