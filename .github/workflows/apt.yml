@@ -95,8 +95,9 @@ jobs:
             Packages Packages.gz Release Release.gpg InRelease mp3rgain-archive-keyring.gpg
 
       # Install the way the README says, from releases/latest, with apt's
-      # gpgv on the runner and sqv on Debian 13. Only meaningful when this
-      # release is the latest one.
+      # gpgv on the runner and apt 3 on Debian 13 and Ubuntu 26.04, which the
+      # PPA served until this repository replaced it. Only meaningful when
+      # this release is the latest one.
       - name: Install from the repository
         env:
           GH_TOKEN: ${{ github.token }}
@@ -117,7 +118,11 @@ jobs:
           apt-get install -y mp3rgain
           mp3rgain -v
           mp3rgain -v | grep -F "$1"
+          # The GUI's dependencies resolve too (simulated: GTK is large).
+          apt-get install -s mp3rgui | grep -F "Inst mp3rgui ($1-1"
           EOF
           sudo bash install.sh "$VERSION"
-          docker run --rm -v "$PWD/install.sh:/install.sh:ro" debian:trixie \
-            bash -c 'apt-get update && apt-get install -y curl ca-certificates && bash /install.sh "$0"' "$VERSION"
+          for image in debian:trixie ubuntu:26.04; do
+            docker run --rm -v "$PWD/install.sh:/install.sh:ro" "$image" \
+              bash -c 'apt-get update && apt-get install -y curl ca-certificates && bash /install.sh "$0"' "$VERSION"
+          done
