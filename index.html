@@ -42,9 +42,9 @@
 
   <div class="grid" id="summary-cards">
     <div class="card">
-      <div class="card-label" title="Includes downloads from Homebrew and Winget installs, which fetch assets from GitHub Releases.">GitHub Releases <span style="color:var(--muted)">&#9432;</span></div>
+      <div class="card-label" title="Includes downloads from Homebrew, Winget and apt installs, which fetch assets from GitHub Releases. Excludes .sha256 files and the apt repository's index files.">GitHub Releases <span style="color:var(--muted)">&#9432;</span></div>
       <div class="card-value" id="gh-total">-</div>
-      <div style="font-size:0.7rem;color:var(--muted);margin-top:0.25rem">incl. Homebrew / Winget</div>
+      <div style="font-size:0.7rem;color:var(--muted);margin-top:0.25rem">incl. Homebrew / Winget / apt</div>
     </div>
     <div class="card"><div class="card-label">crates.io Total</div><div class="card-value" id="crates-total">-</div></div>
     <div class="card"><div class="card-label">PPA Downloads</div><div class="card-value" id="ppa-total">-</div></div>
@@ -52,6 +52,11 @@
       <div class="card-label" title="Sum of opt-in pkgstats reports for the current month. Resets monthly.">Arch pkgstats <span style="color:var(--muted)">&#9432;</span></div>
       <div class="card-value" id="pkgstats-total">-</div>
       <div style="font-size:0.7rem;color:var(--muted);margin-top:0.25rem" id="pkgstats-month">current month</div>
+    </div>
+    <div class="card">
+      <div class="card-label" title="The apt repository (v3.11.0+) lives in the assets of the latest release. Each setup downloads the signing key once, so key downloads approximate repository setups; every apt update fetches InRelease. The .deb files apt installs are counted under GitHub Releases.">apt Repository <span style="color:var(--muted)">&#9432;</span></div>
+      <div class="card-value" id="apt-setups">-</div>
+      <div style="font-size:0.7rem;color:var(--muted);margin-top:0.25rem" id="apt-refreshes">key downloads</div>
     </div>
     <div class="card"><div class="card-label">AUR Votes</div><div class="card-value" id="aur-votes-total">-</div></div>
     <div class="card">
@@ -63,7 +68,7 @@
   </div>
 
   <div class="section">
-    <h2>Downloads by Version (GitHub Releases, incl. Homebrew / Winget)</h2>
+    <h2>Downloads by Version (GitHub Releases, incl. Homebrew / Winget / apt)</h2>
     <canvas id="chart-versions"></canvas>
   </div>
 
@@ -75,7 +80,7 @@
   <div class="section">
     <h2>Platform Share (All-Time, GitHub Releases)</h2>
     <p style="color:var(--muted);font-size:0.875rem;margin-bottom:1rem">
-      Share of downloads by platform summed across every release. Excludes <code>.sha256</code> checksum fetches.
+      Share of downloads by platform summed across every release. Excludes <code>.sha256</code> checksum fetches and the apt repository's index files.
       <br><strong>Windows (installer)</strong> is the GUI setup executable introduced in 3.3.0. It bundles both
       architectures, so it cannot be split into x64 and ARM64 like the portable zips; it also counts the
       version-free copy that backs the permanent download link.
@@ -107,6 +112,7 @@
     <p style="color:var(--muted);font-size:0.875rem;margin-bottom:1rem">
       Estimates how much of the Linux GitHub-Releases traffic is automated (CI, Docker, scripts) vs. human end users.
       Computed across CLI Linux assets (<code>linux-*.tar.gz</code> + <code>*_amd64/arm64.deb</code>) over all releases.
+      A release that carries the apt repository counts its tarballs only: apt fetches the <code>.deb</code> files without checksums, which would read as human traffic.
     </p>
     <div class="grid" style="margin-bottom:0">
       <div class="card">
@@ -210,8 +216,17 @@ const CHART_DEFAULTS = {
 
 function num(n) { return n.toLocaleString(); }
 
+// The apt repository (v3.11.0+, also added to v3.10.0) is a set of index
+// files in each release's assets. apt fetches InRelease on every update and
+// the key once per setup, so they are not downloads of mp3rgain; stats.yml
+// applies the same filter to the trend.
+const APT_INDEX_FILES = new Set(['Packages', 'Packages.gz', 'Release', 'Release.gpg', 'InRelease']);
+function isAptIndex(name) {
+  return APT_INDEX_FILES.has(name) || name.endsWith('-archive-keyring.gpg');
+}
+
 function isReal(name) {
-  return !name.endsWith('.sha256') && !name.endsWith('.tar.gz.sha256');
+  return !name.endsWith('.sha256') && !isAptIndex(name);
 }
 
 // The release assets for every tag before v2.0.0 were deleted from GitHub on
@@ -289,6 +304,11 @@ async function main() {
     document.getElementById('pkgstats-month').textContent =
       String(pkgstatsMonth).replace(/^(\d{4})(\d{2})$/, '$1-$2') + ' (in progress)';
   }
+  const aptAssetTotal = test => ghReleases.reduce((sum, r) =>
+    sum + r.assets.filter(a => test(a.name)).reduce((s, a) => s + a.download_count, 0), 0);
+  document.getElementById('apt-setups').textContent = num(aptAssetTotal(n => n.endsWith('-archive-keyring.gpg')));
+  document.getElementById('apt-refreshes').textContent =
+    `key downloads · ${num(aptAssetTotal(n => n === 'InRelease'))} index refreshes`;
   const aurVotesTotal = (latest.aur?.packages || []).reduce((s, p) => s + (p.votes || 0), 0);
   document.getElementById('aur-votes-total').textContent = num(aurVotesTotal);
   document.getElementById('latest-version').textContent = ghReleases[0]?.tag || '-';
@@ -431,8 +451,10 @@ async function main() {
   const isArmName = name => name.includes('linux-arm64') || /_arm64\.deb(\.sha256)?$/.test(name);
   let shaDL = 0, binDL = 0, armDL = 0, x86DL = 0;
   for (const r of ghReleases) {
+    const viaApt = r.assets.some(a => a.name === 'InRelease');
     for (const a of r.assets) {
       if (!isCliLinuxAsset(a.name)) continue;
+      if (viaApt && /\.deb(\.sha256)?$/.test(a.name)) continue;
       if (a.name.endsWith('.sha256')) {
         shaDL += a.download_count;
       } else {
