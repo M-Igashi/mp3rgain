@@ -49,14 +49,14 @@ jobs:
 
       - name: Upload artifact (Unix)
         if: runner.os != 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mp3rgain-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/mp3rgain
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mp3rgain-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/mp3rgain.exe
@@ -105,14 +105,14 @@ jobs:
 
       - name: Upload artifact (Unix)
         if: runner.os != 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mp3rgui-${{ matrix.target }}
           path: mp3rgui/target/${{ matrix.target }}/release/mp3rgui
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mp3rgui-${{ matrix.target }}
           path: mp3rgui/target/${{ matrix.target }}/release/mp3rgui.exe
@@ -127,7 +127,7 @@ jobs:
           persist-credentials: false
 
       - name: Download GUI Windows binaries
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: mp3rgui-*-pc-windows-msvc
           path: artifacts
@@ -144,7 +144,7 @@ jobs:
             artifacts/mp3rgui-aarch64-pc-windows-msvc/mp3rgui.exe
 
       - name: Upload installer
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mp3rgui-windows-installer
           path: target/windows-installer/mp3rgui-*-windows-setup.exe
@@ -175,7 +175,7 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
       - name: Download all artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
 
