@@ -8,7 +8,7 @@ use std::time::SystemTime;
 
 pub use mp3rgain::apply::restore_timestamp;
 
-use crate::cli::options::{Options, OutputFormat};
+use crate::cli::options::{Options, OutputFormat, StoredTagMode};
 use crate::json_output::JsonFileResult;
 
 /// One yellow `!` warning line for `filename` in text mode (never under
@@ -166,6 +166,42 @@ pub fn emit_clipping_warning(
         Some("Use -c to ignore clipping warnings or -k to prevent clipping"),
     );
     Some(warn_msg)
+}
+
+/// Warn when AAC frames could not be parsed and so kept their original gain
+/// while the rest of the file moved (issue #402). Shown under `-c` too: it is
+/// not a clipping matter, and after a large change those frames are audible
+/// as clicks. The same version's undo skips the same frames, so it restores
+/// the file exactly.
+pub fn emit_unparsed_warning(
+    report: &mp3rgain::ApplyReport,
+    opts: &Options,
+    filename: &str,
+) -> Option<String> {
+    if report.unparsed_frames == 0 {
+        return None;
+    }
+    let msg = format!(
+        "{} AAC frame(s) could not be parsed and kept their original gain, \
+         which can be heard as clicks",
+        report.unparsed_frames
+    );
+    // `-s s` records no undo value, so there is nothing for -u to restore.
+    let undo = if opts.stored_tag_mode == StoredTagMode::Skip {
+        ""
+    } else {
+        "-u restores the file. "
+    };
+    let hint = format!("{undo}Please report it at https://github.com/M-Igashi/mp3rgain/issues");
+    emit_file_warning(opts, filename, &msg, Some(&hint));
+    Some(msg)
+}
+
+/// Join a file's optional warnings into the single
+/// [`JsonFileResult::warning`] field.
+pub fn combine_warnings(warnings: impl IntoIterator<Item = Option<String>>) -> Option<String> {
+    let joined: Vec<String> = warnings.into_iter().flatten().collect();
+    (!joined.is_empty()).then(|| joined.join("; "))
 }
 
 /// Only called on paths that write to the file, and `parse_args` rejects

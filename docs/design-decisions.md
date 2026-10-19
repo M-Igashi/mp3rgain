@@ -70,6 +70,8 @@ Do not propose a change to these paths on the grounds that it is equivalent. If 
 
 **The Linux CLI is a static musl binary, although musl measured 0 to 4% slower than glibc** on both x86_64 and arm64 (the gap is widest on `--rg2`). The glibc build needed glibc 2.34 or newer and would not start on Debian 11, RHEL 8 or Alpine, and nautilus-scripts installs mp3rgain from these tarballs on whatever distribution its users have (cfgnunes/nautilus-scripts#150). Running everywhere is worth more than a few percent. The GUI stays on glibc, since it loads the system's GTK.
 
+**An AAC frame the parser cannot read is warned about, not refused.** The apply changes every other frame and leaves that one as it was, so after a large change it stands out as a click. `ApplyReport::unparsed_frames` carries the count, and the CLI and the GUI say so for each file. Refusing the whole file would apply nothing because of one unusual frame, and the same version's undo skips the same frames, so `-u` restores the file exactly. Until issue #402 the count was dropped silently, which hid a fill-element parser bug from v2.8.0 to v3.11.1.
+
 **`--album-depth` is not exposed in the GUI.** It exists because a CLI user cannot glob a library on Windows and cannot exceed `ARG_MAX` anywhere, and neither constraint reaches a GUI. Selecting rows and choosing **Single album** covers the case it would serve. PR #343.
 
 ## Where the reasoning lives

@@ -231,6 +231,35 @@ fn test_apply_reports_saturation() {
     cleanup(&path);
 }
 
+/// Issue #402: an AAC frame the parser cannot read keeps its original gain,
+/// so the report has to count it for the frontends to warn about.
+#[test]
+fn test_apply_reports_unparsed_aac_frames() {
+    use mp3rgain::{apply_with_options, ApplyOptions};
+
+    let path = copy_test_file("test_aac.m4a");
+    let analysis = mp3rgain::aac::analyze_aac_gains(&path).unwrap();
+    assert_eq!(analysis.parse_warnings(), 0);
+    let loc = &analysis.gain_locations()[10];
+    let sample_start = (loc.file_offset() - u64::from(loc.sample_byte_offset())) as usize;
+
+    // Rewrite the first element ID of that sample to CCE, which the parser
+    // refuses.
+    let mut data = fs::read(&path).unwrap();
+    data[sample_start] = (data[sample_start] & 0x1F) | 0x40;
+    fs::write(&path, &data).unwrap();
+
+    let report = apply_with_options(&path, &ApplyOptions::new(-2)).unwrap();
+    assert_eq!(report.unparsed_frames, 1);
+    assert_eq!(report.modified, analysis.gain_locations().len() - 1);
+    cleanup(&path);
+
+    let path = copy_test_file("test_aac.m4a");
+    let report = apply_with_options(&path, &ApplyOptions::new(-2)).unwrap();
+    assert_eq!(report.unparsed_frames, 0);
+    cleanup(&path);
+}
+
 /// A modest in-range adjustment must report no saturation.
 #[test]
 fn test_apply_no_saturation_when_in_range() {

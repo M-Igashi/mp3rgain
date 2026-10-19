@@ -248,6 +248,8 @@ pub struct AdtsApplyOutcome {
     /// Post-apply `(max, min)` `global_gain` range, `None` for a zero-step
     /// apply that never scanned the stream.
     pub gain_range: Option<(u8, u8)>,
+    /// Frames left unchanged because they could not be parsed (issue #402).
+    pub unparsed_frames: u32,
 }
 
 /// Apply `gain_steps` to every `global_gain` in a raw ADTS stream, reading
@@ -269,6 +271,7 @@ pub fn apply_adts_gain(
         return Ok(AdtsApplyOutcome {
             modified: 0,
             gain_range: None,
+            unparsed_frames: 0,
         });
     }
 
@@ -290,6 +293,7 @@ pub fn apply_adts_gain(
     Ok(AdtsApplyOutcome {
         modified,
         gain_range,
+        unparsed_frames: analysis.parse_warnings(),
     })
 }
 

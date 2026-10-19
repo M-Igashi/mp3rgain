@@ -204,6 +204,12 @@ pub struct ApplyReport {
     /// re-read the file (issue #231). `None` for AAC, channel-specific
     /// applies, dry runs, and zero-frame applies.
     pub gain_range: Option<(u8, u8)>,
+
+    /// AAC frames the parser could not read, which therefore kept their
+    /// original gain while the rest of the file moved (issue #402). After a
+    /// large change each one stands out from its neighbours as a click.
+    /// Always 0 for MP3, for a zero-step apply and for [`predict_apply`].
+    pub unparsed_frames: u32,
 }
 
 /// Per-strategy clipping signal.
@@ -273,11 +279,10 @@ fn apply_with_options_inner(file_path: &Path, opts: &ApplyOptions) -> Result<App
     // processed under `-s i`, leaving stale values for players to
     // double-apply.
     let mut saturation = SaturationStats::default();
-    let mut adts_gain_range = None;
+    let mut aac = AacApplyOutcome::default();
     let modified = if container == AudioFileType::Adts {
-        let (modified, range) = apply_adts_bytes(file_path, actual_steps, opts, aac_analysis)?;
-        adts_gain_range = range;
-        modified
+        aac = apply_adts_bytes(file_path, actual_steps, opts, aac_analysis)?;
+        aac.modified
     } else if is_aac {
         let rg = if opts.shifts_stored_gain(actual_steps) {
             // The shifted set replaces the stored one in the same container
@@ -292,7 +297,8 @@ fn apply_with_options_inner(file_path: &Path, opts: &ApplyOptions) -> Result<App
                 .flatten()
                 .map(|res| res.to_mp4())
         };
-        apply_aac_bytes(file_path, actual_steps, opts, aac_analysis, rg.as_ref())?
+        aac = apply_aac_bytes(file_path, actual_steps, opts, aac_analysis, rg.as_ref())?;
+        aac.modified
     } else if opts.tag_layout.mp3gain_in_id3v2() {
         saturation = apply_mp3_id3v2_bytes(file_path, actual_steps, opts, mp3_data.take())?;
         saturation.frames
@@ -309,7 +315,7 @@ fn apply_with_options_inner(file_path: &Path, opts: &ApplyOptions) -> Result<App
     let gain_range = match container {
         // The raw ADTS apply reports its own post-apply range; the MP4 path
         // has never tracked one (`MP3GAIN_ALBUM_MINMAX` is MP3/APEv2-only).
-        AudioFileType::Adts => adts_gain_range,
+        AudioFileType::Adts => aac.gain_range,
         AudioFileType::Aac => None,
         _ => (opts.channel.is_none() && saturation.frames > 0)
             .then_some((saturation.max_gain, saturation.min_gain)),
@@ -323,6 +329,7 @@ fn apply_with_options_inner(file_path: &Path, opts: &ApplyOptions) -> Result<App
         saturated_low: saturation.saturated_low,
         saturated_high: saturation.saturated_high,
         gain_range,
+        unparsed_frames: aac.unparsed_frames,
     })
 }
 
@@ -359,6 +366,7 @@ fn predict_apply_inner(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyRep
         saturated_low: 0,
         saturated_high: 0,
         gain_range: None,
+        unparsed_frames: 0,
     })
 }
 
@@ -461,6 +469,15 @@ fn check_clipping(
     Ok((steps, false, None))
 }
 
+/// What the M4A and raw ADTS applies report back to [`apply_with_options`].
+#[derive(Default)]
+struct AacApplyOutcome {
+    modified: usize,
+    /// Post-apply `(max, min)` `global_gain`, raw ADTS only.
+    gain_range: Option<(u8, u8)>,
+    unparsed_frames: u32,
+}
+
 #[cfg(feature = "aac")]
 fn apply_aac_bytes(
     file_path: &Path,
@@ -468,13 +485,18 @@ fn apply_aac_bytes(
     opts: &ApplyOptions,
     analysis: AacAnalysisCache,
     replaygain: Option<&mp4meta::ReplayGainTags>,
-) -> Result<usize> {
-    with_temp_file(file_path, |r, w| {
+) -> Result<AacApplyOutcome> {
+    let (modified, unparsed_frames) = with_temp_file(file_path, |r, w| {
         if opts.write_undo {
             aac::apply_aac_gain_with_undo_to_path_with_analysis(r, w, steps, analysis, replaygain)
         } else {
             aac::apply_aac_gain_to_path_with_analysis(r, w, steps, analysis, replaygain)
         }
+    })?;
+    Ok(AacApplyOutcome {
+        modified,
+        gain_range: None,
+        unparsed_frames,
     })
 }
 
@@ -485,7 +507,7 @@ fn apply_aac_bytes(
     _opts: &ApplyOptions,
     _analysis: AacAnalysisCache,
     _replaygain: Option<&mp4meta::ReplayGainTags>,
-) -> Result<usize> {
+) -> Result<AacApplyOutcome> {
     Err(Error::FeatureNotAvailable {
         feature: "AAC support",
         feature_flag: "aac",
@@ -507,7 +529,7 @@ fn apply_adts_bytes(
     steps: i32,
     opts: &ApplyOptions,
     analysis: AacAnalysisCache,
-) -> Result<(usize, Option<(u8, u8)>)> {
+) -> Result<AacApplyOutcome> {
     with_temp_file(file_path, |r, w| {
         let outcome = adts::apply_adts_gain(r, w, steps, analysis)?;
 
@@ -553,7 +575,11 @@ fn apply_adts_bytes(
         if rg.undo.is_some() || rg.track_gain.is_some() {
             id3v2::write_rg_frames_direct(w, &mut tag, &rg)?;
         }
-        Ok((outcome.modified, outcome.gain_range))
+        Ok(AacApplyOutcome {
+            modified: outcome.modified,
+            gain_range: outcome.gain_range,
+            unparsed_frames: outcome.unparsed_frames,
+        })
     })
 }
 
@@ -563,7 +589,7 @@ fn apply_adts_bytes(
     _steps: i32,
     _opts: &ApplyOptions,
     _analysis: AacAnalysisCache,
-) -> Result<(usize, Option<(u8, u8)>)> {
+) -> Result<AacApplyOutcome> {
     Err(Error::FeatureNotAvailable {
         feature: "AAC support",
         feature_flag: "aac",

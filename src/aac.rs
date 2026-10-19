@@ -145,7 +145,8 @@ impl AacAnalysis {
         self.sample_rate
     }
     /// Samples the parser could not read. A non-zero count is tolerated: those
-    /// samples keep their original gain.
+    /// samples keep their original gain, and an apply reports them in
+    /// [`crate::ApplyReport::unparsed_frames`] (issue #402).
     pub fn parse_warnings(&self) -> u32 {
         self.parse_warnings
     }
@@ -1164,9 +1165,10 @@ fn skip_fil(reader: &mut BitReader) -> Result<()> {
     // Skipping it is safe — the base layer global_gain is in SCE/CPE elements.
     let mut count = reader.read_bits(4)? as usize;
     if count == 15 {
-        // The escape count is normally >= 1; saturate so a malformed 0
-        // cannot underflow.
-        count += (reader.read_bits(8)? as usize).saturating_sub(1);
+        // cnt = 15 + esc_count - 1 (ISO 14496-3), so an esc_count of 0 is a
+        // valid 14 bytes, which FDK-AAC writes. Saturating it to 15 overran
+        // the sample and left the frame ungained (issue #402).
+        count = 14 + reader.read_bits(8)? as usize;
     }
     reader.skip_bits(count * 8)?;
     Ok(())
@@ -1326,6 +1328,7 @@ pub(crate) fn apply_aac_gain_to_data(
 /// Returns the number of modified gain locations.
 pub fn apply_aac_gain_to_path(read_from: &Path, write_to: &Path, gain_steps: i32) -> Result<usize> {
     apply_aac_gain_to_path_with_analysis(read_from, write_to, gain_steps, None, None)
+        .map(|(modified, _)| modified)
 }
 
 /// Write the finished bytes, for this module's MP4 rewrites and for the raw
@@ -1351,30 +1354,36 @@ pub(crate) fn write_container(read_from: &Path, write_to: &Path, data: &[u8]) ->
 /// `replaygain`, when given, is folded into the same container rewrite. A
 /// separate `write_replaygain_tags` afterwards re-read the file, rebuilt the
 /// whole container a second time, and wrote it again.
+///
+/// Returns the modified gain locations and the samples left unchanged
+/// because they could not be parsed (issue #402).
 pub(crate) fn apply_aac_gain_to_path_with_analysis(
     read_from: &Path,
     write_to: &Path,
     gain_steps: i32,
     analysis: Option<AacAnalysis>,
     replaygain: Option<&mp4meta::ReplayGainTags>,
-) -> Result<usize> {
+) -> Result<(usize, u32)> {
     if gain_steps == 0 && replaygain.is_none() {
         if read_from != write_to {
             std::fs::copy(read_from, write_to).map_err(|e| Error::io_write(write_to, e))?;
         }
-        return Ok(0);
+        return Ok((0, 0));
     }
 
     let mut data = std::fs::read(read_from).map_err(|e| Error::io_read(read_from, e))?;
 
-    let modified = if gain_steps == 0 {
-        0
+    let outcome = if gain_steps == 0 {
+        (0, 0)
     } else {
         let analysis = match analysis {
             Some(a) => a,
             None => analyze_aac_gains_from_data(&data)?,
         };
-        apply_aac_gain_to_data(&mut data, &analysis, gain_steps)
+        (
+            apply_aac_gain_to_data(&mut data, &analysis, gain_steps),
+            analysis.parse_warnings,
+        )
     };
 
     if let Some(rg) = replaygain {
@@ -1382,7 +1391,7 @@ pub(crate) fn apply_aac_gain_to_path_with_analysis(
     }
     write_container(read_from, write_to, &data)?;
 
-    Ok(modified)
+    Ok(outcome)
 }
 
 /// Apply gain and store undo information in iTunes freeform tags, reading
@@ -1394,7 +1403,8 @@ pub(crate) fn apply_aac_gain_to_path_with_analysis(
 /// from `with_temp_file` with `write_to == temp_path`, the temp file
 /// ends up containing the fully-rewritten MP4 ready to be renamed over the
 /// original (issue #135). Takes an optional pre-computed analysis of
-/// `read_from` — see [`apply_aac_gain_to_path_with_analysis`] (issue #188).
+/// `read_from` — see [`apply_aac_gain_to_path_with_analysis`] (issue #188),
+/// which also describes the return value.
 //
 // Performs exactly one read and one atomic write: analysis, undo-tag parsing,
 // gain application, and metadata rewrite all run against an in-memory buffer
@@ -1405,7 +1415,7 @@ pub(crate) fn apply_aac_gain_with_undo_to_path_with_analysis(
     gain_steps: i32,
     analysis: Option<AacAnalysis>,
     replaygain: Option<&mp4meta::ReplayGainTags>,
-) -> Result<usize> {
+) -> Result<(usize, u32)> {
     if gain_steps == 0 {
         // Nothing to undo, so no undo tag; the ReplayGain tags (if any) are
         // the only write left.
@@ -1452,7 +1462,7 @@ pub(crate) fn apply_aac_gain_with_undo_to_path_with_analysis(
     }
     write_container(read_from, write_to, &final_data)?;
 
-    Ok(modified)
+    Ok((modified, analysis.parse_warnings))
 }
 
 /// Undo gain changes on AAC/M4A file using stored undo information.
@@ -1631,6 +1641,19 @@ mod tests {
         assert!(info.long_win);
         assert_eq!(info.max_sfb, 10);
         assert_eq!(info.window_groups, 1);
+    }
+
+    #[test]
+    fn test_fil_escape_count_zero_is_14_bytes() {
+        // FIL(110) cnt(1111) esc_count(00000000), 14 fill bytes, END(111):
+        // 3 + 4 + 8 + 112 + 3 = 130 bits. Seen in FDK-AAC output (issue #402).
+        let mut data = vec![0b1101_1110];
+        data.extend([0u8; 14]);
+        data.extend([0b0000_0001, 0b1100_0000]);
+        let mut reader = BitReader::new(&data);
+        let mut locations = Vec::new();
+        parse_raw_data_block(&mut reader, 44100, &mut locations).unwrap();
+        assert_eq!(reader.position(), (16, 2));
     }
 
     // =========================================================================

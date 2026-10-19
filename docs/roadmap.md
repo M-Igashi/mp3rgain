@@ -39,7 +39,8 @@ What ships today:
 
 ## Unreleased
 
-Nothing yet.
+- [x] AAC: a fill element whose escape count is 0 (14 fill bytes, which FDK-AAC writes) was read as 15 bytes, so the frame failed to parse and silently kept its original gain. After a large gain change each such frame stood out from its neighbours by up to the whole change, heard as crackling. Broken since v2.8.0; affects M4A and raw ADTS. A 256 kbps FDK-AAC encode had 13 such frames in 4.5 minutes. A file gained by an affected version has to be undone with that version: the fixed parser reaches the frames the old one skipped, so its undo would raise them instead (#402)
+- [x] AAC frames the parser cannot read, which keep their original gain, are reported instead of dropped silently: a warning per file in the CLI (also in the JSON `warning` field) and "Done (N frames unparsed)" in the GUI's status column (#402)
 
 ## Release history
 

@@ -22,6 +22,9 @@ pub enum FileStatus {
     /// Apply succeeded with the gain taken from stored REPLAYGAIN_* tags
     /// instead of a fresh analysis (issue #302).
     DoneFromTags,
+    /// Apply succeeded, but this many AAC frames could not be parsed and
+    /// kept their original gain (issue #402).
+    DoneWithUnparsed(u32),
     NoChangesToUndo,
     /// Dry-run apply finished without touching the file. `steps` is what
     /// would have been applied; `clipping_prevented` indicates the cap.
@@ -44,6 +47,7 @@ impl FileStatus {
             FileStatus::Undoing => "Undoing...".into(),
             FileStatus::Done => "Done".into(),
             FileStatus::DoneFromTags => "Done (from tags)".into(),
+            FileStatus::DoneWithUnparsed(n) => format!("Done ({n} frames unparsed)"),
             FileStatus::NoChangesToUndo => "Nothing to undo".into(),
             FileStatus::DryRunPredicted {
                 steps,
@@ -1648,11 +1652,15 @@ impl Mp3rgainApp {
                 idx,
                 actual_steps,
                 from_stored,
+                unparsed_frames,
             } => {
                 if let Some(file) = self.files.get_mut(idx) {
                     // Issue #302: make it visible which rows were applied
-                    // from stored tags and which were (re)analyzed.
-                    file.status = if from_stored {
+                    // from stored tags and which were (re)analyzed. Frames
+                    // left ungained (issue #402) matter more than either.
+                    file.status = if unparsed_frames > 0 {
+                        FileStatus::DoneWithUnparsed(unparsed_frames)
+                    } else if from_stored {
                         FileStatus::DoneFromTags
                     } else {
                         FileStatus::Done

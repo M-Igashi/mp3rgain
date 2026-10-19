@@ -17,8 +17,9 @@ use crate::util::get_filename;
 
 use super::info::{scan_gain_range_for_row, tsv_rg_row};
 use super::utils::{
-    analyze_track, emit_clipping_warning, emit_file_warning, report_file_error, restore_timestamp,
-    save_original_mtime, stored_track_result, warn_aac_multi_track,
+    analyze_track, combine_warnings, emit_clipping_warning, emit_file_warning,
+    emit_unparsed_warning, report_file_error, restore_timestamp, save_original_mtime,
+    stored_track_result, warn_aac_multi_track,
 };
 
 pub fn process_track_gain(
@@ -256,8 +257,10 @@ fn apply_replaygain_with_album_into(
 
     match apply_with_options(file, &apply_opts) {
         Ok(report) => {
-            let warning_msg =
-                emit_clipping_warning(steps, &report, opts, filename, Some(result.peak()));
+            let warning_msg = combine_warnings([
+                emit_clipping_warning(steps, &report, opts, filename, Some(result.peak())),
+                emit_unparsed_warning(&report, opts, filename),
+            ]);
 
             if opts.text_output() {
                 writeln!(
@@ -510,13 +513,16 @@ fn apply_replaygain_aac_with_album_into(
         Ok(report) => (
             report.actual_steps,
             report.modified,
-            emit_clipping_warning(
-                requested_steps,
-                &report,
-                opts,
-                filename,
-                Some(result.peak()),
-            ),
+            combine_warnings([
+                emit_clipping_warning(
+                    requested_steps,
+                    &report,
+                    opts,
+                    filename,
+                    Some(result.peak()),
+                ),
+                emit_unparsed_warning(&report, opts, filename),
+            ]),
         ),
         // A read-only file would refuse the fallback tag write too (#398).
         Err(e) if !write_tags || matches!(e, mp3rgain::Error::ReadOnly { .. }) => {

@@ -11,7 +11,8 @@ use crate::json_output::{FileStatus, JsonFileResult};
 use crate::util::get_filename;
 
 use super::utils::{
-    emit_clipping_warning, emit_file_warning, report_file_error, warn_aac_multi_track,
+    combine_warnings, emit_clipping_warning, emit_file_warning, emit_unparsed_warning,
+    report_file_error, warn_aac_multi_track,
 };
 
 pub fn process_apply(file: &Path, steps: i32, opts: &Options) -> Result<(JsonFileResult, String)> {
@@ -101,7 +102,8 @@ fn process_apply_into(
         Ok(report) => {
             let clip_warn = emit_clipping_warning(steps, &report, opts, filename, None);
             let sat_warn = emit_saturation_warning(&report, opts, filename);
-            let warning_msg = combine_warnings(clip_warn, sat_warn);
+            let unparsed_warn = emit_unparsed_warning(&report, opts, filename);
+            let warning_msg = combine_warnings([clip_warn, sat_warn, unparsed_warn]);
 
             if opts.text_output() {
                 if container.is_aac_bitstream() {
@@ -161,15 +163,6 @@ fn emit_saturation_warning(
     let msg = format!("{detail} - saturated gain is not losslessly reversible");
     emit_file_warning(opts, filename, &msg, None);
     Some(msg)
-}
-
-/// Join optional clipping and saturation warnings into the single
-/// [`JsonFileResult::warning`] field.
-fn combine_warnings(clip: Option<String>, saturation: Option<String>) -> Option<String> {
-    match (clip, saturation) {
-        (Some(a), Some(b)) => Some(format!("{a}; {b}")),
-        (a, b) => a.or(b),
-    }
 }
 
 pub fn process_apply_channel(

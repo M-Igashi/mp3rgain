@@ -86,6 +86,9 @@ pub enum WorkerEvent {
         /// The applied gain came from stored tags rather than a fresh
         /// analysis (issue #302); the row status says so.
         from_stored: bool,
+        /// AAC frames left at their original gain because they could not be
+        /// parsed (issue #402).
+        unparsed_frames: u32,
     },
     /// Dry-run analog of `FileApplied`: predict_apply succeeded, no bytes
     /// changed. UI shows "Would apply N steps" in the row status.
@@ -519,6 +522,7 @@ pub fn spawn_apply(
                                     idx: job.idx,
                                     actual_steps: report.actual_steps,
                                     from_stored: job.from_stored,
+                                    unparsed_frames: report.unparsed_frames,
                                 },
                             );
                         }

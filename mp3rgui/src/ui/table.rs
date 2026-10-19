@@ -1,4 +1,4 @@
-use crate::app::{ClickMode, Mp3rgainApp, SortColumn};
+use crate::app::{ClickMode, FileStatus, Mp3rgainApp, SortColumn};
 use crate::worker::StoredTagsView;
 
 /// Render the "Stored RG" column for one row.
@@ -284,7 +284,14 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                     render_stored_tags_cell(ui, file.stored_tags.as_ref());
                 });
                 row.col(|ui| {
-                    ui.label(file.status.label());
+                    let label = ui.label(file.status.label());
+                    if let FileStatus::DoneWithUnparsed(_) = file.status {
+                        label.on_hover_text(
+                            "These AAC frames could not be parsed and kept their original \
+                             gain, which can be heard as clicks. Undo restores the file. \
+                             Please report it at https://github.com/M-Igashi/mp3rgain/issues",
+                        );
+                    }
                 });
             });
         });
