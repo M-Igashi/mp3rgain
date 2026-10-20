@@ -101,12 +101,14 @@ Run `mp3rgain -h` for every option, or see the **[full CLI reference](https://mp
 | Format | Gain and analysis | Where the tags go |
 |--------|-------------------|-------------------|
 | MP3 (MPEG-1, 2 and 2.5 Layer III) | Yes | `REPLAYGAIN_*` in ID3v2, undo data in APEv2 (`-s a`: all APEv2, `-s i`: all ID3v2) |
-| AAC in M4A/MP4 | Yes | iTunes freeform atoms (`replaygain_*`, `mp3rgain_undo`) |
-| Raw ADTS AAC (`.aac`) | Yes | ID3v2 tag at the start of the stream |
-| ALAC, DRM-protected M4P | Skipped with a message | |
+| AAC-LC in M4A/MP4 | Yes | iTunes freeform atoms (`replaygain_*`, `mp3rgain_undo`) |
+| Raw ADTS AAC-LC (`.aac`) | Yes | ID3v2 tag at the start of the stream |
+| HE-AAC (v1 and v2), ALAC, DRM-protected M4P | Skipped with a message | |
 | FLAC, Opus, Ogg, WAV | Not supported | |
 
 `-R` collects `.mp3`, `.m4a`, `.aac` and `.mp4` files. The format itself is detected from the file content, not the extension.
+
+HE-AAC is skipped because `global_gain` only reaches its AAC core: the SBR high band would keep its original level, and the decoder used for analysis does not reconstruct it either ([#403](https://github.com/M-Igashi/mp3rgain/issues/403)). Undo still works on HE-AAC files adjusted by earlier versions.
 
 ## Migrating from mp3gain?
 

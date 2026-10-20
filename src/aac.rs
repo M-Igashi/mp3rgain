@@ -19,6 +19,7 @@ use std::sync::OnceLock;
 use crate::aac_codebooks;
 use crate::mp4meta;
 use crate::mp4meta::{read_u32_be, read_u64_be};
+use crate::replaygain::AudioFileType;
 
 // =============================================================================
 // Public types
@@ -96,9 +97,12 @@ pub struct AacAnalysis {
     max_gain: u8,
     sample_rate: u32,
     parse_warnings: u32,
+    #[cfg_attr(feature = "serde", serde(default))]
+    sbr: bool,
 }
 
 impl AacAnalysis {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         gain_locations: Vec<AacGainLocation>,
         sample_count: u32,
@@ -107,6 +111,7 @@ impl AacAnalysis {
         max_gain: u8,
         sample_rate: u32,
         parse_warnings: u32,
+        sbr: bool,
     ) -> Self {
         Self {
             gain_locations,
@@ -116,6 +121,7 @@ impl AacAnalysis {
             max_gain,
             sample_rate,
             parse_warnings,
+            sbr,
         }
     }
 
@@ -149,6 +155,13 @@ impl AacAnalysis {
     /// [`crate::ApplyReport::unparsed_frames`] (issue #402).
     pub fn parse_warnings(&self) -> u32 {
         self.parse_warnings
+    }
+    /// Whether the stream carries SBR data, which makes it HE-AAC (v2 adds
+    /// parametric stereo on top). Its gain cannot be adjusted: the decoder
+    /// rebuilds the SBR high band at absolute levels that `global_gain` does
+    /// not reach (issue #403).
+    pub fn has_sbr(&self) -> bool {
+        self.sbr
     }
 }
 
@@ -440,7 +453,18 @@ fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
     let (moov_pos, moov_header) = mp4meta::find_box(data, mp4meta::MOOV).ok_or(Error::NoMoovBox)?;
     let moov_start = moov_pos + moov_header.header_size as usize;
     let moov_size = moov_header.content_size() as usize;
+    sample_table_in_moov(data, moov_start, moov_size, data.len())
+}
 
+/// [`build_sample_table`] on a `moov` region of `data`, which need not hold
+/// the rest of the file: sample offsets come from `stco`/`co64` and are
+/// absolute either way. `file_len` bounds the sample count.
+fn sample_table_in_moov(
+    data: &[u8],
+    moov_start: usize,
+    moov_size: usize,
+    file_len: usize,
+) -> Result<(Vec<SampleEntry>, usize)> {
     let (stbl_start, stbl_size, stsd_pos) = find_audio_stbl(data, moov_start, moov_size)?;
 
     // Parse STSZ
@@ -456,7 +480,7 @@ fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
 
     // Even with a default size (no per-sample table to bound the count),
     // every sample occupies at least one byte of mdat.
-    if sample_count > data.len() {
+    if sample_count > file_len {
         return Err(Error::AacParse {
             message: "stsz sample count exceeds file size".into(),
         });
@@ -1160,9 +1184,10 @@ fn skip_dse(reader: &mut BitReader) -> Result<()> {
     Ok(())
 }
 
-fn skip_fil(reader: &mut BitReader) -> Result<()> {
-    // FIL carries extension data including SBR (HE-AAC).
-    // Skipping it is safe — the base layer global_gain is in SCE/CPE elements.
+/// Skip a fill element, returning whether it carries SBR data. The core's
+/// `global_gain` lives in SCE/CPE, so skipping is safe for the parse, but the
+/// gain does not reach the SBR band (issue #403).
+fn skip_fil(reader: &mut BitReader) -> Result<bool> {
     let mut count = reader.read_bits(4)? as usize;
     if count == 15 {
         // cnt = 15 + esc_count - 1 (ISO 14496-3), so an esc_count of 0 is a
@@ -1170,8 +1195,12 @@ fn skip_fil(reader: &mut BitReader) -> Result<()> {
         // the sample and left the frame ungained (issue #402).
         count = 14 + reader.read_bits(8)? as usize;
     }
+    // The payload opens with its 4-bit extension_type: EXT_SBR_DATA (13) or
+    // EXT_SBR_DATA_CRC (14) for SBR, which a fill element never mixes with
+    // other payloads.
+    let sbr = count > 0 && matches!(reader.peek_bits(4)?, 13 | 14);
     reader.skip_bits(count * 8)?;
-    Ok(())
+    Ok(sbr)
 }
 
 /// Skip program_config_element (ISO 14496-3 Table 4.2).
@@ -1229,14 +1258,16 @@ fn skip_pce(reader: &mut BitReader) -> Result<()> {
 }
 
 /// Parse one raw_data_block, appending its `global_gain` locations to
-/// `locations`. The caller owns and reuses the buffer: at ~43 samples per
-/// second of audio, allocating a fresh `Vec` per sample (and per element)
-/// was ~8k heap allocations per minute in the analyzer's hottest loop.
+/// `locations`, and return whether it carries SBR data (HE-AAC). The caller
+/// owns and reuses the buffer: at ~43 samples per second of audio,
+/// allocating a fresh `Vec` per sample (and per element) was ~8k heap
+/// allocations per minute in the analyzer's hottest loop.
 pub(crate) fn parse_raw_data_block(
     reader: &mut BitReader,
     sample_rate: u32,
     locations: &mut Vec<AacGainLocation>,
-) -> Result<()> {
+) -> Result<bool> {
+    let mut sbr = false;
     loop {
         if reader.bits_remaining() < 3 {
             break;
@@ -1255,7 +1286,7 @@ pub(crate) fn parse_raw_data_block(
             }
             ID_DSE => skip_dse(reader)?,
             ID_PCE => skip_pce(reader)?,
-            ID_FIL => skip_fil(reader)?,
+            ID_FIL => sbr |= skip_fil(reader)?,
             ID_END => break,
             _ => {
                 return Err(Error::AacParse {
@@ -1265,7 +1296,7 @@ pub(crate) fn parse_raw_data_block(
         }
     }
 
-    Ok(())
+    Ok(sbr)
 }
 
 // =============================================================================
@@ -1308,6 +1339,91 @@ pub(crate) fn apply_aac_gain_to_data(
         }
     }
     modified
+}
+
+/// Refuse a gain change on HE-AAC (issue #403): it would move the core band
+/// and leave the SBR band at its original level. Undo is not refused, so a
+/// file adjusted by an earlier version can still be restored.
+pub(crate) fn ensure_gain_adjustable(analysis: &AacAnalysis) -> Result<()> {
+    if analysis.has_sbr() {
+        return Err(Error::UnsupportedFormat { format: HE_AAC });
+    }
+    Ok(())
+}
+
+/// Format name for [`Error::UnsupportedFormat`].
+pub(crate) const HE_AAC: &str = "HE-AAC";
+
+/// Raw data blocks [`blocks_have_sbr`] parses. HE-AAC encoders send SBR data
+/// in every frame, so the first block that parses settles it; the rest are a
+/// margin for a damaged start.
+const SBR_PROBE_BLOCKS: usize = 8;
+
+/// Whether any of the first [`SBR_PROBE_BLOCKS`] raw_data_blocks carries SBR.
+pub(crate) fn blocks_have_sbr<'a>(
+    blocks: impl IntoIterator<Item = &'a [u8]>,
+    sample_rate: u32,
+) -> bool {
+    let mut locations = Vec::new();
+    blocks.into_iter().take(SBR_PROBE_BLOCKS).any(|block| {
+        locations.clear();
+        let parsed = parse_raw_data_block(&mut BitReader::new(block), sample_rate, &mut locations);
+        matches!(parsed, Ok(true))
+    })
+}
+
+/// Whether the AAC track of an MP4 is HE-AAC, from the `moov` box and the
+/// first few samples only, so an hours-long audiobook is not read whole just
+/// to be refused.
+pub(crate) fn mp4_has_sbr(file_path: &Path) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    // An AAC frame holds at most 6144 bits per channel, so anything larger
+    // is a damaged table entry rather than a frame worth allocating for.
+    const MAX_SAMPLE: u32 = 64 * 1024;
+
+    let Some(moov) = mp4meta::read_moov_content(file_path) else {
+        return false;
+    };
+    let Ok(mut file) = std::fs::File::open(file_path) else {
+        return false;
+    };
+    let file_len = file.metadata().map_or(0, |m| m.len() as usize);
+    let Ok((samples, stsd_pos)) = sample_table_in_moov(&moov, 0, moov.len(), file_len) else {
+        return false;
+    };
+    let Ok(sample_rate) = parse_audio_config(&moov, stsd_pos) else {
+        return false;
+    };
+
+    let blocks: Vec<Vec<u8>> = samples
+        .iter()
+        .take(SBR_PROBE_BLOCKS)
+        .filter(|entry| entry.size <= MAX_SAMPLE)
+        .filter_map(|entry| {
+            let mut block = vec![0u8; entry.size as usize];
+            file.seek(SeekFrom::Start(entry.file_offset)).ok()?;
+            file.read_exact(&mut block).ok()?;
+            Some(block)
+        })
+        .collect();
+    blocks_have_sbr(blocks.iter().map(Vec::as_slice), sample_rate)
+}
+
+/// Refuse HE-AAC before an analysis decodes it (issue #403). symphonia decodes
+/// the core band only, without SBR or parametric stereo (so v2 comes out
+/// mono), and at the core's sample rate even where the MP4 declares the
+/// output rate. Loudness and peak would describe a different signal from the
+/// one heard.
+pub(crate) fn ensure_analyzable(file_path: &Path, file_type: AudioFileType) -> Result<()> {
+    let he_aac = match file_type {
+        AudioFileType::Aac => mp4_has_sbr(file_path),
+        AudioFileType::Adts => crate::adts::has_sbr(file_path),
+        _ => false,
+    };
+    if he_aac {
+        return Err(Error::UnsupportedFormat { format: HE_AAC });
+    }
+    Ok(())
 }
 
 // =============================================================================
@@ -1380,6 +1496,7 @@ pub(crate) fn apply_aac_gain_to_path_with_analysis(
             Some(a) => a,
             None => analyze_aac_gains_from_data(&data)?,
         };
+        ensure_gain_adjustable(&analysis)?;
         (
             apply_aac_gain_to_data(&mut data, &analysis, gain_steps),
             analysis.parse_warnings,
@@ -1428,6 +1545,7 @@ pub(crate) fn apply_aac_gain_with_undo_to_path_with_analysis(
         Some(a) => a,
         None => analyze_aac_gains_from_data(&data)?,
     };
+    ensure_gain_adjustable(&analysis)?;
 
     let existing_undo = mp4meta::read_undo_tags_from_data(&data);
     let existing_gain = crate::ape::parse_undo_values(existing_undo.undo()).0;
@@ -1531,6 +1649,7 @@ pub(crate) fn analyze_aac_gains_from_data(data: &[u8]) -> Result<AacAnalysis> {
     let mut min_gain = 255u8;
     let mut max_gain = 0u8;
     let mut max_channel = 0u8;
+    let mut sbr = false;
 
     for (idx, entry) in sample_table.iter().enumerate() {
         let sample_start = entry.file_offset as usize;
@@ -1546,7 +1665,8 @@ pub(crate) fn analyze_aac_gains_from_data(data: &[u8]) -> Result<AacAnalysis> {
 
         sample_locations.clear();
         match parse_raw_data_block(&mut reader, sample_rate, &mut sample_locations) {
-            Ok(()) => {
+            Ok(sample_sbr) => {
+                sbr |= sample_sbr;
                 for mut loc in sample_locations.drain(..) {
                     loc.sample_index = idx as u32;
                     loc.file_offset = entry.file_offset + loc.sample_byte_offset as u64;
@@ -1576,6 +1696,7 @@ pub(crate) fn analyze_aac_gains_from_data(data: &[u8]) -> Result<AacAnalysis> {
         max_gain,
         sample_rate,
         parse_warnings,
+        sbr,
     ))
 }
 
@@ -1729,6 +1850,7 @@ mod tests {
             80,
             44100,
             0,
+            false,
         );
 
         let modified = apply_aac_gain_to_data(&mut data, &analysis, 5);
@@ -1743,10 +1865,41 @@ mod tests {
         let mut data = vec![0x00; 50];
         data[10] = 80;
 
-        let analysis = AacAnalysis::new(vec![make_loc(10, 0, 80)], 1, 1, 80, 80, 44100, 0);
+        let analysis = AacAnalysis::new(vec![make_loc(10, 0, 80)], 1, 1, 80, 80, 44100, 0, false);
 
         let modified = apply_aac_gain_to_data(&mut data, &analysis, 0);
         assert_eq!(modified, 0);
         assert_eq!(data[10], 80); // unchanged
+    }
+
+    /// Issue #403: HE-AAC refuses a gain change but not an undo, so a file an
+    /// earlier version adjusted can still be restored.
+    #[test]
+    fn test_undo_still_restores_he_aac() {
+        let original = std::fs::read("tests/fixtures/test_he_aac.m4a").unwrap();
+        let analysis = analyze_aac_gains_from_data(&original).unwrap();
+        assert!(analysis.has_sbr());
+        assert!(ensure_gain_adjustable(&analysis).is_err());
+
+        // What an earlier version left behind: the core gained, the undo tag
+        // recording it.
+        let mut gained = original.clone();
+        assert!(apply_aac_gain_to_data(&mut gained, &analysis, -2) > 0);
+        let undo = mp4meta::UndoTags::new(Some(crate::ape::format_undo_value(-2, -2, false)), None);
+        let gained = mp4meta::update_mp4_undo_metadata(&gained, &undo).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("mp3rgain_he_undo_{}.m4a", std::process::id()));
+        std::fs::write(&path, &gained).unwrap();
+
+        assert!(undo_aac_gain(&path).unwrap() > 0);
+        let restored = analyze_aac_gains(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        let gains = |a: &AacAnalysis| -> Vec<u8> {
+            a.gain_locations()
+                .iter()
+                .map(|l| l.original_gain())
+                .collect()
+        };
+        assert_eq!(gains(&restored), gains(&analysis));
     }
 }

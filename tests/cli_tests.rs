@@ -2170,6 +2170,36 @@ fn an_unsupported_format_is_skipped_rather_than_failed() {
     assert_eq!(json["summary"]["failed"], 0);
 }
 
+/// Issue #403: HE-AAC is skipped like ALAC, in either container, by every
+/// command that would analyze it or change its gain, and the file is left as
+/// it was.
+#[test]
+fn he_aac_is_skipped_and_left_untouched() {
+    for fixture in ["test_he_aac.m4a", "test_he_aac.aac"] {
+        let original = fs::read(Path::new("tests/fixtures").join(fixture)).unwrap();
+        for args in [
+            &["-g", "-2"][..],
+            &["-r"],
+            &["-a"],
+            &["-r", "--tags-only"],
+            &["-x"],
+        ] {
+            let album = TempAlbum::new(&[fixture]);
+            let file = album.files[0].to_str().unwrap();
+            let mut cmd = args.to_vec();
+            cmd.extend(["-o", "json", file]);
+            let out = run(&cmd);
+            assert!(out.status.success(), "{fixture} {args:?}: {out:?}");
+            let json = json_of(&out);
+            assert_eq!(
+                json["files"][0]["status"], "skipped",
+                "{fixture} {args:?}: {json}"
+            );
+            assert_eq!(fs::read(file).unwrap(), original, "{fixture} {args:?}");
+        }
+    }
+}
+
 /// Album mode agrees with the track path: an unsupported member is dropped
 /// from the set without failing the run, and an album with nothing adjustable
 /// in it at all is a set of skips rather than "all files failed" (issue #330).

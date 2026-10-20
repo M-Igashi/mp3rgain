@@ -231,7 +231,7 @@ mp3rgain keeps its AAC undo data in its own `mp3rgain_undo` atom and does not re
 mp3rgain is not the right tool if you need:
 
 - **An exact loudness level in the audio.** `--rg2` and `--r128` measure BS.1770 loudness, but a lossless change moves in 1.5 dB steps, so the audio lands within about 0.75 dB of the target. `--tags-only` writes the exact value as a tag; to bake an exact level into the audio, use ffmpeg `loudnorm`, which re-encodes.
-- **FLAC, Ogg, Opus, WAV or ALAC.** mp3rgain handles MP3 and AAC only; loudgain and rsgain cover the other formats. Under `-R` such files are ignored. An ALAC or DRM-protected M4P file is reported as skipped without failing the run ([#330](https://github.com/M-Igashi/mp3rgain/issues/330)); FLAC, Opus or WAV files passed by name fail with an error.
+- **FLAC, Ogg, Opus, WAV, ALAC or HE-AAC.** mp3rgain handles MP3 and AAC-LC only; loudgain and rsgain cover the other formats. Under `-R` FLAC, Ogg, Opus and WAV files are ignored. An ALAC, DRM-protected M4P or HE-AAC file is reported as skipped without failing the run ([#330](https://github.com/M-Igashi/mp3rgain/issues/330), [#403](https://github.com/M-Igashi/mp3rgain/issues/403)); FLAC, Opus or WAV files passed by name fail with an error.
 
 ## Reporting migration problems
 

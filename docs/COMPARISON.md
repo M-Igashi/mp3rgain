@@ -22,14 +22,14 @@ How mp3rgain compares with the tools it replaces, mp3gain and aacgain, and where
 | MP3 (MPEG-1, MPEG-2, MPEG-2.5 Layer III) | Yes | Yes | Yes |
 | AAC in MP4/M4A | Yes (lossless) | Yes (lossless) | No |
 | AAC, raw ADTS `.aac` | Yes (lossless, since 3.7.0) | No | No |
-| HE-AAC (SBR) | AAC core only, untested (see below) | No | No |
+| HE-AAC (SBR, v1 and v2) | No (skipped, see below) | No | No |
 | Apple Lossless (ALAC) | No (skipped) | No | No |
 
 Notes on mp3rgain:
 
 - **AAC** gain has been lossless since 2.0.0: like aacgain, mp3rgain rewrites the `global_gain` field of each channel element. The audio track of a video `.mp4` is handled since 3.7.0 ([#327](https://github.com/M-Igashi/mp3rgain/issues/327)).
 - **Raw ADTS** streams (from `ffmpeg -f adts`, DVB/HLS captures and some rippers) have no container for metadata, so their undo and `REPLAYGAIN_*` values go into an ID3v2 tag ([#330](https://github.com/M-Igashi/mp3rgain/issues/330)).
-- **HE-AAC:** the gain is applied to the AAC core and the SBR extension data is left as it is. There is no HE-AAC test file in the test suite, so treat the result as unverified.
+- **HE-AAC** files are reported as skipped ([#403](https://github.com/M-Igashi/mp3rgain/issues/403)). `global_gain` only scales the AAC core; the decoder rebuilds the SBR high band at levels stored in absolute form, so a gain change left that band at its original level, about as many dB too loud as the change. The decoder mp3rgain analyzes with has no SBR either, so loudness and peak were measured on the core alone. Earlier versions applied the core-only gain, and undo still works on those files.
 - **ALAC and DRM-protected M4P** files are reported as skipped and do not fail the run (since 3.7.0).
 - **FLAC, Ogg, Opus and WAV** are not supported: passed by name they fail with an error, and `-R` ignores them.
 
@@ -254,8 +254,7 @@ See [security.md](security.md) for the CVE details.
 ### mp3rgain
 
 - Lossless gain moves in whole 1.5 dB steps, so the audio lands within about 0.75 dB of the target (`--tags-only` writes exact values).
-- MP3 and AAC only: no FLAC, Ogg, Opus, WAV or ALAC.
-- HE-AAC handling is untested (see [Supported formats](#supported-formats)).
+- MP3 and AAC-LC only: no HE-AAC, FLAC, Ogg, Opus, WAV or ALAC.
 - `-g` and `-l` leave existing `REPLAYGAIN_*` tags unchanged (see [Avoiding double volume adjustment](#avoiding-double-volume-adjustment)).
 - Undo restores every audio frame, but after an ID3v2 tag write the file is not byte-identical to the original (the ID3v2 tag is rewritten as ID3v2.4). Frames whose `global_gain` clamped at 0 or 255 cannot be restored.
 - Raw ADTS streams with CRC protection (`protection_absent = 0`) keep their original CRC after a gain change. ffmpeg and Apple's encoder do not write ADTS CRCs, so there is nothing to test the update against.

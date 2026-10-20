@@ -260,6 +260,61 @@ fn test_apply_reports_unparsed_aac_frames() {
     cleanup(&path);
 }
 
+/// Issue #403: HE-AAC is recognised from its SBR data in both containers and
+/// refused as an unsupported format, by the analysis as well as the apply,
+/// since the decoder mp3rgain analyzes with has no SBR either. AAC-LC is not.
+#[test]
+fn test_he_aac_is_an_unsupported_format() {
+    use mp3rgain::{apply_with_options, ApplyOptions};
+
+    let fixtures = Path::new("tests/fixtures");
+    assert!(
+        mp3rgain::aac::analyze_aac_gains(&fixtures.join("test_he_aac.m4a"))
+            .unwrap()
+            .has_sbr()
+    );
+    assert!(
+        mp3rgain::adts::analyze_adts_gains(&fixtures.join("test_he_aac.aac"))
+            .unwrap()
+            .has_sbr()
+    );
+    assert!(
+        !mp3rgain::aac::analyze_aac_gains(&fixtures.join("test_aac.m4a"))
+            .unwrap()
+            .has_sbr()
+    );
+    assert!(
+        !mp3rgain::adts::analyze_adts_gains(&fixtures.join("test_adts.aac"))
+            .unwrap()
+            .has_sbr()
+    );
+
+    for fixture in ["test_aac.m4a", "test_adts.aac"] {
+        assert_eq!(
+            mp3rgain::mp4meta::unsupported_audio_format(&fixtures.join(fixture)),
+            None
+        );
+    }
+
+    for fixture in ["test_he_aac.m4a", "test_he_aac.aac"] {
+        let src = fixtures.join(fixture);
+        assert_eq!(
+            mp3rgain::mp4meta::unsupported_audio_format(&src),
+            Some("HE-AAC")
+        );
+        let err = mp3rgain::replaygain::analyze_track(&src).unwrap_err();
+        assert!(err.is_unsupported_format(), "{fixture}: {err}");
+        let err = mp3rgain::find_max_amplitude(&src).unwrap_err();
+        assert!(err.is_unsupported_format(), "{fixture}: {err}");
+
+        let path = copy_test_file(fixture);
+        let err = apply_with_options(&path, &ApplyOptions::new(-2)).unwrap_err();
+        assert!(err.is_unsupported_format(), "{fixture}: {err}");
+        assert_eq!(fs::read(&path).unwrap(), fs::read(&src).unwrap());
+        cleanup(&path);
+    }
+}
+
 /// A modest in-range adjustment must report no saturation.
 #[test]
 fn test_apply_no_saturation_when_in_range() {

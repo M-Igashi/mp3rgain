@@ -1399,7 +1399,7 @@ impl std::fmt::Display for Mp4AudioCodec {
 /// the file — the audio payload (`mdat`) is usually orders of magnitude
 /// larger than the metadata, so codec/track inspection shouldn't pay for a
 /// full-file read (issue #188).
-fn read_moov_content(file_path: &Path) -> Option<Vec<u8>> {
+pub(crate) fn read_moov_content(file_path: &Path) -> Option<Vec<u8>> {
     let mut file = fs::File::open(file_path).ok()?;
     let file_len = file.metadata().ok()?.len();
     let mut pos = 0u64;
@@ -1575,12 +1575,13 @@ pub fn is_aac_file(file_path: &Path) -> bool {
     )
 }
 
-/// Name of a container mp3rgain recognizes but cannot adjust the gain of.
+/// Name of a format mp3rgain recognizes but cannot adjust the gain of: ALAC,
+/// DRM-protected M4P, or HE-AAC in either container (issue #403).
 ///
 /// Used to report such a file as a *skip* rather than a failure (issue #330):
 /// letting one ALAC track set the exit code makes a whole library scan look
 /// failed over a file mp3rgain was never going to touch. Only positively
-/// identified containers qualify — `None` covers MP3, AAC in MP4, raw ADTS,
+/// identified formats qualify: `None` covers MP3, AAC-LC in MP4 or raw ADTS,
 /// *and* anything unidentifiable, because an unidentifiable file is also what
 /// a truncated or corrupt one looks like and that has to stay a real error.
 pub fn unsupported_audio_format(file_path: &Path) -> Option<&'static str> {
@@ -1590,6 +1591,10 @@ pub fn unsupported_audio_format(file_path: &Path) -> Option<&'static str> {
     let head = &buf[..bytes_read];
 
     if head.len() < 12 || &head[4..8] != b"ftyp" {
+        #[cfg(feature = "aac")]
+        if crate::adts::is_adts_file(file_path) && crate::adts::has_sbr(file_path) {
+            return Some(crate::aac::HE_AAC);
+        }
         return None;
     }
     if is_mp4_header(head) {
@@ -1597,6 +1602,8 @@ pub fn unsupported_audio_format(file_path: &Path) -> Option<&'static str> {
         return match detect_mp4_audio_codec(file_path) {
             Some(Mp4AudioCodec::Alac) => Some("ALAC"),
             Some(Mp4AudioCodec::Unknown) => Some("this MP4 audio codec"),
+            #[cfg(feature = "aac")]
+            _ if crate::aac::mp4_has_sbr(file_path) => Some(crate::aac::HE_AAC),
             // `mp4a`, or a container whose codec could not be determined,
             // which the AAC path handles.
             _ => None,

@@ -1299,6 +1299,8 @@ fn analyze_track_decoded(
     let pipeline = rayon::current_num_threads() > 1;
     // Detect file type
     let file_type = AudioFileType::from_path(file_path);
+    #[cfg(feature = "aac")]
+    crate::aac::ensure_analyzable(file_path, file_type)?;
 
     // Open the media source
     let file = std::fs::File::open(file_path).map_err(|e| Error::io_open(file_path, e))?;
@@ -2741,6 +2743,8 @@ fn find_peak_amplitude_from_source(
     file_path: &Path,
     source: Box<dyn MediaSource>,
 ) -> Result<PeakAmplitudeResult> {
+    #[cfg(feature = "aac")]
+    crate::aac::ensure_analyzable(file_path, AudioFileType::from_path(file_path))?;
     let mss = MediaSourceStream::new(source, Default::default());
 
     let mut hint = Hint::new();

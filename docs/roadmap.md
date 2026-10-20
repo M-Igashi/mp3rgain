@@ -41,6 +41,8 @@ What ships today:
 
 - [x] AAC: a fill element whose escape count is 0 (14 fill bytes, which FDK-AAC writes) was read as 15 bytes, so the frame failed to parse and silently kept its original gain. After a large gain change each such frame stood out from its neighbours by up to the whole change, heard as crackling. Broken since v2.8.0; affects M4A and raw ADTS. A 256 kbps FDK-AAC encode had 13 such frames in 4.5 minutes. A file gained by an affected version has to be undone with that version: the fixed parser reaches the frames the old one skipped, so its undo would raise them instead (#402)
 - [x] AAC frames the parser cannot read, which keep their original gain, are reported instead of dropped silently: a warning per file in the CLI (also in the JSON `warning` field) and "Done (N frames unparsed)" in the GUI's status column (#402)
+- [x] HE-AAC (v1 and v2, in M4A or raw ADTS) is skipped with a message, like ALAC, by every command that would analyze it or change its gain. `global_gain` only reaches the AAC core, so a gain change left the SBR high band at its original level, as many dB too loud as the change. The analysis was wrong too: symphonia decodes the core without SBR or parametric stereo, at the core's sample rate even when the MP4 declares twice that, which put R128 loudness up to 1.6 dB off. Detected from the SBR payload in the frames themselves, the only signal raw ADTS carries, reading the `moov` box and the first eight frames rather than the whole file. Undo, `-s c` and `-s d` still work, so a file adjusted by an earlier version can be restored (#403)
+- [x] The GUI shows why a file failed: the reason appears on hover over "Error" in the status column, which until now showed nothing more (#403)
 
 ## Release history
 

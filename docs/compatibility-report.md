@@ -104,9 +104,9 @@ The check is that the `global_gain` range returns to the original, which catches
 | AAC undo | `-u file.m4a` (after gain application) | Verified |
 | AAC ReplayGain tags | `-r file.m4a` | Verified |
 | AAC tag deletion | `-s d file.m4a` | Verified |
-| HE-AAC/SBR gain | `-g 2 he-aac.m4a` | Verified |
+| HE-AAC/SBR gain | `-g 2 he-aac.m4a` | Skipped as unsupported ([#403](https://github.com/M-Igashi/mp3rgain/issues/403)) |
 
-These rows date from v2.0.0. mp3gain has no AAC support, so they are not a comparison with another tool and `scripts/compatibility-test.sh` does not run them; the AAC path is covered by the Rust test suite instead, which has an LC-AAC fixture but no HE-AAC one.
+These rows date from v2.0.0. mp3gain has no AAC support, so they are not a comparison with another tool and `scripts/compatibility-test.sh` does not run them; the AAC path is covered by the Rust test suite instead, which has LC-AAC and HE-AAC fixtures. The HE-AAC row read "Verified" until #403 found that the gain reached the AAC core only and left the SBR high band at its original level.
 
 ## MP3 Format Coverage
 
@@ -268,7 +268,7 @@ Yes. mp3rgain produces identical output on macOS, Linux, and Windows.
 
 ### Q: Does mp3rgain support AAC/M4A gain adjustment?
 
-Yes. As of v2.0.0, mp3rgain supports lossless AAC bitstream gain adjustment by modifying `global_gain` fields in the AAC frames, similar to aacgain. Undo information is stored in iTunes freeform metadata tags. HE-AAC/SBR files are also supported (base layer gain adjustment). Since v3.7.0 raw ADTS `.aac` streams are supported too, with their tags in an ID3v2 tag because a raw stream has no container for freeform atoms.
+Yes. As of v2.0.0, mp3rgain supports lossless AAC bitstream gain adjustment by modifying `global_gain` fields in the AAC frames, similar to aacgain. Undo information is stored in iTunes freeform metadata tags. HE-AAC files are skipped: the gain would reach the AAC core and not the SBR high band ([#403](https://github.com/M-Igashi/mp3rgain/issues/403)). Since v3.7.0 raw ADTS `.aac` streams are supported too, with their tags in an ID3v2 tag because a raw stream has no container for freeform atoms.
 
 ### Q: Can I undo AAC gain changes?
 

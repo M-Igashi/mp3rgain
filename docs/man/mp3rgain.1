@@ -589,18 +589,20 @@ for the measurements.
 MPEG-1, MPEG-2 and MPEG-2.5 Layer III: reading, analyzing, and modifying gain.
 .TP
 .B AAC/M4A/MP4
-Lossless bitstream gain adjustment and undo, including the audio track of a
-video MP4. For HE-AAC only the AAC core is adjusted and the SBR data is left as
-it is; this case is untested.
+AAC-LC: lossless bitstream gain adjustment and undo, including the audio track
+of a video MP4.
 .TP
 .B AAC (raw ADTS, .aac)
 Lossless bitstream gain adjustment and undo, as for AAC in MP4. Undo and
 .B REPLAYGAIN_*
 go into an ID3v2 tag, since a raw stream has no container for them.
 .TP
-.B ALAC, DRM-protected M4P
+.B HE-AAC, ALAC, DRM-protected M4P
 Recognized but not adjustable. Reported as skipped, without affecting the exit
-status of a batch.
+status of a batch. HE-AAC (v1 and v2, in MP4 or raw ADTS) is skipped because
+the gain would reach the AAC core and not the SBR high band, and the decoder
+used for analysis does not reconstruct that band either. Undo still works on
+HE-AAC files adjusted by earlier versions.
 .TP
 .B FLAC, Ogg, Opus, WAV
 Not supported. Named on the command line they fail with an error;
@@ -683,7 +685,7 @@ with nothing to write succeeds on it.
 .SH EXIT STATUS
 .TP
 .B 0
-Success. Files skipped as unsupported (ALAC, M4P) do not change this. An
+Success. Files skipped as unsupported (HE-AAC, ALAC, M4P) do not change this. An
 unknown short option, such as
 .BR \-Z ,
 only prints a warning, as in mp3gain.

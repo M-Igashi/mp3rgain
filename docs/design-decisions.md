@@ -72,6 +72,8 @@ Do not propose a change to these paths on the grounds that it is equivalent. If 
 
 **An AAC frame the parser cannot read is warned about, not refused.** The apply changes every other frame and leaves that one as it was, so after a large change it stands out as a click. `ApplyReport::unparsed_frames` carries the count, and the CLI and the GUI say so for each file. Refusing the whole file would apply nothing because of one unusual frame, and the same version's undo skips the same frames, so `-u` restores the file exactly. Until issue #402 the count was dropped silently, which hid a fill-element parser bug from v2.8.0 to v3.11.1.
 
+**HE-AAC is skipped, not tagged.** The obvious fallback for a format whose gain cannot be adjusted is `--tags-only`, and it is what #403 first proposed. It does not work here: symphonia decodes HE-AAC as its core band alone, with no SBR and no parametric stereo, and at the core's sample rate even where the MP4 declares the output rate, so the loudness and peak it measures belong to a different signal (R128 loudness up to 1.6 dB off on the files tested). Tags from that analysis would be wrong in a way the user cannot see. Scaling the SBR envelope as well would need a full SBR parser, and with `bs_amp_res` 1 its 3 dB steps cannot represent an odd number of 1.5 dB gain steps. Undo stays allowed, so files adjusted by earlier versions can be restored. Issue #403.
+
 **`--album-depth` is not exposed in the GUI.** It exists because a CLI user cannot glob a library on Windows and cannot exceed `ARG_MAX` anywhere, and neither constraint reaches a GUI. Selecting rows and choosing **Single album** covers the case it would serve. PR #343.
 
 ## Where the reasoning lives

@@ -285,12 +285,20 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                 });
                 row.col(|ui| {
                     let label = ui.label(file.status.label());
-                    if let FileStatus::DoneWithUnparsed(_) = file.status {
-                        label.on_hover_text(
-                            "These AAC frames could not be parsed and kept their original \
-                             gain, which can be heard as clicks. Undo restores the file. \
-                             Please report it at https://github.com/M-Igashi/mp3rgain/issues",
-                        );
+                    match &file.status {
+                        FileStatus::DoneWithUnparsed(_) => {
+                            label.on_hover_text(
+                                "These AAC frames could not be parsed and kept their original \
+                                 gain, which can be heard as clicks. Undo restores the file. \
+                                 Please report it at https://github.com/M-Igashi/mp3rgain/issues",
+                            );
+                        }
+                        // The reason, e.g. "HE-AAC is not supported for gain
+                        // adjustment" (issue #403), is otherwise shown nowhere.
+                        FileStatus::Error(message) => {
+                            label.on_hover_text(message);
+                        }
+                        _ => {}
                     }
                 });
             });

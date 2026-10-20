@@ -19,7 +19,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::aac::{
-    apply_aac_gain_to_data, AacAnalysis, AacGainLocation, BitReader, SAMPLE_RATE_TABLE,
+    apply_aac_gain_to_data, blocks_have_sbr, ensure_gain_adjustable, AacAnalysis, AacGainLocation,
+    BitReader, SAMPLE_RATE_TABLE,
 };
 use crate::error::{Error, Result};
 use crate::frame::{find_audio_end, skip_id3v2};
@@ -132,6 +133,46 @@ pub fn is_adts_file(file_path: &Path) -> bool {
     has_adts_frames(&window[..filled])
 }
 
+/// Whether a raw ADTS stream is HE-AAC, from a window at its head (issue
+/// #403). ADTS cannot signal SBR in its header, so the frames themselves are
+/// parsed, the first few being enough.
+pub(crate) fn has_sbr(file_path: &Path) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    // Eight frames of the largest size `aac_frame_length` allows.
+    const WINDOW: u64 = 8 * 8 * 1024;
+
+    let Ok(mut file) = fs::File::open(file_path) else {
+        return false;
+    };
+    let mut head = [0u8; 10];
+    let Ok(n) = file.read(&mut head) else {
+        return false;
+    };
+    let start = skip_id3v2(&head[..n]) as u64;
+    let mut window = Vec::new();
+    if file.seek(SeekFrom::Start(start)).is_err()
+        || file.take(WINDOW).read_to_end(&mut window).is_err()
+    {
+        return false;
+    }
+
+    let mut blocks = Vec::new();
+    let mut sample_rate = None;
+    let mut pos = 0;
+    while let Some(header) = window.get(pos..).and_then(parse_adts_header) {
+        let Some(frame) = window.get(pos..pos + header.frame_len) else {
+            break;
+        };
+        // Multi-block frames are left unparsed, as in the analysis.
+        if header.blocks == 1 {
+            blocks.push(&frame[header.header_len..]);
+            sample_rate.get_or_insert(header.sample_rate);
+        }
+        pos += header.frame_len;
+    }
+    sample_rate.is_some_and(|rate| blocks_have_sbr(blocks, rate))
+}
+
 /// [`is_adts_file`] on a whole file already in memory.
 pub fn is_adts_data(data: &[u8]) -> bool {
     let start = skip_id3v2(data);
@@ -158,6 +199,7 @@ pub fn analyze_adts_gains_from_data(data: &[u8]) -> Result<AacAnalysis> {
     let mut channel_count = 1u8;
     let mut sample_rate = 0u32;
     let mut frame_count = 0u32;
+    let mut sbr = false;
     let mut pos = start;
 
     while pos < end {
@@ -199,7 +241,8 @@ pub fn analyze_adts_gains_from_data(data: &[u8]) -> Result<AacAnalysis> {
             header.sample_rate,
             &mut block_locations,
         ) {
-            Ok(()) => {
+            Ok(block_sbr) => {
+                sbr |= block_sbr;
                 for loc in block_locations.drain(..) {
                     min_gain = min_gain.min(loc.original_gain());
                     max_gain = max_gain.max(loc.original_gain());
@@ -238,6 +281,7 @@ pub fn analyze_adts_gains_from_data(data: &[u8]) -> Result<AacAnalysis> {
         max_gain,
         sample_rate,
         parse_warnings,
+        sbr,
     ))
 }
 
@@ -280,6 +324,7 @@ pub fn apply_adts_gain(
         Some(a) => a,
         None => analyze_adts_gains_from_data(&data)?,
     };
+    ensure_gain_adjustable(&analysis)?;
     let modified = apply_aac_gain_to_data(&mut data, &analysis, gain_steps);
 
     // Post-apply range, from the analysis rather than a second full parse of
