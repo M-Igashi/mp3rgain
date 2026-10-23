@@ -15,6 +15,7 @@ pub(crate) struct FrameHeader {
     pub sample_rate: u32,
     pub channel_mode: ChannelMode,
     pub frame_size: usize,
+    pub bitrate_kbps: u32,
 }
 
 impl FrameHeader {
@@ -23,6 +24,10 @@ impl FrameHeader {
             MpegVersion::Mpeg1 => 2,
             _ => 1,
         }
+    }
+
+    pub fn samples_per_frame(&self) -> usize {
+        self.granule_count() * 576
     }
 
     pub fn side_info_offset(&self) -> usize {
@@ -140,6 +145,7 @@ pub(crate) fn parse_header(header: &[u8]) -> Option<FrameHeader> {
         sample_rate,
         channel_mode,
         frame_size,
+        bitrate_kbps,
     })
 }
 
@@ -347,6 +353,19 @@ pub(crate) fn is_xing_frame(data: &[u8], frame_offset: usize, header: &FrameHead
     marker == b"Xing" || marker == b"Info"
 }
 
+/// Header of the frame starting at `pos`, if it is a valid one: another sync
+/// word follows it, or it ends exactly at `audio_end`.
+pub(crate) fn frame_at(data: &[u8], pos: usize, audio_end: usize) -> Option<FrameHeader> {
+    let header = parse_header(&data[pos..])?;
+    let next_pos = pos + header.frame_size;
+    let valid = if next_pos + 2 <= audio_end {
+        data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
+    } else {
+        next_pos <= audio_end
+    };
+    valid.then_some(header)
+}
+
 /// Scan forward from `pos` to the next valid, non-Xing MP3 frame.
 /// Returns `(frame_pos, header, next_pos)`, or `None` when no further
 /// frame exists before `audio_end`. Shared by the frame iterator and the
@@ -366,28 +385,11 @@ fn next_frame(
     reference: Option<(MpegVersion, u32)>,
 ) -> Option<(usize, FrameHeader, usize)> {
     while pos + 4 <= audio_end {
-        let header = match parse_header(&data[pos..]) {
-            Some(h) => h,
-            None => {
-                pos += 1;
-                continue;
-            }
-        };
-
-        let next_pos = pos + header.frame_size;
-
-        // A frame is valid when another sync word follows it, or when it
-        // ends exactly at the audio end.
-        let valid_frame = if next_pos + 2 <= audio_end {
-            data[next_pos] == 0xFF && (data[next_pos + 1] & 0xE0) == 0xE0
-        } else {
-            next_pos <= audio_end
-        };
-
-        if !valid_frame {
+        let Some(header) = frame_at(data, pos, audio_end) else {
             pos += 1;
             continue;
-        }
+        };
+        let next_pos = pos + header.frame_size;
 
         // Skip Xing/Info VBR header frames to match mp3gain behavior.
         if is_xing_frame(data, pos, &header) {

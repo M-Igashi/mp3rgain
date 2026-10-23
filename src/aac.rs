@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 
 use crate::aac_codebooks;
 use crate::mp4meta;
-use crate::mp4meta::{read_u32_be, read_u64_be};
+use crate::mp4meta::{read_u32_be, read_u64_be, STSZ};
 use crate::replaygain::AudioFileType;
 
 // =============================================================================
@@ -191,7 +191,6 @@ const MAX_WINDOWS: usize = 8;
 
 // MP4 box types used by this module
 const STSC: u32 = u32::from_be_bytes(*b"stsc");
-const STSZ: u32 = u32::from_be_bytes(*b"stsz");
 const ESDS: u32 = u32::from_be_bytes(*b"esds");
 
 // =============================================================================

@@ -39,6 +39,7 @@ What ships today:
 ## Unreleased
 
 - [x] mp3rgain is in the Termux User Repository (termux-user-repository/tur#2899, merged 2026-10-13), built for aarch64, arm, i686 and x86_64: `pkg install tur-repo`, then `pkg install mp3rgain`. TUR's bot picks up new releases. The official Termux repository declined it (termux/termux-packages#32543) because mp3rgain is not yet in enough distributions to count as well known there (#399)
+- [x] mp3rgui shows each file's average bitrate and whether an MP3 is CBR or VBR, in two sortable columns filled in when files are added, without an analysis. An MP3 is judged from the Xing, Info or VBRI header in its first frame, which needs only the start of the file; one without such a header has every frame read. An M4A's bitrate comes from its `moov` box (the sample sizes over the duration, as ffmpeg computes it) and its CBR/VBR cell stays empty, since AAC frames vary in size whatever the encoder setting. Raw ADTS shows neither. Library: new `read_bitrate`, `Bitrate` and `BitrateMode` (#408)
 
 ## Release history
 

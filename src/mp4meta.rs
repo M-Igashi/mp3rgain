@@ -1211,6 +1211,8 @@ pub(crate) const TRAK: u32 = u32::from_be_bytes(*b"trak");
 pub(crate) const MDIA: u32 = u32::from_be_bytes(*b"mdia");
 pub(crate) const MINF: u32 = u32::from_be_bytes(*b"minf");
 pub(crate) const STBL: u32 = u32::from_be_bytes(*b"stbl");
+pub(crate) const STSZ: u32 = u32::from_be_bytes(*b"stsz");
+const MDHD: u32 = u32::from_be_bytes(*b"mdhd");
 
 fn update_offsets_recursive(
     data: &mut [u8],
@@ -1473,8 +1475,8 @@ impl Iterator for TrakIter<'_> {
 /// stbl location and codec identifier for one trak, from
 /// [`find_trak_sample_info`].
 //
-// The stbl/stsd fields are only consumed by the `aac` module's
-// sample-table builder; without that feature only `entry_type` is read.
+// `stsd_pos` is only consumed by the `aac` module's sample-table builder;
+// without that feature it is never read.
 #[cfg_attr(not(feature = "aac"), allow(dead_code))]
 pub(crate) struct TrakSampleInfo {
     pub(crate) stbl_start: usize,
@@ -1561,6 +1563,56 @@ fn detect_codec_in_trak(data: &[u8], trak_start: usize, trak_size: usize) -> Opt
         ALAC => Some(Mp4AudioCodec::Alac),
         _ => Some(Mp4AudioCodec::Unknown),
     }
+}
+
+/// Average bitrate of the first audio trak in kbps: the total of its `stsz`
+/// sample sizes over its `mdhd` duration, as ffmpeg computes it. Reads only
+/// `moov`, so it costs the same whatever the length of the file.
+pub(crate) fn audio_bitrate_kbps(file_path: &Path) -> Option<f64> {
+    let moov = read_moov_content(file_path)?;
+    traks(&moov, 0, moov.len()).find_map(|(trak_start, trak_size)| {
+        detect_codec_in_trak(&moov, trak_start, trak_size)?;
+        trak_bitrate_kbps(&moov, trak_start, trak_size)
+    })
+}
+
+fn trak_bitrate_kbps(data: &[u8], trak_start: usize, trak_size: usize) -> Option<f64> {
+    let (mdia_pos, mdia_header) = find_box_in_container(data, trak_start, trak_size, MDIA)?;
+    let mdia_start = mdia_pos + mdia_header.header_size as usize;
+    let (mdhd_pos, mdhd_header) =
+        find_box_in_container(data, mdia_start, mdia_header.content_size() as usize, MDHD)?;
+    // Version 1 widens the creation and modification times and the duration
+    // to 64 bits.
+    let mdhd = data.get(mdhd_pos + mdhd_header.header_size as usize..)?;
+    let (timescale, duration) = match *mdhd.first()? {
+        0 if mdhd.len() >= 20 => (read_u32_be(mdhd, 12), read_u32_be(mdhd, 16) as u64),
+        1 if mdhd.len() >= 32 => (read_u32_be(mdhd, 20), read_u64_be(mdhd, 24)),
+        _ => return None,
+    };
+
+    let info = find_trak_sample_info(data, trak_start, trak_size)?;
+    let (stsz_pos, stsz_header) =
+        find_box_in_container(data, info.stbl_start, info.stbl_size, STSZ)?;
+    let stsz = data.get(stsz_pos + stsz_header.header_size as usize..)?;
+    if stsz.len() < 12 {
+        return None;
+    }
+    let default_size = read_u32_be(stsz, 4) as u64;
+    let sample_count = read_u32_be(stsz, 8) as usize;
+    let bytes = if default_size != 0 {
+        default_size * sample_count as u64
+    } else {
+        let sizes = stsz.get(12..12 + sample_count.checked_mul(4)?)?;
+        sizes
+            .chunks_exact(4)
+            .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as u64)
+            .sum()
+    };
+
+    if timescale == 0 || duration == 0 || bytes == 0 {
+        return None;
+    }
+    Some(bytes as f64 * 8.0 * timescale as f64 / duration as f64 / 1000.0)
 }
 
 /// Check if file is an MP4/M4A file containing AAC audio.

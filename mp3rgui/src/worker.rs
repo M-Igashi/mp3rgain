@@ -14,7 +14,8 @@ use mp3rgain::apply::{
 };
 use mp3rgain::replaygain::{self, AnalysisMode, ReplayGainResult};
 use mp3rgain::{
-    read_gain_tags_auto, AacAlbumInfo, Channel, GainTagSource, StoredGainTags, TagLayout,
+    read_bitrate, read_gain_tags_auto, AacAlbumInfo, Bitrate, Channel, GainTagSource,
+    StoredGainTags, TagLayout,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -103,10 +104,12 @@ pub enum WorkerEvent {
     },
 
     /// Stored-tag scan completed for `idx`. `view.is_empty()` distinguishes
-    /// "no tags" from "all tags read successfully and present".
+    /// "no tags" from "all tags read successfully and present". The bitrate
+    /// is read alongside so it shows as soon as files are added (issue #408).
     StoredTagsRead {
         idx: usize,
         view: StoredTagsView,
+        bitrate: Option<Bitrate>,
     },
 
     /// Stored tags were deleted from `idx`. The audio is untouched, so the
@@ -849,7 +852,12 @@ pub fn spawn_check_stored_tags(
             run_job_pool(jobs, &cancel_w, move |(idx, path)| {
                 send(&tx, &ctx, WorkerEvent::FileStart { idx });
                 let view = read_stored_tags(&path, layout);
-                send(&tx, &ctx, WorkerEvent::StoredTagsRead { idx, view });
+                let bitrate = read_bitrate(&path);
+                send(
+                    &tx,
+                    &ctx,
+                    WorkerEvent::StoredTagsRead { idx, view, bitrate },
+                );
             });
         }
 

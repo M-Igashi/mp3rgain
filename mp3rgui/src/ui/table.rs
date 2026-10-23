@@ -136,6 +136,8 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
             .column(egui_extras::Column::auto().at_least(80.0)) // Album Gain
             .column(egui_extras::Column::auto().at_least(50.0)) // Clip (Album)
             .column(egui_extras::Column::auto().at_least(90.0)) // Stored RG
+            .column(egui_extras::Column::auto().at_least(70.0)) // Bitrate
+            .column(egui_extras::Column::auto().at_least(60.0)) // CBR/VBR
             .column(egui_extras::Column::remainder()) // Status
             .header(20.0, |mut header| {
                 header.col(|ui| {
@@ -167,6 +169,26 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                         "Existing ReplayGain/undo tags read from the file. \
                          Run Analysis > Check Stored Tags to populate. \
                          Hover a cell for full tag details.",
+                    );
+                });
+                header.col(|ui| {
+                    sort_header(
+                        ui,
+                        app,
+                        "Bitrate",
+                        SortColumn::Bitrate,
+                        "Average bitrate, read when files are added. Click to sort.",
+                    );
+                });
+                header.col(|ui| {
+                    sort_header(
+                        ui,
+                        app,
+                        "CBR/VBR",
+                        SortColumn::BitrateMode,
+                        "MP3 only: CBR when every frame has the same bitrate, VBR otherwise. \
+                         AAC frames vary in size whatever the encoder setting, so M4A rows \
+                         stay empty. Click to sort.",
                     );
                 });
                 header.col(|ui| {
@@ -282,6 +304,14 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                 });
                 row.col(|ui| {
                     render_stored_tags_cell(ui, file.stored_tags.as_ref());
+                });
+                row.col(|ui| {
+                    if let Some(bitrate) = file.bitrate {
+                        ui.label(format!("{:.0} kbps", bitrate.kbps));
+                    }
+                });
+                row.col(|ui| {
+                    ui.label(file.bitrate_mode_label());
                 });
                 row.col(|ui| {
                     let label = ui.label(file.status.label());

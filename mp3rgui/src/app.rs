@@ -4,7 +4,7 @@ use mp3rgain::replaygain::{
 };
 use mp3rgain::{
     apply_gain_to_peak, db_to_steps, read_album_tags, would_clip, AacAlbumInfo, AlbumLabel,
-    AlbumTags, Channel, ReleaseKey, StoredAlbumValues,
+    AlbumTags, Bitrate, BitrateMode, Channel, ReleaseKey, StoredAlbumValues,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -119,6 +119,9 @@ pub struct FileEntry {
     /// Pre-existing ReplayGain / undo tags read from the file, populated by
     /// the "Check Stored Tags" action. `None` = not scanned yet.
     pub stored_tags: Option<StoredTagsView>,
+    /// Average bitrate and CBR/VBR, read with the stored tags (issue #408).
+    /// A gain change leaves both as they were.
+    pub bitrate: Option<Bitrate>,
     /// Gain baked into the file since `measurement` was taken, in dB. Apply
     /// adds what it actually wrote, undo subtracts what it rolled back, and a
     /// fresh measurement resets it to 0 (issues #160, #171, #172).
@@ -233,6 +236,15 @@ impl FileEntry {
         }
     }
 
+    /// The CBR/VBR column's text, empty where the mode is unknown.
+    pub fn bitrate_mode_label(&self) -> &'static str {
+        match self.bitrate.and_then(|b| b.mode) {
+            Some(BitrateMode::Constant) => "CBR",
+            Some(BitrateMode::Variable) => "VBR",
+            None => "",
+        }
+    }
+
     /// Replace the measurement. A fresh measurement describes the file as it
     /// is, so the applied offset restarts at zero.
     fn set_measurement(&mut self, measurement: Option<Measurement>) {
@@ -288,6 +300,8 @@ pub enum SortColumn {
     TrackGain,
     AlbumVolume,
     AlbumGain,
+    Bitrate,
+    BitrateMode,
     Status,
 }
 
@@ -715,6 +729,14 @@ impl Mp3rgainApp {
                     .map(|f| f.status.label().to_lowercase())
                     .collect();
                 order.sort_by(|&a, &b| cmp_str(&keys[a], &keys[b], desc));
+            }
+            SortColumn::Bitrate => {
+                let kbps = |i: usize| self.files[i].bitrate.map(|b| b.kbps);
+                order.sort_by(|&a, &b| cmp_opt_f64(kbps(a), kbps(b), desc));
+            }
+            SortColumn::BitrateMode => {
+                let mode = |i: usize| self.files[i].bitrate_mode_label();
+                order.sort_by(|&a, &b| cmp_str(mode(a), mode(b), desc));
             }
             SortColumn::Volume
             | SortColumn::TrackGain
@@ -1715,13 +1737,14 @@ impl Mp3rgainApp {
                     file.stored_tags = None;
                 }
             }
-            WorkerEvent::StoredTagsRead { idx, view } => {
+            WorkerEvent::StoredTagsRead { idx, view, bitrate } => {
                 let is_import = self.worker_kind() == Some(WorkerKind::ImportScan);
                 if let Some(file) = self.files.get_mut(idx) {
                     if is_import {
                         Self::populate_from_stored_tags(file, &view);
                     }
                     file.stored_tags = Some(view);
+                    file.bitrate = bitrate;
                 }
             }
             WorkerEvent::MaxAmplitudeFound { idx, peak } => {

@@ -129,7 +129,7 @@ See **[docs/migrating-from-mp3gain.md](docs/migrating-from-mp3gain.md)** for the
   <img src="docs/branding/mp3rgui-screenshot-compact.png" alt="mp3rgui showing track and album ReplayGain analysis for a batch of files" width="820">
 </p>
 
-`mp3rgui` covers the CLI's core workflow: track and album analysis and gain (ReplayGain 1.0, 2.0 or EBU R128), a target volume, manual and per-channel gain, undo, stored tag inspection and deletion, and clipping prevention. Drag files or folders onto the window; a progress bar and a Cancel button track the batch. It runs the same apply code as the CLI. Install it from the table above.
+`mp3rgui` covers the CLI's core workflow: track and album analysis and gain (ReplayGain 1.0, 2.0 or EBU R128), a target volume, manual and per-channel gain, undo, stored tag inspection and deletion, each file's bitrate and CBR/VBR, and clipping prevention. Drag files or folders onto the window; a progress bar and a Cancel button track the batch. It runs the same apply code as the CLI. Install it from the table above.
 
 Where it differs from the CLI:
 

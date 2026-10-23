@@ -50,6 +50,7 @@
 //! - [`apply`] - The unified apply pipeline both frontends drive ([`apply_with_options`])
 //! - [`gain`] - Gain adjustment operations and the [`GainOptions`] builder
 //! - [`ape`] - APEv2 tag reading, writing, and management
+//! - [`bitrate`] - Average bitrate and CBR/VBR of a file, for display
 //! - [`id3v2`] - ReplayGain and undo values in ID3v2 TXXX frames
 //! - [`replaygain`] - ReplayGain loudness analysis
 //! - [`bs1770`] - ITU-R BS.1770 loudness engine for the RG2/R128 modes (feature-gated)
@@ -81,6 +82,7 @@ pub mod albummeta;
 pub mod analysis;
 pub mod ape;
 pub mod apply;
+pub mod bitrate;
 #[cfg(feature = "replaygain")]
 pub mod bs1770;
 pub mod error;
@@ -105,6 +107,7 @@ pub use apply::{
     apply_with_options, predict_apply, write_album_minmax, write_replaygain_tags_only,
     AacAlbumInfo, ApplyOptions, ApplyReport, ClippingDetection, TagsOnlyOptions,
 };
+pub use bitrate::{read_bitrate, Bitrate, BitrateMode};
 pub use error::{Error, Result};
 pub use gain::{
     apply_gain, apply_gain_db, apply_gain_to_peak, db_to_linear, db_to_steps, peak_to_headroom_db,
