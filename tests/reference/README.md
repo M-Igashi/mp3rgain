@@ -16,6 +16,8 @@ broadband signals (pink noise). The hypothesis was that this gap is a
 To prove it, hold the PCM constant and vary only the analysis: feed the
 identical samples into mp3rgain's analyzer and into the reference C, and compare.
 
+The decoder difference turned out to be gapless trimming. Symphonia trims the encoder delay and padding of a LAME-encoded MP3, which mp3gain keeps by turning mpg123's gapless mode off, so every window was shifted by about 1100 samples. Since #430 the RG1 analysis decodes untrimmed, and on 118 real MP3s every track and album gain matches mp3gain's.
+
 ## What
 
 - `gain_analysis.c` / `gain_analysis.h` — vendored from

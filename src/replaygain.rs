@@ -34,6 +34,8 @@ use symphonia::core::formats::{FormatOptions, SeekMode, SeekTo};
 use symphonia::core::io::{MediaSource, MediaSourceStream};
 #[cfg(feature = "replaygain")]
 use symphonia::core::meta::MetadataOptions;
+#[cfg(feature = "replaygain")]
+use symphonia::core::packet::Packet;
 
 /// ReplayGain reference level in dB SPL
 /// Original mp3gain uses 89 dB (ReplayGain 1.0)
@@ -1466,6 +1468,10 @@ fn analyze_track_decoded(
                 if packet.track_id != track_id {
                     continue;
                 }
+                let packet = match track_analyzer {
+                    TrackAnalyzer::Rg1 { .. } => untrimmed(packet),
+                    TrackAnalyzer::Bs1770 { .. } => packet,
+                };
 
                 let decoded = match decoder.decode(&packet) {
                     Ok(d) => d,
@@ -1629,6 +1635,22 @@ pub fn analyze_track_with_progress(
         AnalysisMode::default(),
         Some(on_progress),
     )
+}
+
+/// `packet` with its gapless trims cleared, so the decoder returns every sample
+/// its frame holds.
+///
+/// symphonia always trims the encoder delay and padding a LAME tag declares,
+/// about 1100 samples at the start of a LAME-encoded MP3. mp3gain turns
+/// mpg123's gapless mode off "so that mp3gain and mpg123 agree on sample
+/// offsets", so its 50 ms windows start at the first decoded sample. The RG1
+/// analysis and `-x` follow mp3gain. The BS.1770 modes keep the trimmed
+/// signal, the one a listener hears (issue #430).
+#[cfg(feature = "replaygain")]
+fn untrimmed(mut packet: Packet) -> Packet {
+    packet.trim_start = symphonia::core::units::Duration::ZERO;
+    packet.trim_end = symphonia::core::units::Duration::ZERO;
+    packet
 }
 
 /// Scale factor to convert normalized float samples to 16-bit integer range.
@@ -2847,7 +2869,7 @@ fn find_peak_amplitude_from_source(
             continue;
         }
 
-        let decoded = match decoder.decode(&packet) {
+        let decoded = match decoder.decode(&untrimmed(packet)) {
             Ok(d) => d,
             Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
             Err(e) => return Err(Error::Decode(Box::new(e))),
@@ -3231,8 +3253,8 @@ mod tests {
     // Issue #201: cross-check the ReplayGain *analysis* against the reference C
     // `gain_analysis.c` by feeding both the identical PCM. The decoder
     // (symphonia) is deliberately kept out of the loop, so any difference here
-    // is the analysis and nothing else — isolating it from the ~0.05 dB
-    // decoder-vs-decoder gap seen end-to-end against mp3gain.
+    // is the analysis and nothing else. End to end, the gap to mp3gain was
+    // the decoder's gapless trimming, which the RG1 path undoes (#430).
     // =========================================================================
 
     /// `GetTitleGain()` from the reference harness in `tests/reference/` on
@@ -3573,5 +3595,24 @@ mod tests {
 
         let _ = std::fs::remove_file(short);
         let _ = std::fs::remove_file(long);
+    }
+
+    /// Issue #430: a LAME-encoded MP3 is analyzed with its encoder delay and
+    /// padding, as mp3gain's mpg123 decodes it. `test_lame_gapless.mp3` is
+    /// 20 ms of sine: trimmed, only its 882 real samples remain, short of one
+    /// 50 ms window; untrimmed it is two frames, which mp3gain 1.6.2 reads
+    /// as +10.83 dB, 7 steps. `-x` measures the same samples.
+    #[cfg(feature = "replaygain")]
+    #[test]
+    fn lame_mp3_is_analyzed_untrimmed_like_mp3gain() {
+        let path = Path::new("tests/fixtures/test_lame_gapless.mp3");
+        let result = analyze_track(path).unwrap();
+        assert_eq!(result.gain_steps(), 7);
+        assert!(
+            (result.gain_db() - 10.83).abs() < 0.005,
+            "gain {} dB",
+            result.gain_db()
+        );
+        assert_eq!(find_peak_amplitude(path).unwrap().peak(), result.peak());
     }
 }

@@ -252,7 +252,7 @@ Tests run automatically in CI on every code change. See the latest workflow run 
 
 ### Q: Why might ReplayGain values differ slightly?
 
-ReplayGain analysis requires decoding the MP3 to PCM audio. mp3gain decodes with mpg123 (the system libmpg123, or the mpglib copy it bundles), while mp3rgain uses the Symphonia library. Minor floating-point differences in audio decoding can result in slightly different loudness measurements (typically <0.1 dB, which is the tolerance CI allows).
+ReplayGain analysis requires decoding the MP3 to PCM audio. mp3gain decodes with mpg123 (the system libmpg123, or the mpglib copy it bundles), while mp3rgain uses the Symphonia library. For ReplayGain 1.0 mp3rgain decodes the way mp3gain does, keeping the encoder delay and padding of a LAME-encoded MP3 that Symphonia would otherwise trim ([#430](https://github.com/M-Igashi/mp3rgain/issues/430)). On 118 real MP3s every track and album gain then matches mp3gain's to the 0.01 dB it prints, and the peak (Max Amplitude) to about 0.02 on the 16-bit scale, since mp3gain keeps it in single precision. Before that fix the trimming shifted every analysis window and moved some gains by up to 1.3 dB. CI still allows 0.1 dB, for decoders built on other platforms.
 
 **The gain adjustment mechanism itself is identical**; only the analysis phase may differ.
 
