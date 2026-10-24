@@ -1044,7 +1044,7 @@ struct ReplayGainAnalyzer {
 impl ReplayGainAnalyzer {
     fn new(sample_rate: u32) -> Self {
         // 50ms window
-        let window_samples = (sample_rate as usize * 50) / 1000;
+        let window_samples = (sample_rate as usize * 50).div_ceil(1000);
         Self {
             lsum: 0.0,
             rsum: 0.0,
