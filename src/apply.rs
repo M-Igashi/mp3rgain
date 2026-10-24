@@ -390,12 +390,20 @@ fn check_clipping(
     // unity. The headroom branch below keeps its `steps <= 0` early-out —
     // there, only positive gain can introduce clipping.
     if let Some(track) = opts.track_result.as_ref() {
+        // A track gain is judged as mp3gain's track path judges it (issue
+        // #418). An album gain keeps the plain peak, as mp3gain's album path
+        // does. The warning reports the plain peak either way.
+        let clip_peak = if opts.album_info.is_some() {
+            track.peak()
+        } else {
+            track.track_clip_peak()
+        };
         let new_peak = apply_gain_to_peak(track.peak(), steps_to_db(steps));
-        if new_peak > 1.0 {
+        if apply_gain_to_peak(clip_peak, steps_to_db(steps)) > 1.0 {
             if opts.prevent_clipping {
-                // `new_peak > 1.0` implies `peak > 0`, so headroom is
+                // Clipping implies `clip_peak > 0`, so headroom is
                 // well-defined here.
-                let max_safe_db = peak_to_headroom_db(track.peak()).unwrap_or(0.0);
+                let max_safe_db = peak_to_headroom_db(clip_peak).unwrap_or(0.0);
                 // Floor (not round) so the cap never exceeds true headroom —
                 // round() would, e.g., turn 0.8 dB of headroom into 1 step
                 // (1.5 dB) and re-introduce clipping. Negative results are
@@ -1175,7 +1183,7 @@ pub fn write_album_minmax<'a>(files: &[(&'a Path, Option<(u8, u8)>)]) -> Vec<(&'
 #[cfg(feature = "replaygain")]
 mod tests {
     use super::*;
-    use crate::replaygain::AudioFileType;
+    use crate::replaygain::{AnalysisMode, AudioFileType};
 
     fn track_with_peak(peak: f64) -> ReplayGainResult {
         ReplayGainResult::new(
@@ -1318,6 +1326,63 @@ mod tests {
         assert_eq!(steps, 0);
         assert!(!prevented);
         assert!(detected.is_none());
+    }
+
+    /// Issue #418: mp3gain's track `-k` measures a fresh analysis against
+    /// 32767 on the 32768 scale, one step lower than the plain peak allows
+    /// when it sits on a boundary. A result rebuilt from stored tags and an
+    /// album gain keep the plain peak, as mp3gain's do.
+    #[test]
+    fn track_clip_cap_follows_mp3gain_16_bit_limit() {
+        let cap = |opts: &ApplyOptions| {
+            check_clipping(
+                Path::new("unused"),
+                opts,
+                AudioFileType::Mp3,
+                &mut None,
+                &mut None,
+            )
+            .unwrap()
+            .0
+        };
+        // (peak as a 16-bit sample, mp3gain's track cap, its plain-peak cap)
+        for (pcm, track, plain) in [
+            (32768.0, -1, 0),
+            (27554.0, 0, 1),
+            (23170.0, 1, 2),
+            (16384.0, 3, 4),
+            (40000.0, -2, -2),
+        ] {
+            let peak = pcm / 32768.0;
+            assert_eq!(cap(&opts_with_track(10, peak, true)), track, "{pcm}");
+
+            let mut stored = opts_with_track(10, peak, true);
+            stored.track_result = Some(ReplayGainResult::from_stored_tags(
+                0.0,
+                peak,
+                AudioFileType::Mp3,
+                AnalysisMode::Rg1,
+            ));
+            assert_eq!(cap(&stored), plain, "{pcm} from stored tags");
+
+            let mut album = opts_with_track(10, peak, true);
+            album.album_info = Some(AacAlbumInfo {
+                album_gain_db: 0.0,
+                album_peak: peak,
+            });
+            assert_eq!(cap(&album), plain, "{pcm} as an album");
+
+            let mut lufs = opts_with_track(10, peak, true);
+            lufs.track_result = Some(ReplayGainResult::new(
+                0.0,
+                0.0,
+                peak,
+                44_100,
+                AudioFileType::Mp3,
+                AnalysisMode::Rg2,
+            ));
+            assert_eq!(cap(&lufs), plain, "{pcm} in --rg2");
+        }
     }
 
     /// Sweep clipping peaks (> 1.0). Cap must always produce a non-clipping

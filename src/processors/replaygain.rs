@@ -120,7 +120,7 @@ fn process_track_gain_into(
                 }
             }
 
-            if apply_is_noop(opts, modified_steps, result.peak()) {
+            if apply_is_noop(opts, modified_steps, result.track_clip_peak()) {
                 if opts.text_output() {
                     writeln!(out, "  {} {} (no adjustment needed)", ".".cyan(), filename)?;
                 }
@@ -147,13 +147,14 @@ fn process_track_gain_into(
 ///     #376), so an already-on-target track gets its REPLAYGAIN_* tags
 ///     (re)written rather than skipped;
 ///   - `-k` must attenuate a track that already sits at the reference
-///     loudness yet already clips (`peak > 1.0`);
+///     loudness yet already clips (a clipping peak above 1.0, see
+///     [`ReplayGainResult::track_clip_peak`]);
 ///   - `--tags-only` always has a tag to write (issue #308).
 ///
 /// Album mode passes the loudest member peak.
-pub fn apply_is_noop(opts: &Options, steps: i32, max_peak: f64) -> bool {
+pub fn apply_is_noop(opts: &Options, steps: i32, clip_peak: f64) -> bool {
     let writes_rg_tags = opts.stored_tag_mode != StoredTagMode::Skip;
-    let clip_prevention_applies = opts.prevent_clipping && max_peak > 1.0;
+    let clip_prevention_applies = opts.prevent_clipping && clip_peak > 1.0;
     !opts.tags_only && steps == 0 && !writes_rg_tags && !clip_prevention_applies
 }
 

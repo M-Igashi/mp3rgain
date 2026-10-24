@@ -292,6 +292,23 @@ impl ReplayGainResult {
         self.analysis_mode.target_lufs().map(|_| self.loudness_db)
     }
 
+    /// [`peak`](Self::peak) as mp3gain's track gain judges clipping, so that
+    /// above 1.0 a track gain clips and `-k` caps it (issue #418).
+    ///
+    /// mp3gain measures a fresh analysis against the largest 16-bit sample,
+    /// 32767, while the peak sits on the 32768 scale, so an RG1 analysis reads
+    /// 32768/32767 higher here. A result rebuilt from stored tags (sample rate
+    /// 0) reads its plain peak, because mp3gain rebuilds that one on the 32767
+    /// scale and the two cancel. The BS.1770 modes have no 16-bit sample to
+    /// clip, and album gain is judged on the plain peak too.
+    pub fn track_clip_peak(&self) -> f64 {
+        if self.analysis_mode == AnalysisMode::Rg1 && self.sample_rate != 0 {
+            self.peak * 32768.0 / 32767.0
+        } else {
+            self.peak
+        }
+    }
+
     /// Convert gain in dB to MP3 gain steps (1.5 dB per step)
     pub fn gain_steps(&self) -> i32 {
         crate::gain::db_to_steps(self.gain_db)
