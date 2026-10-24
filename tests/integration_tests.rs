@@ -198,6 +198,24 @@ fn test_apply_gain_saturates_at_min() {
     cleanup(&path);
 }
 
+/// Issue #417: frames whose global_gain is 0 keep it through a positive
+/// saturating apply, as in mp3gain, so a silent frame is not turned up.
+#[test]
+fn test_apply_gain_leaves_zero_gain_frames_alone() {
+    let path = copy_test_file("test_joint_stereo.mp3");
+
+    // 110..210 lowered by 150: the quietest frames clamp to 0.
+    apply_gain(&path, -150).unwrap();
+    let before = analyze(&path).unwrap();
+    assert_eq!((before.min_gain(), before.max_gain()), (0, 60));
+
+    apply_gain(&path, 5).unwrap();
+    let after = analyze(&path).unwrap();
+    assert_eq!((after.min_gain(), after.max_gain()), (0, 65));
+
+    cleanup(&path);
+}
+
 /// Issue #207: a saturating apply that clamps global_gain values at the
 /// 0/255 boundary must surface a saturation count so the CLI can warn that
 /// the change is no longer losslessly reversible.

@@ -417,7 +417,9 @@ never prompts.
 .TP
 .B \-w
 Wrap gain values around instead of clamping when they exceed the
-valid range (0\-255). Disables the clipping check.
+valid range (0\-255). Disables the clipping check. Without this option a
+.I global_gain
+of 0, which encoders write for silent frames, is never changed, as in mp3gain.
 .TP
 .B \-t
 Use a temporary file for writing. Accepted for compatibility and has no effect:

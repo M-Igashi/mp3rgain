@@ -658,9 +658,10 @@ pub fn parse_rg_peak(s: &str) -> Option<f64> {
 /// mp3gain shifts these after `-g` (issue #377): the gains by the applied dB,
 /// the peaks by the matching linear factor 2^(steps/4), and the album
 /// `global_gain` range by the steps, clamped to 0..=255 like the frames
-/// themselves. `REPLAYGAIN_ALGORITHM`, `REPLAYGAIN_REFERENCE_LOUDNESS` and
-/// every other item stay as they are. Keys match case-insensitively, which
-/// also covers the lowercase MP4 and ID3v2 spellings.
+/// themselves, which also leave a 0 where it is (issue #417).
+/// `REPLAYGAIN_ALGORITHM`, `REPLAYGAIN_REFERENCE_LOUDNESS` and every other
+/// item stay as they are. Keys match case-insensitively, which also covers
+/// the lowercase MP4 and ID3v2 spellings.
 ///
 /// The shift stays arithmetic when frames saturate, as in mp3gain, where the
 /// `-r` residual re-analyzes: nothing records how another tool measured the
@@ -677,8 +678,12 @@ pub(crate) fn shift_stored_value(key: &str, value: &str, steps: i32) -> Option<S
     } else if is(TAG_MP3GAIN_ALBUM_MINMAX) {
         let (min, max) = value.split_once(',')?;
         let shift = |v: &str| {
-            let v = i32::from(v.trim().parse::<u8>().ok()?);
-            Some(v.saturating_add(steps).clamp(0, 255) as u8)
+            let v = v.trim().parse::<u8>().ok()?;
+            Some(crate::frame::adjust_gain_value(
+                v,
+                steps,
+                crate::frame::GainMode::Saturating,
+            ))
         };
         Some(format_minmax(shift(min)?, shift(max)?))
     } else {
@@ -948,6 +953,8 @@ mod tests {
             // The album range clamps like global_gain itself.
             (TAG_MP3GAIN_ALBUM_MINMAX, "148,248", 20, "168,255"),
             (TAG_MP3GAIN_ALBUM_MINMAX, "3,100", -5, "0,95"),
+            // A 0 stays 0, as the frames do (issue #417).
+            (TAG_MP3GAIN_ALBUM_MINMAX, "0,100", 5, "0,105"),
         ];
         for (key, value, steps, expected) in cases {
             assert_eq!(

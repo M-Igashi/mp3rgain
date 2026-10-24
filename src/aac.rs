@@ -1328,9 +1328,6 @@ pub(crate) fn apply_aac_gain_to_data(
     let mut modified = 0usize;
     for loc in &analysis.gain_locations {
         let current = read_aac_gain_at(data, loc);
-        if current == 0 {
-            continue;
-        }
         let new_value = adjust_aac_gain_value(current, gain_steps);
         if new_value != current {
             write_aac_gain_at(data, loc, new_value);
@@ -1830,7 +1827,7 @@ mod tests {
         assert_eq!(adjust_aac_gain_value(100, -10), 90);
         assert_eq!(adjust_aac_gain_value(250, 10), 255);
         assert_eq!(adjust_aac_gain_value(5, -10), 0);
-        assert_eq!(adjust_aac_gain_value(0, 10), 10);
+        assert_eq!(adjust_aac_gain_value(0, 10), 0); // silence stays silent
         assert_eq!(adjust_aac_gain_value(128, 0), 128);
     }
 

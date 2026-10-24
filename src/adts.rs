@@ -349,15 +349,11 @@ fn post_apply_range(analysis: &AacAnalysis, gain_steps: i32) -> Option<(u8, u8)>
     let mut min = u8::MAX;
     let mut max = u8::MIN;
     for loc in analysis.gain_locations() {
-        let value = if loc.original_gain() == 0 {
-            0
-        } else {
-            crate::frame::adjust_gain_value(
-                loc.original_gain(),
-                gain_steps,
-                crate::frame::GainMode::Saturating,
-            )
-        };
+        let value = crate::frame::adjust_gain_value(
+            loc.original_gain(),
+            gain_steps,
+            crate::frame::GainMode::Saturating,
+        );
         min = min.min(value);
         max = max.max(value);
     }

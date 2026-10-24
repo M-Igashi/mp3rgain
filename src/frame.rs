@@ -509,8 +509,12 @@ impl SaturationStats {
     }
 
     /// Record one saturating adjustment of `current` by `steps`, using the
-    /// same `[-255, 255]` step clamp as [`adjust_gain_value`].
+    /// same `[-255, 255]` step clamp as [`adjust_gain_value`]. A 0 is left
+    /// as it is in both directions, so undo restores it and it is not counted.
     fn tally(&mut self, current: u8, steps: i32) {
+        if current == 0 {
+            return;
+        }
         let target = current as i32 + steps.clamp(-255, 255);
         if target > 255 {
             self.saturated_high += 1;
@@ -524,8 +528,14 @@ impl SaturationStats {
 ///
 /// `steps` is normalized first (clamp for saturating, modulo for wrapping)
 /// so that extreme values like `i32::MIN` cannot overflow the arithmetic.
+///
+/// Saturating mode leaves a value of 0 unchanged, whatever the sign of
+/// `steps`, as mp3gain does: encoders store silent frames with a global_gain
+/// of 0, and some leave audio data behind it that a raised gain would make
+/// audible (issue #417). Wrapping mode moves it like any other value.
 pub(crate) fn adjust_gain_value(current: u8, steps: i32, mode: GainMode) -> u8 {
     match mode {
+        GainMode::Saturating if current == 0 => 0,
         GainMode::Saturating => {
             let steps = steps.clamp(-255, 255);
             if steps > 0 {
@@ -680,8 +690,22 @@ mod tests {
         s.tally(100, 10); //  110 -> in range
         s.tally(255, 0); //   255 -> exactly at ceiling, not over
         s.tally(0, 0); //     0   -> exactly at floor, not under
+        s.tally(0, -50); //   0   -> left alone, not clamped
         assert_eq!(s.saturated_high, 2);
         assert_eq!(s.saturated_low, 1);
+    }
+
+    /// Issue #417: a global_gain of 0 stays 0 in saturating mode, as in
+    /// mp3gain, and wraps like any other value under `-w`.
+    #[test]
+    fn test_zero_gain_is_left_alone_unless_wrapping() {
+        use GainMode::{Saturating, Wrapping};
+        assert_eq!(adjust_gain_value(0, 5, Saturating), 0);
+        assert_eq!(adjust_gain_value(0, -5, Saturating), 0);
+        assert_eq!(adjust_gain_value(1, 5, Saturating), 6);
+        assert_eq!(adjust_gain_value(3, -5, Saturating), 0);
+        assert_eq!(adjust_gain_value(0, 5, Wrapping), 5);
+        assert_eq!(adjust_gain_value(0, -1, Wrapping), 255);
     }
 
     #[test]
