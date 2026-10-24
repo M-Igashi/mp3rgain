@@ -23,9 +23,9 @@ use std::sync::Arc;
 #[cfg(feature = "replaygain")]
 use symphonia::core::audio::{Audio, GenericAudioBufferRef};
 #[cfg(feature = "replaygain")]
-use symphonia::core::codecs::audio::well_known::CODEC_ID_AAC;
+use symphonia::core::codecs::audio::well_known::{CODEC_ID_AAC, CODEC_ID_MP3};
 #[cfg(feature = "replaygain")]
-use symphonia::core::codecs::audio::{AudioDecoderOptions, CODEC_ID_NULL_AUDIO};
+use symphonia::core::codecs::audio::{AudioCodecId, AudioDecoderOptions, CODEC_ID_NULL_AUDIO};
 #[cfg(feature = "replaygain")]
 use symphonia::core::formats::probe::Hint;
 #[cfg(feature = "replaygain")]
@@ -1383,6 +1383,7 @@ fn analyze_track_decoded(
         .as_ref()
         .map(|c| c.count())
         .unwrap_or(2);
+    let stereo_scale = rg1_stereo_scale(audio_params.codec);
 
     // Create decoder
     let mut decoder = symphonia::default::get_codecs()
@@ -1454,7 +1455,7 @@ fn analyze_track_decoded(
                 // Process audio buffer
                 match track_analyzer {
                     TrackAnalyzer::Rg1 { filters, analyzer } => {
-                        process_audio_buffer(&decoded, filters, analyzer, &mut peak)
+                        process_audio_buffer(&decoded, filters, analyzer, stereo_scale, &mut peak)
                     }
                     TrackAnalyzer::Bs1770 { analyzer } => {
                         process_audio_buffer_bs1770(&decoded, analyzer, &mut peak)
@@ -1625,14 +1626,38 @@ const SAMPLE_SCALE_16BIT: f64 = 32768.0;
 /// Scale factor for 32-bit integer samples (2^31).
 const SAMPLE_SCALE_32BIT: f64 = 2147483648.0;
 
+/// The 16-bit scale RG1 analysis applies to stereo samples, which is not
+/// always the mono one (issue #415). mp3gain 1.6.2 multiplies decoded MP3 by
+/// 32767 when it is stereo and by 32768 when it is mono (`convert_decout`),
+/// while aacgain multiplies AAC by 32768 either way (`NEXT_SAMPLE`). Each
+/// codec follows the tool it replaces; the peak is 32768-based in both.
+#[cfg(feature = "replaygain")]
+fn rg1_stereo_scale(codec: AudioCodecId) -> f64 {
+    if codec == CODEC_ID_MP3 {
+        32767.0
+    } else {
+        SAMPLE_SCALE_16BIT
+    }
+}
+
 /// Process an audio buffer and feed filtered samples to the analyzer
 #[cfg(feature = "replaygain")]
 fn process_audio_buffer(
     buffer: &GenericAudioBufferRef,
     filters: &mut [EqualLoudnessFilter],
     analyzer: &mut ReplayGainAnalyzer,
+    stereo_scale: f64,
     peak: &mut f64,
 ) {
+    // Every product below is exact in f64 (a sample of at most 32 significant
+    // bits times a scale of at most 15), so no platform rounds it differently.
+    let scale = |stereo: bool| {
+        if stereo {
+            stereo_scale
+        } else {
+            SAMPLE_SCALE_16BIT
+        }
+    };
     // Hoist `plane()` lookups outside the per-sample loop — calling
     // `buf.plane(N).unwrap()` per frame goes through symphonia's Option
     // unwrap on every sample (millions per file).
@@ -1642,16 +1667,17 @@ fn process_audio_buffer(
             let frames = buf.frames();
             let left_plane = buf.plane(0).unwrap();
             let right_plane = (channels >= 2).then(|| buf.plane(1).unwrap());
+            let scale = scale(right_plane.is_some());
 
             for frame in 0..frames {
                 let left_norm = left_plane[frame] as f64;
                 *peak = peak.max(left_norm.abs());
-                let left_filtered = filters[0].process(left_norm * SAMPLE_SCALE_16BIT);
+                let left_filtered = filters[0].process(left_norm * scale);
 
                 if let Some(right_plane) = right_plane {
                     let right_norm = right_plane[frame] as f64;
                     *peak = peak.max(right_norm.abs());
-                    let right_filtered = filters[1].process(right_norm * SAMPLE_SCALE_16BIT);
+                    let right_filtered = filters[1].process(right_norm * scale);
                     analyzer.add_sample(left_filtered, right_filtered);
                 } else {
                     analyzer.add_mono_sample(left_filtered);
@@ -1663,17 +1689,18 @@ fn process_audio_buffer(
             let frames = buf.frames();
             let left_plane = buf.plane(0).unwrap();
             let right_plane = (channels >= 2).then(|| buf.plane(1).unwrap());
+            // S16 samples are already on the 32768 scale.
+            let scale = scale(right_plane.is_some()) / SAMPLE_SCALE_16BIT;
 
             for frame in 0..frames {
-                // S16 samples are already in the correct range for ReplayGain algorithm
                 let left = left_plane[frame] as f64;
                 *peak = peak.max((left / SAMPLE_SCALE_16BIT).abs());
-                let left_filtered = filters[0].process(left);
+                let left_filtered = filters[0].process(left * scale);
 
                 if let Some(right_plane) = right_plane {
                     let right = right_plane[frame] as f64;
                     *peak = peak.max((right / SAMPLE_SCALE_16BIT).abs());
-                    let right_filtered = filters[1].process(right);
+                    let right_filtered = filters[1].process(right * scale);
                     analyzer.add_sample(left_filtered, right_filtered);
                 } else {
                     analyzer.add_mono_sample(left_filtered);
@@ -1683,20 +1710,20 @@ fn process_audio_buffer(
         GenericAudioBufferRef::S32(buf) => {
             let channels = buf.num_planes();
             let frames = buf.frames();
-            // Scale S32 to 16-bit range: divide by 2^16 to go from 32-bit to 16-bit range
-            let scale = SAMPLE_SCALE_16BIT / SAMPLE_SCALE_32BIT;
             let left_plane = buf.plane(0).unwrap();
             let right_plane = (channels >= 2).then(|| buf.plane(1).unwrap());
+            // From the 2^31 scale down to the 16-bit one.
+            let scale = scale(right_plane.is_some()) / SAMPLE_SCALE_32BIT;
 
             for frame in 0..frames {
-                let left = left_plane[frame] as f64 * scale;
-                *peak = peak.max((left / SAMPLE_SCALE_16BIT).abs());
-                let left_filtered = filters[0].process(left);
+                let left = left_plane[frame] as f64;
+                *peak = peak.max((left / SAMPLE_SCALE_32BIT).abs());
+                let left_filtered = filters[0].process(left * scale);
 
                 if let Some(right_plane) = right_plane {
-                    let right = right_plane[frame] as f64 * scale;
-                    *peak = peak.max((right / SAMPLE_SCALE_16BIT).abs());
-                    let right_filtered = filters[1].process(right);
+                    let right = right_plane[frame] as f64;
+                    *peak = peak.max((right / SAMPLE_SCALE_32BIT).abs());
+                    let right_filtered = filters[1].process(right * scale);
                     analyzer.add_sample(left_filtered, right_filtered);
                 } else {
                     analyzer.add_mono_sample(left_filtered);
@@ -3276,14 +3303,15 @@ mod tests {
         let mut buf = Vec::with_capacity(8 + left.len() * 16);
         buf.extend_from_slice(&sample_rate.to_le_bytes());
         buf.extend_from_slice(&(left.len() as u32).to_le_bytes());
-        // Write the exact values the filter sees: normalized × 16-bit scale.
-        // The reference harness feeds these straight into AnalyzeSamples, so
-        // both implementations filter identical numbers.
+        // Write the exact values the filter sees: normalized × the stereo MP3
+        // scale. The reference harness feeds these straight into
+        // AnalyzeSamples, so both implementations filter identical numbers.
+        let scale = rg1_stereo_scale(CODEC_ID_MP3);
         for &x in &left {
-            buf.extend_from_slice(&(x * SAMPLE_SCALE_16BIT).to_le_bytes());
+            buf.extend_from_slice(&(x * scale).to_le_bytes());
         }
         for &x in &right {
-            buf.extend_from_slice(&(x * SAMPLE_SCALE_16BIT).to_le_bytes());
+            buf.extend_from_slice(&(x * scale).to_le_bytes());
         }
         std::fs::write(&path, &buf).expect("write PCM dump");
         eprintln!(
@@ -3319,11 +3347,13 @@ mod tests {
             let mut filter_r = EqualLoudnessFilter::new(sr).unwrap();
             let mut analyzer = ReplayGainAnalyzer::new(sr);
 
-            // Identical to process_audio_buffer's F32 path: normalized samples are
-            // scaled to 16-bit range before filtering, then squared per window.
+            // Identical to process_audio_buffer's F32 path for a stereo MP3:
+            // normalized samples are scaled to 16-bit range before filtering,
+            // then squared per window.
+            let scale = rg1_stereo_scale(CODEC_ID_MP3);
             for (&l, &r) in left.iter().zip(right.iter()) {
-                let lf = filter_l.process(l * SAMPLE_SCALE_16BIT);
-                let rf = filter_r.process(r * SAMPLE_SCALE_16BIT);
+                let lf = filter_l.process(l * scale);
+                let rf = filter_r.process(r * scale);
                 analyzer.add_sample(lf, rf);
             }
             analyzer.finish_window(); // no-op: golden_pcm() is a window multiple
@@ -3334,6 +3364,111 @@ mod tests {
                 delta < 1e-6,
                 "ReplayGain analysis at {sr} Hz diverged from reference gain_analysis.c: \
                  mp3rgain {gain:.12} dB vs reference {golden:.12} dB (Δ {delta:.3e} dB)"
+            );
+        }
+    }
+
+    /// Issue #415: a stereo MP3 reaches the filters on mp3gain's 32767 scale,
+    /// a stereo AAC on aacgain's 32768 and mono on 32768, from whichever
+    /// sample format the decoder produced. The peak is 32768-based throughout.
+    #[cfg(feature = "replaygain")]
+    #[test]
+    fn rg1_scales_stereo_mp3_by_32767() {
+        use symphonia::core::audio::{layouts, AudioBuffer, AudioSpec, Channels};
+
+        const RATE: u32 = 44_100;
+        let pcm: [i16; 6] = [12_345, -32_768, 32_767, -1, 0, 20_000];
+
+        fn buffer<S: symphonia::core::audio::sample::Sample>(
+            channels: Channels,
+            sample: impl Fn(i16) -> S,
+            pcm: &[i16],
+        ) -> AudioBuffer<S> {
+            let mut buf = AudioBuffer::new(AudioSpec::new(RATE, channels), pcm.len());
+            buf.render_with(None, |i, out| {
+                for (ch, plane) in out.iter_mut().enumerate() {
+                    // Different but related content per channel.
+                    plane[i] = sample(if ch == 0 { pcm[i] } else { pcm[i] / 2 });
+                }
+                Ok(())
+            })
+            .unwrap();
+            buf
+        }
+
+        // (lsum, rsum, peak) after one pass, with fewer samples than a window.
+        let run = |buf: GenericAudioBufferRef, codec: AudioCodecId| {
+            let mut filters = vec![
+                EqualLoudnessFilter::new(RATE).unwrap(),
+                EqualLoudnessFilter::new(RATE).unwrap(),
+            ];
+            let mut analyzer = ReplayGainAnalyzer::new(RATE);
+            let mut peak = 0.0;
+            process_audio_buffer(
+                &buf,
+                &mut filters,
+                &mut analyzer,
+                rg1_stereo_scale(codec),
+                &mut peak,
+            );
+            assert_eq!(analyzer.totsamp, pcm.len());
+            (analyzer.lsum, analyzer.rsum, peak)
+        };
+        let by_hand = |scale: f64, stereo: bool| {
+            let mut filters = [
+                EqualLoudnessFilter::new(RATE).unwrap(),
+                EqualLoudnessFilter::new(RATE).unwrap(),
+            ];
+            let (mut lsum, mut rsum) = (0.0, 0.0);
+            for &s in &pcm {
+                let l = filters[0].process(s as f64 / SAMPLE_SCALE_16BIT * scale);
+                let r = if stereo {
+                    filters[1].process((s / 2) as f64 / SAMPLE_SCALE_16BIT * scale)
+                } else {
+                    l
+                };
+                lsum += l * l;
+                rsum += r * r;
+            }
+            (lsum, rsum, 1.0)
+        };
+
+        let stereo = layouts::CHANNEL_LAYOUT_STEREO;
+        let mono = layouts::CHANNEL_LAYOUT_MONO;
+        let f32_of = |s: i16| s as f32 / 32768.0;
+        let s32_of = |s: i16| (s as i32) << 16;
+        for codec in [CODEC_ID_MP3, CODEC_ID_AAC] {
+            let scale = if codec == CODEC_ID_MP3 {
+                32767.0
+            } else {
+                32768.0
+            };
+            let expected = by_hand(scale, true);
+            assert_eq!(
+                run((&buffer(stereo.clone(), f32_of, &pcm)).into(), codec),
+                expected
+            );
+            assert_eq!(
+                run((&buffer(stereo.clone(), |s| s, &pcm)).into(), codec),
+                expected
+            );
+            assert_eq!(
+                run((&buffer(stereo.clone(), s32_of, &pcm)).into(), codec),
+                expected
+            );
+
+            let expected = by_hand(SAMPLE_SCALE_16BIT, false);
+            assert_eq!(
+                run((&buffer(mono.clone(), f32_of, &pcm)).into(), codec),
+                expected
+            );
+            assert_eq!(
+                run((&buffer(mono.clone(), |s| s, &pcm)).into(), codec),
+                expected
+            );
+            assert_eq!(
+                run((&buffer(mono.clone(), s32_of, &pcm)).into(), codec),
+                expected
             );
         }
     }
