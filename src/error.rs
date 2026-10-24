@@ -12,7 +12,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// [`is_unsupported_format`](Self::is_unsupported_format) separates "this
 /// format is not adjustable" from a genuine failure, and
 /// [`refine_format`](Self::refine_format) is what turns the former into
-/// [`UnsupportedFormat`](Self::UnsupportedFormat).
+/// [`UnsupportedFormat`](Self::UnsupportedFormat). An album analysis also
+/// leaves out what [`drops_from_album`](Self::drops_from_album) names and goes
+/// on with the other files.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -126,6 +128,12 @@ pub enum Error {
     /// container declared no rate at all.
     #[error("Unsupported sample rate: {0} Hz")]
     UnsupportedSampleRate(u32),
+
+    /// Not one 50 ms ReplayGain 1.0 analysis window filled, so there is no
+    /// loudness to measure. mp3gain refuses such a file the same way rather
+    /// than measure a fraction of a window (issue #423).
+    #[error("Not enough samples to do analysis (less than 50 ms of audio)")]
+    NotEnoughSamples,
 
     /// The operation needs a Cargo feature this build does not have.
     #[error("The '{feature}' feature is not available. Rebuild with --features {feature_flag}.")]
@@ -261,6 +269,17 @@ impl Error {
     /// file rather than a failure that sets the exit code.
     pub fn is_unsupported_format(&self) -> bool {
         matches!(self, Self::UnsupportedFormat { .. })
+    }
+
+    /// True when an album analysis leaves this file out and goes on with the
+    /// others, `--skip-errors` or not: a format mp3rgain cannot process
+    /// (issue #330), or a file too short to analyze, which mp3gain leaves out
+    /// of the album gain too (issue #423).
+    pub fn drops_from_album(&self) -> bool {
+        matches!(
+            self,
+            Self::UnsupportedFormat { .. } | Self::NotEnoughSamples
+        )
     }
 
     /// Build an [`IoRead`](Self::IoRead) carrying the path that failed.

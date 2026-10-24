@@ -24,8 +24,7 @@ identical samples into mp3rgain's analyzer and into the reference C, and compare
   the upstream `float`, to match mp3gain's original precision and mp3rgain's
   f64. LGPL-2.1; used here for local verification only.
 - `main.c` — reads the PCM dump and prints `GetTitleGain()`.
-- `run.sh` — compiles the harness, regenerates the dump from Rust for each
-  sample rate (44100, 22050 and 11025 Hz by default), prints the gains.
+- `run.sh` — compiles the harness, regenerates the dump from Rust for each case (by default 44100, 22050 and 11025 Hz, plus 79 full windows and a 1000-sample partial one at 44100 Hz), prints the gains.
 
 This is **not** built by Cargo and **not** shipped in the crate (`tests/` is
 excluded from the package, and no C toolchain is added to CI). It exists to
@@ -50,6 +49,8 @@ window), whereas mp3rgain originally dropped silent windows, shrinking the
 95th-percentile denominator and reading sparse material (acapellas) too loud.
 The cross-check caught that — without the `finish_window` clamp mp3rgain reads
 −1.50 dB here vs the reference −0.83 dB.
+
+The last case ends on a partial window of 1000 samples after 79 full ones. The reference drops it, since `GetTitleGain()` only counts a window when it fills, and so does mp3rgain since #423. Counting it, as mp3rgain did before, reads −0.37 dB here against the reference −0.83 dB.
 
 The PCM is integer-deterministic (fixed-seed LCG, no transcendentals), so the
 golden value is platform-independent.

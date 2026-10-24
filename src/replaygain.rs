@@ -1071,9 +1071,16 @@ impl ReplayGainAnalyzer {
         }
     }
 
-    /// Take ownership of the histogram, consuming the analyzer.
-    fn into_histogram(self) -> LoudnessHistogram {
-        self.histogram
+    /// The track's histogram, or [`Error::NotEnoughSamples`] when not one
+    /// window filled. Samples left over after the last full window are not
+    /// counted: `GetTitleGain()` in gain_analysis.c drops them too, and a
+    /// window of a few samples would get as much say in the 95th percentile
+    /// as a full one (issue #423).
+    fn finish(self) -> Result<LoudnessHistogram> {
+        if self.histogram.data.iter().all(|&n| n == 0) {
+            return Err(Error::NotEnoughSamples);
+        }
+        Ok(self.histogram)
     }
 
     /// Add a stereo sample pair (already filtered)
@@ -1099,12 +1106,8 @@ impl ReplayGainAnalyzer {
         }
     }
 
-    /// Finish the current window and add to histogram
+    /// Add the window that just filled to the histogram.
     fn finish_window(&mut self) {
-        if self.totsamp == 0 {
-            return;
-        }
-
         // Calculate mean square value (average of both channels)
         // Original: (lsum + rsum) / totsamp * 0.5
         let mean_square = (self.lsum + self.rsum) / self.totsamp as f64 * 0.5;
@@ -1131,6 +1134,7 @@ impl ReplayGainAnalyzer {
     }
 
     /// Calculate the loudness value from the histogram (95th percentile)
+    #[cfg(test)]
     fn get_loudness(&self) -> f64 {
         self.histogram.get_loudness()
     }
@@ -1495,15 +1499,10 @@ fn analyze_track_decoded(
     // Finish analysis and calculate loudness and gain
     let mut is_true_peak = false;
     let (loudness_db, gain_db, state) = match track_analyzer {
-        TrackAnalyzer::Rg1 { mut analyzer, .. } => {
-            // Finish any remaining samples in the last window
-            analyzer.finish_window();
-            let (loudness_db, gain_db) = rg1_loudness_and_gain(analyzer.get_loudness());
-            (
-                loudness_db,
-                gain_db,
-                LoudnessState::Rg1(analyzer.into_histogram()),
-            )
+        TrackAnalyzer::Rg1 { analyzer, .. } => {
+            let histogram = analyzer.finish()?;
+            let (loudness_db, gain_db) = rg1_loudness_and_gain(histogram.get_loudness());
+            (loudness_db, gain_db, LoudnessState::Rg1(histogram))
         }
         TrackAnalyzer::Bs1770 { analyzer, .. } => {
             // The interpolator's passthrough phase makes the true peak
@@ -2493,11 +2492,12 @@ fn analyze_album_serial(
                 track_results.push(internal.result);
                 successful_indices.push(i);
             }
-            // A file whose *format* mp3rgain cannot process is dropped from
-            // the set whether or not `--skip-errors` is on (issue #330): the
-            // album gain over the remaining tracks is still correct, and one
-            // ALAC track should not fail the whole album.
-            Err(e) if skip_errors || e.is_unsupported_format() => {
+            // A file whose *format* mp3rgain cannot process, or one too short
+            // to analyze, is dropped from the set whether or not
+            // `--skip-errors` is on (issues #330, #423): the album gain over
+            // the remaining tracks is still correct, and one ALAC track
+            // should not fail the whole album.
+            Err(e) if skip_errors || e.drops_from_album() => {
                 failures.push((i, format!("{}", e)));
             }
             Err(e) => return Err(e),
@@ -2579,9 +2579,10 @@ fn analyze_album_parallel_internal(
     } else {
         // collect::<Result<Vec<_>>>() short-circuits at the first error,
         // matching the serial path's fail-fast behavior. An unsupported
-        // format is not such an error (issue #330), so it rides through as an
-        // *inner* Err — the collect keeps going, and it joins `failures`
-        // below like a `--skip-errors` skip would.
+        // format or a file too short to analyze is not such an error (issues
+        // #330, #423), so it rides through as an *inner* Err — the collect
+        // keeps going, and it joins `failures` below like a `--skip-errors`
+        // skip would.
         let internals: Vec<Result<TrackAnalysisInternal>> = files
             .par_iter()
             .enumerate()
@@ -2594,7 +2595,7 @@ fn analyze_album_parallel_internal(
                     cb(i, file);
                 }
                 match r {
-                    Err(e) if e.is_unsupported_format() => Ok(Err(e)),
+                    Err(e) if e.drops_from_album() => Ok(Err(e)),
                     other => other.map(Ok),
                 }
             })
@@ -3235,26 +3236,32 @@ mod tests {
     // =========================================================================
 
     /// `GetTitleGain()` from the reference harness in `tests/reference/` on
-    /// `golden_pcm(rate)`, captured with `./tests/reference/run.sh`. 44100 Hz
+    /// `golden_pcm(rate, windows, tail)`, captured with
+    /// `./tests/reference/run.sh`, as `(rate, windows, tail, gain)`. 44100 Hz
     /// is the #201 / #217 value. 22050 and 11025 Hz are the two rates whose
     /// 50 ms window is not a whole number of samples, which mp3rgain truncated
-    /// until #413 while the reference rounds up.
+    /// until #413 while the reference rounds up. The last case ends on a
+    /// partial window, which the reference drops; mp3rgain counted it until
+    /// #423 and read -0.37 dB.
     #[cfg(feature = "replaygain")]
-    const GOLDEN_GAINS_DB: [(u32, f64); 3] = [
-        (44_100, -0.8300000000000125),
-        (22_050, -3.710000000000008),
-        (11_025, -5.910000000000011),
+    const GOLDEN_GAINS_DB: [(u32, usize, usize, f64); 4] = [
+        (44_100, 80, 0, -0.8300000000000125),
+        (22_050, 80, 0, -3.710000000000008),
+        (11_025, 80, 0, -5.910000000000011),
+        (44_100, 79, 1_000, -0.8300000000000125),
     ];
 
     /// Deterministic stereo PCM (normalized to [-1, 1]) used by both the
     /// reference C harness in `tests/reference/` and the test below.
     ///
-    /// 80 full 50 ms windows, with the window rounded up to whole samples as
-    /// gain_analysis.c does (2205 at 44.1 kHz, 1103 at 22.05 kHz). An exact
-    /// multiple of the window leaves no trailing partial window: the reference
-    /// only counts a window when it fills, while mp3rgain's final
-    /// `finish_window()` would flush a partial one. Matching the window
-    /// boundary removes that as a variable.
+    /// `windows` full 50 ms windows, with the window rounded up to whole
+    /// samples as gain_analysis.c does (2205 at 44.1 kHz, 1103 at 22.05 kHz),
+    /// then `tail` samples of silence, fewer than a window. The reference only
+    /// counts a window when it fills, so it drops the tail, and mp3rgain has
+    /// to drop it too (issue #423). 79 windows and a tail is the case that
+    /// shows it: counted, the tail is an 80th window, and a quiet one, which
+    /// moves the 95th percentile from the 4th loudest window to the 5th
+    /// (`ceil(0.05 * 79)` is 4, `0.05 * 80` rounds up to 5 in floating point).
     ///
     /// Layout (80 windows of 50 ms): the first 50 are **silent**, the last 30
     /// are broadband white noise on a distinct-amplitude staircase. The silent
@@ -3271,9 +3278,10 @@ mod tests {
     /// therefore bit-identical on every platform, so the golden value captured
     /// on one machine is valid for the CI runner too.
     #[cfg(feature = "replaygain")]
-    fn golden_pcm(sample_rate: u32) -> (Vec<f64>, Vec<f64>) {
+    fn golden_pcm(sample_rate: u32, windows: usize, tail: usize) -> (Vec<f64>, Vec<f64>) {
         let win = (sample_rate as usize * 50).div_ceil(1000);
-        let n = win * 80;
+        assert!(tail < win, "the tail must be a partial window");
+        let n = win * windows + tail;
         let mut left = Vec::with_capacity(n);
         let mut right = Vec::with_capacity(n);
         let mut ls: u64 = 0x1234_5678_9abc_def0;
@@ -3287,8 +3295,9 @@ mod tests {
         };
         for i in 0..n {
             let w = i / win;
-            // First 50 windows silent; last 30 a distinct-amplitude staircase.
-            let amp = if w < 50 {
+            // First 50 windows silent; the rest a distinct-amplitude
+            // staircase; the tail silent.
+            let amp = if w < 50 || w >= windows {
                 0.0
             } else {
                 0.06 + 0.01 * (w - 50) as f64
@@ -3304,7 +3313,9 @@ mod tests {
     /// One-time helper: dump `golden_pcm()` to a binary file the reference C
     /// harness reads. Header is `[u32 sample_rate][u32 frames]` (LE) followed by
     /// `frames` f64 left samples then `frames` f64 right samples. `RG_PCM_RATE`
-    /// picks the sample rate (default 44100). Run with:
+    /// picks the sample rate (default 44100), `RG_PCM_WINDOWS` the full windows
+    /// (default 80) and `RG_PCM_TAIL` the partial one after them (default 0).
+    /// Run with:
     ///   `cargo test --lib dump_golden_pcm -- --ignored --nocapture`
     /// then see `tests/reference/README.md` to produce the golden value.
     #[cfg(feature = "replaygain")]
@@ -3316,7 +3327,16 @@ mod tests {
         let sample_rate: u32 = std::env::var("RG_PCM_RATE")
             .map(|r| r.parse().expect("RG_PCM_RATE must be a sample rate"))
             .unwrap_or(44_100);
-        let (left, right) = golden_pcm(sample_rate);
+        let count = |var: &str, default: usize| {
+            std::env::var(var)
+                .map(|v| v.parse().expect("must be a count"))
+                .unwrap_or(default)
+        };
+        let (left, right) = golden_pcm(
+            sample_rate,
+            count("RG_PCM_WINDOWS", 80),
+            count("RG_PCM_TAIL", 0),
+        );
         let mut buf = Vec::with_capacity(8 + left.len() * 16);
         buf.extend_from_slice(&sample_rate.to_le_bytes());
         buf.extend_from_slice(&(left.len() as u32).to_le_bytes());
@@ -3358,8 +3378,8 @@ mod tests {
     #[cfg(feature = "replaygain")]
     #[test]
     fn analysis_matches_reference_c_to_float_precision() {
-        for (sr, golden) in GOLDEN_GAINS_DB {
-            let (left, right) = golden_pcm(sr);
+        for (sr, windows, tail, golden) in GOLDEN_GAINS_DB {
+            let (left, right) = golden_pcm(sr, windows, tail);
             let mut filter_l = EqualLoudnessFilter::new(sr).unwrap();
             let mut filter_r = EqualLoudnessFilter::new(sr).unwrap();
             let mut analyzer = ReplayGainAnalyzer::new(sr);
@@ -3373,14 +3393,16 @@ mod tests {
                 let rf = filter_r.process(r * scale);
                 analyzer.add_sample(lf, rf);
             }
-            analyzer.finish_window(); // no-op: golden_pcm() is a window multiple
-            let gain = PINK_REF - analyzer.get_loudness();
+            // As analyze_track_decoded finishes a track: the partial window
+            // in the tail is not counted.
+            let gain = PINK_REF - analyzer.finish().unwrap().get_loudness();
 
             let delta = (gain - golden).abs();
             assert!(
                 delta < 1e-6,
-                "ReplayGain analysis at {sr} Hz diverged from reference gain_analysis.c: \
-                 mp3rgain {gain:.12} dB vs reference {golden:.12} dB (Δ {delta:.3e} dB)"
+                "ReplayGain analysis at {sr} Hz ({windows} windows + {tail}) diverged from reference \
+                 gain_analysis.c: mp3rgain {gain:.12} dB vs reference {golden:.12} dB \
+                 (Δ {delta:.3e} dB)"
             );
         }
     }
@@ -3488,5 +3510,68 @@ mod tests {
                 expected
             );
         }
+    }
+
+    /// `tests/fixtures/<name>` cut to its ID3v2 tag and first `frames` MPEG
+    /// frames, in a temp file the caller removes.
+    #[cfg(feature = "replaygain")]
+    fn cut_fixture(name: &str, frames: usize) -> std::path::PathBuf {
+        let data = std::fs::read(Path::new("tests/fixtures").join(name)).unwrap();
+        let mut end = crate::frame::skip_id3v2(&data);
+        for _ in 0..frames {
+            end += crate::frame::parse_header(&data[end..]).unwrap().frame_size;
+        }
+        let path = std::env::temp_dir().join(format!(
+            "mp3rgain_cut_{}_{frames}_{name}",
+            std::process::id()
+        ));
+        std::fs::write(&path, &data[..end]).unwrap();
+        path
+    }
+
+    /// Issue #423: a track that fills no 50 ms window is refused, as mp3gain
+    /// refuses it, and an album leaves it out and goes on with the others.
+    /// Two frames of `test_mono.mp3` are its Info frame and 1152 samples,
+    /// short of the 2205-sample window; the BS.1770 modes still measure it.
+    #[cfg(feature = "replaygain")]
+    #[test]
+    fn track_shorter_than_one_window_is_refused() {
+        let short = cut_fixture("test_mono.mp3", 2);
+        let long = cut_fixture("test_mono.mp3", 6);
+        let vbr = Path::new("tests/fixtures/test_vbr.mp3");
+
+        assert!(matches!(
+            analyze_track(&short),
+            Err(Error::NotEnoughSamples)
+        ));
+        assert!(analyze_track(&long).is_ok());
+        let rg2 = TrackAnalysisOptions {
+            mode: AnalysisMode::Rg2,
+            ..Default::default()
+        };
+        assert!(analyze_track_with_options(&short, &rg2).is_ok());
+
+        for threads in [1, 4] {
+            let opts = AlbumAnalysisOptions {
+                threads,
+                ..Default::default()
+            };
+            let report = analyze_album_with_options(&[&short, vbr], &opts).unwrap();
+            assert_eq!(report.successful_indices, [1], "threads {threads}");
+            assert_eq!(report.failures.len(), 1);
+            assert_eq!(report.failures[0].0, 0);
+            assert_eq!(
+                report.album.album_gain_db(),
+                analyze_track(vbr).unwrap().gain_db(),
+                "the album gain is the other track's alone"
+            );
+        }
+        assert!(matches!(
+            analyze_album(&[&short]),
+            Err(Error::AllFilesFailed { count: 1 })
+        ));
+
+        let _ = std::fs::remove_file(short);
+        let _ = std::fs::remove_file(long);
     }
 }
