@@ -345,6 +345,28 @@ pub struct AlbumGroup {
     pub rows: Vec<(usize, PathBuf)>,
 }
 
+/// Prevent clipping for Apply Album Gain: lower every job of an album by the
+/// same steps, so its tracks keep their levels relative to each other, as the
+/// CLI's -a -k does (issue #419). Each file's own check then has nothing left
+/// to cap. Rows without a peak cannot be judged, but are lowered with their
+/// album.
+fn cap_album_jobs(jobs: &mut [ApplyJob], groups: &[AlbumGroup]) {
+    for group in groups {
+        let in_group = |job: &ApplyJob| group.rows.iter().any(|&(idx, _)| idx == job.idx);
+        let reduction = mp3rgain::album_clip_reduction(
+            jobs.iter()
+                .filter(|job| in_group(job))
+                .filter_map(|job| Some((job.steps, job.track_result.as_ref()?.peak()))),
+        );
+        if reduction > 0 {
+            for job in jobs.iter_mut().filter(|job| in_group(job)) {
+                job.steps -= reduction;
+                job.clipping_prevented = true;
+            }
+        }
+    }
+}
+
 /// Split rows into albums. A free function so it can be tested without an
 /// `Mp3rgainApp`, which needs an eframe context to exist.
 fn group_albums(rows: Vec<(usize, PathBuf)>, grouping: AlbumGrouping) -> Vec<AlbumGroup> {
@@ -1080,6 +1102,7 @@ impl Mp3rgainApp {
                         album_info: None,
                         channel: None,
                         from_stored: false,
+                        clipping_prevented: false,
                     });
                 }
                 let (gain_db, peak) = trusted_track_tags(f)?;
@@ -1096,6 +1119,7 @@ impl Mp3rgainApp {
                     album_info: None,
                     channel: None,
                     from_stored: true,
+                    clipping_prevented: false,
                 })
             })
             .collect();
@@ -1284,6 +1308,7 @@ impl Mp3rgainApp {
                     album_info: None,
                     channel: None,
                     from_stored: false,
+                    clipping_prevented: false,
                 })
             })
             .collect();
@@ -1325,6 +1350,7 @@ impl Mp3rgainApp {
                 album_info: None,
                 channel: Some(channel),
                 from_stored: false,
+                clipping_prevented: false,
             })
             .collect();
         if jobs.is_empty() {
@@ -1460,6 +1486,7 @@ impl Mp3rgainApp {
                                 album_info: Some(info),
                                 channel: None,
                                 from_stored: true,
+                                clipping_prevented: false,
                             });
                         }
                         continue;
@@ -1481,6 +1508,7 @@ impl Mp3rgainApp {
                             album_info: f.album_info,
                             channel: None,
                             from_stored: false,
+                            clipping_prevented: false,
                         });
                     }
                 }
@@ -1499,9 +1527,14 @@ impl Mp3rgainApp {
                         album_info: f.album_info,
                         channel: None,
                         from_stored: false,
+                        clipping_prevented: false,
                     })
                 })
                 .collect();
+        }
+
+        if self.apply_options.prevent_clipping && !self.apply_options.wrap {
+            cap_album_jobs(&mut jobs, &groups);
         }
 
         if jobs.is_empty() {
@@ -2190,5 +2223,49 @@ mod tests {
             Some(-20.0 * 0.5f64.log10() - steps_to_db(4))
         ));
         assert!(after.clipping);
+    }
+
+    /// Issue #419: prevent clipping lowers every row of an album by the same
+    /// steps, set by the row that would clip most, and leaves other albums to
+    /// their own cap.
+    #[test]
+    fn album_apply_caps_each_album_as_one() {
+        let job = |idx: usize, steps: i32, peak: Option<f64>| ApplyJob {
+            idx,
+            path: PathBuf::from(format!("{idx}.mp3")),
+            steps,
+            track_result: peak.map(|p| {
+                ReplayGainResult::from_stored_tags(0.0, p, AudioFileType::Mp3, AnalysisMode::Rg1)
+            }),
+            album_info: None,
+            channel: None,
+            from_stored: false,
+            clipping_prevented: false,
+        };
+        let group = |rows: &[usize]| AlbumGroup {
+            label: None,
+            merged_releases: false,
+            rows: rows
+                .iter()
+                .map(|&i| (i, PathBuf::from(format!("{i}.mp3"))))
+                .collect(),
+        };
+        let mut jobs = vec![
+            job(0, 17, Some(0.1189)), // 12 steps of headroom: the album's limit
+            job(1, 17, Some(0.0843)), // 14 on its own
+            job(2, 17, None),         // no peak, lowered with its album
+            job(3, 17, Some(0.0843)), // another album, capped at its own 14
+            job(4, 2, Some(0.5)),     // another album that does not clip
+        ];
+        cap_album_jobs(&mut jobs, &[group(&[0, 1, 2]), group(&[3]), group(&[4])]);
+
+        let result: Vec<(i32, bool)> = jobs
+            .iter()
+            .map(|j| (j.steps, j.clipping_prevented))
+            .collect();
+        assert_eq!(
+            result,
+            [(12, true), (12, true), (12, true), (14, true), (2, false)]
+        );
     }
 }

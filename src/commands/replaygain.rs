@@ -529,6 +529,23 @@ fn run_album(
             let base_steps = album_result.album_gain_steps();
             let modified_gain_steps = opts.modified_steps(album_result.album_gain_db());
 
+            // -k: one cap for the whole album, from its loudest track, so the
+            // tracks keep their levels relative to each other, as mp3gain's
+            // `-a -k` does (issue #419). Each file's own check then has
+            // nothing left to cap. --tags-only caps the tag value instead,
+            // and -w checks nothing.
+            let clip_reduction = if opts.prevent_clipping && !opts.tags_only && !opts.wrap_gain {
+                mp3rgain::album_clip_reduction(
+                    album_result
+                        .tracks()
+                        .iter()
+                        .map(|t| (modified_gain_steps, t.peak())),
+                )
+            } else {
+                0
+            };
+            let applied_steps = modified_gain_steps - clip_reduction;
+
             // --tags-only writes the album gain into the tag instead of the
             // frames, capped at the album peak's headroom under `-k` so every
             // file in the set still carries the same value (issue #308).
@@ -547,11 +564,7 @@ fn run_album(
                 analysis_mode: Some(opts.analysis_mode.name()),
                 gain_db: album_result.album_gain_db(),
                 // Nothing is applied to the audio in --tags-only mode.
-                gain_steps: if opts.tags_only {
-                    0
-                } else {
-                    modified_gain_steps
-                },
+                gain_steps: if opts.tags_only { 0 } else { applied_steps },
                 tag_gain_db: album_tag_gain_db,
                 peak: album_result.album_peak(),
             };
@@ -596,11 +609,20 @@ fn run_album(
                     )?,
                 }
                 writeln!(out, "  Album peak:     {:.4}", album_result.album_peak())?;
+                if clip_reduction > 0 {
+                    writeln!(
+                        out,
+                        "  {} Album gain reduced from {} to {} steps to prevent clipping",
+                        "!".yellow(),
+                        modified_gain_steps,
+                        applied_steps
+                    )?;
+                }
                 writeln!(out)?;
             }
 
             // Apply album gain to all files
-            let steps = modified_gain_steps;
+            let steps = applied_steps;
 
             // A net 0-step album adjustment still has work to do when tags
             // would be written or `-k` must attenuate a clipping track, the

@@ -180,6 +180,9 @@ pub struct ApplyJob {
     /// The gain was taken from stored REPLAYGAIN_* tags instead of a fresh
     /// analysis (issue #302). Echoed back in `FileApplied`.
     pub from_stored: bool,
+    /// Prevent clipping already lowered `steps` for the whole album (issue
+    /// #419), so a dry run reports the row as capped.
+    pub clipping_prevented: bool,
 }
 
 /// User-facing apply toggles, captured at the moment the worker is
@@ -514,7 +517,8 @@ pub fn spawn_apply(
                                 WorkerEvent::FileApplyDryRun {
                                     idx: job.idx,
                                     actual_steps: report.actual_steps,
-                                    clipping_prevented: report.clipping_prevented,
+                                    clipping_prevented: job.clipping_prevented
+                                        || report.clipping_prevented,
                                 },
                             );
                         } else {

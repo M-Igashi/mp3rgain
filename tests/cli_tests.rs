@@ -152,6 +152,33 @@ fn album_at_zero_steps_skips_when_tags_are_disabled() {
     }
 }
 
+/// Issue #419: `-a -k` caps the album gain once, at the loudest track's
+/// headroom, and applies that one value to every file, as mp3gain does,
+/// instead of capping each file at its own headroom.
+#[test]
+fn album_prevent_clipping_applies_one_cap_to_every_file() {
+    let album = TempAlbum::new(&["test_mono.mp3", "test_vbr.mp3", "test_joint_stereo.mp3"]);
+    let files = album.args();
+
+    // -m 15 pushes the album gain past every file's headroom, and the three
+    // fixtures peak differently, so caps per file would differ.
+    let run_album = |extra: &[&str]| {
+        let mut args = vec!["-a", "-s", "s", "-m", "15", "-o", "json"];
+        args.extend_from_slice(extra);
+        args.extend_from_slice(&files);
+        let out = run(&args);
+        assert!(out.status.success(), "{args:?}: {out:?}");
+        json_of(&out)
+    };
+    let uncapped = run_album(&["-n"])["album"]["gain_steps"].as_i64().unwrap();
+    let out = run_album(&["-k"]);
+    let capped = out["album"]["gain_steps"].as_i64().unwrap();
+    assert!(capped < uncapped, "-k should cap {uncapped}, got {capped}");
+    for file in out["files"].as_array().unwrap() {
+        assert_eq!(file["gain_applied_steps"].as_i64(), Some(capped), "{file}");
+    }
+}
+
 /// Issue #376: `-s s` writes no tags on M4A either. `-r` and `-a` used to
 /// write the undo atom and the `replaygain_*` atoms whatever `-s` said, and
 /// rewrote an already-on-target file just to tag it.

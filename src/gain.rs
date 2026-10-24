@@ -375,6 +375,33 @@ pub fn peak_to_headroom_db(peak: f64) -> Option<f64> {
     }
 }
 
+/// The most whole gain steps a normalized peak can take without passing 1.0,
+/// `floor(-4 * log2(peak))`, which is what mp3gain's `-k` caps at. Floored,
+/// not rounded: rounding would turn 0.8 dB of headroom into a 1.5 dB step and
+/// clip again (issue #162). Negative when the peak is already above 1.0, so
+/// such a file is attenuated below its current level, as the original
+/// MP3GainGUI does (issue #173). `None` for silence, which no gain can clip.
+pub fn max_unclipped_steps(peak: f64) -> Option<i32> {
+    peak_to_headroom_db(peak).map(|db| (db / GAIN_STEP_DB).floor() as i32)
+}
+
+/// How many steps `-k` takes off every member of an album so that none of
+/// them clips, from each member's requested steps and peak; 0 when none would
+/// (issue #419).
+///
+/// One reduction for the whole album keeps its tracks' levels relative to
+/// each other, which is the point of album gain: mp3gain's `-a -k` caps the
+/// album gain at the loudest track's headroom and writes that to every file.
+/// Members usually request the same steps, which makes this the album gain
+/// minus that cap. A GUI row adjusted since the analysis requests a different
+/// number, and the levels are still kept.
+pub fn album_clip_reduction(members: impl IntoIterator<Item = (i32, f64)>) -> i32 {
+    members
+        .into_iter()
+        .filter_map(|(steps, peak)| Some(steps - max_unclipped_steps(peak)?))
+        .fold(0, i32::max)
+}
+
 /// Linear gain ratio for a dB value (`10^(db/20)`).
 pub fn db_to_linear(db: f64) -> f64 {
     10.0_f64.powf(db / 20.0)
@@ -630,5 +657,30 @@ mod tests {
             let physical = 20.0 * (2.0_f64.powf(steps as f64 / 4.0)).log10();
             assert!((db - physical).abs() < 1e-9, "steps={steps}");
         }
+    }
+
+    /// Issue #419: the cap is mp3gain's `floor(-4 * log2(peak))`, and every
+    /// member of an album loses the same steps, set by the one that would
+    /// clip most.
+    #[test]
+    fn album_clip_reduction_keeps_relative_levels() {
+        assert_eq!(max_unclipped_steps(0.1189), Some(12));
+        assert_eq!(max_unclipped_steps(0.9), Some(0));
+        assert_eq!(max_unclipped_steps(1.2), Some(-2));
+        assert_eq!(max_unclipped_steps(0.0), None);
+
+        // The loudest of three, as in mp3gain: 17 - 12.
+        let album = [(17, 0.1189), (17, 0.0887), (17, 0.0843)];
+        assert_eq!(album_clip_reduction(album), 5);
+
+        // A member already raised by 2 steps peaks 2 steps higher and asks
+        // for 2 fewer; it calls for the same reduction.
+        let raised = 0.1189 * 2.0_f64.powf(0.5);
+        assert_eq!(album_clip_reduction([(17, 0.0843), (15, raised)]), 5);
+
+        // Nothing clips, silence cannot clip, and no members.
+        assert_eq!(album_clip_reduction([(3, 0.5), (3, 0.25)]), 0);
+        assert_eq!(album_clip_reduction([(10, 0.0)]), 0);
+        assert_eq!(album_clip_reduction([]), 0);
     }
 }

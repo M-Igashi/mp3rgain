@@ -25,8 +25,7 @@ use crate::adts;
 use crate::error::{Error, Result};
 use crate::frame::SaturationStats;
 use crate::gain::{
-    apply_gain_to_peak, peak_to_headroom_db, steps_to_db, Channel, GainOptions, GAIN_STEP_DB,
-    MAX_GAIN,
+    apply_gain_to_peak, max_unclipped_steps, steps_to_db, Channel, GainOptions, MAX_GAIN,
 };
 use crate::replaygain::{AudioFileType, ReplayGainResult};
 use crate::{ape, id3v2, mp4meta, TagLayout};
@@ -399,20 +398,11 @@ fn check_clipping(
             track.track_clip_peak()
         };
         let new_peak = apply_gain_to_peak(track.peak(), steps_to_db(steps));
-        if apply_gain_to_peak(clip_peak, steps_to_db(steps)) > 1.0 {
+        // Whole steps against whole steps, as mp3gain compares them, so a
+        // gain the album cap already lowered to exactly the limit (issue
+        // #419) is not judged again through a float product.
+        if let Some(max_safe_steps) = max_unclipped_steps(clip_peak).filter(|&safe| steps > safe) {
             if opts.prevent_clipping {
-                // Clipping implies `clip_peak > 0`, so headroom is
-                // well-defined here.
-                let max_safe_db = peak_to_headroom_db(clip_peak).unwrap_or(0.0);
-                // Floor (not round) so the cap never exceeds true headroom —
-                // round() would, e.g., turn 0.8 dB of headroom into 1 step
-                // (1.5 dB) and re-introduce clipping. Negative results are
-                // allowed: when the source file already clips (peak > 1.0),
-                // headroom is negative and the cap legitimately needs to
-                // attenuate the file below its current loudness to remove
-                // clipping — matching the original MP3GainGUI behavior
-                // (issue #173).
-                let max_safe_steps = (max_safe_db / GAIN_STEP_DB).floor() as i32;
                 return Ok((
                     max_safe_steps,
                     true,

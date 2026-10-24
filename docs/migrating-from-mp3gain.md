@@ -38,7 +38,7 @@ Every mp3gain 1.6.2 option is accepted except `-T`. Where mp3rgain's behaviour d
 | `-m <i>` | Shift the suggested gain by `i` steps, added after `-d` and the rounding. The printed dB leaves it out, as in mp3gain |
 | `-u` | Undo from the stored `MP3GAIN_UNDO` tag. Either tool can undo the other's changes |
 | `-x` | Print the maximum amplitude only |
-| `-k` | Lower the gain to avoid clipping. With `-r`/`-a` the limit comes from the decoded peak; with `-g` it only stops any frame's `global_gain` from exceeding 255 |
+| `-k` | Lower the gain to avoid clipping. With `-r`/`-a` the limit comes from the decoded peak, and with `-a` from the album's loudest file, the same lowered gain going to every file; with `-g` it only stops any frame's `global_gain` from exceeding 255 |
 | `-c` | Silence clipping warnings |
 | `-p` | Keep the file's modification time |
 | `-w` | Wrap `global_gain` around 0-255 instead of clamping |
