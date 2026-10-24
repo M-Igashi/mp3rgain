@@ -23,7 +23,7 @@ pub fn print_usage() {
         "    -g <i>      Apply gain of i steps (each step = {:.4} dB)",
         GAIN_STEP_DB
     );
-    println!("    -d <n>      Modify suggested/target gain by n dB (rounded to nearest step)");
+    println!("    -d <n>      Modify suggested/target gain by n dB");
     println!("    -l <c> <g>  Apply gain to left (0) or right (1) channel only. Not for");
     println!("                mono or joint stereo MP3s, as in mp3gain");
     println!("    -m <i>      Modify suggested gain by integer i");

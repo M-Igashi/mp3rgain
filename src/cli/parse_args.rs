@@ -544,16 +544,15 @@ mod tests {
     }
 
     #[test]
-    fn tags_only_target_offset_is_not_step_quantized() {
-        // The apply path has to land on a whole 1.5 dB step, so -d 0.4 rounds
-        // away; a tag holds a float, so it must survive (issue #308).
-        let applied = parse_args(&args(&["-r", "-d", "0.4", "a.mp3"])).unwrap();
-        assert_eq!(applied.target_offset_db(), 0.0);
+    fn target_offset_is_exact_for_d_and_whole_steps_for_m() {
+        // -d moves the target exactly, applied or not: the one rounding to
+        // whole steps happens on the shifted gain (issues #308, #416).
+        for mode in [&["-r"][..], &["-r", "--tags-only"][..]] {
+            let opts = parse_args(&args(&[mode, &["-d", "0.4", "a.mp3"]].concat())).unwrap();
+            assert!((opts.target_offset_db() - 0.4).abs() < f64::EPSILON);
+        }
 
-        let tagged = parse_args(&args(&["-r", "--tags-only", "-d", "0.4", "a.mp3"])).unwrap();
-        assert!((tagged.target_offset_db() - 0.4).abs() < f64::EPSILON);
-
-        // -m still contributes whole steps, converted to dB.
+        // -m contributes whole steps, converted to dB.
         let steps = parse_args(&args(&["-r", "--tags-only", "-m", "2", "a.mp3"])).unwrap();
         assert!((steps.target_offset_db() - mp3rgain::steps_to_db(2)).abs() < f64::EPSILON);
     }
@@ -616,31 +615,32 @@ mod tests {
         assert_eq!(opts.gain_modifier, 2);
     }
 
+    /// Issue #416: `-d` is added to the measured gain in dB and the sum is
+    /// rounded once, half away from zero; `-m` is added after the rounding.
+    /// The dB reported is the measured gain plus `-d`, without `-m`, as
+    /// mp3gain prints it.
     #[test]
-    fn gain_modifier_steps_combines_d_and_m() {
-        // -d alone: 3.0 dB rounds to +2 steps (1.5 dB per step)
-        let opts = parse_args(&args(&["-d", "3.0", "song.mp3"])).unwrap();
-        assert_eq!(opts.gain_modifier_steps(), 2);
+    fn modified_steps_round_d_with_the_measured_gain() {
+        let opts = |a: &[&str]| parse_args(&args(&[a, &["song.mp3"]].concat())).unwrap();
 
-        // -m alone: untouched
-        let opts = parse_args(&args(&["-m", "3", "song.mp3"])).unwrap();
-        assert_eq!(opts.gain_modifier_steps(), 3);
+        // The issue's cases: rounding each 0.53 step separately gave +-2.
+        assert_eq!(opts(&["-d", "0.80"]).modified_steps(0.80), 1);
+        assert_eq!(opts(&["-d", "-0.80"]).modified_steps(-0.80), -1);
+        assert_eq!(opts(&["-d", "0.80"]).modified_gain(0.80).1, 1.60);
 
-        // -d + -m: sum
-        let opts = parse_args(&args(&["-d", "3.0", "-m", "1", "song.mp3"])).unwrap();
-        assert_eq!(opts.gain_modifier_steps(), 3);
+        // -d alone on a gain of 0: 3.0 dB rounds to +2 steps.
+        assert_eq!(opts(&["-d", "3.0"]).modified_steps(0.0), 2);
+        // A sub-step -d can still tip a gain over a half step.
+        assert_eq!(opts(&["-d", "0.5"]).modified_steps(0.3), 1);
+        assert_eq!(opts(&["-d", "0.5"]).modified_steps(0.0), 0);
 
-        // Negative -d
-        let opts = parse_args(&args(&["-d", "-3.0", "song.mp3"])).unwrap();
-        assert_eq!(opts.gain_modifier_steps(), -2);
+        // -m is whole steps after the rounding, and left out of the dB.
+        let m = opts(&["-m", "2"]);
+        assert_eq!(m.modified_gain(1.0), (3, 1.0));
+        assert_eq!(opts(&["-d", "3.0", "-m", "1"]).modified_steps(0.0), 3);
 
-        // Sub-step -d (0.5 dB < 0.75 dB threshold) rounds to zero
-        let opts = parse_args(&args(&["-d", "0.5", "song.mp3"])).unwrap();
-        assert_eq!(opts.gain_modifier_steps(), 0);
-
-        // No modifiers
-        let opts = parse_args(&args(&["song.mp3"])).unwrap();
-        assert_eq!(opts.gain_modifier_steps(), 0);
+        // No modifiers: the measured gain's own steps.
+        assert_eq!(opts(&[]).modified_gain(-4.6), (-3, -4.6));
     }
 
     #[test]

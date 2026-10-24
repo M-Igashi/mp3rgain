@@ -34,8 +34,8 @@ Every mp3gain 1.6.2 option is accepted except `-T`. Where mp3rgain's behaviour d
 | `-e` | Skip album analysis. On its own it analyzes each track and prints no album summary, as in mp3gain. **Differs:** `-a -e` applies track gain (see below) |
 | `-g <i>` | Apply `i` gain steps of 1.5 dB each, without analysis |
 | `-l <c> <g>` | Apply `g` steps to one channel only: `0` = left, `1` = right. MP3 only. Refused on mono and joint-stereo files, as in mp3gain, since a joint-stereo frame may code mid and side rather than left and right ([#393](https://github.com/M-Igashi/mp3rgain/issues/393)) |
-| `-d <n>` | Shift the target by `n` dB, rounded to whole 1.5 dB steps. Without `-r`/`-a` it shifts the recommendation the plain analysis prints |
-| `-m <i>` | Shift the suggested gain by `i` steps (adds to `-d`) |
+| `-d <n>` | Shift the target by `n` dB: the suggested gain plus `n` is rounded to whole 1.5 dB steps once, as in mp3gain. Without `-r`/`-a` it shifts the recommendation the plain analysis prints |
+| `-m <i>` | Shift the suggested gain by `i` steps, added after `-d` and the rounding. The printed dB leaves it out, as in mp3gain |
 | `-u` | Undo from the stored `MP3GAIN_UNDO` tag. Either tool can undo the other's changes |
 | `-x` | Print the maximum amplitude only |
 | `-k` | Lower the gain to avoid clipping. With `-r`/`-a` the limit comes from the decoded peak; with `-g` it only stops any frame's `global_gain` from exceeding 255 |

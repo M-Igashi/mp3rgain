@@ -87,7 +87,8 @@ it shifts the target relative to the reference level (89 dB, or the
 .B \-\-rg2
 /
 .B \-\-r128
-target), rounded to whole 1.5 dB steps; with
+target): it is added to the suggested gain, and the sum is rounded to whole
+1.5 dB steps once, as in mp3gain. With
 .B \-\-tags\-only
 it is applied exactly. Without an action it shifts the recommendation the
 analysis prints.
@@ -109,8 +110,11 @@ afterwards.
 .BI \-m " i"
 Modify the suggested gain by integer
 .I i
-steps, in addition to any
-.BR \-d .
+steps, added after
+.B \-d
+and the rounding. As in mp3gain, the dB value the analysis prints leaves
+.B \-m
+out.
 Used with
 .B \-r
 or

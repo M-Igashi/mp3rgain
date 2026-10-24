@@ -151,38 +151,31 @@ impl Options {
         }
     }
 
-    /// A measured gain shifted by the `-m` / `-d` modifiers, as the apply and
-    /// info paths report it: `(steps, dB)`, both quantized to whole
-    /// `global_gain` steps so the two columns always agree. Every caller used
-    /// to spell this out, and one carried a comment asking to be kept in sync
-    /// with the others.
-    pub fn modified_gain(&self, base_steps: i32, base_db: f64) -> (i32, f64) {
-        let modifier_steps = self.gain_modifier_steps();
+    /// The gain steps an apply makes for a measured `gain_db`, as mp3gain
+    /// computes them: `-d` is added in dB before the one rounding to whole
+    /// steps, and `-m` is added after it (issue #416). Rounding `-d` on its
+    /// own and adding the two step counts could land one step off, as an
+    /// analysis of +0.80 dB with `-d 0.80` did (2 steps against mp3gain's 1).
+    pub fn modified_steps(&self, gain_db: f64) -> i32 {
+        mp3rgain::db_to_steps(gain_db + self.gain_modifier_db) + self.gain_modifier
+    }
+
+    /// A measured gain shifted by the `-m` / `-d` modifiers, as the
+    /// mp3gain-compatible analysis output reports it: `(steps, dB)`. The
+    /// steps are [`Self::modified_steps`]; the dB is mp3gain's printed value,
+    /// the measured gain plus `-d`, which leaves `-m` out.
+    pub fn modified_gain(&self, gain_db: f64) -> (i32, f64) {
         (
-            base_steps + modifier_steps,
-            base_db + mp3rgain::steps_to_db(modifier_steps),
+            self.modified_steps(gain_db),
+            gain_db + self.gain_modifier_db,
         )
     }
 
-    /// Combined `-m` (steps) and `-d` (dB) modifier expressed as mp3 gain steps.
-    /// `-d` is rounded to the nearest 1.5 dB step; sub-step values silently
-    /// round to zero, matching mp3gain's quantized step model.
-    pub fn gain_modifier_steps(&self) -> i32 {
-        self.gain_modifier + mp3rgain::db_to_steps(self.gain_modifier_db)
-    }
-
-    /// How far `-d` / `-m` shift the target, in dB.
-    ///
-    /// Normally this is [`Self::gain_modifier_steps`] converted back to dB,
-    /// because the shift has to land on a whole `global_gain` step. In
-    /// `--tags-only` mode nothing is quantized, since the shift only moves a
-    /// float in a tag, so `-d` applies exactly and `-m` contributes its steps
-    /// (issue #308).
+    /// How far `-d` / `-m` shift the target, in dB: `-d` exactly and `-m` by
+    /// whole steps. An apply rounds the shifted gain to whole steps once
+    /// ([`Self::modified_steps`]); `--tags-only` writes it as it is, since a
+    /// tag holds a float (issue #308).
     pub fn target_offset_db(&self) -> f64 {
-        if self.tags_only {
-            self.gain_modifier_db + mp3rgain::steps_to_db(self.gain_modifier)
-        } else {
-            mp3rgain::steps_to_db(self.gain_modifier_steps())
-        }
+        self.gain_modifier_db + mp3rgain::steps_to_db(self.gain_modifier)
     }
 }

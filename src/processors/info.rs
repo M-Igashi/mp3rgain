@@ -43,7 +43,7 @@ pub fn tsv_rg_row(
     rg_result: &ReplayGainResult,
     gain_range: Option<(u8, u8)>,
 ) -> String {
-    let (gain_steps, gain_db) = opts.modified_gain(rg_result.gain_steps(), rg_result.gain_db());
+    let (gain_steps, gain_db) = opts.modified_gain(rg_result.gain_db());
     let (max_gain, min_gain) = gain_range_fields(gain_range);
     format!(
         "{}\t{}\t{:.6}\t{:.6}\t{}\t{}\n",
@@ -68,7 +68,7 @@ pub fn tsv_album_row(
         .into_iter()
         .flatten()
         .reduce(|(max_a, min_a), (max_b, min_b)| (max_a.max(max_b), min_a.min(min_b)));
-    let (gain_steps, gain_db) = opts.modified_gain(album.album_gain_steps(), album.album_gain_db());
+    let (gain_steps, gain_db) = opts.modified_gain(album.album_gain_db());
     let (max_gain, min_gain) = gain_range_fields(range);
     format!(
         "\"Album\"\t{}\t{:.6}\t{:.6}\t{}\t{}\n",
@@ -100,7 +100,7 @@ pub fn format_rg_row(
 
     // Gain with the -m / -d modifiers folded in, the same way the apply
     // paths report it.
-    let (gain_steps, gain_db) = opts.modified_gain(rg_result.gain_steps(), rg_result.gain_db());
+    let (gain_steps, gain_db) = opts.modified_gain(rg_result.gain_db());
 
     // Max Amplitude scaled to 32768 (mp3gain format for beets)
     // beets divides by 32768, so we output peak * 32768

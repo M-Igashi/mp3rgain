@@ -79,10 +79,9 @@ fn process_track_gain_into(
                 ));
             }
 
-            // Apply gain modifier (-m steps + -d dB, combined into steps)
+            // -d and -m, rounded once with the measured gain (issue #416)
             let base_steps = result.gain_steps();
-            let modifier_steps = opts.gain_modifier_steps();
-            let modified_steps = base_steps + modifier_steps;
+            let modified_steps = opts.modified_steps(result.gain_db());
 
             if opts.text_output() {
                 if opts.tags_only {
@@ -110,8 +109,8 @@ fn process_track_gain_into(
                         result.analysis_mode().unit(),
                         result.gain_db(),
                         base_steps,
-                        if modifier_steps != 0 {
-                            format!(" + {} = {}", modifier_steps, modified_steps)
+                        if modified_steps != base_steps {
+                            format!(" + {} = {}", modified_steps - base_steps, modified_steps)
                         } else {
                             String::new()
                         },

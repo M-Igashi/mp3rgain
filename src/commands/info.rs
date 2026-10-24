@@ -152,10 +152,8 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
                     tsv_album_row(opts, &report.album, gain_ranges.iter().copied())
                 );
             } else if opts.text_output() {
-                let (album_gain_steps, album_gain_db) = opts.modified_gain(
-                    report.album.album_gain_steps(),
-                    report.album.album_gain_db(),
-                );
+                let (album_gain_steps, album_gain_db) =
+                    opts.modified_gain(report.album.album_gain_db());
                 println!();
                 println!(
                     "Recommended \"Album\" dB change for all files: {:.6}",

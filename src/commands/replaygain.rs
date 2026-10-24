@@ -33,8 +33,8 @@ use crate::util::get_filename;
 fn print_target_with_modifier(opts: &Options) {
     let mode = opts.analysis_mode;
     let target = mode.reference_level();
-    // `-d`/`-m` land on whole gain steps when frames are modified, but shift
-    // the tag value exactly in --tags-only mode (issue #308).
+    // `-d` shifts the target exactly and `-m` by whole steps; an apply rounds
+    // the shifted gain once (issues #308, #416).
     let modifier_db = opts.target_offset_db();
     if modifier_db != 0.0 {
         println!(
@@ -525,9 +525,9 @@ fn run_album(
                 file_to_track[*file_idx] = Some(track_idx);
             }
 
-            // Apply gain modifier (-m steps + -d dB, combined into steps)
-            let modifier_steps = opts.gain_modifier_steps();
-            let modified_gain_steps = album_result.album_gain_steps() + modifier_steps;
+            // -d and -m, rounded once with the measured gain (issue #416)
+            let base_steps = album_result.album_gain_steps();
+            let modified_gain_steps = opts.modified_steps(album_result.album_gain_db());
 
             // --tags-only writes the album gain into the tag instead of the
             // frames, capped at the album peak's headroom under `-k` so every
@@ -583,9 +583,13 @@ fn run_album(
                         out,
                         "  Album gain:     {:+.1} dB ({} steps{})",
                         album_result.album_gain_db(),
-                        album_result.album_gain_steps(),
-                        if modifier_steps != 0 {
-                            format!(" + {} = {}", modifier_steps, modified_gain_steps)
+                        base_steps,
+                        if modified_gain_steps != base_steps {
+                            format!(
+                                " + {} = {}",
+                                modified_gain_steps - base_steps,
+                                modified_gain_steps
+                            )
                         } else {
                             String::new()
                         }
