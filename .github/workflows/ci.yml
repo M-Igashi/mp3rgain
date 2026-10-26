@@ -139,6 +139,11 @@ jobs:
       - name: Clippy
         run: cargo clippy --manifest-path mp3rgui/Cargo.toml -- -D warnings
 
+      # Includes the check that every locales/*.po has no fuzzy entry and
+      # keeps the msgid's placeholders, so a translation PR is tested (#422).
+      - name: Test
+        run: cargo test --manifest-path mp3rgui/Cargo.toml
+
       # Compile the installer script so an .iss error is caught here rather
       # than during a release. The same debug binary stands in for both
       # architectures; only the script is under test.
