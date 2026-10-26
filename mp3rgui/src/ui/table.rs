@@ -9,17 +9,15 @@ use crate::worker::StoredTagsView;
 fn render_stored_tags_cell(ui: &mut egui::Ui, tags: Option<&StoredTagsView>) {
     let Some(view) = tags else { return };
     if view.is_empty() {
-        ui.weak("none").on_hover_text(format!(
-            "No stored tags found ({} container)",
-            view.format()
-        ));
+        ui.weak(tr!("none"))
+            .on_hover_text(tr!("No stored tags found ({} container)", view.format()));
         return;
     }
     let tags = &view.tags;
     let (undo_key, minmax_key) = tags.source.undo_minmax_keys();
     let label = tags.track_gain.as_deref().unwrap_or("—");
     ui.label(label).on_hover_ui(|ui| {
-        ui.label(format!("Container: {}", view.format()));
+        ui.label(tr!("Container: {}", view.format()));
         ui.separator();
         for (name, value) in [
             (
@@ -50,7 +48,7 @@ fn render_stored_tags_cell(ui: &mut egui::Ui, tags: Option<&StoredTagsView>) {
             ),
         ] {
             if let Some(v) = value {
-                ui.label(format!("{}: {}", name, v));
+                ui.label(tr!("{name}: {value}", name = name, value = v));
             }
         }
     });
@@ -80,7 +78,7 @@ fn sort_header(
     let text = egui::RichText::new(format!("{}{}", label, arrow)).strong();
     let resp = ui.add(egui::Button::new(text).frame(false));
     let resp = if hover_text.is_empty() {
-        resp.on_hover_text("Click to sort")
+        resp.on_hover_text(tr!("Click to sort"))
     } else {
         resp.on_hover_text(hover_text)
     };
@@ -95,18 +93,20 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
     // are visible at a glance.
     let lufs = app.analysis_mode.target_lufs().is_some();
     let (volume_header, album_volume_header) = if lufs {
-        ("Volume (LUFS)", "Album (LUFS)")
+        (tr!("Volume (LUFS)"), tr!("Album (LUFS)"))
     } else {
-        ("Volume", "Album Vol")
+        (tr!("Volume"), tr!("Album Vol"))
     };
     let volume_hover = if lufs {
-        "Track Analysis: BS.1770 integrated loudness in LUFS. \
-         Find Max Amplitude: available headroom in dB before clipping. \
-         Click to sort."
+        tr!("Track Analysis: BS.1770 integrated loudness in LUFS. \
+             Find Max Amplitude: available headroom in dB before clipping. \
+             Click to sort.")
     } else {
-        "Track Analysis: current loudness relative to ReplayGain reference (89 dB). \
-         Find Max Amplitude: available headroom in dB before clipping. \
-         Click to sort."
+        tr!(
+            "Track Analysis: current loudness relative to ReplayGain reference (89 dB). \
+             Find Max Amplitude: available headroom in dB before clipping. \
+             Click to sort."
+        )
     };
     app.ensure_display_order();
     // Set lookup instead of `Vec::contains` per row, which made selection
@@ -141,58 +141,60 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
             .column(egui_extras::Column::remainder()) // Status
             .header(20.0, |mut header| {
                 header.col(|ui| {
-                    sort_header(ui, app, "Path/File", SortColumn::Filename, "");
+                    sort_header(ui, app, &tr!("Path/File"), SortColumn::Filename, "");
                 });
                 header.col(|ui| {
-                    sort_header(ui, app, volume_header, SortColumn::Volume, volume_hover);
+                    sort_header(ui, app, &volume_header, SortColumn::Volume, &volume_hover);
                 });
                 header.col(|ui| {
-                    ui.strong("Clip");
+                    ui.strong(tr!("Clip"));
                 });
                 header.col(|ui| {
-                    sort_header(ui, app, "Track Gain", SortColumn::TrackGain, "");
+                    sort_header(ui, app, &tr!("Track Gain"), SortColumn::TrackGain, "");
                 });
                 header.col(|ui| {
-                    ui.strong("Clip(T)");
+                    ui.strong(tr!("Clip(T)"));
                 });
                 header.col(|ui| {
-                    sort_header(ui, app, album_volume_header, SortColumn::AlbumVolume, "");
+                    sort_header(ui, app, &album_volume_header, SortColumn::AlbumVolume, "");
                 });
                 header.col(|ui| {
-                    sort_header(ui, app, "Album Gain", SortColumn::AlbumGain, "");
+                    sort_header(ui, app, &tr!("Album Gain"), SortColumn::AlbumGain, "");
                 });
                 header.col(|ui| {
-                    ui.strong("Clip(A)");
+                    ui.strong(tr!("Clip(A)"));
                 });
                 header.col(|ui| {
-                    ui.strong("Stored RG").on_hover_text(
+                    ui.strong(tr!("Stored RG")).on_hover_text(tr!(
                         "Existing ReplayGain/undo tags read from the file. \
                          Run Analysis > Check Stored Tags to populate. \
-                         Hover a cell for full tag details.",
-                    );
+                         Hover a cell for full tag details."
+                    ));
                 });
                 header.col(|ui| {
                     sort_header(
                         ui,
                         app,
-                        "Bitrate",
+                        &tr!("Bitrate"),
                         SortColumn::Bitrate,
-                        "Average bitrate, read when files are added. Click to sort.",
+                        &tr!("Average bitrate, read when files are added. Click to sort."),
                     );
                 });
                 header.col(|ui| {
                     sort_header(
                         ui,
                         app,
-                        "CBR/VBR",
+                        &tr!("CBR/VBR"),
                         SortColumn::BitrateMode,
-                        "MP3 only: CBR when every frame has the same bitrate, VBR otherwise. \
-                         AAC frames vary in size whatever the encoder setting, so M4A rows \
-                         stay empty. Click to sort.",
+                        &tr!(
+                            "MP3 only: CBR when every frame has the same bitrate, VBR otherwise. \
+                             AAC frames vary in size whatever the encoder setting, so M4A rows \
+                             stay empty. Click to sort."
+                        ),
                     );
                 });
                 header.col(|ui| {
-                    sort_header(ui, app, "Status", SortColumn::Status, "");
+                    sort_header(ui, app, &tr!("Status"), SortColumn::Status, "");
                 });
             });
         // Borrowed after the header (which needs `app` mutably for sort
@@ -243,7 +245,7 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                     // Issue #161 item 4: right-click → reveal in
                     // file manager. Captured for after-loop apply.
                     resp.context_menu(|ui| {
-                        if ui.button("Open file location").clicked() {
+                        if ui.button(tr!("Open file location")).clicked() {
                             pending_reveal = Some(file.path.clone());
                             ui.close_menu();
                         }
@@ -257,7 +259,7 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                 });
                 row.col(|ui| {
                     if d.clipping {
-                        ui.colored_label(egui::Color32::RED, "Y");
+                        ui.colored_label(egui::Color32::RED, tr!("Y"));
                     }
                 });
                 row.col(|ui| {
@@ -267,12 +269,12 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                         } else {
                             ui.style().visuals.text_color()
                         };
-                        ui.colored_label(color, format!("{:+.1} dB", g));
+                        ui.colored_label(color, tr!("{} dB", format!("{:+.1}", g)));
                     }
                 });
                 row.col(|ui| {
                     if d.track_clip {
-                        ui.colored_label(egui::Color32::RED, "Y");
+                        ui.colored_label(egui::Color32::RED, tr!("Y"));
                     }
                 });
                 row.col(|ui| {
@@ -287,19 +289,19 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                         } else {
                             ui.style().visuals.text_color()
                         };
-                        let label = ui.colored_label(color, format!("{:+.1} dB", g));
+                        let label = ui.colored_label(color, tr!("{} dB", format!("{:+.1}", g)));
                         // Which album this row was grouped into (issue #344).
                         // Under By tags the grouping is otherwise invisible:
                         // a file that fell back to its folder, or two
                         // releases that merged, look like any other row.
                         if let Some(album) = &file.album_label {
-                            label.on_hover_text(format!("Album: {}", album));
+                            label.on_hover_text(tr!("Album: {}", album));
                         }
                     }
                 });
                 row.col(|ui| {
                     if d.album_clip {
-                        ui.colored_label(egui::Color32::RED, "Y");
+                        ui.colored_label(egui::Color32::RED, tr!("Y"));
                     }
                 });
                 row.col(|ui| {
@@ -307,21 +309,25 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
                 });
                 row.col(|ui| {
                     if let Some(bitrate) = file.bitrate {
-                        ui.label(format!("{:.0} kbps", bitrate.kbps));
+                        ui.label(tr!("{} kbps", format!("{:.0}", bitrate.kbps)));
                     }
                 });
                 row.col(|ui| {
-                    ui.label(file.bitrate_mode_label());
+                    ui.label(match file.bitrate_mode_label() {
+                        "CBR" => tr!("CBR"),
+                        "VBR" => tr!("VBR"),
+                        _ => String::new(),
+                    });
                 });
                 row.col(|ui| {
                     let label = ui.label(file.status.label());
                     match &file.status {
                         FileStatus::DoneWithUnparsed(_) => {
-                            label.on_hover_text(
+                            label.on_hover_text(tr!(
                                 "These AAC frames could not be parsed and kept their original \
                                  gain, which can be heard as clicks. Undo restores the file. \
-                                 Please report it at https://github.com/M-Igashi/mp3rgain/issues",
-                            );
+                                 Please report it at https://github.com/M-Igashi/mp3rgain/issues"
+                            ));
                         }
                         // The reason, e.g. "HE-AAC is not supported for gain
                         // adjustment" (issue #403), is otherwise shown nowhere.

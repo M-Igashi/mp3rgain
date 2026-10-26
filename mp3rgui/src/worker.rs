@@ -275,11 +275,15 @@ pub fn spawn_track_analysis(
             &tx,
             &ctx,
             WorkerEvent::Done {
-                message: format_result_message(
-                    "Analyzed",
-                    analyzed.load(Ordering::Relaxed),
-                    errors.load(Ordering::Relaxed),
-                ),
+                message: {
+                    let count = analyzed.load(Ordering::Relaxed);
+                    let errors = errors.load(Ordering::Relaxed);
+                    if errors > 0 {
+                        tr!("Analyzed {} file(s), {} error(s)", count, errors)
+                    } else {
+                        tr!("Analyzed {} file(s)", count)
+                    }
+                },
             },
         );
     });
@@ -409,36 +413,13 @@ pub fn spawn_album_analysis(
             }
         }
 
-        let message = match (group_count, error_groups) {
-            (1, 0) if skipped_total == 0 => {
-                format!("Album analysis complete ({} tracks)", analyzed_total)
-            }
-            (1, 0) => format!(
-                "Album analysis complete ({} tracks, {} skipped)",
-                analyzed_total, skipped_total
-            ),
-            (_, 0) if skipped_total == 0 => format!(
-                "Album analysis complete ({} albums, {} tracks)",
-                group_count, analyzed_total
-            ),
-            (_, 0) => format!(
-                "Album analysis complete ({} albums, {} tracks, {} skipped)",
-                group_count, analyzed_total, skipped_total
-            ),
-            (_, n) => format!(
-                "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed",
-                analyzed_total, skipped_total, n
-            ),
-        };
-        let message = if merged_groups > 0 {
-            format!(
-                "{}; {} album(s) hold more than one release (same artist and album tag). \
-                 Hover Album Gain to see the grouping.",
-                message, merged_groups
-            )
-        } else {
-            message
-        };
+        let message = album_done_message(
+            group_count,
+            error_groups,
+            analyzed_total,
+            skipped_total,
+            merged_groups,
+        );
         send(&tx, &ctx, WorkerEvent::Done { message });
     });
 
@@ -455,7 +436,7 @@ pub fn spawn_album_analysis(
 pub fn spawn_apply(
     ctx: egui::Context,
     jobs: Vec<ApplyJob>,
-    action_label: &'static str,
+    phrase: GainPhrase,
     ui_opts: ApplyOptionsUi,
     // The album grouping the app used, so the album-wide MINMAX range is
     // stamped over the same sets the gain was computed over (issue #338).
@@ -576,25 +557,22 @@ pub fn spawn_apply(
                     &ctx,
                     WorkerEvent::FileApplyFailed {
                         idx: album_members[path].0,
-                        message: format!(
-                            "Gain applied, but MP3GAIN_ALBUM_MINMAX was not written: {e}"
+                        message: tr!(
+                            "Gain applied, but MP3GAIN_ALBUM_MINMAX was not written: {e}",
+                            e
                         ),
                     },
                 );
             }
         }
 
-        let verb = if ui_opts.dry_run {
-            "Dry-ran"
-        } else {
-            "Applied"
-        };
         send(
             &tx,
             &ctx,
             WorkerEvent::Done {
-                message: format_result_message(
-                    &format!("{} {} on", verb, action_label),
+                message: gain_done_message(
+                    phrase,
+                    ui_opts.dry_run,
                     applied.load(Ordering::Relaxed),
                     errors.load(Ordering::Relaxed),
                 ),
@@ -672,23 +650,25 @@ pub fn spawn_undo(
             return;
         }
 
-        let mut parts: Vec<String> = Vec::new();
-        parts.push(format!("Undone {} file(s)", undone.load(Ordering::Relaxed)));
+        let undone = undone.load(Ordering::Relaxed);
         let skipped = skipped.load(Ordering::Relaxed);
         let errors = errors.load(Ordering::Relaxed);
-        if skipped > 0 {
-            parts.push(format!("{} had no changes to undo", skipped));
-        }
-        if errors > 0 {
-            parts.push(format!("{} error(s)", errors));
-        }
-        send(
-            &tx,
-            &ctx,
-            WorkerEvent::Done {
-                message: parts.join(", "),
-            },
-        );
+        let message = match (skipped > 0, errors > 0) {
+            (false, false) => tr!("Undone {} file(s)", undone),
+            (true, false) => tr!(
+                "Undone {} file(s), {} had no changes to undo",
+                undone,
+                skipped
+            ),
+            (false, true) => tr!("Undone {} file(s), {} error(s)", undone, errors),
+            (true, true) => tr!(
+                "Undone {} file(s), {} had no changes to undo, {} error(s)",
+                undone,
+                skipped,
+                errors
+            ),
+        };
+        send(&tx, &ctx, WorkerEvent::Done { message });
     });
 
     WorkerHandle { rx, cancel }
@@ -755,11 +735,19 @@ pub fn spawn_delete_tags(
             &tx,
             &ctx,
             WorkerEvent::Done {
-                message: format_result_message(
-                    "Deleted stored tags from",
-                    deleted.load(Ordering::Relaxed),
-                    errors.load(Ordering::Relaxed),
-                ),
+                message: {
+                    let count = deleted.load(Ordering::Relaxed);
+                    let errors = errors.load(Ordering::Relaxed);
+                    if errors > 0 {
+                        tr!(
+                            "Deleted stored tags from {} file(s), {} error(s)",
+                            count,
+                            errors
+                        )
+                    } else {
+                        tr!("Deleted stored tags from {} file(s)", count)
+                    }
+                },
             },
         );
     });
@@ -818,11 +806,19 @@ pub fn spawn_find_max_amplitude(ctx: egui::Context, files: Vec<(usize, PathBuf)>
             &tx,
             &ctx,
             WorkerEvent::Done {
-                message: format_result_message(
-                    "Max amplitude scanned on",
-                    found.load(Ordering::Relaxed),
-                    errors.load(Ordering::Relaxed),
-                ),
+                message: {
+                    let count = found.load(Ordering::Relaxed);
+                    let errors = errors.load(Ordering::Relaxed);
+                    if errors > 0 {
+                        tr!(
+                            "Max amplitude scanned on {} file(s), {} error(s)",
+                            count,
+                            errors
+                        )
+                    } else {
+                        tr!("Max amplitude scanned on {} file(s)", count)
+                    }
+                },
             },
         );
     });
@@ -874,7 +870,7 @@ pub fn spawn_check_stored_tags(
             &tx,
             &ctx,
             WorkerEvent::Done {
-                message: format!("Checked stored tags for {} file(s)", total),
+                message: tr!("Checked stored tags for {} file(s)", total),
             },
         );
     });
@@ -970,13 +966,157 @@ fn send(tx: &Sender<WorkerEvent>, ctx: &egui::Context, event: WorkerEvent) {
     ctx.request_repaint();
 }
 
-/// Build the final status message: `"<action> <count> file(s)"` plus a
-/// `", N error(s)"` suffix when any job failed. `action` carries any
-/// worker-specific phrasing (e.g. "Applied Track Gain on").
-fn format_result_message(action: &str, count: usize, errors: usize) -> String {
-    if errors > 0 {
-        format!("{} {} file(s), {} error(s)", action, count, errors)
-    } else {
-        format!("{} {} file(s)", action, count)
+/// Which apply finished. The status line is one sentence so a translation
+/// can reorder it; the English matches the old "<verb> <action> on N file(s)".
+#[derive(Clone, Copy)]
+pub enum GainPhrase {
+    Track,
+    Manual,
+    Channel,
+    Album,
+}
+
+fn gain_done_message(phrase: GainPhrase, dry_run: bool, count: usize, errors: usize) -> String {
+    match (phrase, dry_run, errors > 0) {
+        (GainPhrase::Track, false, false) => tr!("Applied track gain on {} file(s)", count),
+        (GainPhrase::Track, false, true) => {
+            tr!(
+                "Applied track gain on {} file(s), {} error(s)",
+                count,
+                errors
+            )
+        }
+        (GainPhrase::Track, true, false) => tr!("Dry-ran track gain on {} file(s)", count),
+        (GainPhrase::Track, true, true) => {
+            tr!(
+                "Dry-ran track gain on {} file(s), {} error(s)",
+                count,
+                errors
+            )
+        }
+        (GainPhrase::Manual, false, false) => tr!("Applied manual gain on {} file(s)", count),
+        (GainPhrase::Manual, false, true) => {
+            tr!(
+                "Applied manual gain on {} file(s), {} error(s)",
+                count,
+                errors
+            )
+        }
+        (GainPhrase::Manual, true, false) => tr!("Dry-ran manual gain on {} file(s)", count),
+        (GainPhrase::Manual, true, true) => {
+            tr!(
+                "Dry-ran manual gain on {} file(s), {} error(s)",
+                count,
+                errors
+            )
+        }
+        (GainPhrase::Channel, false, false) => tr!("Applied channel gain on {} file(s)", count),
+        (GainPhrase::Channel, false, true) => {
+            tr!(
+                "Applied channel gain on {} file(s), {} error(s)",
+                count,
+                errors
+            )
+        }
+        (GainPhrase::Channel, true, false) => tr!("Dry-ran channel gain on {} file(s)", count),
+        (GainPhrase::Channel, true, true) => {
+            tr!(
+                "Dry-ran channel gain on {} file(s), {} error(s)",
+                count,
+                errors
+            )
+        }
+        (GainPhrase::Album, false, false) => tr!("Applied album gain on {} file(s)", count),
+        (GainPhrase::Album, false, true) => {
+            tr!(
+                "Applied album gain on {} file(s), {} error(s)",
+                count,
+                errors
+            )
+        }
+        (GainPhrase::Album, true, false) => tr!("Dry-ran album gain on {} file(s)", count),
+        (GainPhrase::Album, true, true) => {
+            tr!(
+                "Dry-ran album gain on {} file(s), {} error(s)",
+                count,
+                errors
+            )
+        }
+    }
+}
+
+fn album_done_message(
+    group_count: usize,
+    error_groups: usize,
+    analyzed_total: usize,
+    skipped_total: usize,
+    merged_groups: usize,
+) -> String {
+    let one = group_count == 1;
+    let ok = error_groups == 0;
+    let none_skipped = skipped_total == 0;
+    let merged = merged_groups > 0;
+    match (one, ok, none_skipped, merged) {
+        (true, true, true, false) => tr!("Album analysis complete ({} tracks)", analyzed_total),
+        (true, true, true, true) => tr!(
+            "Album analysis complete ({} tracks); {} album(s) hold more than one \
+             release (same artist and album tag). Hover Album Gain to see the grouping.",
+            analyzed_total,
+            merged_groups
+        ),
+        (true, true, false, false) => tr!(
+            "Album analysis complete ({} tracks, {} skipped)",
+            analyzed_total,
+            skipped_total
+        ),
+        (true, true, false, true) => tr!(
+            "Album analysis complete ({} tracks, {} skipped); {} album(s) hold more than \
+             one release (same artist and album tag). Hover Album Gain to see the grouping.",
+            analyzed_total,
+            skipped_total,
+            merged_groups
+        ),
+        (false, true, true, false) => tr!(
+            "Album analysis complete ({} albums, {} tracks)",
+            group_count,
+            analyzed_total
+        ),
+        (false, true, true, true) => tr!(
+            "Album analysis complete ({} albums, {} tracks); {} album(s) hold more than \
+             one release (same artist and album tag). Hover Album Gain to see the grouping.",
+            group_count,
+            analyzed_total,
+            merged_groups
+        ),
+        (false, true, false, false) => tr!(
+            "Album analysis complete ({} albums, {} tracks, {} skipped)",
+            group_count,
+            analyzed_total,
+            skipped_total
+        ),
+        (false, true, false, true) => tr!(
+            "Album analysis complete ({} albums, {} tracks, {} skipped); {} album(s) hold \
+             more than one release (same artist and album tag). Hover Album Gain to see \
+             the grouping.",
+            group_count,
+            analyzed_total,
+            skipped_total,
+            merged_groups
+        ),
+        (_, false, _, false) => tr!(
+            "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed",
+            analyzed_total,
+            skipped_total,
+            error_groups
+        ),
+        (_, false, _, true) => tr!(
+            "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed; \
+             {} album(s) hold more than one release (same artist and album tag). \
+             Hover Album Gain to see the grouping.",
+            analyzed_total,
+            skipped_total,
+            error_groups,
+            merged_groups
+        ),
     }
 }

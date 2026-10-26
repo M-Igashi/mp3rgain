@@ -18,9 +18,10 @@ use std::sync::Arc;
 /// candidate list. The escape hatch for an OS font set we did not predict.
 pub const FONT_ENV: &str = "MP3RGUI_FONT";
 
-/// Language groups a candidate font primarily serves. The user's locale
-/// moves its group to the front; Japanese is the default order since every
-/// CJK font covers kana and most kanji, while Hangul needs a Korean face.
+/// Language groups a candidate font primarily serves. The resolved UI
+/// language moves its group to the front; Japanese is the default order
+/// since every CJK font covers kana and most kanji, while Hangul needs a
+/// Korean face.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Lang {
     Ja,
@@ -85,9 +86,10 @@ const CANDIDATES: &[(Lang, &str)] = &[
 ];
 
 /// Install egui's default fonts plus the system CJK fallback, if one exists.
-pub fn install(ctx: &egui::Context) {
+/// `ui_locale` is the resolved UI language (`zh_CN`, `ko_KR`, `pt_BR`).
+pub fn install(ctx: &egui::Context, ui_locale: &str) {
     let mut defs = egui::FontDefinitions::default();
-    if let Some((path, bytes)) = load_fallback() {
+    if let Some((path, bytes)) = load_fallback(ui_locale) {
         let name = path.display().to_string();
         defs.font_data
             .insert(name.clone(), Arc::new(egui::FontData::from_owned(bytes)));
@@ -98,21 +100,21 @@ pub fn install(ctx: &egui::Context) {
     ctx.set_fonts(defs);
 }
 
-fn load_fallback() -> Option<(PathBuf, Vec<u8>)> {
-    fallback_candidates()
+fn load_fallback(ui_locale: &str) -> Option<(PathBuf, Vec<u8>)> {
+    fallback_candidates(ui_locale)
         .into_iter()
         .find_map(|path| std::fs::read(&path).ok().map(|bytes| (path, bytes)))
 }
 
 /// Candidate font files in preference order: the explicit override, the
-/// fontconfig answer on Linux, then the static list with the locale's
-/// language group first.
-fn fallback_candidates() -> Vec<PathBuf> {
+/// fontconfig answer on Linux, then the static list with the UI language's
+/// group first.
+fn fallback_candidates(ui_locale: &str) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = Vec::new();
     if let Some(path) = std::env::var_os(FONT_ENV).filter(|p| !p.is_empty()) {
         paths.push(PathBuf::from(path));
     }
-    let preferred = preferred_lang();
+    let preferred = lang_from_locale(ui_locale);
     #[cfg(not(any(target_os = "macos", windows)))]
     paths.extend(fontconfig_match(preferred));
     paths.extend(ordered_static_candidates(preferred));
@@ -139,15 +141,9 @@ fn font_path(name: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Language group from the POSIX locale variables. macOS apps launched from
-/// Finder and Windows have none of them set, so those fall through to `Ja`.
-fn preferred_lang() -> Lang {
-    ["LC_ALL", "LC_MESSAGES", "LANG"]
-        .iter()
-        .filter_map(|var| std::env::var(var).ok())
-        .find(|v| !v.is_empty())
-        .map(|v| lang_from_locale(&v))
-        .unwrap_or(Lang::Ja)
+/// Whether two resolved UI locales want the same CJK fallback face.
+pub fn same_cjk_group(a: &str, b: &str) -> bool {
+    lang_from_locale(a) == lang_from_locale(b)
 }
 
 fn lang_from_locale(locale: &str) -> Lang {
@@ -185,6 +181,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ui_locale_selects_cjk_group() {
+        assert!(same_cjk_group("zh_CN", "zh-Hans"));
+        assert!(same_cjk_group("ko_KR", "ko"));
+        assert!(!same_cjk_group("zh_CN", "ko_KR"));
+        assert!(same_cjk_group("pt_BR", "en_US"));
+        assert!(same_cjk_group("", "ja_JP.UTF-8"));
+    }
+
+    #[test]
     fn locale_picks_language_group() {
         assert_eq!(lang_from_locale("ja_JP.UTF-8"), Lang::Ja);
         assert_eq!(lang_from_locale("zh_CN.UTF-8"), Lang::Zh);
@@ -209,7 +214,7 @@ mod tests {
     /// actually supply the glyphs from the issue #321 filename.
     #[test]
     fn japanese_glyphs_resolve_when_a_system_font_exists() {
-        let Some((path, bytes)) = load_fallback() else {
+        let Some((path, bytes)) = load_fallback("ja") else {
             eprintln!("no system CJK font on this machine, skipping");
             return;
         };

@@ -23,17 +23,19 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
 /// Help > About. The only other place the version appeared was the crash
 /// message, so a GUI user could not say which release they were on (#367).
 fn render_about(app: &mut Mp3rgainApp, ctx: &egui::Context) {
-    egui::Window::new("About mp3rgui")
+    egui::Window::new(tr!("About mp3rgui"))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .open(&mut app.show_about)
         .show(ctx, |ui| {
-            ui.heading(format!("mp3rgui {}", env!("CARGO_PKG_VERSION")));
-            ui.label("Lossless MP3 and AAC volume normalizer using ReplayGain");
+            ui.heading(tr!("mp3rgui {}", env!("CARGO_PKG_VERSION")));
+            ui.label(tr!(
+                "Lossless MP3 and AAC volume normalizer using ReplayGain"
+            ));
             ui.add_space(8.0);
             ui.hyperlink(env!("CARGO_PKG_REPOSITORY"));
-            ui.label(format!("{} License", env!("CARGO_PKG_LICENSE")));
+            ui.label(tr!("{} License", env!("CARGO_PKG_LICENSE")));
         });
 }
 
@@ -45,9 +47,9 @@ fn render_about(app: &mut Mp3rgainApp, ctx: &egui::Context) {
 /// its action.
 fn modal(
     ctx: &egui::Context,
-    title: &str,
+    title: impl Into<egui::WidgetText>,
     open_flag: &mut bool,
-    commit_label: &str,
+    commit_label: impl Into<egui::WidgetText>,
     commit_fill: Option<egui::Color32>,
     body: impl FnOnce(&mut egui::Ui) -> bool,
 ) -> bool {
@@ -66,7 +68,7 @@ fn modal(
             let can_commit = body(ui);
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr!("Cancel")).clicked() {
                     close_via_cancel = true;
                 }
                 let mut button = egui::Button::new(commit_label);
@@ -96,29 +98,39 @@ fn render_channel_gain_modal(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     let modal_state = &mut app.channel_gain_modal;
     let committed = modal(
         ctx,
-        "Apply channel gain",
+        tr!("Apply channel gain"),
         &mut modal_state.open,
-        "Apply",
+        tr!("Apply"),
         None,
         |ui| {
-            ui.label(format!("Target: {} file(s) (MP3 only)", count));
+            ui.label(tr!("Target: {} file(s) (MP3 only)", count));
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label("Channel:");
-                ui.selectable_value(&mut modal_state.channel, mp3rgain::Channel::Left, "Left");
-                ui.selectable_value(&mut modal_state.channel, mp3rgain::Channel::Right, "Right");
+                ui.label(tr!("Channel:"));
+                ui.selectable_value(
+                    &mut modal_state.channel,
+                    mp3rgain::Channel::Left,
+                    tr!("Left"),
+                );
+                ui.selectable_value(
+                    &mut modal_state.channel,
+                    mp3rgain::Channel::Right,
+                    tr!("Right"),
+                );
             });
             ui.horizontal(|ui| {
-                ui.label("Steps:");
+                ui.label(tr!("Steps:"));
                 ui.add(
                     egui::DragValue::new(&mut modal_state.steps)
                         .range(-64..=64)
                         .speed(1),
                 );
                 let db = mp3rgain::steps_to_db(modal_state.steps);
-                ui.label(format!("= {:+.2} dB", db));
+                ui.label(tr!("= {} dB", format!("{:+.2}", db)));
             });
-            ui.label("Stereo / Dual Channel MP3s only. Mono and joint stereo files are refused.");
+            ui.label(tr!(
+                "Stereo / Dual Channel MP3s only. Mono and joint stereo files are refused."
+            ));
             modal_state.steps != 0
         },
     );
@@ -138,24 +150,24 @@ fn render_manual_gain_modal(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     let modal_state = &mut app.manual_gain_modal;
     let committed = modal(
         ctx,
-        "Apply manual gain",
+        tr!("Apply manual gain"),
         &mut modal_state.open,
-        "Apply",
+        tr!("Apply"),
         None,
         |ui| {
-            ui.label(format!("Target: {} file(s)", count));
+            ui.label(tr!("Target: {} file(s)", count));
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label("Steps:");
+                ui.label(tr!("Steps:"));
                 ui.add(
                     egui::DragValue::new(&mut modal_state.steps)
                         .range(-64..=64)
                         .speed(1),
                 );
                 let db = mp3rgain::steps_to_db(modal_state.steps);
-                ui.label(format!("= {:+.2} dB", db));
+                ui.label(tr!("= {} dB", format!("{:+.2}", db)));
             });
-            ui.label("1 step ≈ 1.5 dB. Negative values lower the volume.");
+            ui.label(tr!("1 step ≈ 1.5 dB. Negative values lower the volume."));
             modal_state.steps != 0
         },
     );
@@ -173,16 +185,16 @@ fn render_delete_confirm(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     let count = app.target_indices().len();
     let committed = modal(
         ctx,
-        "Delete stored tags",
+        tr!("Delete stored tags"),
         &mut app.confirm_delete_tags,
-        "Delete",
+        tr!("Delete"),
         Some(egui::Color32::DARK_RED),
         |ui| {
-            ui.label(format!(
+            ui.label(tr!(
                 "Delete stored ReplayGain / undo tags from {} file(s)?",
                 count
             ));
-            ui.label("This cannot be undone.");
+            ui.label(tr!("This cannot be undone."));
             true
         },
     );
@@ -219,7 +231,7 @@ fn handle_selection_shortcuts(app: &mut Mp3rgainApp, ctx: &egui::Context) {
 /// File menu.
 fn pick_files(app: &mut Mp3rgainApp) {
     if let Some(paths) = rfd::FileDialog::new()
-        .add_filter("Audio files", mp3rgain::SUPPORTED_EXTENSIONS)
+        .add_filter(tr!("Audio files"), mp3rgain::SUPPORTED_EXTENSIONS)
         .pick_files()
     {
         app.add_files(paths);
@@ -257,7 +269,9 @@ fn render_central_panel(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     egui::CentralPanel::default().show(ctx, |ui| {
         if app.files.is_empty() {
             ui.centered_and_justified(|ui| {
-                ui.label("Drag and drop MP3 files here, or use the toolbar buttons to add files");
+                ui.label(tr!(
+                    "Drag and drop MP3 files here, or use the toolbar buttons to add files"
+                ));
             });
         } else {
             table::render(app, ui);

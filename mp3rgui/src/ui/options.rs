@@ -10,64 +10,74 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     egui::TopBottomPanel::top("options_panel").show(ctx, |ui| {
         ui.add_enabled_ui(!app.is_processing(), |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Options:");
+                ui.label(tr!("Options:"));
 
-                ui.checkbox(&mut app.apply_options.prevent_clipping, "Prevent clipping")
-                    .on_hover_text(
-                        "Cap the applied gain at the available headroom so the \
-                         output cannot clip. Equivalent to the CLI's -k flag.",
-                    );
+                ui.checkbox(
+                    &mut app.apply_options.prevent_clipping,
+                    tr!("Prevent clipping"),
+                )
+                .on_hover_text(tr!(
+                    "Cap the applied gain at the available headroom so the \
+                         output cannot clip. Equivalent to the CLI's -k flag."
+                ));
 
-                ui.checkbox(&mut app.apply_options.preserve_timestamp, "Preserve mtime")
-                    .on_hover_text(
-                        "Restore the file's last-modified timestamp after writing \
+                ui.checkbox(
+                    &mut app.apply_options.preserve_timestamp,
+                    tr!("Preserve mtime"),
+                )
+                .on_hover_text(tr!(
+                    "Restore the file's last-modified timestamp after writing \
                          so it doesn't jump to the top of playlists sorted by date. \
-                         CLI -p.",
-                    );
+                         CLI -p."
+                ));
 
-                ui.checkbox(&mut app.apply_options.wrap, "Wrap mode")
-                    .on_hover_text(
+                ui.checkbox(&mut app.apply_options.wrap, tr!("Wrap mode"))
+                    .on_hover_text(tr!(
                         "Allow gain values to wrap around 0–255 instead of saturating. \
-                         Disables the clipping check. CLI -w. Rarely useful — leave off.",
-                    );
+                     Disables the clipping check. CLI -w. Rarely useful — leave off."
+                    ));
 
                 ui.horizontal(|ui| {
-                    ui.label("MP3 tags:");
+                    ui.label(tr!("MP3 tags:"));
                     let layout = &mut app.apply_options.tag_layout;
                     egui::ComboBox::from_id_salt("tag_layout")
                         .selected_text(match layout {
-                            TagLayout::Split => "ReplayGain in ID3v2",
-                            TagLayout::Ape => "All in APEv2",
-                            TagLayout::Id3v2 => "All in ID3v2",
+                            TagLayout::Split => tr!("ReplayGain in ID3v2"),
+                            TagLayout::Ape => tr!("All in APEv2"),
+                            TagLayout::Id3v2 => tr!("All in ID3v2"),
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(layout, TagLayout::Split, "ReplayGain in ID3v2")
-                                .on_hover_text(
-                                    "Default. REPLAYGAIN_* in ID3v2 TXXX where players \
+                            ui.selectable_value(
+                                layout,
+                                TagLayout::Split,
+                                tr!("ReplayGain in ID3v2"),
+                            )
+                            .on_hover_text(tr!(
+                                "Default. REPLAYGAIN_* in ID3v2 TXXX where players \
                                  look, MP3GAIN_UNDO / MINMAX in APEv2 where mp3gain \
-                                 looks.",
-                                );
-                            ui.selectable_value(layout, TagLayout::Ape, "All in APEv2")
-                                .on_hover_text(
+                                 looks."
+                            ));
+                            ui.selectable_value(layout, TagLayout::Ape, tr!("All in APEv2"))
+                                .on_hover_text(tr!(
                                     "Byte-for-byte mp3gain behaviour. ReplayGain-aware \
-                                     players will not find the values. CLI -s a.",
-                                );
-                            ui.selectable_value(layout, TagLayout::Id3v2, "All in ID3v2")
-                                .on_hover_text(
+                                     players will not find the values. CLI -s a."
+                                ));
+                            ui.selectable_value(layout, TagLayout::Id3v2, tr!("All in ID3v2"))
+                                .on_hover_text(tr!(
                                     "Undo and ReplayGain both in ID3v2 TXXX frames. \
-                                     CLI -s i.",
-                                );
+                                     CLI -s i."
+                                ));
                         });
                 });
 
                 ui.separator();
 
-                ui.checkbox(&mut app.apply_options.dry_run, "Dry run")
-                    .on_hover_text(
+                ui.checkbox(&mut app.apply_options.dry_run, tr!("Dry run"))
+                    .on_hover_text(tr!(
                         "Preview Apply Track / Album Gain without modifying any file. \
                          The Status column shows the steps that would be applied. \
-                         CLI -n.",
-                    );
+                         CLI -n."
+                    ));
 
                 // Issue #302: GUI counterpart of the CLI's -s R. Reuse is
                 // only trusted in RG 1.0 mode, so the checkbox greys out in
@@ -75,75 +85,75 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
                 // --rg2 / --r128).
                 ui.add_enabled(
                     app.analysis_mode == AnalysisMode::Rg1,
-                    egui::Checkbox::new(&mut app.use_stored_tags, "Use stored tags"),
+                    egui::Checkbox::new(&mut app.use_stored_tags, tr!("Use stored tags")),
                 )
-                .on_hover_text(
+                .on_hover_text(tr!(
                     "Apply Track / Album Gain from stored REPLAYGAIN_* tags instead \
                      of re-analyzing; only files without usable tags are rescanned. \
                      Album Gain reuses tags only when every file in the album \
                      carries a consistent set; any gap rescans the whole album. \
-                     CLI -s R. RG 1.0 mode only.",
-                );
+                     CLI -s R. RG 1.0 mode only."
+                ));
 
                 ui.separator();
 
                 // What one album is, for Album Analysis / Apply Album Gain.
                 // The CLI's --album-by, in the same three units (issue #338).
-                ui.label("Album:");
-                ui.radio_value(&mut app.album_grouping, AlbumGrouping::Folder, "Per folder")
-                    .on_hover_text(
-                        "Each folder is its own album. A release whose discs live in \
-                         subfolders gets one album gain per disc, so use By tags for \
-                         those. CLI --album-by=dir.",
-                    );
-                ui.radio_value(&mut app.album_grouping, AlbumGrouping::Tag, "By tags")
-                    .on_hover_text(
+                ui.label(tr!("Album:"));
+                ui.radio_value(
+                    &mut app.album_grouping,
+                    AlbumGrouping::Folder,
+                    tr!("Per folder"),
+                )
+                .on_hover_text(tr!(
+                    "Each folder is its own album. A release whose discs live in \
+                     subfolders gets one album gain per disc, so use By tags for \
+                     those. CLI --album-by=dir."
+                ));
+                ui.radio_value(&mut app.album_grouping, AlbumGrouping::Tag, tr!("By tags"))
+                    .on_hover_text(tr!(
                         "One album per release, read from ALBUMARTIST / ALBUM (and \
                          MUSICBRAINZ_ALBUMID when present), so discs in subfolders \
                          share one album gain. Files with no ALBUM tag fall back to \
-                         their own folder. CLI --album-by=tag.",
-                    );
+                         their own folder. CLI --album-by=tag."
+                    ));
                 ui.radio_value(
                     &mut app.album_grouping,
                     AlbumGrouping::Single,
-                    "Single album",
+                    tr!("Single album"),
                 )
-                .on_hover_text(
+                .on_hover_text(tr!(
                     "Treat every loaded file as one album, ignoring folders. \
-                         Select rows first to group just those, which is how to \
-                         handle a release that has no usable tags. CLI -a.",
-                );
+                     Select rows first to group just those, which is how to \
+                     handle a release that has no usable tags. CLI -a."
+                ));
 
-                ui.checkbox(&mut app.show_filename_only, "Filename only")
-                    .on_hover_text(
+                ui.checkbox(&mut app.show_filename_only, tr!("Filename only"))
+                    .on_hover_text(tr!(
                         "Show only the file name in the Path/File column instead of \
-                         the full path. The full path is still shown on hover.",
-                    );
+                         the full path. The full path is still shown on hover."
+                    ));
 
                 ui.separator();
 
                 // Loudness measurement mode (issue #272). Switching modes
                 // invalidates cached analysis results — RG1 and BS.1770
                 // numbers live on different scales.
-                ui.label("Analysis:");
+                ui.label(tr!("Analysis:"));
                 let before = app.analysis_mode;
-                ui.radio_value(&mut app.analysis_mode, AnalysisMode::Rg1, "RG 1.0")
-                    .on_hover_text(
-                        "ReplayGain 1.0 (default): mp3gain-compatible values, \
+                ui.radio_value(&mut app.analysis_mode, AnalysisMode::Rg1, tr!("RG 1.0"))
+                    .on_hover_text(tr!("ReplayGain 1.0 (default): mp3gain-compatible values, \
                          89 dB reference. Keeps re-scans consistent with \
-                         libraries normalized by mp3gain.",
-                    );
-                ui.radio_value(&mut app.analysis_mode, AnalysisMode::Rg2, "RG 2.0")
-                    .on_hover_text(
+                         libraries normalized by mp3gain."));
+                ui.radio_value(&mut app.analysis_mode, AnalysisMode::Rg2, tr!("RG 2.0"))
+                    .on_hover_text(tr!(
                         "ReplayGain 2.0: BS.1770 integrated loudness, -18 LUFS \
                          reference (same perceived level as 89 dB). \
-                         CLI --rg2.",
-                    );
-                ui.radio_value(&mut app.analysis_mode, AnalysisMode::R128, "R128")
-                    .on_hover_text(
-                        "EBU R128: BS.1770 integrated loudness, -23 LUFS \
-                         broadcast target. CLI --r128.",
-                    );
+                         CLI --rg2."
+                    ));
+                ui.radio_value(&mut app.analysis_mode, AnalysisMode::R128, tr!("R128"))
+                    .on_hover_text(tr!("EBU R128: BS.1770 integrated loudness, -23 LUFS \
+                         broadcast target. CLI --r128."));
                 if app.analysis_mode != before {
                     app.invalidate_analysis_results();
                 }

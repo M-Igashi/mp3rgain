@@ -1,7 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[macro_use]
+extern crate tr;
+
 mod app;
 mod fonts;
+mod i18n;
 mod panic_hook;
 mod startup;
 mod ui;

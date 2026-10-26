@@ -8,11 +8,11 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
 
             // Add Files button
             ui.add_enabled_ui(!app.is_processing(), |ui| {
-                if ui.button("Add Files").clicked() {
+                if ui.button(tr!("Add Files")).clicked() {
                     super::pick_files(app);
                 }
 
-                if ui.button("Add Folder").clicked() {
+                if ui.button(tr!("Add Folder")).clicked() {
                     super::pick_folder(app, true);
                 }
             });
@@ -21,10 +21,10 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
 
             // Analysis buttons
             ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing(), |ui| {
-                if ui.button("Track Analysis").clicked() {
+                if ui.button(tr!("Track Analysis")).clicked() {
                     app.start_analyze_tracks(ctx);
                 }
-                if ui.button("Album Analysis").clicked() {
+                if ui.button(tr!("Album Analysis")).clicked() {
                     app.start_analyze_album(ctx);
                 }
             });
@@ -33,10 +33,10 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
 
             // Gain buttons
             ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing(), |ui| {
-                if ui.button("Track Gain").clicked() {
+                if ui.button(tr!("Track Gain")).clicked() {
                     app.start_apply_track_gain(ctx);
                 }
-                if ui.button("Album Gain").clicked() {
+                if ui.button(tr!("Album Gain")).clicked() {
                     app.start_apply_album_gain(ctx);
                 }
             });
@@ -47,14 +47,14 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             ui.add_enabled_ui(
                 !app.selected_indices.is_empty() && !app.is_processing(),
                 |ui| {
-                    if ui.button("Remove").clicked() {
+                    if ui.button(tr!("Remove")).clicked() {
                         app.remove_selected();
                     }
                 },
             );
 
             ui.add_enabled_ui(!app.files.is_empty() && !app.is_processing(), |ui| {
-                if ui.button("Clear All").clicked() {
+                if ui.button(tr!("Clear All")).clicked() {
                     app.clear_files();
                 }
             });
@@ -63,7 +63,7 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
 
             // Cancel — only enabled while a worker is running.
             ui.add_enabled_ui(app.is_processing(), |ui| {
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr!("Cancel")).clicked() {
                     app.cancel_current_work();
                 }
             });
@@ -73,7 +73,7 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
             // Target volume. Stored on the 89 dB scale and shown on the
             // selected mode's scale, so one offset carries across modes:
             // 95 dB in RG 1.0 is -12 LUFS in RG 2.0 (issues #272, #364).
-            ui.label("Target:");
+            ui.label(tr!("Target:"));
             let shift = app.analysis_mode.reference_level() - REPLAYGAIN_REFERENCE_DB;
             let mut shown = app.target_volume + shift;
             let resp = ui
@@ -84,12 +84,12 @@ pub fn render(app: &mut Mp3rgainApp, ctx: &egui::Context) {
                         .range(75.0 + shift..=100.0 + shift)
                         .suffix(format!(" {}", app.analysis_mode.unit())),
                 )
-                .on_hover_text(
+                .on_hover_text(tr!(
                     "Level to normalize to. One setting shared by all analysis \
                      modes as an offset from the reference: 95 dB in RG 1.0 is \
                      -12 LUFS in RG 2.0 and -17 LUFS in R128. Equivalent to the \
-                     CLI's -d.",
-                );
+                     CLI's -d."
+                ));
             // The gain columns are derived from the Target, so a sort on
             // them must be redone (issue #161 item 1).
             if resp.changed() {

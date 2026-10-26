@@ -40,26 +40,26 @@ impl FileStatus {
     /// category is returned; the detail goes in a tooltip / extra label.
     pub fn label(&self) -> String {
         match self {
-            FileStatus::Pending => "".into(),
-            FileStatus::Analyzing => "Analyzing...".into(),
-            FileStatus::Analyzed => "OK".into(),
-            FileStatus::Applying => "Applying...".into(),
-            FileStatus::Undoing => "Undoing...".into(),
-            FileStatus::Done => "Done".into(),
-            FileStatus::DoneFromTags => "Done (from tags)".into(),
-            FileStatus::DoneWithUnparsed(n) => format!("Done ({n} frames unparsed)"),
-            FileStatus::NoChangesToUndo => "Nothing to undo".into(),
+            FileStatus::Pending => String::new(),
+            FileStatus::Analyzing => tr!("Analyzing..."),
+            FileStatus::Analyzed => tr!("OK"),
+            FileStatus::Applying => tr!("Applying..."),
+            FileStatus::Undoing => tr!("Undoing..."),
+            FileStatus::Done => tr!("Done"),
+            FileStatus::DoneFromTags => tr!("Done (from tags)"),
+            FileStatus::DoneWithUnparsed(n) => tr!("Done ({n} frames unparsed)", n),
+            FileStatus::NoChangesToUndo => tr!("Nothing to undo"),
             FileStatus::DryRunPredicted {
                 steps,
                 clipping_prevented,
             } => {
                 if *clipping_prevented {
-                    format!("Dry run: +{} steps (capped)", steps)
+                    tr!("Dry run: +{} steps (capped)", steps)
                 } else {
-                    format!("Dry run: {:+} steps", steps)
+                    tr!("Dry run: {} steps", format!("{:+}", steps))
                 }
             }
-            FileStatus::Error(_) => "Error".into(),
+            FileStatus::Error(_) => tr!("Error"),
         }
     }
 }
@@ -496,6 +496,10 @@ struct PersistedSettings {
     analysis_mode: AnalysisMode,
     #[serde(default)]
     use_stored_tags: bool,
+    /// `None` follows the system language. `Some("en")` forces English.
+    /// `Some("pt_BR")` selects that compiled catalogue.
+    #[serde(default)]
+    ui_language: Option<String>,
 }
 
 impl Default for PersistedSettings {
@@ -508,6 +512,7 @@ impl Default for PersistedSettings {
             single_album: false,
             analysis_mode: AnalysisMode::default(),
             use_stored_tags: false,
+            ui_language: None,
         }
     }
 }
@@ -605,6 +610,10 @@ pub struct Mp3rgainApp {
     /// the GUI counterpart of the CLI's -s R (issue #302). RG 1.0 mode only.
     pub use_stored_tags: bool,
 
+    /// Menu choice: `None` is the system language, `Some("en")` is English,
+    /// anything else is a catalogue such as `pt_BR`.
+    pub ui_language: Option<String>,
+
     /// Apply action waiting behind an in-flight stored-tag rescan phase
     /// (issue #302). Consumed by `pump_worker_events` when the analysis
     /// worker exits; cleared on cancel.
@@ -613,13 +622,14 @@ pub struct Mp3rgainApp {
 
 impl Mp3rgainApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        crate::fonts::install(&cc.egui_ctx);
         // Restore the user's checkboxes / target from the previous session
         // (issue #202). Window geometry + column widths are handled by eframe.
         let settings: PersistedSettings = cc
             .storage
             .and_then(|s| eframe::get_value(s, SETTINGS_KEY))
             .unwrap_or_default();
+        let ui_locale = crate::i18n::apply(settings.ui_language.as_deref());
+        crate::fonts::install(&cc.egui_ctx, &ui_locale);
         Self {
             files: Vec::new(),
             target_volume: settings.target_volume,
@@ -652,7 +662,19 @@ impl Mp3rgainApp {
             },
             analysis_mode: settings.analysis_mode,
             use_stored_tags: settings.use_stored_tags,
+            ui_language: settings.ui_language,
             pending_apply: None,
+        }
+    }
+
+    /// Switch the UI language and reload the CJK font when that group changes.
+    /// `None` follows the system.
+    pub fn set_ui_language(&mut self, choice: Option<String>, ctx: &egui::Context) {
+        let previous = crate::i18n::resolved_locale(self.ui_language.as_deref());
+        self.ui_language = choice;
+        let resolved = crate::i18n::apply(self.ui_language.as_deref());
+        if !crate::fonts::same_cjk_group(&previous, &resolved) {
+            crate::fonts::install(ctx, &resolved);
         }
     }
 
@@ -787,7 +809,7 @@ impl Mp3rgainApp {
         if self.is_processing() {
             if !paths.is_empty() {
                 self.pending_drops.extend(paths);
-                self.status_message = format!(
+                self.status_message = tr!(
                     "{} file(s) queued, will be added when processing finishes",
                     self.pending_drops.len()
                 );
@@ -831,10 +853,9 @@ impl Mp3rgainApp {
             self.pending_import_scan.extend(first_new..self.files.len());
         }
         if skipped > 0 {
-            self.status_message =
-                format!("Added {} file(s), {} duplicate(s) skipped", added, skipped);
+            self.status_message = tr!("Added {} file(s), {} duplicate(s) skipped", added, skipped);
         } else if added > 0 {
-            self.status_message = format!("Added {} file(s)", added);
+            self.status_message = tr!("Added {} file(s)", added);
         }
     }
 
@@ -967,7 +988,7 @@ impl Mp3rgainApp {
     pub fn cancel_current_work(&mut self) {
         if let Some((_, worker)) = self.worker.as_ref() {
             worker.request_cancel();
-            self.status_message = "Cancelling...".to_string();
+            self.status_message = tr!("Cancelling...");
         }
     }
 
@@ -977,14 +998,14 @@ impl Mp3rgainApp {
     pub fn reveal_in_file_manager(&mut self, path: &Path) {
         let result = open_in_file_manager(path);
         if let Err(msg) = result {
-            self.status_message = format!("Could not open file location: {}", msg);
+            self.status_message = tr!("Could not open file location: {}", msg);
         }
     }
 
     pub fn start_analyze_tracks(&mut self, ctx: &egui::Context) {
         if self.files.is_empty() || self.is_processing() || !replaygain::is_available() {
             if !replaygain::is_available() {
-                self.status_message = "ReplayGain feature not available".to_string();
+                self.status_message = tr!("ReplayGain feature not available");
             }
             return;
         }
@@ -1013,7 +1034,7 @@ impl Mp3rgainApp {
     pub fn start_analyze_album(&mut self, ctx: &egui::Context) {
         if self.files.is_empty() || self.is_processing() || !replaygain::is_available() {
             if !replaygain::is_available() {
-                self.status_message = "ReplayGain feature not available".to_string();
+                self.status_message = tr!("ReplayGain feature not available");
             }
             return;
         }
@@ -1067,7 +1088,7 @@ impl Mp3rgainApp {
                     count,
                     worker::spawn_track_analysis(ctx.clone(), missing, self.analysis_mode),
                 );
-                self.status_message = format!("Analyzing {} file(s) without stored tags...", count);
+                self.status_message = tr!("Analyzing {} file(s) without stored tags...", count);
                 return;
             }
         }
@@ -1125,7 +1146,7 @@ impl Mp3rgainApp {
             .collect();
 
         if jobs.is_empty() {
-            self.status_message = "No track gain values — run Track Analysis first".to_string();
+            self.status_message = tr!("No track gain values — run Track Analysis first");
             return;
         }
 
@@ -1137,7 +1158,13 @@ impl Mp3rgainApp {
         self.begin_worker(
             WorkerKind::TrackApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "track gain", ui_opts, Vec::new()),
+            worker::spawn_apply(
+                ctx.clone(),
+                jobs,
+                worker::GainPhrase::Track,
+                ui_opts,
+                Vec::new(),
+            ),
         );
     }
 
@@ -1324,7 +1351,13 @@ impl Mp3rgainApp {
         self.begin_worker(
             WorkerKind::TrackApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "manual gain", ui_opts, Vec::new()),
+            worker::spawn_apply(
+                ctx.clone(),
+                jobs,
+                worker::GainPhrase::Manual,
+                ui_opts,
+                Vec::new(),
+            ),
         );
     }
 
@@ -1355,7 +1388,7 @@ impl Mp3rgainApp {
             .collect();
         if jobs.is_empty() {
             self.status_message =
-                "Channel gain only applies to MP3 — selection had no eligible files".into();
+                tr!("Channel gain only applies to MP3 — selection had no eligible files");
             return;
         }
 
@@ -1367,7 +1400,13 @@ impl Mp3rgainApp {
         self.begin_worker(
             WorkerKind::TrackApply,
             count,
-            worker::spawn_apply(ctx.clone(), jobs, "channel gain", ui_opts, Vec::new()),
+            worker::spawn_apply(
+                ctx.clone(),
+                jobs,
+                worker::GainPhrase::Channel,
+                ui_opts,
+                Vec::new(),
+            ),
         );
     }
 
@@ -1432,7 +1471,7 @@ impl Mp3rgainApp {
                     total,
                     worker::spawn_album_analysis(ctx.clone(), rescan, self.analysis_mode),
                 );
-                self.status_message = format!(
+                self.status_message = tr!(
                     "Analyzing {} file(s) without consistent stored album tags...",
                     total
                 );
@@ -1538,7 +1577,7 @@ impl Mp3rgainApp {
         }
 
         if jobs.is_empty() {
-            self.status_message = "No album gain values — run Album Analysis first".to_string();
+            self.status_message = tr!("No album gain values — run Album Analysis first");
             return;
         }
 
@@ -1560,7 +1599,7 @@ impl Mp3rgainApp {
             worker::spawn_apply(
                 ctx.clone(),
                 jobs,
-                "album gain",
+                worker::GainPhrase::Album,
                 ui_opts,
                 album_minmax_groups,
             ),
@@ -1582,15 +1621,15 @@ impl Mp3rgainApp {
         self.worker = Some((kind, handle));
         self.total_progress = 0.0;
         self.status_message = match kind {
-            WorkerKind::TrackAnalysis => "Analyzing tracks...".to_string(),
-            WorkerKind::AlbumAnalysis => "Analyzing album...".to_string(),
-            WorkerKind::TrackApply => "Applying track gain...".to_string(),
-            WorkerKind::AlbumApply => "Applying album gain...".to_string(),
-            WorkerKind::Undo => "Undoing gain changes...".to_string(),
-            WorkerKind::CheckTags => "Checking stored tags...".to_string(),
-            WorkerKind::MaxAmplitude => "Finding max amplitude...".to_string(),
-            WorkerKind::DeleteTags => "Deleting stored tags...".to_string(),
-            WorkerKind::ImportScan => "Reading existing ReplayGain values...".to_string(),
+            WorkerKind::TrackAnalysis => tr!("Analyzing tracks..."),
+            WorkerKind::AlbumAnalysis => tr!("Analyzing album..."),
+            WorkerKind::TrackApply => tr!("Applying track gain..."),
+            WorkerKind::AlbumApply => tr!("Applying album gain..."),
+            WorkerKind::Undo => tr!("Undoing gain changes..."),
+            WorkerKind::CheckTags => tr!("Checking stored tags..."),
+            WorkerKind::MaxAmplitude => tr!("Finding max amplitude..."),
+            WorkerKind::DeleteTags => tr!("Deleting stored tags..."),
+            WorkerKind::ImportScan => tr!("Reading existing ReplayGain values..."),
         };
         self.started_files = 0;
         self.total_files_in_job = total;
@@ -1701,7 +1740,7 @@ impl Mp3rgainApp {
                 }
             }
             WorkerEvent::AlbumAnalysisFailed(msg) => {
-                self.status_message = format!("Album analysis failed: {}", msg);
+                self.status_message = tr!("Album analysis failed: {}", msg);
             }
             WorkerEvent::FileApplied {
                 idx,
@@ -1798,7 +1837,7 @@ impl Mp3rgainApp {
                 }
             }
             WorkerEvent::Cancelled => {
-                self.status_message = "Cancelled".to_string();
+                self.status_message = tr!("Cancelled");
                 self.total_progress = 0.0;
                 // Cancelling a stored-tag rescan phase also drops the apply
                 // that was queued behind it (issue #302).
@@ -1960,6 +1999,7 @@ impl eframe::App for Mp3rgainApp {
             single_album: false,
             analysis_mode: self.analysis_mode,
             use_stored_tags: self.use_stored_tags,
+            ui_language: self.ui_language.clone(),
         };
         eframe::set_value(storage, SETTINGS_KEY, &settings);
     }
