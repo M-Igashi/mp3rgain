@@ -2695,3 +2695,48 @@ fn album_gain_under_s_i_writes_the_album_range_to_id3v2() {
     let tags = read_gain_tags_auto(&album.files[0], TagLayout::Id3v2).unwrap();
     assert_eq!(tags.album_minmax, None);
 }
+
+/// Issue #451: `-g` shifts a stored `MP3GAIN_MINMAX` as mp3gain does and adds
+/// none to a file without one. Under `-w` a range that would leave 0..=255 is
+/// dropped, as mp3gain drops it.
+#[test]
+fn manual_gain_shifts_the_stored_range_and_adds_none() {
+    use mp3rgain::{read_gain_tags_auto, TagLayout};
+
+    for (layout, layout_arg) in [(TagLayout::Ape, "a"), (TagLayout::Id3v2, "i")] {
+        let album = TempAlbum::new(&["test_vbr.mp3"]);
+        let file = &album.files[0];
+        let path = file.to_str().unwrap();
+        let tags = || read_gain_tags_auto(file, layout).unwrap();
+
+        let out = run(&["-g", "2", "-s", layout_arg, path]);
+        assert!(out.status.success(), "{layout:?}: {out:?}");
+        assert_eq!(tags().undo.as_deref(), Some("-002,-002,N"), "{layout:?}");
+        assert_eq!(tags().minmax, None, "{layout:?}: -g added a range");
+
+        let out = run(&["-u", "-s", layout_arg, path]);
+        assert!(out.status.success(), "{layout:?}: {out:?}");
+        let out = run(&["-a", "-c", "-s", layout_arg, path]);
+        assert!(out.status.success(), "{layout:?}: {out:?}");
+        let (min, max) = gain_range(file);
+        let shifted = |by: u8| mp3rgain::ape::format_minmax(min + by, max + by);
+
+        let out = run(&["-g", "2", "-s", layout_arg, path]);
+        assert!(out.status.success(), "{layout:?}: {out:?}");
+        assert_eq!(tags().minmax, Some(shifted(2)), "{layout:?}");
+        assert_eq!(tags().album_minmax, Some(shifted(2)), "{layout:?}");
+
+        let out = run(&["-g", "1", "-w", "-s", layout_arg, path]);
+        assert!(out.status.success(), "{layout:?}: {out:?}");
+        assert_eq!(tags().minmax, Some(shifted(3)), "{layout:?}");
+
+        let out = run(&["-g", "100", "-w", "-s", layout_arg, path]);
+        assert!(out.status.success(), "{layout:?}: {out:?}");
+        assert_eq!(tags().minmax, None, "{layout:?}: wrapped range kept");
+        assert_eq!(
+            tags().album_minmax,
+            None,
+            "{layout:?}: wrapped album range kept"
+        );
+    }
+}

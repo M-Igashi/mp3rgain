@@ -155,9 +155,9 @@ impl ApplyOptions {
             .unwrap_or_else(|| AudioFileType::from_path(file_path))
     }
 
-    /// Whether applying `steps` moves the ReplayGain values and
-    /// `MP3GAIN_ALBUM_MINMAX` already stored in the file along with the audio
-    /// (issue #377), as mp3gain does after `-g`. Only an apply that records
+    /// Whether applying `steps` moves the ReplayGain values and both
+    /// `global_gain` ranges already stored in the file along with the audio
+    /// (issues #377, #451), as mp3gain does after `-g`. Only an apply that records
     /// its undo value, covers every channel, and writes no fresh ReplayGain
     /// values of its own: `-r`/`-a` replace them, `-s s` writes no tags at
     /// all, and mp3gain leaves every tag alone after `-l`.
@@ -555,7 +555,7 @@ fn apply_adts_bytes(
         // Issue #377. The undo value above is always written when this
         // holds, so the shifted frames ride along in that same tag write.
         if opts.shifts_stored_gain(steps) {
-            id3v2::shift_stored_gain(&mut tag, steps);
+            id3v2::shift_stored_gain(&mut tag, steps, false);
         }
 
         if opts.write_replaygain_tags {
@@ -729,9 +729,12 @@ fn apply_mp3_ape_bytes(
     let ape_rg_folded = folded_rg.is_some();
 
     with_temp_file(file_path, |r, w| {
+        // `-g` shifts the stored range below instead of recording the scanned
+        // one, so a file without a range gets none, as in mp3gain (#451).
         let mut gain = GainOptions::new(steps)
             .wrap(opts.wrap)
-            .undo(opts.write_undo);
+            .undo(opts.write_undo)
+            .record_minmax(!opts.shifts_stored_gain(steps));
         if let Some(ch) = opts.channel {
             gain = gain.channel(ch);
         }
@@ -744,8 +747,8 @@ fn apply_mp3_ape_bytes(
         // the audio before this apply. Each write is skipped when its
         // container has nothing to shift.
         if opts.shifts_stored_gain(steps) {
-            ape::shift_ape_stored_gain(w, steps)?;
-            id3v2::shift_id3v2_stored_gain_direct(w, steps)?;
+            ape::shift_ape_stored_gain(w, steps, opts.wrap)?;
+            id3v2::shift_id3v2_stored_gain_direct(w, steps, opts.wrap)?;
         }
 
         if write_rg {
@@ -848,8 +851,9 @@ fn apply_mp3_id3v2_bytes(
                 // it would claim an apply that never happened. A channel apply
                 // leaves any stored range as it is and adds none, as mp3gain's
                 // `-l` does: it updates stored values only when both channels
-                // move by the same amount (issue #433).
-                if opts.channel.is_none() {
+                // move by the same amount (issue #433). `-g` shifts the stored
+                // range below instead and adds none (issue #451).
+                if opts.channel.is_none() && !opts.shifts_stored_gain(steps) {
                     let (min, max) = if stats.frames > 0 {
                         (stats.min_gain, stats.max_gain)
                     } else {
@@ -871,8 +875,8 @@ fn apply_mp3_id3v2_bytes(
         // the shifted ID3v2 frames ride along in that tag write; values
         // mp3gain left in APEv2 describe the old audio too.
         if opts.shifts_stored_gain(steps) {
-            id3v2::shift_stored_gain(&mut tag, steps);
-            ape::shift_ape_stored_gain(w, steps)?;
+            id3v2::shift_stored_gain(&mut tag, steps, opts.wrap);
+            ape::shift_ape_stored_gain(w, steps, opts.wrap)?;
         }
 
         if opts.write_replaygain_tags {

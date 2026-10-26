@@ -5,9 +5,10 @@
 //! subsumed by a broader rewrite of this module.
 
 use crate::ape::{
-    parse_undo_values, parse_undo_wrap, shift_stored_value, TAG_MP3GAIN_ALBUM_MINMAX,
-    TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN, TAG_REPLAYGAIN_ALBUM_PEAK,
-    TAG_REPLAYGAIN_ALGORITHM, TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
+    parse_undo_values, parse_undo_wrap, range_wraps_out, shift_stored_value,
+    TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN,
+    TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_ALGORITHM, TAG_REPLAYGAIN_TRACK_GAIN,
+    TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use crate::error::{Error, Result};
 use crate::gain::apply_undo_to_data;
@@ -351,11 +352,23 @@ pub(crate) fn write_id3v2_album_minmax(path: &Path, min: u8, max: u8) -> Result<
 }
 
 /// Move every TXXX value [`shift_stored_value`] knows by `steps` of applied
-/// gain (issue #377). Frames are replaced where they stand, so each keeps its
-/// description as written (mp3gain's `-s i` uses lowercase) and its place in
-/// the tag. `true` if any frame changed.
-pub(crate) fn shift_stored_gain(tag: &mut id3::Tag, steps: i32) -> bool {
+/// gain (issue #377), dropping a range that wraps out under `-w`
+/// ([`range_wraps_out`], issue #451). Frames are replaced where they stand, so
+/// each keeps its description as written (mp3gain's `-s i` uses lowercase)
+/// and its place in the tag. `true` if any frame changed.
+pub(crate) fn shift_stored_gain(tag: &mut id3::Tag, steps: i32, wrap: bool) -> bool {
     let mut shifted = false;
+    if wrap {
+        let dropped: Vec<String> = tag
+            .extended_texts()
+            .filter(|t| range_wraps_out(&t.description, &t.value, steps))
+            .map(|t| t.description.clone())
+            .collect();
+        for description in &dropped {
+            tag.remove_extended_text(Some(description), None);
+        }
+        shifted = !dropped.is_empty();
+    }
     for frame in tag.frames_vec_mut() {
         let replacement = match frame.content() {
             id3::Content::ExtendedText(t) => shift_stored_value(&t.description, &t.value, steps)
@@ -378,11 +391,11 @@ pub(crate) fn shift_stored_gain(tag: &mut id3::Tag, steps: i32) -> bool {
 /// nothing to shift are left untouched, and so is a tag the `id3` crate
 /// cannot parse: it holds nothing that could be shifted, and the layouts that
 /// call this never needed to read ID3v2 before, so it must not fail the apply.
-pub(crate) fn shift_id3v2_stored_gain_direct(path: &Path, steps: i32) -> Result<()> {
+pub(crate) fn shift_id3v2_stored_gain_direct(path: &Path, steps: i32, wrap: bool) -> Result<()> {
     let Ok(mut tag) = read_tag(path) else {
         return Ok(());
     };
-    if !shift_stored_gain(&mut tag, steps) {
+    if !shift_stored_gain(&mut tag, steps, wrap) {
         return Ok(());
     }
     write_tag_direct(path, &mut tag)
@@ -435,7 +448,7 @@ mod tests {
             });
         }
 
-        assert!(shift_stored_gain(&mut tag, 2));
+        assert!(shift_stored_gain(&mut tag, 2, false));
         let frames: Vec<_> = tag
             .extended_texts()
             .map(|t| (t.description.as_str(), t.value.as_str()))
