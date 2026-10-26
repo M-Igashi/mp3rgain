@@ -444,6 +444,42 @@ fn audio_payload(data: &[u8]) -> &[u8] {
     &data[start..end]
 }
 
+/// Issue #437: a ReplayGain apply that rounds to 0 steps changes no frame but
+/// records the scanned `MP3GAIN_MINMAX`, and no undo value, as mp3gain's `-r`
+/// and `-a` do when no change is necessary.
+#[test]
+fn zero_step_apply_records_the_gain_range() {
+    use mp3rgain::{read_gain_tags_auto, TagLayout};
+
+    for (layout, layout_args) in [
+        (TagLayout::Split, &[][..]),
+        (TagLayout::Ape, &["-s", "a"][..]),
+        (TagLayout::Id3v2, &["-s", "i"][..]),
+    ] {
+        for mode in ["-r", "-a"] {
+            let album = TempAlbum::new(&["test_vbr.mp3"]);
+            let files = album.args();
+            let file = &album.files[0];
+            let before = gain_range(file);
+            let offset = (-album_gain_steps(&files)).to_string();
+            let mut args = vec![mode, "-m", offset.as_str()];
+            args.extend_from_slice(layout_args);
+            args.extend_from_slice(&files);
+            let out = run(&args);
+            assert!(out.status.success(), "{layout:?} {mode}: {out:?}");
+
+            assert_eq!(gain_range(file), before, "{layout:?} {mode}: frames moved");
+            let tags = read_gain_tags_auto(file, layout).unwrap();
+            assert_eq!(
+                tags.minmax,
+                Some(mp3rgain::ape::format_minmax(before.0, before.1)),
+                "{layout:?} {mode}"
+            );
+            assert_eq!(tags.undo, None, "{layout:?} {mode}");
+        }
+    }
+}
+
 /// Track mode already had this behaviour (issue #206); keep it covered so the
 /// two paths can't drift apart again.
 #[test]

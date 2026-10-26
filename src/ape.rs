@@ -596,6 +596,12 @@ pub fn write_ape_album_minmax(file_path: &Path, min: u8, max: u8) -> Result<()> 
     })
 }
 
+/// Add (or replace) the `MP3GAIN_MINMAX` item in `file_path`'s APEv2 tag,
+/// preserving all other items (issue #437).
+pub(crate) fn write_ape_minmax(file_path: &Path, min: u8, max: u8) -> Result<()> {
+    rewrite_ape_tail(file_path, |tag| tag.set_minmax(min, max))
+}
+
 /// Delete APEv2 tag from file (tail-only truncate; a trailing ID3v1 block
 /// is preserved)
 pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
