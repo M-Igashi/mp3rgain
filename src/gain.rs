@@ -112,6 +112,7 @@ pub struct GainOptions {
     undo: bool,
     channel: Option<Channel>,
     replaygain: Option<ApeReplayGain>,
+    record_minmax: bool,
 }
 
 impl GainOptions {
@@ -125,6 +126,7 @@ impl GainOptions {
             undo: false,
             channel: None,
             replaygain: None,
+            record_minmax: true,
         }
     }
 
@@ -161,6 +163,14 @@ impl GainOptions {
     /// channel-specific applies.
     pub(crate) fn replaygain(mut self, rg: ApeReplayGain) -> Self {
         self.replaygain = Some(rg);
+        self
+    }
+
+    /// Whether a whole-file apply with undo records the post-apply range as
+    /// `MP3GAIN_MINMAX` (the default). `-g` turns it off and shifts the
+    /// stored range instead, as mp3gain does (issue #451).
+    pub(crate) fn record_minmax(mut self, record: bool) -> Self {
+        self.record_minmax = record;
         self
     }
 
@@ -241,6 +251,7 @@ impl GainOptions {
                     self.steps,
                     mode,
                     self.replaygain.as_ref(),
+                    self.record_minmax,
                 )
             } else {
                 apply_gain_simple_to_path(
@@ -454,6 +465,7 @@ fn apply_gain_with_undo_impl_to_path(
     gain_steps: i32,
     mode: GainMode,
     replaygain: Option<&ApeReplayGain>,
+    record_minmax: bool,
 ) -> Result<SaturationStats> {
     let mut tag = read_ape_tag(&data).unwrap_or_default();
 
@@ -483,7 +495,9 @@ fn apply_gain_with_undo_impl_to_path(
     if stats.frames == 0 {
         return Err(Error::NoMp3Frames);
     }
-    tag.set_minmax(stats.min_gain, stats.max_gain);
+    if record_minmax {
+        tag.set_minmax(stats.min_gain, stats.max_gain);
+    }
 
     if let Some(rg) = replaygain {
         tag.set_replaygain(rg);

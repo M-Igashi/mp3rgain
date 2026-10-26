@@ -194,9 +194,15 @@ impl ApeTag {
     }
 
     /// Move every item [`shift_stored_value`] knows by `steps` of applied
-    /// gain (issue #377). `true` if any item changed.
-    pub(crate) fn shift_stored_gain(&mut self, steps: i32) -> bool {
-        let mut shifted = false;
+    /// gain (issue #377), dropping a range that wraps out under `-w`
+    /// ([`range_wraps_out`]). `true` if any item changed.
+    pub(crate) fn shift_stored_gain(&mut self, steps: i32, wrap: bool) -> bool {
+        let before = self.items.len();
+        if wrap {
+            self.items
+                .retain(|item| !range_wraps_out(&item.key, &item.value, steps));
+        }
+        let mut shifted = self.items.len() != before;
         for item in &mut self.items {
             if let Some(value) = shift_stored_value(&item.key, &item.value, steps) {
                 item.value = value;
@@ -608,17 +614,17 @@ pub(crate) fn remove_ape_undone_gain_values(file_path: &Path) -> Result<()> {
     })
 }
 
-/// Shift the stored ReplayGain values and `MP3GAIN_ALBUM_MINMAX` in
-/// `file_path`'s APEv2 tag by `steps` of applied gain (issue #377). Files
-/// carrying none of them are left untouched rather than rewritten.
-pub(crate) fn shift_ape_stored_gain(file_path: &Path, steps: i32) -> Result<()> {
-    let has_values =
-        read_ape_tag_from_file(file_path)?.is_some_and(|mut tag| tag.shift_stored_gain(steps));
+/// Shift the stored ReplayGain values and both `global_gain` ranges in
+/// `file_path`'s APEv2 tag by `steps` of applied gain (issues #377, #451).
+/// Files carrying none of them are left untouched rather than rewritten.
+pub(crate) fn shift_ape_stored_gain(file_path: &Path, steps: i32, wrap: bool) -> Result<()> {
+    let has_values = read_ape_tag_from_file(file_path)?
+        .is_some_and(|mut tag| tag.shift_stored_gain(steps, wrap));
     if !has_values {
         return Ok(());
     }
     rewrite_ape_tail(file_path, |tag| {
-        tag.shift_stored_gain(steps);
+        tag.shift_stored_gain(steps, wrap);
     })
 }
 
@@ -702,9 +708,11 @@ pub fn parse_rg_peak(s: &str) -> Option<f64> {
 /// the audio or `value` does not parse, so the caller leaves it as it is.
 ///
 /// mp3gain shifts these after `-g` (issue #377): the gains by the applied dB,
-/// the peaks by the matching linear factor 2^(steps/4), and the album
-/// `global_gain` range by the steps, clamped to 0..=255 like the frames
-/// themselves, which also leave a 0 where it is (issue #417).
+/// the peaks by the matching linear factor 2^(steps/4), and the track and
+/// album `global_gain` ranges by the steps (issue #451), clamped to 0..=255
+/// like the frames themselves, which also leave a 0 where it is (issue #417).
+/// Under `-w` a range that would leave 0..=255 is dropped instead
+/// ([`range_wraps_out`]).
 /// `REPLAYGAIN_ALGORITHM`, `REPLAYGAIN_REFERENCE_LOUDNESS` and every other
 /// item stay as they are. Keys match case-insensitively, which also covers
 /// the lowercase MP4 and ID3v2 spellings.
@@ -712,6 +720,25 @@ pub fn parse_rg_peak(s: &str) -> Option<f64> {
 /// The shift stays arithmetic when frames saturate, as in mp3gain, where the
 /// `-r` residual re-analyzes: nothing records how another tool measured the
 /// stored values, and the album ones cannot be re-measured from one file.
+/// Whether `steps` of wrapping gain move a stored `global_gain` range outside
+/// 0..=255, where mp3gain's `-w` drops it because the real range is lost
+/// (`changeGainAndTag`, issue #451). Inside those bounds mp3gain 1.6.2 leaves
+/// the stored range unshifted, describing the audio before the change;
+/// mp3rgain shifts it, as without `-w`.
+pub(crate) fn range_wraps_out(key: &str, value: &str, steps: i32) -> bool {
+    let is_range = key.eq_ignore_ascii_case(TAG_MP3GAIN_MINMAX)
+        || key.eq_ignore_ascii_case(TAG_MP3GAIN_ALBUM_MINMAX);
+    let leaves = |v: &str| {
+        v.trim()
+            .parse::<i32>()
+            .is_ok_and(|v| !(0..=255).contains(&(v + steps)))
+    };
+    is_range
+        && value
+            .split_once(',')
+            .is_some_and(|(min, max)| leaves(min) || leaves(max))
+}
+
 pub(crate) fn shift_stored_value(key: &str, value: &str, steps: i32) -> Option<String> {
     let is = |name: &str| key.eq_ignore_ascii_case(name);
     let db = crate::gain::steps_to_db(steps);
@@ -721,7 +748,7 @@ pub(crate) fn shift_stored_value(key: &str, value: &str, steps: i32) -> Option<S
     } else if is(TAG_REPLAYGAIN_TRACK_PEAK) || is(TAG_REPLAYGAIN_ALBUM_PEAK) {
         let peak = parse_rg_peak(value).filter(|p| p.is_finite())?;
         Some(format_rg_peak(crate::gain::apply_gain_to_peak(peak, db)))
-    } else if is(TAG_MP3GAIN_ALBUM_MINMAX) {
+    } else if is(TAG_MP3GAIN_MINMAX) || is(TAG_MP3GAIN_ALBUM_MINMAX) {
         let (min, max) = value.split_once(',')?;
         let shift = |v: &str| {
             let v = v.trim().parse::<u8>().ok()?;
@@ -1010,6 +1037,9 @@ mod tests {
             (TAG_MP3GAIN_ALBUM_MINMAX, "3,100", -5, "000,095"),
             // A 0 stays 0, as the frames do (issue #417).
             (TAG_MP3GAIN_ALBUM_MINMAX, "000,100", 5, "000,105"),
+            // The track range moves the same way (issue #451).
+            (TAG_MP3GAIN_MINMAX, "117,212", 2, "119,214"),
+            ("mp3gain_minmax", "140,214", 50, "190,255"),
         ];
         for (key, value, steps, expected) in cases {
             assert_eq!(
@@ -1020,6 +1050,31 @@ mod tests {
         }
     }
 
+    /// Issue #451: under `-w` a range is dropped once the shift takes either
+    /// end outside 0..=255, as mp3gain drops it, and otherwise shifted.
+    #[test]
+    fn wrapped_range_is_dropped_only_when_it_leaves_the_bounds() {
+        assert!(range_wraps_out(TAG_MP3GAIN_MINMAX, "140,214", 50));
+        assert!(range_wraps_out(TAG_MP3GAIN_ALBUM_MINMAX, "003,200", -5));
+        assert!(!range_wraps_out(TAG_MP3GAIN_MINMAX, "140,214", 41));
+        assert!(!range_wraps_out(TAG_MP3GAIN_MINMAX, "140,214", -140));
+        assert!(!range_wraps_out(TAG_REPLAYGAIN_TRACK_GAIN, "-1.0 dB", 300));
+        assert!(!range_wraps_out(TAG_MP3GAIN_MINMAX, "garbage", 300));
+
+        let mut tag = ApeTag::new();
+        tag.set_minmax(140, 214);
+        tag.set(TAG_MP3GAIN_ALBUM_MINMAX, "120,214");
+        tag.set(TAG_REPLAYGAIN_TRACK_GAIN, "-1.000000 dB");
+        let mut wrapped = tag.clone();
+        assert!(wrapped.shift_stored_gain(50, true));
+        assert_eq!(wrapped.get(TAG_MP3GAIN_MINMAX), None);
+        assert_eq!(wrapped.get(TAG_MP3GAIN_ALBUM_MINMAX), None);
+        assert!(wrapped.get(TAG_REPLAYGAIN_TRACK_GAIN).is_some());
+        assert!(tag.shift_stored_gain(2, true));
+        assert_eq!(tag.get(TAG_MP3GAIN_MINMAX), Some("142,216"));
+        assert_eq!(tag.get(TAG_MP3GAIN_ALBUM_MINMAX), Some("122,216"));
+    }
+
     /// Items that do not describe the audio's level, and stored values that do
     /// not parse, are left as they are (issue #377).
     #[test]
@@ -1028,7 +1083,6 @@ mod tests {
             (TAG_REPLAYGAIN_ALGORITHM, "ITU-R BS.1770"),
             ("REPLAYGAIN_REFERENCE_LOUDNESS", "89.0 dB"),
             (TAG_MP3GAIN_UNDO, "-002,-002,N"),
-            (TAG_MP3GAIN_MINMAX, "117,212"),
             (TAG_REPLAYGAIN_TRACK_GAIN, "loud"),
             (TAG_REPLAYGAIN_TRACK_GAIN, "nan dB"),
             (TAG_REPLAYGAIN_TRACK_PEAK, ""),
@@ -1041,9 +1095,11 @@ mod tests {
 
         let mut tag = sample_tag("comment");
         tag.set(TAG_REPLAYGAIN_TRACK_GAIN, "loud");
-        assert!(!tag.clone().shift_stored_gain(2));
+        assert!(!tag.clone().shift_stored_gain(2, false));
+        // sample_tag carries no range, so nothing is dropped under -w either.
+        assert!(!tag.clone().shift_stored_gain(2, true));
         tag.set(TAG_REPLAYGAIN_TRACK_PEAK, "0.5");
-        assert!(tag.shift_stored_gain(2));
+        assert!(tag.shift_stored_gain(2, false));
         assert_eq!(tag.get(TAG_REPLAYGAIN_TRACK_GAIN), Some("loud"));
         assert_eq!(tag.get(TAG_REPLAYGAIN_TRACK_PEAK), Some("0.707107"));
         assert_eq!(tag.get(TAG_MP3GAIN_UNDO), Some("+002,+002,N"));
