@@ -188,6 +188,7 @@ fn process_apply_channel_into(
 
     let mut apply_opts = ApplyOptions::new(steps);
     apply_opts.channel = Some(channel);
+    apply_opts.wrap = opts.wrap_gain;
     apply_opts.preserve_timestamp = opts.preserve_timestamp;
     apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
     apply_opts.tag_layout = opts.tag_layout;

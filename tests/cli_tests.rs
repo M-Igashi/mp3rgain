@@ -60,6 +60,96 @@ fn run(args: &[&str]) -> Output {
         .expect("failed to run mp3rgain")
 }
 
+fn first_mp3_frame_offset(data: &[u8]) -> usize {
+    let id3_size = if data.starts_with(b"ID3") {
+        assert!(data.len() >= 10, "truncated ID3v2 header");
+        data[6..10].iter().fold(0usize, |size, byte| {
+            (size << 7) | (usize::from(*byte) & 0x7f)
+        })
+    } else {
+        0
+    };
+    let audio_start = if data.starts_with(b"ID3") {
+        10 + id3_size
+    } else {
+        0
+    };
+    (audio_start..=data.len().saturating_sub(4))
+        .find(|&offset| data[offset] == 0xff && data[offset + 1] & 0xe0 == 0xe0)
+        .expect("fixture should contain an MP3 frame")
+}
+
+/// Offset of the first non-Xing MPEG-1 stereo frame. The simple-stereo
+/// fixture has a Xing/Info frame first, which the gain scanner intentionally
+/// skips.
+fn first_audio_frame_offset(data: &[u8]) -> usize {
+    let frame = first_mp3_frame_offset(data);
+
+    let marker_offset = frame + 4 + 32;
+    if matches!(
+        data.get(marker_offset..marker_offset + 4),
+        Some(b"Xing" | b"Info")
+    ) {
+        let bit_rate_index = usize::from(data[frame + 2] >> 4);
+        let sample_rate_index = usize::from((data[frame + 2] >> 2) & 0x03);
+        let bit_rate = [
+            0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+        ][bit_rate_index];
+        let sample_rate = [44_100, 48_000, 32_000][sample_rate_index];
+        let padding = usize::from((data[frame + 2] >> 1) & 1);
+        frame + (1152 * bit_rate * 125) / sample_rate + padding
+    } else {
+        frame
+    }
+}
+
+/// Offset of the first MPEG-1 stereo frame's requested `global_gain` field.
+/// The simple-stereo fixture has no frame CRC, so changing its side info does
+/// not require updating a checksum.
+fn first_global_gain_bit_offset(data: &[u8], channel: usize) -> usize {
+    assert!(channel < 2, "stereo channel index must be 0 or 1");
+    let frame = first_audio_frame_offset(data);
+    assert_eq!(
+        (data[frame + 1] >> 3) & 0x03,
+        0x03,
+        "fixture must be MPEG-1"
+    );
+    assert_eq!(
+        data[frame + 1] & 0x01,
+        0x01,
+        "fixture must not have a frame CRC"
+    );
+    assert_eq!(data[frame + 3] >> 6, 0, "fixture must be stereo");
+
+    // MPEG-1 stereo side info starts with 20 bits before granule data; within
+    // each granule/channel entry, global_gain follows 12 + 9 bits.
+    (frame + 4) * 8 + 20 + 21 + channel * 59
+}
+
+fn read_first_global_gain(data: &[u8], channel: usize) -> u8 {
+    let start = first_global_gain_bit_offset(data, channel);
+    (0..8).fold(0, |value, bit| {
+        let position = start + bit;
+        (value << 1) | ((data[position / 8] >> (7 - position % 8)) & 1)
+    })
+}
+
+fn set_first_global_gain(path: &Path, channel: usize, gain: u8) {
+    let mut data = fs::read(path).expect("read fixture");
+    let start = first_global_gain_bit_offset(&data, channel);
+    for bit in 0..8 {
+        let position = start + bit;
+        let byte = &mut data[position / 8];
+        let mask = 1 << (7 - position % 8);
+        if gain & (1 << (7 - bit)) != 0 {
+            *byte |= mask;
+        } else {
+            *byte &= !mask;
+        }
+    }
+    fs::write(path, data).expect("write fixture with chosen global_gain");
+}
+
 fn stdout_of(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
@@ -630,6 +720,107 @@ fn channel_gain_on_joint_stereo_is_refused() {
 
     let out = run(&["-o", "json", "-l", "0", "2", file]);
     assert_eq!(json_of(&out)["files"][0]["status"], "error");
+}
+
+/// Issue #434: channel `-w` wraps the selected channel, records `W`, and lets
+/// `-u` restore its audio bytes from both APEv2 and ID3v2 undo tags.
+#[test]
+fn channel_wrap_wraps_and_undo_restores_audio() {
+    for (layout, layout_arg) in [("APEv2", "a"), ("ID3v2", "i")] {
+        for (initial_gain, steps, expected_gain) in [(250, 10, 4), (3, -5, 254)] {
+            let album = TempAlbum::new(&["test_simple_stereo.mp3"]);
+            let file = &album.files[0];
+            set_first_global_gain(file, 0, initial_gain);
+            let original = fs::read(file).unwrap();
+            let file_arg = file.to_str().unwrap();
+            let steps_arg = steps.to_string();
+
+            let out = run(&["-l", "0", &steps_arg, "-w", "-s", layout_arg, file_arg]);
+            assert!(out.status.success(), "{layout} apply failed: {out:?}");
+
+            let applied = fs::read(file).unwrap();
+            assert_eq!(
+                read_first_global_gain(&applied, 0),
+                expected_gain,
+                "{layout}: {initial_gain} + {steps} should wrap"
+            );
+            assert_eq!(
+                read_first_global_gain(&applied, 1),
+                read_first_global_gain(&original, 1),
+                "{layout}: channel apply must leave the right channel alone"
+            );
+
+            let undo = if layout_arg == "a" {
+                read_ape_tag_from_file(file)
+                    .unwrap()
+                    .and_then(|tag| tag.get(TAG_MP3GAIN_UNDO).map(str::to_owned))
+            } else {
+                mp3rgain::read_id3v2_replaygain(file).unwrap().undo
+            };
+            let expected_undo = mp3rgain::ape::format_undo_value(-steps, 0, true);
+            assert_eq!(undo.as_deref(), Some(expected_undo.as_str()), "{layout}");
+
+            let out = run(&["-u", file_arg]);
+            assert!(out.status.success(), "{layout} undo failed: {out:?}");
+            let undone = fs::read(file).unwrap();
+            if layout_arg == "a" {
+                assert!(
+                    undone == original,
+                    "{layout}: wrap-mode channel undo must restore every byte"
+                );
+            } else {
+                let original_audio = first_mp3_frame_offset(&original);
+                let undone_audio = first_mp3_frame_offset(&undone);
+                assert!(
+                    undone[undone_audio..] == original[original_audio..],
+                    "{layout}: wrap-mode channel undo must restore every MP3 frame byte"
+                );
+                assert!(
+                    mp3rgain::read_id3v2_replaygain(file)
+                        .unwrap()
+                        .undo
+                        .is_none(),
+                    "{layout}: undo tag should be removed"
+                );
+            }
+        }
+    }
+}
+
+/// Omitting `-w` keeps the existing saturating behavior and records `N`.
+#[test]
+fn channel_gain_without_wrap_still_saturates() {
+    let album = TempAlbum::new(&["test_simple_stereo.mp3"]);
+    let file = &album.files[0];
+    set_first_global_gain(file, 0, 250);
+
+    let out = run(&["-l", "0", "10", "-s", "a", file.to_str().unwrap()]);
+    assert!(out.status.success(), "channel apply failed: {out:?}");
+
+    let applied = fs::read(file).unwrap();
+    assert_eq!(read_first_global_gain(&applied, 0), 255);
+    let undo = read_ape_tag_from_file(file)
+        .unwrap()
+        .and_then(|tag| tag.get(TAG_MP3GAIN_UNDO).map(str::to_owned));
+    assert_eq!(undo.as_deref(), Some("-010,+000,N"));
+}
+
+#[test]
+fn channel_wrap_without_undo_still_wraps() {
+    let album = TempAlbum::new(&["test_simple_stereo.mp3"]);
+    let file = &album.files[0];
+    set_first_global_gain(file, 0, 250);
+
+    let out = run(&["-l", "0", "10", "-w", "-s", "s", file.to_str().unwrap()]);
+    assert!(out.status.success(), "channel apply failed: {out:?}");
+
+    let applied = fs::read(file).unwrap();
+    assert_eq!(read_first_global_gain(&applied, 0), 4);
+    assert!(read_ape_tag_from_file(file).unwrap().is_none());
+    assert!(mp3rgain::read_id3v2_replaygain(file)
+        .unwrap()
+        .undo
+        .is_none());
 }
 
 /// Issue #377: `-l` moves no stored value, since mp3gain leaves every tag alone

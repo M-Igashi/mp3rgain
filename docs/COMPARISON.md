@@ -45,14 +45,14 @@ mp3rgain accepts every mp3gain option except `-T` (modify in place), which it ig
 | `-r` | Apply track gain | |
 | `-a` | Apply album gain | Every file given is one album, as in mp3gain |
 | `-e` | Skip album analysis | `-a -e` applies track gain (mp3gain applies nothing) |
-| `-l <c> <g>` | Channel-specific gain | MP3 only, and refused on mono and joint-stereo files as in mp3gain ([#393](https://github.com/M-Igashi/mp3rgain/issues/393)) |
+| `-l <c> <g>` | Channel-specific gain | MP3 only; combine with `-w` for wrap mode. Refused on mono and joint-stereo files as in mp3gain ([#393](https://github.com/M-Igashi/mp3rgain/issues/393)) |
 | `-u` | Undo gain changes | Also removes the `REPLAYGAIN_*` values |
 | `-x` | Find max amplitude only | |
 | `-k` | Prevent clipping | With `-g`, only stops `global_gain` from exceeding 255 |
 | `-c` | Ignore clipping warnings | mp3rgain never prompts; it warns and applies |
 | `-p` | Preserve file timestamp | |
 | `-q` | Quiet mode | |
-| `-w` | Wrap gain values | |
+| `-w` | Wrap gain values | Applies to `-l` channel changes too; `-u` honors the stored `W` flag |
 | `-t` | Use temp file for writing | No effect: always on |
 | `-f` | Assume MPEG 2 Layer III | No effect |
 | `-s c` / `-s d` | Check / delete stored tag info | |

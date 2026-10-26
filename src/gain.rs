@@ -137,8 +137,8 @@ impl GainOptions {
 
     /// Use wrapping mode instead of saturating (values wrap around 0-255 range).
     ///
-    /// Default is saturating mode (values clamp to 0-255).
-    /// Note: wrapping mode is ignored for channel-specific gain (always saturating).
+    /// Applies to whole-file and channel-specific gain. Default is saturating
+    /// mode (values clamp to 0-255).
     pub fn wrap(mut self, wrap: bool) -> Self {
         self.wrap = wrap;
         self
@@ -228,14 +228,14 @@ impl GainOptions {
         }
 
         let data = read(preread)?;
+        let mode = GainMode::from_wrap(self.wrap);
         if let Some(channel) = self.channel {
             if self.undo {
-                apply_gain_channel_with_undo(data, write_to, channel, self.steps)
+                apply_gain_channel_with_undo(data, write_to, channel, self.steps, mode)
             } else {
-                apply_gain_channel_impl(data, write_to, channel, self.steps)
+                apply_gain_channel_impl(data, write_to, channel, self.steps, mode)
             }
         } else {
-            let mode = GainMode::from_wrap(self.wrap);
             if self.undo {
                 apply_gain_with_undo_impl_to_path(
                     data,
@@ -280,8 +280,8 @@ pub fn apply_gain_db(file_path: &Path, gain_db: f64) -> Result<usize> {
 
 /// Apply the inverse of recorded undo deltas (`left`, `right`) to MP3 data.
 ///
-/// Equal deltas take the whole-file path (honoring `wrap`); unequal deltas
-/// are undone per channel (channel gain is always saturating).
+/// Equal deltas take the whole-file path; unequal deltas are undone per
+/// channel. Both paths honor the wrap mode recorded in the undo tag.
 ///
 /// `left`/`right` are the stored `MP3GAIN_UNDO` deltas in mp3gain's
 /// convention — the gain to *re-add* to restore the original — so they are
@@ -298,8 +298,9 @@ pub(crate) fn apply_undo_to_data(
     right: i32,
     wrap: bool,
 ) -> Result<usize> {
+    let mode = GainMode::from_wrap(wrap);
     if left == right {
-        Ok(apply_gain_to_data(data, left, GainMode::from_wrap(wrap), None).frames)
+        Ok(apply_gain_to_data(data, left, mode, None).frames)
     } else {
         ensure_channels_separable(data).map_err(|e| match e {
             Error::ChannelGainOnMono | Error::ChannelGainOnJointStereo => {
@@ -307,8 +308,8 @@ pub(crate) fn apply_undo_to_data(
             }
             e => e,
         })?;
-        let left_frames = apply_gain_to_data(data, left, GainMode::Saturating, Some(0)).frames;
-        let right_frames = apply_gain_to_data(data, right, GainMode::Saturating, Some(1)).frames;
+        let left_frames = apply_gain_to_data(data, left, mode, Some(0)).frames;
+        let right_frames = apply_gain_to_data(data, right, mode, Some(1)).frames;
         Ok(left_frames.max(right_frames))
     }
 }
@@ -524,15 +525,11 @@ fn apply_gain_channel_impl(
     write_to: &Path,
     channel: Channel,
     gain_steps: i32,
+    mode: GainMode,
 ) -> Result<SaturationStats> {
     ensure_channels_separable(&data)?;
 
-    let stats = apply_gain_to_data(
-        &mut data,
-        gain_steps,
-        GainMode::Saturating,
-        Some(channel.index()),
-    );
+    let stats = apply_gain_to_data(&mut data, gain_steps, mode, Some(channel.index()));
 
     fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
 
@@ -545,6 +542,7 @@ fn apply_gain_channel_with_undo(
     write_to: &Path,
     channel: Channel,
     gain_steps: i32,
+    mode: GainMode,
 ) -> Result<SaturationStats> {
     ensure_channels_separable(&data)?;
 
@@ -558,14 +556,9 @@ fn apply_gain_channel_with_undo(
         Channel::Right => (existing_left, existing_right - gain_steps),
     };
 
-    tag.set_undo_gain(new_left, new_right, false);
+    tag.set_undo_gain(new_left, new_right, mode == GainMode::Wrapping);
 
-    let stats = apply_gain_to_data(
-        &mut data,
-        gain_steps,
-        GainMode::Saturating,
-        Some(channel.index()),
-    );
+    let stats = apply_gain_to_data(&mut data, gain_steps, mode, Some(channel.index()));
 
     // MP3GAIN_MINMAX records the *post-apply* global_gain range (mp3gain
     // convention); re-scan the modified buffer and overwrite any prior value.

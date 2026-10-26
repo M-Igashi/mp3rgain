@@ -569,8 +569,7 @@ fn adjust_gain_at(
 
 /// Internal function to apply gain to frames in data. With
 /// `channel_index = None` every gain location in each frame is adjusted;
-/// with `Some(ch)` only that channel's location per granule is touched
-/// (always saturating — wrap mode has no channel-specific path).
+/// with `Some(ch)` only that channel's location per granule is touched.
 pub(crate) fn apply_gain_to_data(
     data: &mut [u8],
     gain_steps: i32,
@@ -600,7 +599,7 @@ pub(crate) fn apply_gain_to_data(
                 let num_channels = header.channel_mode.channel_count();
                 for gr in 0..header.granule_count() {
                     if let Some(loc) = locations[..len].get(gr * num_channels + ch) {
-                        adjust_gain_at(data, loc, gain_steps, GainMode::Saturating, &mut stats);
+                        adjust_gain_at(data, loc, gain_steps, mode, &mut stats);
                     }
                 }
             }
