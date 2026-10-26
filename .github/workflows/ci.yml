@@ -50,9 +50,12 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      # An Ubuntu mirror once held this step for over 30 minutes (#453).
+      # A stuck install now fails fast instead, and can be re-run.
       - name: Install ffmpeg (Ubuntu)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        timeout-minutes: 10
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Install ffmpeg (macOS)
         if: runner.os == 'macOS'
@@ -127,6 +130,7 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev
 
       - name: Check formatting
@@ -229,7 +233,8 @@ jobs:
           key: ${{ runner.os }}-cargo-compat-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install mp3gain
-        run: sudo apt-get update && sudo apt-get install -y mp3gain ffmpeg
+        timeout-minutes: 10
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mp3gain ffmpeg
 
       - name: Generate test fixtures
         run: |
