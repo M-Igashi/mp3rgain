@@ -1,0 +1,800 @@
+# Translators:
+# Privato72 (https://github.com/Privato72)
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: mp3rgui\n"
+"Report-Msgid-Bugs-To: https://github.com/M-Igashi/mp3rgain/issues\n"
+"POT-Creation-Date: 2026-10-26 18:42+0000\n"
+"PO-Revision-Date: 2026-10-26 22:05+0100\n"
+"Last-Translator: Privato72\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/app.rs:44
+msgid "Analyzing..."
+msgstr "Analisi in corso..."
+
+#: src/app.rs:45
+msgid "OK"
+msgstr "OK"
+
+#: src/app.rs:46
+msgid "Applying..."
+msgstr "Applicazione in corso..."
+
+#: src/app.rs:47
+msgid "Undoing..."
+msgstr "Annullamento modifiche..."
+
+#: src/app.rs:48
+msgid "Done"
+msgstr "Completato"
+
+#: src/app.rs:49
+msgid "Done (from tags)"
+msgstr "Completato (dai tag)"
+
+#: src/app.rs:50
+msgid "Done ({n} frames unparsed)"
+msgstr "Completato ({n} frame non interpretati)"
+
+#: src/app.rs:51
+msgid "Nothing to undo"
+msgstr "Niente da annullare"
+
+#: src/app.rs:57
+msgid "Dry run: +{} steps (capped)"
+msgstr "Simulazione: +{} passi (limitato)"
+
+#: src/app.rs:59
+msgid "Dry run: {} steps"
+msgstr "Simulazione: {} passi"
+
+#: src/app.rs:62
+msgid "Error"
+msgstr "Errore"
+
+#: src/app.rs:813
+msgid "{} file(s) queued, will be added when processing finishes"
+msgstr "{} file in coda, verranno aggiunti al termine dell'elaborazione"
+
+#: src/app.rs:856
+msgid "Added {} file(s), {} duplicate(s) skipped"
+msgstr "File aggiunti: {}, duplicati saltati: {}"
+
+#: src/app.rs:858
+msgid "Added {} file(s)"
+msgstr "File aggiunti: {}"
+
+#: src/app.rs:991
+msgid "Cancelling..."
+msgstr "Annullamento in corso..."
+
+#: src/app.rs:1001
+msgid "Could not open file location: {}"
+msgstr "Impossibile aprire il percorso del file: {}"
+
+#: src/app.rs:1008 src/app.rs:1037
+msgid "ReplayGain feature not available"
+msgstr "Funzione ReplayGain non disponibile"
+
+#: src/app.rs:1091
+msgid "Analyzing {} file(s) without stored tags..."
+msgstr "Analisi di {} file senza tag salvati..."
+
+#: src/app.rs:1149
+msgid "No track gain values — run Track Analysis first"
+msgstr "Nessun valore di guadagno traccia: esegui prima Analisi traccia"
+
+#: src/app.rs:1391
+msgid "Channel gain only applies to MP3 — selection had no eligible files"
+msgstr "Il guadagno canale si applica solo agli MP3: nessun file idoneo nella selezione"
+
+#: src/app.rs:1475
+msgid "Analyzing {} file(s) without consistent stored album tags..."
+msgstr "Analisi di {} file senza tag album salvati coerenti..."
+
+#: src/app.rs:1580
+msgid "No album gain values — run Album Analysis first"
+msgstr "Nessun valore di guadagno album: esegui prima Analisi album"
+
+#: src/app.rs:1624
+msgid "Analyzing tracks..."
+msgstr "Analisi delle tracce..."
+
+#: src/app.rs:1625
+msgid "Analyzing album..."
+msgstr "Analisi dell'album..."
+
+#: src/app.rs:1626
+msgid "Applying track gain..."
+msgstr "Applicazione guadagno traccia..."
+
+#: src/app.rs:1627
+msgid "Applying album gain..."
+msgstr "Applicazione guadagno album..."
+
+#: src/app.rs:1628
+msgid "Undoing gain changes..."
+msgstr "Annullamento modifiche al guadagno..."
+
+#: src/app.rs:1629
+msgid "Checking stored tags..."
+msgstr "Controllo tag salvati..."
+
+#: src/app.rs:1630
+msgid "Finding max amplitude..."
+msgstr "Ricerca ampiezza massima..."
+
+#: src/app.rs:1631
+msgid "Deleting stored tags..."
+msgstr "Eliminazione tag salvati..."
+
+#: src/app.rs:1632
+msgid "Reading existing ReplayGain values..."
+msgstr "Lettura valori ReplayGain esistenti..."
+
+#: src/app.rs:1743
+msgid "Album analysis failed: {}"
+msgstr "Analisi album non riuscita: {}"
+
+#: src/app.rs:1840
+msgid "Cancelled"
+msgstr "Annullato"
+
+#: src/i18n.rs:48
+msgctxt "language name"
+msgid "English"
+msgstr "Italiano"
+
+#: src/i18n.rs:81 src/ui/menu.rs:59
+msgid "Add Files..."
+msgstr "Aggiungi file..."
+
+#: src/i18n.rs:91 src/i18n.rs:95 src/ui/menu.rs:18
+msgid "System default"
+msgstr "Predefinita di sistema"
+
+#: src/ui/menu.rs:16
+msgid "Language"
+msgstr "Lingua"
+
+#: src/ui/menu.rs:49
+msgid "Help"
+msgstr "Aiuto"
+
+#: src/ui/menu.rs:50 src/ui/mod.rs:26
+msgid "About mp3rgui"
+msgstr "Informazioni su mp3rgui"
+
+#: src/ui/menu.rs:58
+msgid "File"
+msgstr "File"
+
+#: src/ui/menu.rs:63
+msgid "Add Folder..."
+msgstr "Aggiungi cartella..."
+
+#: src/ui/menu.rs:67
+msgid "Add Folder (with subfolders)..."
+msgstr "Aggiungi cartella (con sottocartelle)..."
+
+#: src/ui/menu.rs:72
+msgid "Clear File List"
+msgstr "Svuota elenco file"
+
+#: src/ui/menu.rs:77 src/ui/status.rs:14
+msgid "Exit"
+msgstr "Esci"
+
+#: src/ui/menu.rs:84
+msgid "Analysis"
+msgstr "Analisi"
+
+#: src/ui/menu.rs:86 src/ui/toolbar.rs:24
+msgid "Track Analysis"
+msgstr "Analisi traccia"
+
+#: src/ui/menu.rs:90 src/ui/toolbar.rs:27
+msgid "Album Analysis"
+msgstr "Analisi album"
+
+#: src/ui/menu.rs:94
+msgid "Find Max Amplitude"
+msgstr "Trova ampiezza massima"
+
+#: src/ui/menu.rs:99
+msgid "Check Stored Tags"
+msgstr "Controlla tag salvati"
+
+#: src/ui/menu.rs:108
+msgid "Modify Gain"
+msgstr "Modifica guadagno"
+
+#: src/ui/menu.rs:110
+msgid "Apply Track Gain"
+msgstr "Applica guadagno traccia"
+
+#: src/ui/menu.rs:114
+msgid "Apply Album Gain"
+msgstr "Applica guadagno album"
+
+#: src/ui/menu.rs:118
+msgid "Apply Manual Gain..."
+msgstr "Applica guadagno manuale..."
+
+#: src/ui/menu.rs:122
+msgid "Apply Channel Gain (MP3)..."
+msgstr "Applica guadagno canale (MP3)..."
+
+#: src/ui/menu.rs:128
+msgid "Undo All"
+msgstr "Annulla tutto"
+
+#: src/ui/menu.rs:130
+msgid "Undo Selected"
+msgstr "Annulla selezionati"
+
+#: src/ui/menu.rs:137
+msgid "Delete Stored Tags (All)..."
+msgstr "Elimina tag salvati (tutti)..."
+
+#: src/ui/menu.rs:139
+msgid "Delete Stored Tags (Selected)..."
+msgstr "Elimina tag salvati (selezionati)..."
+
+#: src/ui/options.rs:13
+msgid "Options:"
+msgstr "Opzioni:"
+
+#: src/ui/options.rs:17
+msgid "Prevent clipping"
+msgstr "Previeni clipping"
+
+#: src/ui/options.rs:20
+msgid "Cap the applied gain at the available headroom so the output cannot clip. Equivalent to the CLI's -k flag."
+msgstr "Limita il guadagno applicato al margine disponibile, così l'uscita non può andare in clipping. Equivale al parametro -k della CLI."
+
+#: src/ui/options.rs:26
+msgid "Preserve mtime"
+msgstr "Preserva mtime"
+
+#: src/ui/options.rs:29
+msgid "Restore the file's last-modified timestamp after writing so it doesn't jump to the top of playlists sorted by date. CLI -p."
+msgstr "Ripristina la data di ultima modifica del file dopo la scrittura, così non finisce in cima alle playlist ordinate per data. Parametro -p della CLI."
+
+#: src/ui/options.rs:34
+msgid "Wrap mode"
+msgstr "Modalità wrap"
+
+#: src/ui/options.rs:36
+msgid "Allow gain values to wrap around 0–255 instead of saturating. Disables the clipping check. CLI -w. Rarely useful — leave off."
+msgstr "Consente ai valori di guadagno di ricominciare da capo tra 0 e 255 invece di saturare. Disattiva il controllo del clipping. Parametro -w della CLI. Raramente utile: lascia disattivato."
+
+#: src/ui/options.rs:41
+msgid "MP3 tags:"
+msgstr "Tag MP3:"
+
+#: src/ui/options.rs:45 src/ui/options.rs:53
+msgid "ReplayGain in ID3v2"
+msgstr "ReplayGain in ID3v2"
+
+#: src/ui/options.rs:46 src/ui/options.rs:60
+msgid "All in APEv2"
+msgstr "Tutto in APEv2"
+
+#: src/ui/options.rs:47 src/ui/options.rs:65
+msgid "All in ID3v2"
+msgstr "Tutto in ID3v2"
+
+#: src/ui/options.rs:56
+msgid "Default. REPLAYGAIN_* in ID3v2 TXXX where players look, MP3GAIN_UNDO / MINMAX in APEv2 where mp3gain looks."
+msgstr "Predefinito. REPLAYGAIN_* in ID3v2 TXXX, dove li cercano i lettori, e MP3GAIN_UNDO / MINMAX in APEv2, dove li cerca mp3gain."
+
+#: src/ui/options.rs:62
+msgid "Byte-for-byte mp3gain behaviour. ReplayGain-aware players will not find the values. CLI -s a."
+msgstr "Comportamento identico a mp3gain, byte per byte. I lettori che supportano ReplayGain non troveranno i valori. Parametro -s a della CLI."
+
+#: src/ui/options.rs:67
+msgid "Undo and ReplayGain both in ID3v2 TXXX frames. CLI -s i."
+msgstr "Dati di annullamento e ReplayGain, entrambi in frame TXXX di ID3v2. Parametro -s i della CLI."
+
+#: src/ui/options.rs:75
+msgid "Dry run"
+msgstr "Simulazione (Dry run)"
+
+#: src/ui/options.rs:77
+msgid "Preview Apply Track / Album Gain without modifying any file. The Status column shows the steps that would be applied. CLI -n."
+msgstr "Mostra in anteprima Applica guadagno traccia / album senza modificare alcun file. La colonna Stato mostra i passi che verrebbero applicati. Parametro -n della CLI."
+
+#: src/ui/options.rs:88
+msgid "Use stored tags"
+msgstr "Usa tag salvati"
+
+#: src/ui/options.rs:91
+msgid "Apply Track / Album Gain from stored REPLAYGAIN_* tags instead of re-analyzing; only files without usable tags are rescanned. Album Gain reuses tags only when every file in the album carries a consistent set; any gap rescans the whole album. CLI -s R. RG 1.0 mode only."
+msgstr "Applica il guadagno traccia / album dai tag REPLAYGAIN_* salvati invece di rianalizzare; vengono rianalizzati solo i file senza tag utilizzabili. Il guadagno album riutilizza i tag solo se tutti i file dell'album ne hanno un insieme coerente; qualsiasi mancanza fa rianalizzare l'intero album. Parametro -s R della CLI. Solo in modalità RG 1.0."
+
+#. What one album is, for Album Analysis / Apply Album Gain.
+#. The CLI's --album-by, in the same three units (issue #338).
+#: src/ui/options.rs:102
+msgid "Album:"
+msgstr "Album:"
+
+#: src/ui/options.rs:106
+msgid "Per folder"
+msgstr "Per cartella"
+
+#: src/ui/options.rs:109
+msgid "Each folder is its own album. A release whose discs live in subfolders gets one album gain per disc, so use By tags for those. CLI --album-by=dir."
+msgstr "Ogni cartella è un album a sé. Una pubblicazione con i dischi in sottocartelle riceve un guadagno album per disco, quindi in quel caso usa In base ai tag. Parametro --album-by=dir della CLI."
+
+#: src/ui/options.rs:113
+msgid "By tags"
+msgstr "In base ai tag"
+
+#: src/ui/options.rs:115
+msgid "One album per release, read from ALBUMARTIST / ALBUM (and MUSICBRAINZ_ALBUMID when present), so discs in subfolders share one album gain. Files with no ALBUM tag fall back to their own folder. CLI --album-by=tag."
+msgstr "Un album per pubblicazione, letto da ALBUMARTIST / ALBUM (e MUSICBRAINZ_ALBUMID se presente), così i dischi in sottocartelle condividono un unico guadagno album. I file senza tag ALBUM vengono raggruppati per cartella. Parametro --album-by=tag della CLI."
+
+#: src/ui/options.rs:123
+msgid "Single album"
+msgstr "Album singolo"
+
+#: src/ui/options.rs:126
+msgid "Treat every loaded file as one album, ignoring folders. Select rows first to group just those, which is how to handle a release that has no usable tags. CLI -a."
+msgstr "Tratta tutti i file caricati come un unico album, ignorando le cartelle. Seleziona prima delle righe per raggruppare solo quelle: è il modo di gestire una pubblicazione senza tag utilizzabili. Parametro -a della CLI."
+
+#: src/ui/options.rs:131
+msgid "Filename only"
+msgstr "Solo nome file"
+
+#: src/ui/options.rs:133
+msgid "Show only the file name in the Path/File column instead of the full path. The full path is still shown on hover."
+msgstr "Mostra solo il nome del file nella colonna Percorso/File invece del percorso completo. Il percorso completo resta visibile al passaggio del mouse."
+
+#. Loudness measurement mode (issue #272). Switching modes
+#. invalidates cached analysis results — RG1 and BS.1770
+#. numbers live on different scales.
+#: src/ui/options.rs:142
+msgid "Analysis:"
+msgstr "Analisi:"
+
+#: src/ui/options.rs:144
+msgid "RG 1.0"
+msgstr "RG 1.0"
+
+#: src/ui/options.rs:145
+msgid "ReplayGain 1.0 (default): mp3gain-compatible values, 89 dB reference. Keeps re-scans consistent with libraries normalized by mp3gain."
+msgstr "ReplayGain 1.0 (predefinito): valori compatibili con mp3gain, riferimento a 89 dB. Mantiene le nuove analisi coerenti con le librerie normalizzate da mp3gain."
+
+#: src/ui/options.rs:148
+msgid "RG 2.0"
+msgstr "RG 2.0"
+
+#: src/ui/options.rs:150
+msgid "ReplayGain 2.0: BS.1770 integrated loudness, -18 LUFS reference (same perceived level as 89 dB). CLI --rg2."
+msgstr "ReplayGain 2.0: loudness integrata BS.1770, riferimento a -18 LUFS (stesso livello percepito di 89 dB). Parametro --rg2 della CLI."
+
+#: src/ui/options.rs:154
+msgid "R128"
+msgstr "R128"
+
+#: src/ui/options.rs:155
+msgid "EBU R128: BS.1770 integrated loudness, -23 LUFS broadcast target. CLI --r128."
+msgstr "EBU R128: loudness integrata BS.1770, obiettivo broadcast di -23 LUFS. Parametro --r128 della CLI."
+
+#: src/ui/status.rs:6
+msgid "Progress:"
+msgstr "Progresso:"
+
+#: src/ui/status.rs:26
+msgid "No files loaded"
+msgstr "Nessun file caricato"
+
+#: src/ui/status.rs:28
+msgid "1 file"
+msgstr "1 file"
+
+#: src/ui/status.rs:30
+msgid "{} files"
+msgstr "{} file"
+
+#: src/ui/table.rs:12
+msgid "none"
+msgstr "nessuno"
+
+#: src/ui/table.rs:13
+msgid "No stored tags found ({} container)"
+msgstr "Nessun tag salvato trovato (contenitore {})"
+
+#: src/ui/table.rs:20
+msgid "Container: {}"
+msgstr "Contenitore: {}"
+
+#: src/ui/table.rs:51
+msgid "{name}: {value}"
+msgstr "{name}: {value}"
+
+#: src/ui/table.rs:81
+msgid "Click to sort"
+msgstr "Clic per ordinare"
+
+#: src/ui/table.rs:96
+msgid "Volume (LUFS)"
+msgstr "Volume (LUFS)"
+
+#: src/ui/table.rs:96
+msgid "Album (LUFS)"
+msgstr "Album (LUFS)"
+
+#: src/ui/table.rs:98
+msgid "Volume"
+msgstr "Volume"
+
+#: src/ui/table.rs:98
+msgid "Album Vol"
+msgstr "Vol. album"
+
+#: src/ui/table.rs:101
+msgid "Track Analysis: BS.1770 integrated loudness in LUFS. Find Max Amplitude: available headroom in dB before clipping. Click to sort."
+msgstr "Analisi traccia: loudness integrata BS.1770 in LUFS. Trova ampiezza massima: margine disponibile in dB prima del clipping. Clic per ordinare."
+
+#: src/ui/table.rs:106
+msgid "Track Analysis: current loudness relative to ReplayGain reference (89 dB). Find Max Amplitude: available headroom in dB before clipping. Click to sort."
+msgstr "Analisi traccia: loudness attuale rispetto al riferimento ReplayGain (89 dB). Trova ampiezza massima: margine disponibile in dB prima del clipping. Clic per ordinare."
+
+#: src/ui/table.rs:144
+msgid "Path/File"
+msgstr "Percorso/File"
+
+#: src/ui/table.rs:150
+msgid "Clip"
+msgstr "Clip"
+
+#: src/ui/table.rs:153 src/ui/toolbar.rs:36
+msgid "Track Gain"
+msgstr "Guadagno traccia"
+
+#: src/ui/table.rs:156
+msgid "Clip(T)"
+msgstr "Clip(T)"
+
+#: src/ui/table.rs:162 src/ui/toolbar.rs:39
+msgid "Album Gain"
+msgstr "Guadagno album"
+
+#: src/ui/table.rs:165
+msgid "Clip(A)"
+msgstr "Clip(A)"
+
+#: src/ui/table.rs:168
+msgid "Stored RG"
+msgstr "RG salvato"
+
+#: src/ui/table.rs:169
+msgid "Existing ReplayGain/undo tags read from the file. Run Analysis > Check Stored Tags to populate. Hover a cell for full tag details."
+msgstr "Tag ReplayGain e di annullamento già presenti nel file. Usa Analisi > Controlla tag salvati per compilare la colonna. Passa il mouse su una cella per i dettagli completi dei tag."
+
+#: src/ui/table.rs:178
+msgid "Bitrate"
+msgstr "Bitrate"
+
+#: src/ui/table.rs:180
+msgid "Average bitrate, read when files are added. Click to sort."
+msgstr "Bitrate medio, letto quando i file vengono aggiunti. Clic per ordinare."
+
+#: src/ui/table.rs:187
+msgid "CBR/VBR"
+msgstr "CBR/VBR"
+
+#: src/ui/table.rs:190
+msgid "MP3 only: CBR when every frame has the same bitrate, VBR otherwise. AAC frames vary in size whatever the encoder setting, so M4A rows stay empty. Click to sort."
+msgstr "Solo MP3: CBR se tutti i frame hanno lo stesso bitrate, altrimenti VBR. I frame AAC variano di dimensione qualunque sia l'impostazione dell'encoder, quindi le righe M4A restano vuote. Clic per ordinare."
+
+#: src/ui/table.rs:197
+msgid "Status"
+msgstr "Stato"
+
+#: src/ui/table.rs:248
+msgid "Open file location"
+msgstr "Apri percorso file"
+
+#: src/ui/table.rs:262 src/ui/table.rs:277 src/ui/table.rs:304
+msgid "Y"
+msgstr "S"
+
+#: src/ui/table.rs:272 src/ui/table.rs:292
+msgid "{} dB"
+msgstr "{} dB"
+
+#: src/ui/table.rs:298
+msgid "Album: {}"
+msgstr "Album: {}"
+
+#: src/ui/table.rs:312
+msgid "{} kbps"
+msgstr "{} kbps"
+
+#: src/ui/table.rs:317
+msgid "CBR"
+msgstr "CBR"
+
+#: src/ui/table.rs:318
+msgid "VBR"
+msgstr "VBR"
+
+#: src/ui/table.rs:327
+msgid "These AAC frames could not be parsed and kept their original gain, which can be heard as clicks. Undo restores the file. Please report it at https://github.com/M-Igashi/mp3rgain/issues"
+msgstr "Questi frame AAC non sono stati interpretati e hanno mantenuto il guadagno originale, il che può causare clic udibili. Annulla ripristina il file. Segnalalo su https://github.com/M-Igashi/mp3rgain/issues"
+
+#: src/ui/toolbar.rs:11
+msgid "Add Files"
+msgstr "Aggiungi file"
+
+#: src/ui/toolbar.rs:15
+msgid "Add Folder"
+msgstr "Aggiungi cartella"
+
+#: src/ui/toolbar.rs:50
+msgid "Remove"
+msgstr "Rimuovi"
+
+#: src/ui/toolbar.rs:57
+msgid "Clear All"
+msgstr "Svuota tutto"
+
+#: src/ui/toolbar.rs:66 src/ui/mod.rs:71
+msgid "Cancel"
+msgstr "Annulla"
+
+#. Target volume. Stored on the 89 dB scale and shown on the
+#. selected mode's scale, so one offset carries across modes:
+#. 95 dB in RG 1.0 is -12 LUFS in RG 2.0 (issues #272, #364).
+#: src/ui/toolbar.rs:76
+msgid "Target:"
+msgstr "Target:"
+
+#: src/ui/toolbar.rs:88
+msgid "Level to normalize to. One setting shared by all analysis modes as an offset from the reference: 95 dB in RG 1.0 is -12 LUFS in RG 2.0 and -17 LUFS in R128. Equivalent to the CLI's -d."
+msgstr "Livello a cui normalizzare. Un'unica impostazione condivisa da tutte le modalità di analisi, come scostamento dal riferimento: 95 dB in RG 1.0 corrispondono a -12 LUFS in RG 2.0 e a -17 LUFS in R128. Equivale al parametro -d della CLI."
+
+#: src/ui/mod.rs:32
+msgid "mp3rgui {}"
+msgstr "mp3rgui {}"
+
+#: src/ui/mod.rs:34
+msgid "Lossless MP3 and AAC volume normalizer using ReplayGain"
+msgstr "Normalizzatore di volume lossless per MP3 e AAC basato su ReplayGain"
+
+#: src/ui/mod.rs:38
+msgid "{} License"
+msgstr "Licenza {}"
+
+#: src/ui/mod.rs:101
+msgid "Apply channel gain"
+msgstr "Applica guadagno canale"
+
+#: src/ui/mod.rs:103 src/ui/mod.rs:155
+msgid "Apply"
+msgstr "Applica"
+
+#: src/ui/mod.rs:106
+msgid "Target: {} file(s) (MP3 only)"
+msgstr "Target: {} file (solo MP3)"
+
+#: src/ui/mod.rs:109
+msgid "Channel:"
+msgstr "Canale:"
+
+#: src/ui/mod.rs:113
+msgid "Left"
+msgstr "Sinistro"
+
+#: src/ui/mod.rs:118
+msgid "Right"
+msgstr "Destro"
+
+#: src/ui/mod.rs:122 src/ui/mod.rs:161
+msgid "Steps:"
+msgstr "Passi:"
+
+#: src/ui/mod.rs:129 src/ui/mod.rs:168
+msgid "= {} dB"
+msgstr "= {} dB"
+
+#: src/ui/mod.rs:132
+msgid "Stereo / Dual Channel MP3s only. Mono and joint stereo files are refused."
+msgstr "Solo MP3 stereo / dual channel. I file mono e joint stereo vengono rifiutati."
+
+#: src/ui/mod.rs:153
+msgid "Apply manual gain"
+msgstr "Applica guadagno manuale"
+
+#: src/ui/mod.rs:158
+msgid "Target: {} file(s)"
+msgstr "Target: {} file"
+
+#: src/ui/mod.rs:170
+msgid "1 step ≈ 1.5 dB. Negative values lower the volume."
+msgstr "1 passo ≈ 1.5 dB. I valori negativi abbassano il volume."
+
+#: src/ui/mod.rs:188
+msgid "Delete stored tags"
+msgstr "Elimina tag salvati"
+
+#: src/ui/mod.rs:190
+msgid "Delete"
+msgstr "Elimina"
+
+#: src/ui/mod.rs:194
+msgid "Delete stored ReplayGain / undo tags from {} file(s)?"
+msgstr "Eliminare i tag ReplayGain e di annullamento salvati da {} file?"
+
+#: src/ui/mod.rs:197
+msgid "This cannot be undone."
+msgstr "L'operazione non può essere annullata."
+
+#: src/ui/mod.rs:234
+msgid "Audio files"
+msgstr "File audio"
+
+#: src/ui/mod.rs:273
+msgid "Drag and drop MP3 files here, or use the toolbar buttons to add files"
+msgstr "Trascina qui i file MP3, oppure usa i pulsanti della barra degli strumenti per aggiungere file"
+
+#: src/worker.rs:282
+msgid "Analyzed {} file(s), {} error(s)"
+msgstr "File analizzati: {}, errori: {}"
+
+#: src/worker.rs:284
+msgid "Analyzed {} file(s)"
+msgstr "File analizzati: {}"
+
+#: src/worker.rs:561
+msgid "Gain applied, but MP3GAIN_ALBUM_MINMAX was not written: {e}"
+msgstr "Guadagno applicato, ma MP3GAIN_ALBUM_MINMAX non è stato scritto: {e}"
+
+#: src/worker.rs:657
+msgid "Undone {} file(s)"
+msgstr "Modifiche annullate su {} file"
+
+#: src/worker.rs:659
+msgid "Undone {} file(s), {} had no changes to undo"
+msgstr "Modifiche annullate su {} file, {} senza modifiche da annullare"
+
+#: src/worker.rs:663
+msgid "Undone {} file(s), {} error(s)"
+msgstr "Modifiche annullate su {} file, errori: {}"
+
+#: src/worker.rs:665
+msgid "Undone {} file(s), {} had no changes to undo, {} error(s)"
+msgstr "Modifiche annullate su {} file, {} senza modifiche da annullare, errori: {}"
+
+#: src/worker.rs:743
+msgid "Deleted stored tags from {} file(s), {} error(s)"
+msgstr "Tag salvati eliminati da {} file, errori: {}"
+
+#: src/worker.rs:748
+msgid "Deleted stored tags from {} file(s)"
+msgstr "Tag salvati eliminati da {} file"
+
+#: src/worker.rs:814
+msgid "Max amplitude scanned on {} file(s), {} error(s)"
+msgstr "Ampiezza massima rilevata su {} file, errori: {}"
+
+#: src/worker.rs:819
+msgid "Max amplitude scanned on {} file(s)"
+msgstr "Ampiezza massima rilevata su {} file"
+
+#: src/worker.rs:873
+msgid "Checked stored tags for {} file(s)"
+msgstr "Tag salvati controllati su {} file"
+
+#: src/worker.rs:981
+msgid "Applied track gain on {} file(s)"
+msgstr "Guadagno traccia applicato a {} file"
+
+#: src/worker.rs:984
+msgid "Applied track gain on {} file(s), {} error(s)"
+msgstr "Guadagno traccia applicato a {} file, errori: {}"
+
+#: src/worker.rs:989
+msgid "Dry-ran track gain on {} file(s)"
+msgstr "Guadagno traccia simulato su {} file"
+
+#: src/worker.rs:992
+msgid "Dry-ran track gain on {} file(s), {} error(s)"
+msgstr "Guadagno traccia simulato su {} file, errori: {}"
+
+#: src/worker.rs:997
+msgid "Applied manual gain on {} file(s)"
+msgstr "Guadagno manuale applicato a {} file"
+
+#: src/worker.rs:1000
+msgid "Applied manual gain on {} file(s), {} error(s)"
+msgstr "Guadagno manuale applicato a {} file, errori: {}"
+
+#: src/worker.rs:1005
+msgid "Dry-ran manual gain on {} file(s)"
+msgstr "Guadagno manuale simulato su {} file"
+
+#: src/worker.rs:1008
+msgid "Dry-ran manual gain on {} file(s), {} error(s)"
+msgstr "Guadagno manuale simulato su {} file, errori: {}"
+
+#: src/worker.rs:1013
+msgid "Applied channel gain on {} file(s)"
+msgstr "Guadagno canale applicato a {} file"
+
+#: src/worker.rs:1016
+msgid "Applied channel gain on {} file(s), {} error(s)"
+msgstr "Guadagno canale applicato a {} file, errori: {}"
+
+#: src/worker.rs:1021
+msgid "Dry-ran channel gain on {} file(s)"
+msgstr "Guadagno canale simulato su {} file"
+
+#: src/worker.rs:1024
+msgid "Dry-ran channel gain on {} file(s), {} error(s)"
+msgstr "Guadagno canale simulato su {} file, errori: {}"
+
+#: src/worker.rs:1029
+msgid "Applied album gain on {} file(s)"
+msgstr "Guadagno album applicato a {} file"
+
+#: src/worker.rs:1032
+msgid "Applied album gain on {} file(s), {} error(s)"
+msgstr "Guadagno album applicato a {} file, errori: {}"
+
+#: src/worker.rs:1037
+msgid "Dry-ran album gain on {} file(s)"
+msgstr "Guadagno album simulato su {} file"
+
+#: src/worker.rs:1040
+msgid "Dry-ran album gain on {} file(s), {} error(s)"
+msgstr "Guadagno album simulato su {} file, errori: {}"
+
+#: src/worker.rs:1060
+msgid "Album analysis complete ({} tracks)"
+msgstr "Analisi album completata (tracce: {})"
+
+#: src/worker.rs:1062
+msgid "Album analysis complete ({} tracks); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "Analisi album completata (tracce: {}); album con più di una pubblicazione (stesso artista e tag album): {}. Passa il mouse su Guadagno album per vedere il raggruppamento."
+
+#: src/worker.rs:1068
+msgid "Album analysis complete ({} tracks, {} skipped)"
+msgstr "Analisi album completata (tracce: {}, saltate: {})"
+
+#: src/worker.rs:1073
+msgid "Album analysis complete ({} tracks, {} skipped); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "Analisi album completata (tracce: {}, saltate: {}); album con più di una pubblicazione (stesso artista e tag album): {}. Passa il mouse su Guadagno album per vedere il raggruppamento."
+
+#: src/worker.rs:1080
+msgid "Album analysis complete ({} albums, {} tracks)"
+msgstr "Analisi album completata (album: {}, tracce: {})"
+
+#: src/worker.rs:1085
+msgid "Album analysis complete ({} albums, {} tracks); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "Analisi album completata (album: {}, tracce: {}); album con più di una pubblicazione (stesso artista e tag album): {}. Passa il mouse su Guadagno album per vedere il raggruppamento."
+
+#: src/worker.rs:1092
+msgid "Album analysis complete ({} albums, {} tracks, {} skipped)"
+msgstr "Analisi album completata (album: {}, tracce: {}, saltate: {})"
+
+#: src/worker.rs:1098
+msgid "Album analysis complete ({} albums, {} tracks, {} skipped); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "Analisi album completata (album: {}, tracce: {}, saltate: {}); album con più di una pubblicazione (stesso artista e tag album): {}. Passa il mouse su Guadagno album per vedere il raggruppamento."
+
+#: src/worker.rs:1107
+msgid "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed"
+msgstr "Analisi album (tracce analizzate: {}, saltate: {}, album non riusciti: {})"
+
+#: src/worker.rs:1113
+msgid "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed; {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "Analisi album (tracce analizzate: {}, saltate: {}, album non riusciti: {}); album con più di una pubblicazione (stesso artista e tag album): {}. Passa il mouse su Guadagno album per vedere il raggruppamento."
