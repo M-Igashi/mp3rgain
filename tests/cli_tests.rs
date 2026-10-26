@@ -2565,3 +2565,27 @@ fn adts_audio(data: &[u8]) -> &[u8] {
         | (data[9] as usize & 0x7F);
     &data[10 + size..]
 }
+
+/// Issue #436: `-a -p` keeps the original mtime, although the album range is
+/// written after the apply has restored it, as mp3gain's single tag write does.
+#[test]
+fn album_gain_with_p_keeps_mtime_after_the_album_range() {
+    use mp3rgain::apply::{read_mtime, restore_timestamp};
+    use std::time::{Duration, SystemTime};
+
+    let album = TempAlbum::new(&["test_vbr.mp3", "test_simple_stereo.mp3"]);
+    let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1_577_836_800);
+    for file in &album.files {
+        restore_timestamp(file, old);
+    }
+    let mut argv = vec!["-a", "-p", "-c", "-s", "a"];
+    argv.extend(album.files.iter().map(|f| f.to_str().unwrap()));
+    let out = run(&argv);
+    assert!(out.status.success(), "{out:?}");
+
+    for file in &album.files {
+        let tag = read_ape_tag_from_file(file).unwrap().unwrap();
+        assert!(tag.get(TAG_MP3GAIN_ALBUM_MINMAX).is_some(), "{file:?}");
+        assert_eq!(read_mtime(file), Some(old), "{file:?}");
+    }
+}

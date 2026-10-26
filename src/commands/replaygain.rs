@@ -23,7 +23,7 @@ use crate::processors::info::{scan_gain_range_for_row, tsv_album_row, tsv_rg_row
 use crate::processors::replaygain::{
     apply_is_noop, capped_tag_gain, process_apply_replaygain_with_album, process_track_gain,
 };
-use crate::processors::utils::report_unsupported_format;
+use crate::processors::utils::{report_unsupported_format, restore_timestamp, save_original_mtime};
 use crate::progress::{
     create_labeled_file_count_pb_in, create_progress_bar, progress_finish, progress_inc,
     progress_set_message,
@@ -806,7 +806,20 @@ fn run_album(
                     .filter(|&i| applied[i])
                     .map(|i| (files[i].as_path(), range_by_idx[i]))
                     .collect();
-                for (file, e) in mp3rgain::write_album_minmax(&album_files) {
+                // A second write after the apply restored the mtime, so -p has
+                // to restore it again, as mp3gain's single tag write does
+                // (issue #436).
+                let mtimes: Vec<_> = album_files
+                    .iter()
+                    .map(|&(file, _)| save_original_mtime(file, opts))
+                    .collect();
+                let minmax_errors = mp3rgain::write_album_minmax(&album_files);
+                for (&(file, _), mtime) in album_files.iter().zip(mtimes) {
+                    if let Some(mtime) = mtime {
+                        restore_timestamp(file, mtime);
+                    }
+                }
+                for (file, e) in minmax_errors {
                     let msg =
                         format!("gain applied, but MP3GAIN_ALBUM_MINMAX was not written: {e}");
                     if opts.output_format == OutputFormat::Json {
