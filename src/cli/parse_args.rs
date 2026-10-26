@@ -298,8 +298,16 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
                             'c' => opts.ignore_clipping = true,
                             'k' => opts.prevent_clipping = true,
                             'u' => opts.undo = true,
-                            'r' => opts.track_gain = true,
-                            'a' => opts.album_gain = true,
+                            // The later of -r and -a wins, as in mp3gain,
+                            // where each clears the other (issue #435).
+                            'r' => {
+                                opts.track_gain = true;
+                                opts.album_gain = false;
+                            }
+                            'a' => {
+                                opts.album_gain = true;
+                                opts.track_gain = false;
+                            }
                             'n' => opts.dry_run = true,
                             'R' => opts.recursive = true,
                             'e' => opts.skip_album = true,
@@ -693,6 +701,25 @@ mod tests {
 
         let opts = parse_args(&args(&["-e", "song.mp3"])).unwrap();
         assert!(opts.skip_album);
+    }
+
+    /// Issue #435: the later of -a and -r selects the mode, as in mp3gain.
+    /// mp3gain takes no combined flags; mp3rgain reads them left to right.
+    #[test]
+    fn later_of_track_and_album_wins() {
+        for (flags, track) in [
+            (&["-a", "-r"][..], true),
+            (&["-r", "-a"][..], false),
+            (&["-ar"][..], true),
+            (&["-ra"][..], false),
+            (&["-a", "-e", "-r"][..], true),
+        ] {
+            let mut argv = flags.to_vec();
+            argv.push("song.mp3");
+            let opts = parse_args(&args(&argv)).unwrap();
+            assert_eq!(opts.track_gain, track, "{flags:?}");
+            assert_eq!(opts.album_gain, !track, "{flags:?}");
+        }
     }
 
     #[test]
