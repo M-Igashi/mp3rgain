@@ -58,7 +58,7 @@ msgstr "Deneme: {} adım"
 
 #: src/app.rs:62
 msgid "Error"
-msgstr "Hata!"
+msgstr "Hata"
 
 #: src/app.rs:813
 msgid "{} file(s) queued, will be added when processing finishes"
@@ -142,11 +142,11 @@ msgstr "Mevcut ReplayGain değerleri okunuyor..."
 
 #: src/app.rs:1743
 msgid "Album analysis failed: {}"
-msgstr "Albüm analizi başarısız oldu :( {}"
+msgstr "Albüm analizi başarısız oldu: {}"
 
 #: src/app.rs:1840
 msgid "Cancelled"
-msgstr "İptal edildi!"
+msgstr "İptal edildi"
 
 #: src/i18n.rs:48
 msgctxt "language name"
@@ -396,7 +396,7 @@ msgstr "İlerleme:"
 
 #: src/ui/status.rs:26
 msgid "No files loaded"
-msgstr "Yüklü dosya yok!"
+msgstr "Yüklü dosya yok"
 
 #: src/ui/status.rs:28
 msgid "1 file"
@@ -544,7 +544,7 @@ msgstr "Klasör Ekle"
 
 #: src/ui/toolbar.rs:50
 msgid "Remove"
-msgstr "Kaldır!"
+msgstr "Kaldır"
 
 #: src/ui/toolbar.rs:57
 msgid "Clear All"
@@ -552,7 +552,7 @@ msgstr "Tümünü Temizle"
 
 #: src/ui/toolbar.rs:66 src/ui/mod.rs:71
 msgid "Cancel"
-msgstr "İptal!"
+msgstr "İptal"
 
 #. Target volume. Stored on the 89 dB scale and shown on the
 #. selected mode's scale, so one offset carries across modes:
