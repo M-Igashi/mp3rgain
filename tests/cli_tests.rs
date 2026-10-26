@@ -900,6 +900,43 @@ fn channel_gain_leaves_stored_replaygain_values() {
     }
 }
 
+/// Issue #449: an apply under `-s i` moves the mp3gain values an APEv2 tag
+/// holds into ID3v2 and accumulates on them, as mp3gain's `-s i` does, so `-u`
+/// restores the original. Other APEv2 items stay.
+#[test]
+fn id3v2_apply_moves_mp3gain_values_out_of_apev2() {
+    use mp3rgain::{read_gain_tags_auto, write_ape_tag, TagLayout};
+
+    let album = TempAlbum::new(&["test_simple_stereo.mp3"]);
+    let file = &album.files[0];
+    let path = file.to_str().unwrap();
+    let original = gain_range(file);
+
+    let out = run(&["-g", "-4", "-s", "a", path]);
+    assert!(out.status.success(), "{out:?}");
+    let mut ape = read_ape_tag_from_file(file).unwrap().unwrap();
+    assert_eq!(ape.get(TAG_MP3GAIN_UNDO), Some("+004,+004,N"));
+    ape.set("ARTIST", "kept");
+    write_ape_tag(file, &ape).unwrap();
+
+    let out = run(&["-g", "2", "-s", "i", path]);
+    assert!(out.status.success(), "{out:?}");
+    let ape = read_ape_tag_from_file(file).unwrap().unwrap();
+    assert_eq!(ape.get(TAG_MP3GAIN_UNDO), None);
+    assert_eq!(ape.get("MP3GAIN_MINMAX"), None);
+    assert_eq!(ape.get("ARTIST"), Some("kept"));
+    let id3 = read_gain_tags_auto(file, TagLayout::Id3v2).unwrap();
+    assert_eq!(id3.undo.as_deref(), Some("+002,+002,N"));
+
+    let out = run(&["-u", path]);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        gain_range(file),
+        original,
+        "-u did not restore the original"
+    );
+}
+
 /// Issue #433: `-l` records its undo value and adds no `MP3GAIN_MINMAX` to a
 /// file that had none, as mp3gain's `-l` does.
 #[test]

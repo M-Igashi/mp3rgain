@@ -138,6 +138,20 @@ pub(crate) fn get_txxx(tag: &id3::Tag, description: &str) -> Option<String> {
         .map(|t| t.value.clone())
 }
 
+/// Add each `(description, value)` as a TXXX frame unless `tag` already has
+/// one, so an ID3v2 value wins over the APEv2 one it is merged with, as in
+/// mp3gain's `-s i`, which reads APEv2 first and ID3v2 over it (issue #449).
+pub(crate) fn add_missing_txxx(tag: &mut id3::Tag, values: &[(String, String)]) {
+    for (description, value) in values {
+        if get_txxx(tag, description).is_none() {
+            tag.add_frame(id3::frame::ExtendedText {
+                description: description.clone(),
+                value: value.clone(),
+            });
+        }
+    }
+}
+
 /// Remove all TXXX frames matching `description` case-insensitively.
 ///
 /// `Tag::add_frame` and `Tag::remove_extended_text` only match the exact
