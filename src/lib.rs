@@ -104,8 +104,9 @@ pub use ape::{
     TAG_REPLAYGAIN_TRACK_GAIN, TAG_REPLAYGAIN_TRACK_PEAK,
 };
 pub use apply::{
-    apply_with_options, predict_apply, write_album_minmax, write_replaygain_tags_only,
-    AacAlbumInfo, ApplyOptions, ApplyReport, ClippingDetection, TagsOnlyOptions,
+    apply_with_options, predict_apply, write_album_minmax, write_album_minmax_with_layout,
+    write_replaygain_tags_only, AacAlbumInfo, ApplyOptions, ApplyReport, ClippingDetection,
+    TagsOnlyOptions,
 };
 pub use bitrate::{read_bitrate, Bitrate, BitrateMode};
 pub use error::{Error, Result};
@@ -340,8 +341,8 @@ pub struct StoredGainTags {
 }
 
 impl StoredGainTags {
-    /// Snapshot of the ID3v2 TXXX frames `rg` carries. `album_minmax` is an
-    /// APEv2-only item, so it is always absent here.
+    /// Snapshot of the ID3v2 TXXX frames `rg` carries, without the album
+    /// range, which `Id3v2ReplayGain` has no field for.
     fn from_id3v2(rg: id3v2::Id3v2ReplayGain) -> Self {
         Self {
             source: GainTagSource::Id3v2,
@@ -464,9 +465,11 @@ pub fn read_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<Stored
         }
     }
     if layout.mp3gain_in_id3v2() {
-        return Ok(StoredGainTags::from_id3v2(id3v2::read_id3v2_replaygain(
-            file_path,
-        )?));
+        let (rg, album_minmax) = id3v2::read_id3v2_stored(file_path)?;
+        return Ok(StoredGainTags {
+            album_minmax,
+            ..StoredGainTags::from_id3v2(rg)
+        });
     }
     if layout == TagLayout::Split {
         let id3 = id3v2::read_id3v2_replaygain(file_path)?;

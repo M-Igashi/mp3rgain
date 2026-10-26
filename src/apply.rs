@@ -1166,10 +1166,21 @@ pub fn write_replaygain_tags_only(file_path: &Path, opts: &TagsOnlyOptions) -> R
 /// values, skewing the album range and appending an APEv2 tag after the MP4
 /// data. A file whose scan fails is left out of the range. A failed tag write
 /// does not stop the others and is returned, so the caller can report a file
-/// whose gain was applied but whose album range was not recorded. Intended for
-/// the default APEv2 path; skip the call when writing ID3v2 (`-s i`) or when
-/// stored-tag writing is disabled.
+/// whose gain was applied but whose album range was not recorded. Writes the
+/// APEv2 item, where the default layout and `-s a` keep the mp3gain values;
+/// [`write_album_minmax_with_layout`] follows the layout, `-s i` included.
+/// Skip the call when stored-tag writing is disabled.
 pub fn write_album_minmax<'a>(files: &[(&'a Path, Option<(u8, u8)>)]) -> Vec<(&'a Path, Error)> {
+    write_album_minmax_with_layout(files, TagLayout::Split)
+}
+
+/// [`write_album_minmax`] into the container `layout` keeps the mp3gain values
+/// in: a TXXX frame under [`TagLayout::Id3v2`], as mp3gain's `-a -s i` writes
+/// it (issue #450), the APEv2 item otherwise.
+pub fn write_album_minmax_with_layout<'a>(
+    files: &[(&'a Path, Option<(u8, u8)>)],
+    layout: TagLayout,
+) -> Vec<(&'a Path, Error)> {
     use rayon::prelude::*;
 
     // Both the container probe and the fallback analyze() read the file, so
@@ -1202,9 +1213,12 @@ pub fn write_album_minmax<'a>(files: &[(&'a Path, Option<(u8, u8)>)]) -> Vec<(&'
     mp3_files
         .par_iter()
         .filter_map(|&file| {
-            ape::write_ape_album_minmax(file, album_min, album_max)
-                .err()
-                .map(|e| (file, e))
+            let written = if layout.mp3gain_in_id3v2() {
+                id3v2::write_id3v2_album_minmax(file, album_min, album_max)
+            } else {
+                ape::write_ape_album_minmax(file, album_min, album_max)
+            };
+            written.err().map(|e| (file, e))
         })
         .collect()
 }

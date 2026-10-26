@@ -688,7 +688,7 @@ fn manual_gain_shifts_stored_replaygain_values() {
         assert!(before.algorithm.is_some(), "{fixture} {layout:?}: setup");
         assert_eq!(
             before.album_minmax.is_some(),
-            fixture.ends_with(".mp3") && layout != TagLayout::Id3v2,
+            fixture.ends_with(".mp3"),
             "{fixture} {layout:?}: MP3GAIN_ALBUM_MINMAX setup"
         );
 
@@ -2661,4 +2661,37 @@ fn album_gain_with_p_keeps_mtime_after_the_album_range() {
         assert!(tag.get(TAG_MP3GAIN_ALBUM_MINMAX).is_some(), "{file:?}");
         assert_eq!(read_mtime(file), Some(old), "{file:?}");
     }
+}
+
+/// Issue #450: `-a -s i` stores the album range as a TXXX frame, as mp3gain
+/// does, and `-s d` removes it with the other frames.
+#[test]
+fn album_gain_under_s_i_writes_the_album_range_to_id3v2() {
+    use mp3rgain::{read_gain_tags_auto, TagLayout};
+
+    let album = TempAlbum::new(&["test_vbr.mp3", "test_simple_stereo.mp3"]);
+    let mut argv = vec!["-a", "-c", "-s", "i"];
+    argv.extend(album.files.iter().map(|f| f.to_str().unwrap()));
+    let out = run(&argv);
+    assert!(out.status.success(), "{out:?}");
+
+    let ranges: Vec<(u8, u8)> = album.files.iter().map(|f| gain_range(f)).collect();
+    let min = ranges.iter().map(|r| r.0).min().unwrap();
+    let max = ranges.iter().map(|r| r.1).max().unwrap();
+    let expected = mp3rgain::ape::format_minmax(min, max);
+    for file in &album.files {
+        let tags = read_gain_tags_auto(file, TagLayout::Id3v2).unwrap();
+        assert_eq!(
+            tags.album_minmax.as_deref(),
+            Some(expected.as_str()),
+            "{file:?}"
+        );
+        assert!(read_ape_tag_from_file(file).unwrap().is_none(), "{file:?}");
+    }
+
+    let file = album.files[0].to_str().unwrap();
+    let out = run(&["-s", "d", "-s", "i", file]);
+    assert!(out.status.success(), "{out:?}");
+    let tags = read_gain_tags_auto(&album.files[0], TagLayout::Id3v2).unwrap();
+    assert_eq!(tags.album_minmax, None);
 }
