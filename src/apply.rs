@@ -812,18 +812,22 @@ fn apply_mp3_id3v2_bytes(
                 rg.undo = Some(ape::format_undo_value(undo_left, undo_right, opts.wrap));
 
                 // MP3GAIN_MINMAX is the *post-apply* global_gain range
-                // (mp3gain convention). A full apply already tracked it in the
-                // saturation stats (issue #231); channel applies only touch a
-                // subset, so scan the modified temp file instead. Written
-                // alongside the undo value, never on its own: on a file with
-                // no gain applied it would claim an apply that never happened.
-                let (min, max) = if opts.channel.is_none() && stats.frames > 0 {
-                    (stats.min_gain, stats.max_gain)
-                } else {
-                    let post = crate::analyze(w)?;
-                    (post.min_gain(), post.max_gain())
-                };
-                rg.minmax = Some(ape::format_minmax(min, max));
+                // (mp3gain convention), which the apply pass already tracked
+                // in the saturation stats (issue #231). Written alongside the
+                // undo value, never on its own: on a file with no gain applied
+                // it would claim an apply that never happened. A channel apply
+                // leaves any stored range as it is and adds none, as mp3gain's
+                // `-l` does: it updates stored values only when both channels
+                // move by the same amount (issue #433).
+                if opts.channel.is_none() {
+                    let (min, max) = if stats.frames > 0 {
+                        (stats.min_gain, stats.max_gain)
+                    } else {
+                        let post = crate::analyze(w)?;
+                        (post.min_gain(), post.max_gain())
+                    };
+                    rg.minmax = Some(ape::format_minmax(min, max));
+                }
             }
         }
 

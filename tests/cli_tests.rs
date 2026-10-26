@@ -856,10 +856,28 @@ fn channel_gain_leaves_stored_replaygain_values() {
             ("track peak", &after.track_peak, &before.track_peak),
             ("album gain", &after.album_gain, &before.album_gain),
             ("album peak", &after.album_peak, &before.album_peak),
+            ("track range", &after.minmax, &before.minmax),
             ("album range", &after.album_minmax, &before.album_minmax),
         ] {
             assert_eq!(a, b, "{layout:?}: -l moved the {field}");
         }
+    }
+}
+
+/// Issue #433: `-l` records its undo value and adds no `MP3GAIN_MINMAX` to a
+/// file that had none, as mp3gain's `-l` does.
+#[test]
+fn channel_gain_adds_no_gain_range() {
+    use mp3rgain::{read_gain_tags_auto, TagLayout};
+
+    for (layout, layout_arg) in [(TagLayout::Ape, "a"), (TagLayout::Id3v2, "i")] {
+        let album = TempAlbum::new(&["test_simple_stereo.mp3"]);
+        let file = &album.files[0];
+        let out = run(&["-l", "0", "2", "-s", layout_arg, file.to_str().unwrap()]);
+        assert!(out.status.success(), "{layout:?}: {out:?}");
+        let tags = read_gain_tags_auto(file, layout).unwrap();
+        assert_eq!(tags.undo.as_deref(), Some("-002,+000,N"), "{layout:?}");
+        assert_eq!(tags.minmax, None, "{layout:?}");
     }
 }
 

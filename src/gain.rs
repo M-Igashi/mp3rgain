@@ -19,9 +19,7 @@ use crate::ape::{
     TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
 };
 use crate::error::{Error, Result};
-use crate::frame::{
-    apply_gain_to_data, iterate_frames, scan_gain_range, GainMode, SaturationStats,
-};
+use crate::frame::{apply_gain_to_data, iterate_frames, GainMode, SaturationStats};
 
 use std::fs;
 use std::path::Path;
@@ -560,12 +558,9 @@ fn apply_gain_channel_with_undo(
 
     let stats = apply_gain_to_data(&mut data, gain_steps, mode, Some(channel.index()));
 
-    // MP3GAIN_MINMAX records the *post-apply* global_gain range (mp3gain
-    // convention); re-scan the modified buffer and overwrite any prior value.
-    if let Ok((min, max)) = scan_gain_range(&data) {
-        tag.set_minmax(min, max);
-    }
-
+    // MP3GAIN_MINMAX is left as it is, and none is added: mp3gain's `-l`
+    // updates stored values only when both channels move by the same amount
+    // (issue #433).
     let new_data = replace_ape_tag(&data, &tag);
     fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
 
