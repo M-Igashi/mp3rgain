@@ -761,8 +761,27 @@ fn apply_mp3_ape_bytes(
                 }
             }
         }
+
+        if let Some((min, max)) = zero_step_range(w, steps, opts) {
+            ape::write_ape_minmax(w, min, max)?;
+        }
         Ok(stats)
     })
+}
+
+/// The scanned `(min, max)` global_gain range a ReplayGain apply that rounds
+/// to 0 steps records, as mp3gain's `-r` and `-a` do when no change is
+/// necessary (issue #437). Nothing else does: no frame changed, so there is
+/// no undo value to write, and mp3gain's `-g 0` writes nothing at all. A
+/// channel apply never records a range (issue #433). The scan is best-effort,
+/// like the tag it feeds.
+fn zero_step_range(file: &Path, steps: i32, opts: &ApplyOptions) -> Option<(u8, u8)> {
+    if steps != 0 || !opts.write_undo || opts.track_result.is_none() || opts.channel.is_some() {
+        return None;
+    }
+    crate::analyze(file)
+        .ok()
+        .map(|scan| (scan.min_gain(), scan.max_gain()))
 }
 
 fn apply_mp3_id3v2_bytes(
@@ -831,6 +850,12 @@ fn apply_mp3_id3v2_bytes(
             }
         }
 
+        if rg.minmax.is_none() {
+            if let Some((min, max)) = zero_step_range(w, steps, opts) {
+                rg.minmax = Some(ape::format_minmax(min, max));
+            }
+        }
+
         // Issue #377. A nonzero apply always writes the undo value above, so
         // the shifted ID3v2 frames ride along in that tag write; values
         // mp3gain left in APEv2 describe the old audio too.
@@ -850,7 +875,7 @@ fn apply_mp3_id3v2_bytes(
             }
         }
 
-        if rg.undo.is_some() || rg.track_gain.is_some() {
+        if rg.undo.is_some() || rg.minmax.is_some() || rg.track_gain.is_some() {
             id3v2::write_rg_frames_direct(w, &mut tag, &rg)?;
         }
         Ok(stats)
