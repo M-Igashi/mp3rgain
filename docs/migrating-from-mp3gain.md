@@ -106,7 +106,7 @@ For new integrations, `-o json` is easier to parse. Combine it with an action (`
 | Tag | mp3gain | mp3rgain |
 |-----|---------|----------|
 | APEv2 `MP3GAIN_UNDO`, `MP3GAIN_MINMAX` (MP3) | Written | Written. Either tool can undo the other's changes |
-| APEv2 `MP3GAIN_ALBUM_MINMAX` (MP3, `-a`) | Written | Written, but only to APEv2: under `-s i` it is not written at all |
+| `MP3GAIN_ALBUM_MINMAX` (MP3, `-a`) | Written, to ID3v2 under `-s i` | Written, to ID3v2 under `-s i` ([#450](https://github.com/M-Igashi/mp3rgain/issues/450)) |
 | APEv2 `REPLAYGAIN_*` (MP3) | Written | Written with `-s a` only. Since 3.2.0 the default puts `REPLAYGAIN_*` in ID3v2 instead and removes stale APEv2 copies, so the two cannot disagree |
 | ID3v2 `TXXX` `REPLAYGAIN_*` (MP3) | Written with `-s i` | Written by default since 3.2.0, because that is where most players look (ffmpeg, for one, does not read APEv2 on MP3) |
 | MP4 freeform atoms (AAC in MP4/M4A) | n/a | `mp3rgain_undo`, `mp3rgain_minmax`, `replaygain_track_gain`, `replaygain_track_peak`, `replaygain_album_gain`, `replaygain_album_peak` (plus `replaygain_algorithm` under `--rg2`/`--r128`) in the `com.apple.iTunes` namespace |

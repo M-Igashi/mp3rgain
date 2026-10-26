@@ -9,8 +9,8 @@
 //! `ctx.request_repaint()` so egui actually redraws.
 
 use mp3rgain::apply::{
-    apply_with_options, predict_apply, read_mtime_if, restore_timestamp, write_album_minmax,
-    ApplyOptions,
+    apply_with_options, predict_apply, read_mtime_if, restore_timestamp,
+    write_album_minmax_with_layout, ApplyOptions,
 };
 use mp3rgain::replaygain::{self, AnalysisMode, ReplayGainResult};
 use mp3rgain::{
@@ -455,9 +455,10 @@ pub fn spawn_apply(
         // succeeds is recorded with its row and its post-apply (max, min)
         // global_gain range, so the album-wide MP3GAIN_ALBUM_MINMAX can be
         // written after all files are applied without re-analyzing them, the
-        // same mp3gain-parity step the CLI does (issues #210, #232). APEv2
-        // only and not in dry-run. A failed apply is left out (issue #398).
-        let writes_album_minmax = !ui_opts.dry_run && !ui_opts.tag_layout.mp3gain_in_id3v2();
+        // same mp3gain-parity step the CLI does (issues #210, #232), in the
+        // container the tag layout uses (issue #450). Not in dry-run. A
+        // failed apply is left out (issue #398).
+        let writes_album_minmax = !ui_opts.dry_run;
         type AlbumMember = (usize, Option<(u8, u8)>);
         let album_members: Mutex<BTreeMap<PathBuf, AlbumMember>> = Mutex::new(BTreeMap::new());
 
@@ -537,7 +538,7 @@ pub fn spawn_apply(
 
         // Album-wide MP3GAIN_ALBUM_MINMAX, written once the whole album has
         // been applied (mp3gain parity, issue #210). No-op for track/manual
-        // gain (no groups) and for the dry-run / ID3v2 paths (no members).
+        // gain (no groups) and for a dry run (no members).
         // The range is stamped over the groups the app grouped by, whichever
         // of the three modes that was (issues #159, #224, #338). A row whose
         // write fails is gained but incomplete, so it counts as an error.
@@ -555,7 +556,7 @@ pub fn spawn_apply(
                 .iter()
                 .map(|&(path, _)| read_mtime_if(path, ui_opts.preserve_timestamp))
                 .collect();
-            let minmax_errors = write_album_minmax(&entries);
+            let minmax_errors = write_album_minmax_with_layout(&entries, ui_opts.tag_layout);
             for (&(path, _), mtime) in entries.iter().zip(mtimes) {
                 if let Some(mtime) = mtime {
                     restore_timestamp(path, mtime);

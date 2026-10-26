@@ -791,17 +791,14 @@ fn run_album(
             // MP3GAIN_ALBUM_MINMAX: the album-wide post-apply global_gain range,
             // matching mp3gain's album (`-a`) mode (issue #210). Written to every
             // applied MP3 file after all gain is applied (the range is only known
-            // once the whole album is done). APEv2 only — mp3gain has no AAC, and
-            // `-s i` uses ID3v2. A failed write fails that file without stopping
-            // the others (issue #398).
+            // once the whole album is done), in the container the layout keeps
+            // the mp3gain values in, a TXXX frame under `-s i` as in mp3gain
+            // (issue #450). MP3 only, as mp3gain has no AAC. A failed write fails
+            // that file without stopping the others (issue #398).
             // Skipped entirely in --tags-only mode: MP3GAIN_ALBUM_MINMAX
             // describes a global_gain range that a gain apply produced, and
             // no apply happened (issue #308).
-            if !opts.dry_run
-                && !opts.tags_only
-                && opts.stored_tag_mode != StoredTagMode::Skip
-                && !opts.tag_layout.mp3gain_in_id3v2()
-            {
+            if !opts.dry_run && !opts.tags_only && opts.stored_tag_mode != StoredTagMode::Skip {
                 let album_files: Vec<(&Path, Option<(u8, u8)>)> = (0..files.len())
                     .filter(|&i| applied[i])
                     .map(|i| (files[i].as_path(), range_by_idx[i]))
@@ -813,7 +810,8 @@ fn run_album(
                     .iter()
                     .map(|&(file, _)| save_original_mtime(file, opts))
                     .collect();
-                let minmax_errors = mp3rgain::write_album_minmax(&album_files);
+                let minmax_errors =
+                    mp3rgain::write_album_minmax_with_layout(&album_files, opts.tag_layout);
                 for (&(file, _), mtime) in album_files.iter().zip(mtimes) {
                     if let Some(mtime) = mtime {
                         restore_timestamp(file, mtime);
