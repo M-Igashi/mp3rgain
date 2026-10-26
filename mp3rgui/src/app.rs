@@ -628,8 +628,11 @@ impl Mp3rgainApp {
             .storage
             .and_then(|s| eframe::get_value(s, SETTINGS_KEY))
             .unwrap_or_default();
-        let ui_locale = crate::i18n::apply(settings.ui_language.as_deref());
-        crate::fonts::install(&cc.egui_ctx, &ui_locale);
+        crate::i18n::apply(settings.ui_language.as_deref());
+        crate::fonts::install(
+            &cc.egui_ctx,
+            &crate::i18n::font_locale(settings.ui_language.as_deref()),
+        );
         Self {
             files: Vec::new(),
             target_volume: settings.target_volume,
@@ -670,11 +673,12 @@ impl Mp3rgainApp {
     /// Switch the UI language and reload the CJK font when that group changes.
     /// `None` follows the system.
     pub fn set_ui_language(&mut self, choice: Option<String>, ctx: &egui::Context) {
-        let previous = crate::i18n::resolved_locale(self.ui_language.as_deref());
+        let previous = crate::i18n::font_locale(self.ui_language.as_deref());
         self.ui_language = choice;
-        let resolved = crate::i18n::apply(self.ui_language.as_deref());
-        if !crate::fonts::same_cjk_group(&previous, &resolved) {
-            crate::fonts::install(ctx, &resolved);
+        crate::i18n::apply(self.ui_language.as_deref());
+        let font_locale = crate::i18n::font_locale(self.ui_language.as_deref());
+        if !crate::fonts::same_cjk_group(&previous, &font_locale) {
+            crate::fonts::install(ctx, &font_locale);
         }
     }
 
