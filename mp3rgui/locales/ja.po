@@ -1,0 +1,801 @@
+# Translators:
+# M-Igashi (https://github.com/M-Igashi)
+# Claude Code (https://claude.com/claude-code)
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: mp3rgui\n"
+"Report-Msgid-Bugs-To: https://github.com/M-Igashi/mp3rgain/issues\n"
+"POT-Creation-Date: 2026-10-26 18:42+0000\n"
+"PO-Revision-Date: 2026-10-26 22:11+0100\n"
+"Last-Translator: M-Igashi\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: src/app.rs:44
+msgid "Analyzing..."
+msgstr "解析中..."
+
+#: src/app.rs:45
+msgid "OK"
+msgstr "OK"
+
+#: src/app.rs:46
+msgid "Applying..."
+msgstr "適用中..."
+
+#: src/app.rs:47
+msgid "Undoing..."
+msgstr "元に戻し中..."
+
+#: src/app.rs:48
+msgid "Done"
+msgstr "完了"
+
+#: src/app.rs:49
+msgid "Done (from tags)"
+msgstr "完了（タグから）"
+
+#: src/app.rs:50
+msgid "Done ({n} frames unparsed)"
+msgstr "完了（解析できないフレーム {n} 個）"
+
+#: src/app.rs:51
+msgid "Nothing to undo"
+msgstr "元に戻す変更はありません"
+
+#: src/app.rs:57
+msgid "Dry run: +{} steps (capped)"
+msgstr "ドライラン: +{} ステップ（上限で制限）"
+
+#: src/app.rs:59
+msgid "Dry run: {} steps"
+msgstr "ドライラン: {} ステップ"
+
+#: src/app.rs:62
+msgid "Error"
+msgstr "エラー"
+
+#: src/app.rs:813
+msgid "{} file(s) queued, will be added when processing finishes"
+msgstr "{} 個のファイルを待機中。処理が終わってから追加します"
+
+#: src/app.rs:856
+msgid "Added {} file(s), {} duplicate(s) skipped"
+msgstr "{} 個のファイルを追加しました（重複 {} 個をスキップ）"
+
+#: src/app.rs:858
+msgid "Added {} file(s)"
+msgstr "{} 個のファイルを追加しました"
+
+#: src/app.rs:991
+msgid "Cancelling..."
+msgstr "キャンセル中..."
+
+#: src/app.rs:1001
+msgid "Could not open file location: {}"
+msgstr "ファイルの場所を開けませんでした: {}"
+
+#: src/app.rs:1008 src/app.rs:1037
+msgid "ReplayGain feature not available"
+msgstr "ReplayGain 機能は利用できません"
+
+#: src/app.rs:1091
+msgid "Analyzing {} file(s) without stored tags..."
+msgstr "保存済みタグのない {} 個のファイルを解析中..."
+
+#: src/app.rs:1149
+msgid "No track gain values — run Track Analysis first"
+msgstr "トラックゲインの値がありません。先に「トラック解析」を実行してください"
+
+#: src/app.rs:1391
+msgid "Channel gain only applies to MP3 — selection had no eligible files"
+msgstr "チャンネルゲインは MP3 にのみ適用できます。選択した中に対象のファイルがありません"
+
+#: src/app.rs:1475
+msgid "Analyzing {} file(s) without consistent stored album tags..."
+msgstr "保存済みアルバムタグがそろっていない {} 個のファイルを解析中..."
+
+#: src/app.rs:1580
+msgid "No album gain values — run Album Analysis first"
+msgstr "アルバムゲインの値がありません。先に「アルバム解析」を実行してください"
+
+#: src/app.rs:1624
+msgid "Analyzing tracks..."
+msgstr "トラックを解析中..."
+
+#: src/app.rs:1625
+msgid "Analyzing album..."
+msgstr "アルバムを解析中..."
+
+#: src/app.rs:1626
+msgid "Applying track gain..."
+msgstr "トラックゲインを適用中..."
+
+#: src/app.rs:1627
+msgid "Applying album gain..."
+msgstr "アルバムゲインを適用中..."
+
+#: src/app.rs:1628
+msgid "Undoing gain changes..."
+msgstr "ゲインの変更を元に戻し中..."
+
+#: src/app.rs:1629
+msgid "Checking stored tags..."
+msgstr "保存済みタグを確認中..."
+
+#: src/app.rs:1630
+msgid "Finding max amplitude..."
+msgstr "最大振幅を検出中..."
+
+#: src/app.rs:1631
+msgid "Deleting stored tags..."
+msgstr "保存済みタグを削除中..."
+
+#: src/app.rs:1632
+msgid "Reading existing ReplayGain values..."
+msgstr "既存の ReplayGain 値を読み込み中..."
+
+#: src/app.rs:1743
+msgid "Album analysis failed: {}"
+msgstr "アルバム解析に失敗しました: {}"
+
+#: src/app.rs:1840
+msgid "Cancelled"
+msgstr "キャンセルしました"
+
+#: src/i18n.rs:48
+msgctxt "language name"
+msgid "English"
+msgstr "日本語"
+
+#: src/i18n.rs:81 src/ui/menu.rs:59
+msgid "Add Files..."
+msgstr "ファイルを追加..."
+
+#: src/i18n.rs:91 src/i18n.rs:95 src/ui/menu.rs:18
+msgid "System default"
+msgstr "システムの既定"
+
+#: src/ui/menu.rs:16
+msgid "Language"
+msgstr "言語"
+
+#: src/ui/menu.rs:49
+msgid "Help"
+msgstr "ヘルプ"
+
+#: src/ui/menu.rs:50 src/ui/mod.rs:26
+msgid "About mp3rgui"
+msgstr "mp3rgui について"
+
+#: src/ui/menu.rs:58
+msgid "File"
+msgstr "ファイル"
+
+#: src/ui/menu.rs:63
+msgid "Add Folder..."
+msgstr "フォルダを追加..."
+
+#: src/ui/menu.rs:67
+msgid "Add Folder (with subfolders)..."
+msgstr "フォルダを追加（サブフォルダを含む）..."
+
+#: src/ui/menu.rs:72
+msgid "Clear File List"
+msgstr "ファイルリストをクリア"
+
+#: src/ui/menu.rs:77 src/ui/status.rs:14
+msgid "Exit"
+msgstr "終了"
+
+#: src/ui/menu.rs:84
+msgid "Analysis"
+msgstr "解析"
+
+#: src/ui/menu.rs:86 src/ui/toolbar.rs:24
+msgid "Track Analysis"
+msgstr "トラック解析"
+
+#: src/ui/menu.rs:90 src/ui/toolbar.rs:27
+msgid "Album Analysis"
+msgstr "アルバム解析"
+
+#: src/ui/menu.rs:94
+msgid "Find Max Amplitude"
+msgstr "最大振幅を検出"
+
+#: src/ui/menu.rs:99
+msgid "Check Stored Tags"
+msgstr "保存済みタグを確認"
+
+#: src/ui/menu.rs:108
+msgid "Modify Gain"
+msgstr "ゲイン変更"
+
+#: src/ui/menu.rs:110
+msgid "Apply Track Gain"
+msgstr "トラックゲインを適用"
+
+#: src/ui/menu.rs:114
+msgid "Apply Album Gain"
+msgstr "アルバムゲインを適用"
+
+#: src/ui/menu.rs:118
+msgid "Apply Manual Gain..."
+msgstr "手動ゲインを適用..."
+
+#: src/ui/menu.rs:122
+msgid "Apply Channel Gain (MP3)..."
+msgstr "チャンネルゲインを適用（MP3）..."
+
+#: src/ui/menu.rs:128
+msgid "Undo All"
+msgstr "すべて元に戻す"
+
+#: src/ui/menu.rs:130
+msgid "Undo Selected"
+msgstr "選択項目を元に戻す"
+
+#: src/ui/menu.rs:137
+msgid "Delete Stored Tags (All)..."
+msgstr "保存済みタグを削除（すべて）..."
+
+#: src/ui/menu.rs:139
+msgid "Delete Stored Tags (Selected)..."
+msgstr "保存済みタグを削除（選択項目）..."
+
+#: src/ui/options.rs:13
+msgid "Options:"
+msgstr "オプション:"
+
+#: src/ui/options.rs:17
+msgid "Prevent clipping"
+msgstr "クリッピング防止"
+
+#: src/ui/options.rs:20
+msgid "Cap the applied gain at the available headroom so the output cannot clip. Equivalent to the CLI's -k flag."
+msgstr "適用するゲインをヘッドルームの範囲に抑え、出力がクリップしないようにします。CLI の -k に相当します。"
+
+#: src/ui/options.rs:26
+msgid "Preserve mtime"
+msgstr "更新日時を保持"
+
+#: src/ui/options.rs:29
+msgid "Restore the file's last-modified timestamp after writing so it doesn't jump to the top of playlists sorted by date. CLI -p."
+msgstr "書き込み後にファイルの更新日時を元に戻し、日付順のプレイリストで先頭に来ないようにします。CLI の -p に相当します。"
+
+#: src/ui/options.rs:34
+msgid "Wrap mode"
+msgstr "ラップモード"
+
+#: src/ui/options.rs:36
+msgid "Allow gain values to wrap around 0–255 instead of saturating. Disables the clipping check. CLI -w. Rarely useful — leave off."
+msgstr "ゲイン値を上限・下限で止めず、0〜255 の範囲で折り返します。クリッピングの確認は無効になります。CLI の -w に相当します。使う場面はほとんどないので、オフのままにしてください。"
+
+#: src/ui/options.rs:41
+msgid "MP3 tags:"
+msgstr "MP3 タグ:"
+
+#: src/ui/options.rs:45 src/ui/options.rs:53
+msgid "ReplayGain in ID3v2"
+msgstr "ReplayGain は ID3v2"
+
+#: src/ui/options.rs:46 src/ui/options.rs:60
+msgid "All in APEv2"
+msgstr "すべて APEv2"
+
+#: src/ui/options.rs:47 src/ui/options.rs:65
+msgid "All in ID3v2"
+msgstr "すべて ID3v2"
+
+#: src/ui/options.rs:56
+msgid "Default. REPLAYGAIN_* in ID3v2 TXXX where players look, MP3GAIN_UNDO / MINMAX in APEv2 where mp3gain looks."
+msgstr "既定。REPLAYGAIN_* はプレーヤーが読む ID3v2 の TXXX に、MP3GAIN_UNDO / MINMAX は mp3gain が読む APEv2 に書き込みます。"
+
+#: src/ui/options.rs:62
+msgid "Byte-for-byte mp3gain behaviour. ReplayGain-aware players will not find the values. CLI -s a."
+msgstr "mp3gain とバイト単位で同じ動作です。ReplayGain 対応プレーヤーは値を読めません。CLI の -s a に相当します。"
+
+#: src/ui/options.rs:67
+msgid "Undo and ReplayGain both in ID3v2 TXXX frames. CLI -s i."
+msgstr "元に戻すための情報と ReplayGain を、どちらも ID3v2 の TXXX フレームに書き込みます。CLI の -s i に相当します。"
+
+#: src/ui/options.rs:75
+msgid "Dry run"
+msgstr "ドライラン"
+
+#: src/ui/options.rs:77
+msgid "Preview Apply Track / Album Gain without modifying any file. The Status column shows the steps that would be applied. CLI -n."
+msgstr "ファイルを変更せずに、トラック / アルバムゲインの適用をプレビューします。適用されるステップ数は「状態」列に表示されます。CLI の -n に相当します。"
+
+#: src/ui/options.rs:88
+msgid "Use stored tags"
+msgstr "保存済みタグを使用"
+
+#: src/ui/options.rs:91
+msgid "Apply Track / Album Gain from stored REPLAYGAIN_* tags instead of re-analyzing; only files without usable tags are rescanned. Album Gain reuses tags only when every file in the album carries a consistent set; any gap rescans the whole album. CLI -s R. RG 1.0 mode only."
+msgstr "再解析せずに、保存済みの REPLAYGAIN_* タグからトラック / アルバムゲインを適用します。使えるタグのないファイルだけを再スキャンします。アルバムゲインは、アルバム内のすべてのファイルに一貫したタグがそろっている場合だけタグを使い、1 つでも欠けていればアルバム全体を再スキャンします。CLI の -s R に相当します。RG 1.0 モードのみ。"
+
+#. What one album is, for Album Analysis / Apply Album Gain.
+#. The CLI's --album-by, in the same three units (issue #338).
+#: src/ui/options.rs:102
+msgid "Album:"
+msgstr "アルバム:"
+
+#: src/ui/options.rs:106
+msgid "Per folder"
+msgstr "フォルダ単位"
+
+#: src/ui/options.rs:109
+msgid "Each folder is its own album. A release whose discs live in subfolders gets one album gain per disc, so use By tags for those. CLI --album-by=dir."
+msgstr "フォルダごとに 1 つのアルバムとして扱います。ディスクがサブフォルダに分かれている作品はディスクごとにアルバムゲインが付くので、その場合は「タグ単位」を使ってください。CLI の --album-by=dir に相当します。"
+
+#: src/ui/options.rs:113
+msgid "By tags"
+msgstr "タグ単位"
+
+#: src/ui/options.rs:115
+msgid "One album per release, read from ALBUMARTIST / ALBUM (and MUSICBRAINZ_ALBUMID when present), so discs in subfolders share one album gain. Files with no ALBUM tag fall back to their own folder. CLI --album-by=tag."
+msgstr "ALBUMARTIST / ALBUM（あれば MUSICBRAINZ_ALBUMID も）を読んで作品ごとに 1 つのアルバムにするので、サブフォルダに分かれたディスクも 1 つのアルバムゲインを共有します。ALBUM タグのないファイルはフォルダ単位になります。CLI の --album-by=tag に相当します。"
+
+#: src/ui/options.rs:123
+msgid "Single album"
+msgstr "1 つのアルバム"
+
+#: src/ui/options.rs:126
+msgid "Treat every loaded file as one album, ignoring folders. Select rows first to group just those, which is how to handle a release that has no usable tags. CLI -a."
+msgstr "フォルダに関係なく、読み込んだすべてのファイルを 1 つのアルバムとして扱います。先に行を選択すると、その行だけをまとめます。使えるタグのない作品はこの方法で扱ってください。CLI の -a に相当します。"
+
+#: src/ui/options.rs:131
+msgid "Filename only"
+msgstr "ファイル名のみ"
+
+#: src/ui/options.rs:133
+msgid "Show only the file name in the Path/File column instead of the full path. The full path is still shown on hover."
+msgstr "「パス/ファイル」列にフルパスではなくファイル名だけを表示します。フルパスはマウスを重ねると表示されます。"
+
+#. Loudness measurement mode (issue #272). Switching modes
+#. invalidates cached analysis results — RG1 and BS.1770
+#. numbers live on different scales.
+#: src/ui/options.rs:142
+msgid "Analysis:"
+msgstr "解析:"
+
+#: src/ui/options.rs:144
+msgid "RG 1.0"
+msgstr "RG 1.0"
+
+#: src/ui/options.rs:145
+msgid "ReplayGain 1.0 (default): mp3gain-compatible values, 89 dB reference. Keeps re-scans consistent with libraries normalized by mp3gain."
+msgstr "ReplayGain 1.0（既定）: mp3gain 互換の値で、基準は 89 dB。mp3gain で正規化したライブラリと再スキャンの結果がそろいます。"
+
+#: src/ui/options.rs:148
+msgid "RG 2.0"
+msgstr "RG 2.0"
+
+#: src/ui/options.rs:150
+msgid "ReplayGain 2.0: BS.1770 integrated loudness, -18 LUFS reference (same perceived level as 89 dB). CLI --rg2."
+msgstr "ReplayGain 2.0: BS.1770 の統合ラウドネスで、基準は -18 LUFS（89 dB と同じ知覚レベル）。CLI の --rg2 に相当します。"
+
+#: src/ui/options.rs:154
+msgid "R128"
+msgstr "R128"
+
+#: src/ui/options.rs:155
+msgid "EBU R128: BS.1770 integrated loudness, -23 LUFS broadcast target. CLI --r128."
+msgstr "EBU R128: BS.1770 の統合ラウドネスで、放送向けの目標は -23 LUFS。CLI の --r128 に相当します。"
+
+#: src/ui/status.rs:6
+msgid "Progress:"
+msgstr "進捗:"
+
+#: src/ui/status.rs:26
+msgid "No files loaded"
+msgstr "ファイルが読み込まれていません"
+
+#: src/ui/status.rs:28
+msgid "1 file"
+msgstr "1 ファイル"
+
+#: src/ui/status.rs:30
+msgid "{} files"
+msgstr "{} ファイル"
+
+#: src/ui/table.rs:12
+msgid "none"
+msgstr "なし"
+
+#: src/ui/table.rs:13
+msgid "No stored tags found ({} container)"
+msgstr "保存済みタグはありません（{} コンテナ）"
+
+#: src/ui/table.rs:20
+msgid "Container: {}"
+msgstr "コンテナ: {}"
+
+#: src/ui/table.rs:51
+msgid "{name}: {value}"
+msgstr "{name}: {value}"
+
+#: src/ui/table.rs:81
+msgid "Click to sort"
+msgstr "クリックで並べ替え"
+
+#: src/ui/table.rs:96
+msgid "Volume (LUFS)"
+msgstr "音量 (LUFS)"
+
+#: src/ui/table.rs:96
+msgid "Album (LUFS)"
+msgstr "アルバム (LUFS)"
+
+#: src/ui/table.rs:98
+msgid "Volume"
+msgstr "音量"
+
+#: src/ui/table.rs:98
+msgid "Album Vol"
+msgstr "アルバム音量"
+
+#: src/ui/table.rs:101
+msgid "Track Analysis: BS.1770 integrated loudness in LUFS. Find Max Amplitude: available headroom in dB before clipping. Click to sort."
+msgstr "トラック解析: BS.1770 の統合ラウドネス（LUFS）。最大振幅を検出: クリッピングまでのヘッドルーム（dB）。クリックで並べ替え。"
+
+#: src/ui/table.rs:106
+msgid "Track Analysis: current loudness relative to ReplayGain reference (89 dB). Find Max Amplitude: available headroom in dB before clipping. Click to sort."
+msgstr "トラック解析: ReplayGain の基準（89 dB）に対する現在の音量。最大振幅を検出: クリッピングまでのヘッドルーム（dB）。クリックで並べ替え。"
+
+#: src/ui/table.rs:144
+msgid "Path/File"
+msgstr "パス/ファイル"
+
+#: src/ui/table.rs:150
+msgid "Clip"
+msgstr "クリップ"
+
+#: src/ui/table.rs:153 src/ui/toolbar.rs:36
+msgid "Track Gain"
+msgstr "トラックゲイン"
+
+#: src/ui/table.rs:156
+msgid "Clip(T)"
+msgstr "クリップ(T)"
+
+#: src/ui/table.rs:162 src/ui/toolbar.rs:39
+msgid "Album Gain"
+msgstr "アルバムゲイン"
+
+#: src/ui/table.rs:165
+msgid "Clip(A)"
+msgstr "クリップ(A)"
+
+#: src/ui/table.rs:168
+msgid "Stored RG"
+msgstr "保存済み RG"
+
+#: src/ui/table.rs:169
+msgid "Existing ReplayGain/undo tags read from the file. Run Analysis > Check Stored Tags to populate. Hover a cell for full tag details."
+msgstr "ファイルにある ReplayGain と元に戻すための情報のタグ。「解析」>「保存済みタグを確認」を実行すると表示されます。セルにマウスを重ねるとタグの詳細を表示します。"
+
+#: src/ui/table.rs:178
+msgid "Bitrate"
+msgstr "ビットレート"
+
+#: src/ui/table.rs:180
+msgid "Average bitrate, read when files are added. Click to sort."
+msgstr "平均ビットレート。ファイルを追加したときに読み取ります。クリックで並べ替え。"
+
+#: src/ui/table.rs:187
+msgid "CBR/VBR"
+msgstr "CBR/VBR"
+
+#: src/ui/table.rs:190
+msgid "MP3 only: CBR when every frame has the same bitrate, VBR otherwise. AAC frames vary in size whatever the encoder setting, so M4A rows stay empty. Click to sort."
+msgstr "MP3 のみ: すべてのフレームのビットレートが同じなら CBR、そうでなければ VBR。AAC はエンコーダーの設定にかかわらずフレームの大きさが変わるので、M4A の行は空欄です。クリックで並べ替え。"
+
+#: src/ui/table.rs:197
+msgid "Status"
+msgstr "状態"
+
+#: src/ui/table.rs:248
+msgid "Open file location"
+msgstr "ファイルの場所を開く"
+
+#: src/ui/table.rs:262 src/ui/table.rs:277 src/ui/table.rs:304
+msgid "Y"
+msgstr "あり"
+
+#: src/ui/table.rs:272 src/ui/table.rs:292
+msgid "{} dB"
+msgstr "{} dB"
+
+#: src/ui/table.rs:298
+msgid "Album: {}"
+msgstr "アルバム: {}"
+
+#: src/ui/table.rs:312
+msgid "{} kbps"
+msgstr "{} kbps"
+
+#: src/ui/table.rs:317
+msgid "CBR"
+msgstr "CBR"
+
+#: src/ui/table.rs:318
+msgid "VBR"
+msgstr "VBR"
+
+#: src/ui/table.rs:327
+msgid "These AAC frames could not be parsed and kept their original gain, which can be heard as clicks. Undo restores the file. Please report it at https://github.com/M-Igashi/mp3rgain/issues"
+msgstr "これらの AAC フレームは解析できず、元のゲインのまま残っています。クリック音として聞こえることがあります。「元に戻す」でファイルを復元できます。https://github.com/M-Igashi/mp3rgain/issues に報告してください"
+
+#: src/ui/toolbar.rs:11
+msgid "Add Files"
+msgstr "ファイルを追加"
+
+#: src/ui/toolbar.rs:15
+msgid "Add Folder"
+msgstr "フォルダを追加"
+
+#: src/ui/toolbar.rs:50
+msgid "Remove"
+msgstr "リストから削除"
+
+#: src/ui/toolbar.rs:57
+msgid "Clear All"
+msgstr "すべてクリア"
+
+#: src/ui/toolbar.rs:66 src/ui/mod.rs:71
+msgid "Cancel"
+msgstr "キャンセル"
+
+#. Target volume. Stored on the 89 dB scale and shown on the
+#. selected mode's scale, so one offset carries across modes:
+#. 95 dB in RG 1.0 is -12 LUFS in RG 2.0 (issues #272, #364).
+#: src/ui/toolbar.rs:76
+msgid "Target:"
+msgstr "目標:"
+
+#: src/ui/toolbar.rs:88
+msgid "Level to normalize to. One setting shared by all analysis modes as an offset from the reference: 95 dB in RG 1.0 is -12 LUFS in RG 2.0 and -17 LUFS in R128. Equivalent to the CLI's -d."
+msgstr "正規化の目標レベル。基準からのオフセットとして、すべての解析モードで共通の設定です。RG 1.0 の 95 dB は、RG 2.0 では -12 LUFS、R128 では -17 LUFS になります。CLI の -d に相当します。"
+
+#: src/ui/mod.rs:32
+msgid "mp3rgui {}"
+msgstr "mp3rgui {}"
+
+#: src/ui/mod.rs:34
+msgid "Lossless MP3 and AAC volume normalizer using ReplayGain"
+msgstr "ReplayGain による MP3 / AAC のロスレス音量ノーマライザー"
+
+#: src/ui/mod.rs:38
+msgid "{} License"
+msgstr "{} ライセンス"
+
+#: src/ui/mod.rs:101
+msgid "Apply channel gain"
+msgstr "チャンネルゲインを適用"
+
+#: src/ui/mod.rs:103 src/ui/mod.rs:155
+msgid "Apply"
+msgstr "適用"
+
+#: src/ui/mod.rs:106
+msgid "Target: {} file(s) (MP3 only)"
+msgstr "対象: {} ファイル（MP3 のみ）"
+
+#: src/ui/mod.rs:109
+msgid "Channel:"
+msgstr "チャンネル:"
+
+#: src/ui/mod.rs:113
+msgid "Left"
+msgstr "左"
+
+#: src/ui/mod.rs:118
+msgid "Right"
+msgstr "右"
+
+#: src/ui/mod.rs:122 src/ui/mod.rs:161
+msgid "Steps:"
+msgstr "ステップ:"
+
+#: src/ui/mod.rs:129 src/ui/mod.rs:168
+msgid "= {} dB"
+msgstr "= {} dB"
+
+#: src/ui/mod.rs:132
+msgid "Stereo / Dual Channel MP3s only. Mono and joint stereo files are refused."
+msgstr "ステレオ / デュアルチャンネルの MP3 のみ。モノラルとジョイントステレオのファイルは処理しません。"
+
+#: src/ui/mod.rs:153
+msgid "Apply manual gain"
+msgstr "手動ゲインを適用"
+
+#: src/ui/mod.rs:158
+msgid "Target: {} file(s)"
+msgstr "対象: {} ファイル"
+
+#: src/ui/mod.rs:170
+msgid "1 step ≈ 1.5 dB. Negative values lower the volume."
+msgstr "1 ステップ ≈ 1.5 dB。負の値で音量が下がります。"
+
+#: src/ui/mod.rs:188
+msgid "Delete stored tags"
+msgstr "保存済みタグを削除"
+
+#: src/ui/mod.rs:190
+msgid "Delete"
+msgstr "削除"
+
+#: src/ui/mod.rs:194
+msgid "Delete stored ReplayGain / undo tags from {} file(s)?"
+msgstr "{} 個のファイルから、保存済みの ReplayGain と元に戻すための情報のタグを削除しますか？"
+
+#: src/ui/mod.rs:197
+msgid "This cannot be undone."
+msgstr "この操作は元に戻せません。"
+
+#: src/ui/mod.rs:234
+msgid "Audio files"
+msgstr "オーディオファイル"
+
+#: src/ui/mod.rs:273
+msgid "Drag and drop MP3 files here, or use the toolbar buttons to add files"
+msgstr "ここに MP3 ファイルをドラッグ＆ドロップするか、ツールバーのボタンでファイルを追加してください"
+
+#: src/worker.rs:282
+msgid "Analyzed {} file(s), {} error(s)"
+msgstr "{} 個のファイルを解析しました（エラー {} 件）"
+
+#: src/worker.rs:284
+msgid "Analyzed {} file(s)"
+msgstr "{} 個のファイルを解析しました"
+
+#: src/worker.rs:561
+msgid "Gain applied, but MP3GAIN_ALBUM_MINMAX was not written: {e}"
+msgstr "ゲインは適用しましたが、MP3GAIN_ALBUM_MINMAX を書き込めませんでした: {e}"
+
+#: src/worker.rs:657
+msgid "Undone {} file(s)"
+msgstr "{} 個のファイルを元に戻しました"
+
+#: src/worker.rs:659
+msgid "Undone {} file(s), {} had no changes to undo"
+msgstr "{} 個のファイルを元に戻しました（{} 個は元に戻す変更なし）"
+
+#: src/worker.rs:663
+msgid "Undone {} file(s), {} error(s)"
+msgstr "{} 個のファイルを元に戻しました（エラー {} 件）"
+
+#: src/worker.rs:665
+msgid "Undone {} file(s), {} had no changes to undo, {} error(s)"
+msgstr "{} 個のファイルを元に戻しました（{} 個は元に戻す変更なし、エラー {} 件）"
+
+#: src/worker.rs:743
+msgid "Deleted stored tags from {} file(s), {} error(s)"
+msgstr "{} 個のファイルから保存済みタグを削除しました（エラー {} 件）"
+
+#: src/worker.rs:748
+msgid "Deleted stored tags from {} file(s)"
+msgstr "{} 個のファイルから保存済みタグを削除しました"
+
+#: src/worker.rs:814
+msgid "Max amplitude scanned on {} file(s), {} error(s)"
+msgstr "{} 個のファイルの最大振幅を検出しました（エラー {} 件）"
+
+#: src/worker.rs:819
+msgid "Max amplitude scanned on {} file(s)"
+msgstr "{} 個のファイルの最大振幅を検出しました"
+
+#: src/worker.rs:873
+msgid "Checked stored tags for {} file(s)"
+msgstr "{} 個のファイルの保存済みタグを確認しました"
+
+#: src/worker.rs:981
+msgid "Applied track gain on {} file(s)"
+msgstr "{} 個のファイルにトラックゲインを適用しました"
+
+#: src/worker.rs:984
+msgid "Applied track gain on {} file(s), {} error(s)"
+msgstr "{} 個のファイルにトラックゲインを適用しました（エラー {} 件）"
+
+#: src/worker.rs:989
+msgid "Dry-ran track gain on {} file(s)"
+msgstr "{} 個のファイルでトラックゲインをドライランしました"
+
+#: src/worker.rs:992
+msgid "Dry-ran track gain on {} file(s), {} error(s)"
+msgstr "{} 個のファイルでトラックゲインをドライランしました（エラー {} 件）"
+
+#: src/worker.rs:997
+msgid "Applied manual gain on {} file(s)"
+msgstr "{} 個のファイルに手動ゲインを適用しました"
+
+#: src/worker.rs:1000
+msgid "Applied manual gain on {} file(s), {} error(s)"
+msgstr "{} 個のファイルに手動ゲインを適用しました（エラー {} 件）"
+
+#: src/worker.rs:1005
+msgid "Dry-ran manual gain on {} file(s)"
+msgstr "{} 個のファイルで手動ゲインをドライランしました"
+
+#: src/worker.rs:1008
+msgid "Dry-ran manual gain on {} file(s), {} error(s)"
+msgstr "{} 個のファイルで手動ゲインをドライランしました（エラー {} 件）"
+
+#: src/worker.rs:1013
+msgid "Applied channel gain on {} file(s)"
+msgstr "{} 個のファイルにチャンネルゲインを適用しました"
+
+#: src/worker.rs:1016
+msgid "Applied channel gain on {} file(s), {} error(s)"
+msgstr "{} 個のファイルにチャンネルゲインを適用しました（エラー {} 件）"
+
+#: src/worker.rs:1021
+msgid "Dry-ran channel gain on {} file(s)"
+msgstr "{} 個のファイルでチャンネルゲインをドライランしました"
+
+#: src/worker.rs:1024
+msgid "Dry-ran channel gain on {} file(s), {} error(s)"
+msgstr "{} 個のファイルでチャンネルゲインをドライランしました（エラー {} 件）"
+
+#: src/worker.rs:1029
+msgid "Applied album gain on {} file(s)"
+msgstr "{} 個のファイルにアルバムゲインを適用しました"
+
+#: src/worker.rs:1032
+msgid "Applied album gain on {} file(s), {} error(s)"
+msgstr "{} 個のファイルにアルバムゲインを適用しました（エラー {} 件）"
+
+#: src/worker.rs:1037
+msgid "Dry-ran album gain on {} file(s)"
+msgstr "{} 個のファイルでアルバムゲインをドライランしました"
+
+#: src/worker.rs:1040
+msgid "Dry-ran album gain on {} file(s), {} error(s)"
+msgstr "{} 個のファイルでアルバムゲインをドライランしました（エラー {} 件）"
+
+#: src/worker.rs:1060
+msgid "Album analysis complete ({} tracks)"
+msgstr "アルバム解析が完了しました（{} トラック）"
+
+#: src/worker.rs:1062
+msgid "Album analysis complete ({} tracks); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "アルバム解析が完了しました（{} トラック）。{} 個のアルバムに複数の作品が含まれています（アーティストとアルバムタグが同じ）。「アルバムゲイン」にマウスを重ねるとグループ分けを確認できます。"
+
+#: src/worker.rs:1068
+msgid "Album analysis complete ({} tracks, {} skipped)"
+msgstr "アルバム解析が完了しました（{} トラック、スキップ {} 件）"
+
+#: src/worker.rs:1073
+msgid "Album analysis complete ({} tracks, {} skipped); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "アルバム解析が完了しました（{} トラック、スキップ {} 件）。{} 個のアルバムに複数の作品が含まれています（アーティストとアルバムタグが同じ）。「アルバムゲイン」にマウスを重ねるとグループ分けを確認できます。"
+
+#: src/worker.rs:1080
+msgid "Album analysis complete ({} albums, {} tracks)"
+msgstr "アルバム解析が完了しました（{} アルバム、{} トラック）"
+
+#: src/worker.rs:1085
+msgid "Album analysis complete ({} albums, {} tracks); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "アルバム解析が完了しました（{} アルバム、{} トラック）。{} 個のアルバムに複数の作品が含まれています（アーティストとアルバムタグが同じ）。「アルバムゲイン」にマウスを重ねるとグループ分けを確認できます。"
+
+#: src/worker.rs:1092
+msgid "Album analysis complete ({} albums, {} tracks, {} skipped)"
+msgstr "アルバム解析が完了しました（{} アルバム、{} トラック、スキップ {} 件）"
+
+#: src/worker.rs:1098
+msgid "Album analysis complete ({} albums, {} tracks, {} skipped); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "アルバム解析が完了しました（{} アルバム、{} トラック、スキップ {} 件）。{} 個のアルバムに複数の作品が含まれています（アーティストとアルバムタグが同じ）。「アルバムゲイン」にマウスを重ねるとグループ分けを確認できます。"
+
+#: src/worker.rs:1107
+msgid "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed"
+msgstr "アルバム解析: {} トラックを解析、スキップ {} 件、失敗 {} アルバム"
+
+#: src/worker.rs:1113
+msgid "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed; {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "アルバム解析: {} トラックを解析、スキップ {} 件、失敗 {} アルバム。{} 個のアルバムに複数の作品が含まれています（アーティストとアルバムタグが同じ）。「アルバムゲイン」にマウスを重ねるとグループ分けを確認できます。"
