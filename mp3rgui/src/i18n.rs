@@ -5,12 +5,12 @@
 include!(concat!(env!("OUT_DIR"), "/locale/translators.rs"));
 include!(concat!(env!("OUT_DIR"), "/locale/catalogues.rs"));
 
-/// Apply `choice` and return the locale the UI and the CJK font group share.
+/// Apply `choice` as the UI language.
 ///
 /// `None` follows the system. `Some("en")` forces English. Any other value
 /// is a catalogue name such as `pt_BR`. `sys-locale` reports `pt-BR`; gettext
 /// names the file `pt_BR.po`, and `include-po` falls back from `pt_BR` to `pt`.
-pub fn apply(choice: Option<&str>) -> String {
+pub fn apply(choice: Option<&str>) {
     let resolved = resolved_locale(choice);
     let code = if choice == Some("en") {
         "en"
@@ -18,7 +18,19 @@ pub fn apply(choice: Option<&str>) -> String {
         resolved.as_str()
     };
     let _ = translators::set_locale(code);
-    resolved
+}
+
+/// Locale whose CJK font group comes first: the UI language when it is
+/// Chinese, Japanese or Korean, the system language otherwise. File names
+/// come from the system and the library, not from the UI, so a Korean user
+/// who picks the English UI still needs the Korean face (issue #452).
+pub fn font_locale(choice: Option<&str>) -> String {
+    let ui = resolved_locale(choice);
+    if crate::fonts::is_cjk(&ui) {
+        ui
+    } else {
+        resolved_locale(None)
+    }
 }
 
 /// Locale code the font loader should see for this choice, in gettext form.
@@ -71,6 +83,18 @@ mod tests {
         assert_eq!(gettext_code("en-US"), "en_US");
         assert_eq!(gettext_code("zh-CN"), "zh_CN");
         assert_eq!(gettext_code("C"), "C");
+    }
+
+    /// Issue #452: a CJK UI language picks its own font group, any other
+    /// choice leaves the group to the system language.
+    #[test]
+    fn font_locale_follows_the_system_unless_the_ui_is_cjk() {
+        let system = resolved_locale(None);
+        assert_eq!(font_locale(None), system);
+        assert_eq!(font_locale(Some("en")), system);
+        assert_eq!(font_locale(Some("pt_BR")), system);
+        assert_eq!(font_locale(Some("ko")), "ko");
+        assert_eq!(font_locale(Some("zh_CN")), "zh_CN");
     }
 
     #[test]

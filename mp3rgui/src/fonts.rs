@@ -18,10 +18,10 @@ use std::sync::Arc;
 /// candidate list. The escape hatch for an OS font set we did not predict.
 pub const FONT_ENV: &str = "MP3RGUI_FONT";
 
-/// Language groups a candidate font primarily serves. The resolved UI
-/// language moves its group to the front; Japanese is the default order
-/// since every CJK font covers kana and most kanji, while Hangul needs a
-/// Korean face.
+/// Language groups a candidate font primarily serves. The locale from
+/// `i18n::font_locale` moves its group to the front; Japanese is the default
+/// order since every CJK font covers kana and most kanji, while Hangul needs
+/// a Korean face.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Lang {
     Ja,
@@ -86,10 +86,10 @@ const CANDIDATES: &[(Lang, &str)] = &[
 ];
 
 /// Install egui's default fonts plus the system CJK fallback, if one exists.
-/// `ui_locale` is the resolved UI language (`zh_CN`, `ko_KR`, `pt_BR`).
-pub fn install(ctx: &egui::Context, ui_locale: &str) {
+/// `locale` (`zh_CN`, `ko_KR`, `en_US`) comes from `i18n::font_locale`.
+pub fn install(ctx: &egui::Context, locale: &str) {
     let mut defs = egui::FontDefinitions::default();
-    if let Some((path, bytes)) = load_fallback(ui_locale) {
+    if let Some((path, bytes)) = load_fallback(locale) {
         let name = path.display().to_string();
         defs.font_data
             .insert(name.clone(), Arc::new(egui::FontData::from_owned(bytes)));
@@ -100,21 +100,21 @@ pub fn install(ctx: &egui::Context, ui_locale: &str) {
     ctx.set_fonts(defs);
 }
 
-fn load_fallback(ui_locale: &str) -> Option<(PathBuf, Vec<u8>)> {
-    fallback_candidates(ui_locale)
+fn load_fallback(locale: &str) -> Option<(PathBuf, Vec<u8>)> {
+    fallback_candidates(locale)
         .into_iter()
         .find_map(|path| std::fs::read(&path).ok().map(|bytes| (path, bytes)))
 }
 
 /// Candidate font files in preference order: the explicit override, the
-/// fontconfig answer on Linux, then the static list with the UI language's
-/// group first.
-fn fallback_candidates(ui_locale: &str) -> Vec<PathBuf> {
+/// fontconfig answer on Linux, then the static list with the locale's group
+/// first.
+fn fallback_candidates(locale: &str) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = Vec::new();
     if let Some(path) = std::env::var_os(FONT_ENV).filter(|p| !p.is_empty()) {
         paths.push(PathBuf::from(path));
     }
-    let preferred = lang_from_locale(ui_locale);
+    let preferred = lang_from_locale(locale);
     #[cfg(not(any(target_os = "macos", windows)))]
     paths.extend(fontconfig_match(preferred));
     paths.extend(ordered_static_candidates(preferred));
@@ -141,9 +141,18 @@ fn font_path(name: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Whether two resolved UI locales want the same CJK fallback face.
+/// Whether two locales want the same CJK fallback face.
 pub fn same_cjk_group(a: &str, b: &str) -> bool {
     lang_from_locale(a) == lang_from_locale(b)
+}
+
+/// Whether `locale` is Chinese, Japanese or Korean, the languages a font
+/// group exists for.
+pub fn is_cjk(locale: &str) -> bool {
+    matches!(
+        locale.get(..2).map(str::to_ascii_lowercase).as_deref(),
+        Some("zh" | "ja" | "ko")
+    )
 }
 
 fn lang_from_locale(locale: &str) -> Lang {
