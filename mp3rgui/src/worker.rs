@@ -549,7 +549,19 @@ pub fn spawn_apply(
                 .iter()
                 .filter_map(|p| album_members.get(p).map(|&(_, range)| (p.as_path(), range)))
                 .collect();
-            for (path, e) in write_album_minmax(&entries) {
+            // A second write after the apply restored the mtime, so Preserve
+            // mtime has to restore it again (issue #436).
+            let mtimes: Vec<_> = entries
+                .iter()
+                .map(|&(path, _)| read_mtime_if(path, ui_opts.preserve_timestamp))
+                .collect();
+            let minmax_errors = write_album_minmax(&entries);
+            for (&(path, _), mtime) in entries.iter().zip(mtimes) {
+                if let Some(mtime) = mtime {
+                    restore_timestamp(path, mtime);
+                }
+            }
+            for (path, e) in minmax_errors {
                 applied.fetch_sub(1, Ordering::Relaxed);
                 errors.fetch_add(1, Ordering::Relaxed);
                 send(
