@@ -807,6 +807,17 @@ fn apply_mp3_id3v2_bytes(
         let mut tag = id3v2::read_tag(w)?;
         let mut rg = id3v2::Id3v2ReplayGain::default();
 
+        // mp3gain values an APEv2 tag holds (from mp3gain's default, `-s a`
+        // or the default layout) move into ID3v2 before anything accumulates
+        // on them, as mp3gain's `-s i` moves them. Left in place, the undo
+        // below started a second record from zero and `-u` restored neither
+        // the original nor the previous state (issue #449).
+        let migrated = opts.write_undo && {
+            let values = ape::take_ape_mp3gain_values(w)?;
+            id3v2::add_missing_txxx(&mut tag, &values);
+            !values.is_empty()
+        };
+
         if opts.write_undo {
             let (delta_left, delta_right) = match opts.channel {
                 Some(Channel::Left) => (steps, 0),
@@ -875,7 +886,7 @@ fn apply_mp3_id3v2_bytes(
             }
         }
 
-        if rg.undo.is_some() || rg.minmax.is_some() || rg.track_gain.is_some() {
+        if migrated || rg.undo.is_some() || rg.minmax.is_some() || rg.track_gain.is_some() {
             id3v2::write_rg_frames_direct(w, &mut tag, &rg)?;
         }
         Ok(stats)

@@ -554,6 +554,42 @@ pub(crate) fn remove_ape_replaygain(file_path: &Path) -> Result<()> {
     rewrite_ape_tail(file_path, |tag| tag.remove_replaygain())
 }
 
+/// The values mp3gain keeps in its tag, whichever container that is: the undo
+/// value, both ranges and the `REPLAYGAIN_*` items (mp3rgain's
+/// `REPLAYGAIN_ALGORITHM` among them).
+const MP3GAIN_VALUE_KEYS: [&str; 8] = [
+    TAG_MP3GAIN_UNDO,
+    TAG_MP3GAIN_MINMAX,
+    TAG_MP3GAIN_ALBUM_MINMAX,
+    TAG_REPLAYGAIN_TRACK_GAIN,
+    TAG_REPLAYGAIN_TRACK_PEAK,
+    TAG_REPLAYGAIN_ALBUM_GAIN,
+    TAG_REPLAYGAIN_ALBUM_PEAK,
+    TAG_REPLAYGAIN_ALGORITHM,
+];
+
+/// Remove the mp3gain values from `file_path`'s APEv2 tag and return them as
+/// `(key, value)` pairs, keeping every other item. An apply under `-s i` moves
+/// them into ID3v2, as mp3gain's `-s i` does (issue #449). A file with none is
+/// left untouched.
+pub(crate) fn take_ape_mp3gain_values(file_path: &Path) -> Result<Vec<(String, String)>> {
+    let Some(tag) = read_ape_tag_from_file(file_path)? else {
+        return Ok(Vec::new());
+    };
+    let values: Vec<(String, String)> = MP3GAIN_VALUE_KEYS
+        .iter()
+        .filter_map(|&key| tag.get(key).map(|v| (key.to_string(), v.to_string())))
+        .collect();
+    if !values.is_empty() {
+        rewrite_ape_tail(file_path, |tag| {
+            for (key, _) in &values {
+                tag.remove(key);
+            }
+        })?;
+    }
+    Ok(values)
+}
+
 /// Post-undo cleanup for cross-container layouts (issue #306): drop the
 /// `REPLAYGAIN_*` items and `MP3GAIN_ALBUM_MINMAX`, all of which described
 /// the pre-undo audio, but keep any `MP3GAIN_UNDO` / `MP3GAIN_MINMAX`. Files

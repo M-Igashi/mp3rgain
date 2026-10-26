@@ -48,7 +48,7 @@ Every mp3gain 1.6.2 option is accepted except `-T`. Where mp3rgain's behaviour d
 | `-s c` / `-s d` | Show / delete stored tags. `-s d -u` undoes the gain first, then deletes the tags |
 | `-s s` | Write no undo or ReplayGain tags (MP3, M4A and raw ADTS alike), so the change cannot be undone afterwards |
 | `-s r` | Accepted; re-analysis is already mp3rgain's default (see `-s R` below) |
-| `-s i` / `-s a` | Put every tag in ID3v2 / every tag in APEv2. `-s a` is mp3gain's layout (see [Tag compatibility](#tag-compatibility)) |
+| `-s i` / `-s a` | Put every tag in ID3v2 / every tag in APEv2. `-s a` is mp3gain's layout (see [Tag compatibility](#tag-compatibility)). A change made with `-s i` moves the undo value, ranges and ReplayGain values an APEv2 tag already holds into ID3v2, as mp3gain's `-s i` does ([#449](https://github.com/M-Igashi/mp3rgain/issues/449)) |
 | `-o` | Tab-separated output with mp3gain's header (see [Output format](#output-format)) |
 | `-v` / `-h` | Version / help. `-v` is version, not verbose |
 
