@@ -1,10 +1,192 @@
 {
-  "date": "2026-10-26",
+  "date": "2026-10-27",
   "github_releases": [
     {
       "assets": [
         {
-          "download_count": 68,
+          "download_count": 34,
+          "name": "InRelease"
+        },
+        {
+          "download_count": 3,
+          "name": "mp3rgain-archive-keyring.gpg"
+        },
+        {
+          "download_count": 2,
+          "name": "mp3rgain-linux-arm64.tar.gz"
+        },
+        {
+          "download_count": 2,
+          "name": "mp3rgain-linux-arm64.tar.gz.sha256"
+        },
+        {
+          "download_count": 4,
+          "name": "mp3rgain-linux-x86_64.tar.gz"
+        },
+        {
+          "download_count": 3,
+          "name": "mp3rgain-linux-x86_64.tar.gz.sha256"
+        },
+        {
+          "download_count": 2,
+          "name": "mp3rgain-v3.14.0-linux-arm64.tar.gz"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgain-v3.14.0-linux-arm64.tar.gz.sha256"
+        },
+        {
+          "download_count": 29,
+          "name": "mp3rgain-v3.14.0-linux-x86_64.tar.gz"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgain-v3.14.0-linux-x86_64.tar.gz.sha256"
+        },
+        {
+          "download_count": 9,
+          "name": "mp3rgain-v3.14.0-macos-universal.tar.gz"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgain-v3.14.0-macos-universal.tar.gz.sha256"
+        },
+        {
+          "download_count": 9,
+          "name": "mp3rgain-v3.14.0-windows-arm64.zip"
+        },
+        {
+          "download_count": 2,
+          "name": "mp3rgain-v3.14.0-windows-arm64.zip.sha256"
+        },
+        {
+          "download_count": 30,
+          "name": "mp3rgain-v3.14.0-windows-x86_64.zip"
+        },
+        {
+          "download_count": 3,
+          "name": "mp3rgain-v3.14.0-windows-x86_64.zip.sha256"
+        },
+        {
+          "download_count": 14,
+          "name": "mp3rgain_3.14.0-1_amd64.deb"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgain_3.14.0-1_amd64.deb.sha256"
+        },
+        {
+          "download_count": 2,
+          "name": "mp3rgain_3.14.0-1_arm64.deb"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgain_3.14.0-1_arm64.deb.sha256"
+        },
+        {
+          "download_count": 2,
+          "name": "mp3rgui-v3.14.0-linux-arm64.tar.gz"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgui-v3.14.0-linux-arm64.tar.gz.sha256"
+        },
+        {
+          "download_count": 30,
+          "name": "mp3rgui-v3.14.0-linux-x86_64.tar.gz"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgui-v3.14.0-linux-x86_64.tar.gz.sha256"
+        },
+        {
+          "download_count": 10,
+          "name": "mp3rgui-v3.14.0-macos-universal.dmg"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgui-v3.14.0-macos-universal.dmg.sha256"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgui-v3.14.0-macos-universal.tar.gz"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgui-v3.14.0-macos-universal.tar.gz.sha256"
+        },
+        {
+          "download_count": 7,
+          "name": "mp3rgui-v3.14.0-windows-arm64.zip"
+        },
+        {
+          "download_count": 6,
+          "name": "mp3rgui-v3.14.0-windows-arm64.zip.sha256"
+        },
+        {
+          "download_count": 4,
+          "name": "mp3rgui-v3.14.0-windows-setup.exe"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgui-v3.14.0-windows-setup.exe.sha256"
+        },
+        {
+          "download_count": 26,
+          "name": "mp3rgui-v3.14.0-windows-x86_64.zip"
+        },
+        {
+          "download_count": 7,
+          "name": "mp3rgui-v3.14.0-windows-x86_64.zip.sha256"
+        },
+        {
+          "download_count": 19,
+          "name": "mp3rgui-windows-setup.exe"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgui-windows-setup.exe.sha256"
+        },
+        {
+          "download_count": 7,
+          "name": "mp3rgui_3.14.0-1_amd64.deb"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgui_3.14.0-1_amd64.deb.sha256"
+        },
+        {
+          "download_count": 2,
+          "name": "mp3rgui_3.14.0-1_arm64.deb"
+        },
+        {
+          "download_count": 0,
+          "name": "mp3rgui_3.14.0-1_arm64.deb.sha256"
+        },
+        {
+          "download_count": 2,
+          "name": "Packages"
+        },
+        {
+          "download_count": 16,
+          "name": "Packages.gz"
+        },
+        {
+          "download_count": 0,
+          "name": "Release"
+        },
+        {
+          "download_count": 0,
+          "name": "Release.gpg"
+        }
+      ],
+      "date": "2026-10-27T00:13:07Z",
+      "tag": "v3.14.0"
+    },
+    {
+      "assets": [
+        {
+          "download_count": 96,
           "name": "InRelease"
         },
         {
@@ -12,7 +194,7 @@
           "name": "mp3rgain-archive-keyring.gpg"
         },
         {
-          "download_count": 3,
+          "download_count": 4,
           "name": "mp3rgain-linux-arm64.tar.gz"
         },
         {
@@ -20,7 +202,7 @@
           "name": "mp3rgain-linux-arm64.tar.gz.sha256"
         },
         {
-          "download_count": 4,
+          "download_count": 8,
           "name": "mp3rgain-linux-x86_64.tar.gz"
         },
         {
@@ -36,7 +218,7 @@
           "name": "mp3rgain-v3.13.0-linux-arm64.tar.gz.sha256"
         },
         {
-          "download_count": 57,
+          "download_count": 67,
           "name": "mp3rgain-v3.13.0-linux-x86_64.tar.gz"
         },
         {
@@ -44,7 +226,7 @@
           "name": "mp3rgain-v3.13.0-linux-x86_64.tar.gz.sha256"
         },
         {
-          "download_count": 12,
+          "download_count": 17,
           "name": "mp3rgain-v3.13.0-macos-universal.tar.gz"
         },
         {
@@ -52,7 +234,7 @@
           "name": "mp3rgain-v3.13.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 10,
+          "download_count": 12,
           "name": "mp3rgain-v3.13.0-windows-arm64.zip"
         },
         {
@@ -60,7 +242,7 @@
           "name": "mp3rgain-v3.13.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 59,
+          "download_count": 73,
           "name": "mp3rgain-v3.13.0-windows-x86_64.zip"
         },
         {
@@ -68,7 +250,7 @@
           "name": "mp3rgain-v3.13.0-windows-x86_64.zip.sha256"
         },
         {
-          "download_count": 22,
+          "download_count": 24,
           "name": "mp3rgain_3.13.0-1_amd64.deb"
         },
         {
@@ -92,7 +274,7 @@
           "name": "mp3rgui-v3.13.0-linux-arm64.tar.gz.sha256"
         },
         {
-          "download_count": 58,
+          "download_count": 69,
           "name": "mp3rgui-v3.13.0-linux-x86_64.tar.gz"
         },
         {
@@ -100,7 +282,7 @@
           "name": "mp3rgui-v3.13.0-linux-x86_64.tar.gz.sha256"
         },
         {
-          "download_count": 18,
+          "download_count": 20,
           "name": "mp3rgui-v3.13.0-macos-universal.dmg"
         },
         {
@@ -116,7 +298,7 @@
           "name": "mp3rgui-v3.13.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 11,
+          "download_count": 13,
           "name": "mp3rgui-v3.13.0-windows-arm64.zip"
         },
         {
@@ -124,7 +306,7 @@
           "name": "mp3rgui-v3.13.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 12,
+          "download_count": 13,
           "name": "mp3rgui-v3.13.0-windows-setup.exe"
         },
         {
@@ -132,7 +314,7 @@
           "name": "mp3rgui-v3.13.0-windows-setup.exe.sha256"
         },
         {
-          "download_count": 46,
+          "download_count": 57,
           "name": "mp3rgui-v3.13.0-windows-x86_64.zip"
         },
         {
@@ -140,7 +322,7 @@
           "name": "mp3rgui-v3.13.0-windows-x86_64.zip.sha256"
         },
         {
-          "download_count": 34,
+          "download_count": 54,
           "name": "mp3rgui-windows-setup.exe"
         },
         {
@@ -148,7 +330,7 @@
           "name": "mp3rgui-windows-setup.exe.sha256"
         },
         {
-          "download_count": 14,
+          "download_count": 16,
           "name": "mp3rgui_3.13.0-1_amd64.deb"
         },
         {
@@ -168,7 +350,7 @@
           "name": "Packages"
         },
         {
-          "download_count": 22,
+          "download_count": 24,
           "name": "Packages.gz"
         },
         {
@@ -218,7 +400,7 @@
           "name": "mp3rgain-v3.12.1-linux-arm64.tar.gz.sha256"
         },
         {
-          "download_count": 58,
+          "download_count": 59,
           "name": "mp3rgain-v3.12.1-linux-x86_64.tar.gz"
         },
         {
@@ -226,11 +408,11 @@
           "name": "mp3rgain-v3.12.1-linux-x86_64.tar.gz.sha256"
         },
         {
-          "download_count": 20,
+          "download_count": 21,
           "name": "mp3rgain-v3.12.1-macos-universal.tar.gz"
         },
         {
-          "download_count": 0,
+          "download_count": 1,
           "name": "mp3rgain-v3.12.1-macos-universal.tar.gz.sha256"
         },
         {
@@ -306,7 +488,7 @@
           "name": "mp3rgui-v3.12.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 10,
+          "download_count": 11,
           "name": "mp3rgui-v3.12.1-windows-setup.exe"
         },
         {
@@ -314,7 +496,7 @@
           "name": "mp3rgui-v3.12.1-windows-setup.exe.sha256"
         },
         {
-          "download_count": 66,
+          "download_count": 67,
           "name": "mp3rgui-v3.12.1-windows-x86_64.zip"
         },
         {
@@ -384,7 +566,7 @@
           "name": "mp3rgain-linux-arm64.tar.gz.sha256"
         },
         {
-          "download_count": 7,
+          "download_count": 8,
           "name": "mp3rgain-linux-x86_64.tar.gz"
         },
         {
@@ -408,7 +590,7 @@
           "name": "mp3rgain-v3.12.0-linux-x86_64.tar.gz.sha256"
         },
         {
-          "download_count": 12,
+          "download_count": 13,
           "name": "mp3rgain-v3.12.0-macos-universal.tar.gz"
         },
         {
@@ -424,7 +606,7 @@
           "name": "mp3rgain-v3.12.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 88,
+          "download_count": 89,
           "name": "mp3rgain-v3.12.0-windows-x86_64.zip"
         },
         {
@@ -496,7 +678,7 @@
           "name": "mp3rgui-v3.12.0-windows-setup.exe.sha256"
         },
         {
-          "download_count": 77,
+          "download_count": 79,
           "name": "mp3rgui-v3.12.0-windows-x86_64.zip"
         },
         {
@@ -598,7 +780,7 @@
           "name": "mp3rgain-v3.11.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 45,
+          "download_count": 46,
           "name": "mp3rgain-v3.11.1-windows-arm64.zip"
         },
         {
@@ -606,7 +788,7 @@
           "name": "mp3rgain-v3.11.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 266,
+          "download_count": 267,
           "name": "mp3rgain-v3.11.1-windows-x86_64.zip"
         },
         {
@@ -662,7 +844,7 @@
           "name": "mp3rgui-v3.11.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 39,
+          "download_count": 40,
           "name": "mp3rgui-v3.11.1-windows-arm64.zip"
         },
         {
@@ -678,7 +860,7 @@
           "name": "mp3rgui-v3.11.1-windows-setup.exe.sha256"
         },
         {
-          "download_count": 154,
+          "download_count": 155,
           "name": "mp3rgui-v3.11.1-windows-x86_64.zip"
         },
         {
@@ -978,7 +1160,7 @@
           "name": "mp3rgui-v3.10.0-linux-x86_64.tar.gz.sha256"
         },
         {
-          "download_count": 4,
+          "download_count": 6,
           "name": "mp3rgui-v3.10.0-macos-universal.dmg"
         },
         {
@@ -1262,7 +1444,7 @@
           "name": "mp3rgui-v3.9.1-linux-x86_64.tar.gz"
         },
         {
-          "download_count": 30,
+          "download_count": 31,
           "name": "mp3rgui-v3.9.1-macos-universal.dmg"
         },
         {
@@ -1758,7 +1940,7 @@
           "name": "mp3rgain-v3.7.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 73,
+          "download_count": 74,
           "name": "mp3rgain-v3.7.0-windows-arm64.zip"
         },
         {
@@ -1766,7 +1948,7 @@
           "name": "mp3rgain-v3.7.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 120,
+          "download_count": 121,
           "name": "mp3rgain-v3.7.0-windows-x86_64.zip"
         },
         {
@@ -1814,7 +1996,7 @@
           "name": "mp3rgui-v3.7.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 62,
+          "download_count": 63,
           "name": "mp3rgui-v3.7.0-windows-arm64.zip"
         },
         {
@@ -1830,7 +2012,7 @@
           "name": "mp3rgui-v3.7.0-windows-setup.exe.sha256"
         },
         {
-          "download_count": 110,
+          "download_count": 111,
           "name": "mp3rgui-v3.7.0-windows-x86_64.zip"
         },
         {
@@ -1892,7 +2074,7 @@
           "name": "mp3rgain-v3.6.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 68,
+          "download_count": 69,
           "name": "mp3rgain-v3.6.1-windows-arm64.zip"
         },
         {
@@ -1900,7 +2082,7 @@
           "name": "mp3rgain-v3.6.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 107,
+          "download_count": 108,
           "name": "mp3rgain-v3.6.1-windows-x86_64.zip"
         },
         {
@@ -1948,7 +2130,7 @@
           "name": "mp3rgui-v3.6.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 61,
+          "download_count": 62,
           "name": "mp3rgui-v3.6.1-windows-arm64.zip"
         },
         {
@@ -1964,7 +2146,7 @@
           "name": "mp3rgui-v3.6.1-windows-setup.exe.sha256"
         },
         {
-          "download_count": 95,
+          "download_count": 96,
           "name": "mp3rgui-v3.6.1-windows-x86_64.zip"
         },
         {
@@ -2294,7 +2476,7 @@
           "name": "mp3rgain-v3.5.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 68,
+          "download_count": 69,
           "name": "mp3rgain-v3.5.0-windows-arm64.zip"
         },
         {
@@ -2302,7 +2484,7 @@
           "name": "mp3rgain-v3.5.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 78,
+          "download_count": 79,
           "name": "mp3rgain-v3.5.0-windows-x86_64.zip"
         },
         {
@@ -2350,7 +2532,7 @@
           "name": "mp3rgui-v3.5.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 71,
+          "download_count": 72,
           "name": "mp3rgui-v3.5.0-windows-arm64.zip"
         },
         {
@@ -2366,7 +2548,7 @@
           "name": "mp3rgui-v3.5.0-windows-setup.exe.sha256"
         },
         {
-          "download_count": 75,
+          "download_count": 76,
           "name": "mp3rgui-v3.5.0-windows-x86_64.zip"
         },
         {
@@ -4120,7 +4302,7 @@
           "name": "mp3rgain-v2.9.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 22,
+          "download_count": 23,
           "name": "mp3rgain-v2.9.0-windows-x86_64.zip"
         },
         {
@@ -4176,7 +4358,7 @@
           "name": "mp3rgui-v2.9.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 175,
+          "download_count": 176,
           "name": "mp3rgui-v2.9.0-windows-x86_64.zip"
         },
         {
@@ -6948,12 +7130,17 @@
     }
   ],
   "crates_io": {
-    "total_downloads": 3833,
-    "recent_downloads": 1818,
+    "total_downloads": 3903,
+    "recent_downloads": 1875,
     "versions": [
       {
+        "num": "3.14.0",
+        "downloads": 52,
+        "created_at": "2026-10-27T00:13:42.026650Z"
+      },
+      {
         "num": "3.13.0",
-        "downloads": 17,
+        "downloads": 21,
         "created_at": "2026-10-25T14:19:27.559291Z"
       },
       {
@@ -6963,7 +7150,7 @@
       },
       {
         "num": "3.12.0",
-        "downloads": 173,
+        "downloads": 175,
         "created_at": "2026-10-22T00:53:09.649866Z"
       },
       {
@@ -6978,7 +7165,7 @@
       },
       {
         "num": "3.10.0",
-        "downloads": 189,
+        "downloads": 201,
         "created_at": "2026-10-08T17:59:15.647476Z"
       },
       {
@@ -7501,657 +7688,26 @@
         "votes": 3,
         "popularity": 0.032177,
         "maintainer": "Dominiquini",
-        "last_modified": 1792940217
+        "last_modified": 1793060387
       },
       {
         "name": "mp3rgui",
         "votes": 0,
         "popularity": 0,
         "maintainer": "m-igashi",
-        "last_modified": 1792937954
+        "last_modified": 1793060009
       }
     ]
   },
   "ppa_cli": {
     "ppa": "mp3rgain",
-    "total_downloads": 63,
-    "items": [
-      {
-        "version": "2.2.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.2.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.2.2-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.2.2-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.2.3-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.2.3-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.3.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.3.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.4.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.4.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.5.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.5.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.2-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.2-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.3-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.3-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.7.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.7.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.7.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.7.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.7.2-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.7.2-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.7.3-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.7.3-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.8.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.8.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.8.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.8.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.2-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.2-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.3-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.3-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.4-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.5-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.5-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.6-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.9.6-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.10.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.10.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.3.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 1
-      },
-      {
-        "version": "3.3.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.4.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 3
-      },
-      {
-        "version": "3.4.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.5.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "3.5.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.5.1-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 3
-      },
-      {
-        "version": "3.5.1-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.6.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 3
-      },
-      {
-        "version": "3.6.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.6.1-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 2
-      },
-      {
-        "version": "3.6.1-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.7.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 4
-      },
-      {
-        "version": "3.7.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.8.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 4
-      },
-      {
-        "version": "3.8.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.8.1-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 3
-      },
-      {
-        "version": "3.8.1-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.9.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 4
-      },
-      {
-        "version": "3.9.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.9.1-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 4
-      },
-      {
-        "version": "3.9.1-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.9.2-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 6
-      },
-      {
-        "version": "3.9.2-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.10.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "3.10.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.11.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 8
-      },
-      {
-        "version": "3.11.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.11.1-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 6
-      },
-      {
-        "version": "3.11.1-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.12.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 5
-      },
-      {
-        "version": "3.12.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.12.1-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 5
-      },
-      {
-        "version": "3.12.1-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "3.13.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "amd64",
-        "downloads": 2
-      },
-      {
-        "version": "3.13.0-0ppa1~resolute1",
-        "series": "resolute",
-        "arch": "arm64",
-        "downloads": 0
-      }
-    ]
+    "total_downloads": 0,
+    "items": []
   },
   "ppa_gui": {
     "ppa": "mp3rgui",
-    "total_downloads": 61,
+    "total_downloads": 50,
     "items": [
-      {
-        "version": "2.2.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.2.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.2.2-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.2.2-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.2.3-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 2
-      },
-      {
-        "version": "2.2.3-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.3.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 2
-      },
-      {
-        "version": "2.3.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.4.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.4.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.5.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.5.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.1-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.2-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.2-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.3-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.6.3-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
-      {
-        "version": "2.7.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "amd64",
-        "downloads": 0
-      },
-      {
-        "version": "2.7.0-0ppa1~questing1",
-        "series": "questing",
-        "arch": "arm64",
-        "downloads": 0
-      },
       {
         "version": "2.7.1-0ppa1~questing1",
         "series": "questing",
@@ -8438,7 +7994,7 @@
         "version": "3.9.2-0ppa1~resolute1",
         "series": "resolute",
         "arch": "amd64",
-        "downloads": 4
+        "downloads": 0
       },
       {
         "version": "3.9.2-0ppa1~resolute1",
@@ -8498,7 +8054,7 @@
         "version": "3.12.1-0ppa1~resolute1",
         "series": "resolute",
         "arch": "amd64",
-        "downloads": 3
+        "downloads": 0
       },
       {
         "version": "3.12.1-0ppa1~resolute1",
@@ -8514,6 +8070,18 @@
       },
       {
         "version": "3.13.0-0ppa1~resolute1",
+        "series": "resolute",
+        "arch": "arm64",
+        "downloads": 0
+      },
+      {
+        "version": "3.14.0-0ppa1~resolute1",
+        "series": "resolute",
+        "arch": "amd64",
+        "downloads": 0
+      },
+      {
+        "version": "3.14.0-0ppa1~resolute1",
         "series": "resolute",
         "arch": "arm64",
         "downloads": 0
@@ -8524,12 +8092,12 @@
     "image": "ghcr.io/m-igashi/mp3rgain",
     "platforms": [
       {
-        "arch": "arm64",
-        "size_bytes": 1268054
+        "arch": "amd64",
+        "size_bytes": 1346781
       },
       {
-        "arch": "amd64",
-        "size_bytes": 1339730
+        "arch": "arm64",
+        "size_bytes": 1273756
       }
     ],
     "tags": [
@@ -8579,8 +8147,9 @@
       "v3.11.1",
       "v3.12.0",
       "v3.12.1",
-      "v3.13.0"
+      "v3.13.0",
+      "v3.14.0"
     ],
-    "latest_pushed": "2026-10-25T14:14:05.295208843Z"
+    "latest_pushed": "2026-10-27T00:08:15.268906922Z"
   }
 }
