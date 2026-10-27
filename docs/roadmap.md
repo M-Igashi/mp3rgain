@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current status: v3.13.0 (2026-10-25)
+## Current status: v3.14.0 (2026-10-27)
 
 mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writes standard `REPLAYGAIN_*` tags, and can bake the correction into the bitstream losslessly. For MP3 it is a modern drop-in replacement for mp3gain. For AAC it is the only actively maintained command-line tool that does this: aacgain has been abandoned since about 2009, and foobar2000, the reference-grade ReplayGain suite, offers a comparable scalefactor-based AAC rewrite ("Apply ReplayGain to file content") but only as a Windows GUI with no undo.
 
@@ -20,7 +20,7 @@ What ships today:
 - [ ] Renew the Developer ID certificate before 2027-02-01 (#355)
 - [ ] Retire the Ubuntu PPA after 2026-12-31: stop uploading, remove `ppa.yml`, the `ppa` environment and its secrets, `packages/ppa*`, `scripts/build-ppa.sh` and `docs/ppa-setup.md`, and decide whether to delete the two Launchpad PPAs (a deleted PPA makes `apt update` fail, which at least tells its remaining users; one left in place keeps them on the last upload without a word)
 - [ ] Upgrade mp3rgui's egui/eframe stack, which also retires the quick-xml audit ignores in `ci.yml`
-- [ ] More mp3rgui translations, one `.po` file per language (#440); `pt_PT` and `it` are offered
+- [ ] More mp3rgui translations, one `.po` file per language (#440); `pt_PT` is offered
 - [ ] Homebrew core formula (#8); today it is in the `M-Igashi/tap` tap
 - [ ] nixpkgs package (#314); the flake in this repo already works, see [packages/nix/README.md](../packages/nix/README.md)
 - [ ] Official Debian archive package (#394): the ITP is [#1126519](https://bugs.debian.org/1126519); `id3` still needs packaging in `debcargo-conf`, `indicatif` 0.18 and `console` 0.16 are only in experimental, and the upload needs a sponsor. Meanwhile every release is an apt repository
@@ -39,7 +39,15 @@ What ships today:
 
 ## Unreleased
 
-- [x] mp3rgui can be translated, and speaks Brazilian Portuguese. Each language is a gettext `.po` file in `mp3rgui/locales/`, compiled into the binary, so a translation ships in every package with nothing extra to install, and a missing or outdated entry shows the English. A new Language menu offers System default, English and each translation under its own name, and remembers the choice. The CJK font for file names now follows the system language on macOS and Windows too, where it used to read only the POSIX locale variables, and a Chinese or Korean UI picks its own font. The CLI's output stays English. More languages are welcome through #440. Implemented and translated by @cfgnunes (#422)
+Nothing yet.
+
+## Release history
+
+### v3.14.0 - mp3rgui in Five Languages & mp3gain Tag Parity
+
+mp3rgui speaks Brazilian Portuguese, Italian, Japanese and Turkish as well as English, through gettext catalogues compiled into the binary. On the command line, the stored values follow mp3gain 1.6.2 more closely: `MP3GAIN_MINMAX` is zero-padded, left alone by `-l`, shifted rather than rescanned by `-g` and recorded on a `-r`/`-a` that changes nothing; `-l -w` wraps; `-s i` moves the mp3gain values out of APEv2; `-a -s i` writes the album range. Behaviour changes: `-a -r` applies track gain, as in mp3gain, and an undo after mixing `-s a` and `-s i` now restores the original. The analysis and the gains of `-r`, `-a` and `-g` are unchanged.
+
+- [x] mp3rgui can be translated, and ships in Brazilian Portuguese (@cfgnunes), Italian (@Privato72), Japanese (@M-Igashi) and Turkish (@0anes0) besides English. Each language is a gettext `.po` file in `mp3rgui/locales/`, compiled into the binary, so a translation ships in every package with nothing extra to install, and a missing or outdated entry shows the English. A new Language menu offers System default, English and each translation under its own name, and remembers the choice. The CJK font for file names now follows the system language on macOS and Windows too, where it used to read only the POSIX locale variables, and a Chinese or Korean UI picks its own font. The CLI's output stays English. More languages are welcome through #440. The translation mechanism was built by @cfgnunes (#422, #439); the catalogues arrived in #439, #443, #445 and #448
 - [x] `-l` with `-w` wraps the channel's `global_gain` around 0-255 and records `W` in the undo tag, as mp3gain does, instead of clamping and recording `N`, and `-u` undoes a channel change with the wrap mode its tag records, so a `-l -w` change made by mp3gain is now reversed exactly. On a file whose left `global_gain` reaches 248, `-l 0 10 -w` writes the same audio as mp3gain 1.6.2. Without `-w` nothing changes. In mp3rgui, Apply Channel Gain follows the Wrap mode option, which it used to ignore. Reported by @cfgnunes, fixed by @dannyward630 (#434)
 - [x] `MP3GAIN_MINMAX` and `MP3GAIN_ALBUM_MINMAX` are zero-padded to three digits (`094,168`), as mp3gain writes them. mp3gain reads the field at fixed offsets, so a minimum below 100 written unpadded (`94,168`) made it read the maximum as 68, and a later `mp3gain -g` shifted that wrong value. Ranges written by earlier versions still read correctly in mp3rgain, and mp3gain reads them correctly once an apply has written them again. The AAC `mp3rgain_minmax` atom uses the same form. Reported by @cfgnunes (#432)
 - [x] `-l` leaves `MP3GAIN_MINMAX` as it is and adds none, as mp3gain does, instead of writing the range after the change. mp3gain updates the stored values only when both channels move by the same amount, and `-l` already left the ReplayGain values and the album range alone. With `-s a` the file `-l` writes is now byte-identical to mp3gain's. mp3rgui's Apply Channel Gain follows. Reported by @cfgnunes (#433)
@@ -51,8 +59,6 @@ What ships today:
 - [x] mp3rgui's font for Chinese, Japanese and Korean file names follows the system language when the chosen UI language is not one of the three. Since the Language menu arrived it followed the UI language, so a Korean user who picked English got the Japanese face, which on macOS and Windows has no Hangul and drew Korean file names as boxes (#452)
 - [x] `-a -s i` stores the album range `MP3GAIN_ALBUM_MINMAX` as an ID3v2 TXXX frame, as mp3gain does; it used to write none under `-s i`, so a later mp3gain run re-analyzed the album. `-s c` shows it, `-s d` and `-u` remove it, and mp3rgui's Apply Album Gain with "All in ID3v2" writes it too. Library: new `write_album_minmax_with_layout` (#450)
 - [x] `-g` shifts a stored `MP3GAIN_MINMAX` by the applied steps and adds none to a file without one, as mp3gain does, instead of recording the range scanned after the change; on an untagged file `-g` now writes the same bytes as mp3gain. Under `-w` both ranges are dropped when the shift would take them outside 0-255, as in mp3gain; inside those bounds they are shifted, where mp3gain leaves them describing the audio before the change. `-r` and `-a` still record the scanned range. mp3rgui's Apply Manual Gain follows (#451)
-
-## Release history
 
 ### v3.13.0 - mp3gain Parity: ReplayGain 1.0 Analysis, -d, -k & Silent Frames
 

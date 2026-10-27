@@ -11,7 +11,7 @@ How mp3rgain compares with the tools it replaces, mp3gain and aacgain, and where
 | | mp3rgain | aacgain | mp3gain |
 |---|----------|---------|---------|
 | **Language** | Rust | C | C |
-| **Latest release** | 3.13.0 (2026) | 2.0.0 | 1.6.2 |
+| **Latest release** | 3.14.0 (2026) | 2.0.0 | 1.6.2 |
 | **License** | MIT | LGPL | LGPL |
 | **Repository** | [M-Igashi/mp3rgain](https://github.com/M-Igashi/mp3rgain) | [dgilman/aacgain](https://github.com/dgilman/aacgain) | SourceForge |
 
