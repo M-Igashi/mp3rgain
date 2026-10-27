@@ -2,7 +2,7 @@
 
 How mp3rgain compares with the tools it replaces, mp3gain and aacgain, and where tag-only ReplayGain tools fit.
 
-> **In short:** as far as we know, mp3rgain is the only actively maintained command-line tool that adjusts AAC/M4A volume losslessly by rewriting `global_gain`. aacgain did this too, but its last release is 2.0.0 and its repository has had no commits since 2022; rsgain and loudgain write ReplayGain tags only, and FFmpeg re-encodes. foobar2000's "Apply ReplayGain to file content" does a comparable lossless AAC adjustment in MP4/MKA from its desktop GUI on Windows, without an undo path. **On a Windows desktop, foobar2000 is the one to reach for**; from a script, a container or a non-Windows host, mp3rgain is.
+> **In short:** as far as we know, mp3rgain is the only actively maintained command-line tool that adjusts AAC/M4A volume losslessly by rewriting `global_gain`. aacgain did this too, but its last release is 2.0.0 and its repository has had no commits since 2022; rsgain and loudgain write ReplayGain tags only, and FFmpeg re-encodes. foobar2000's "Apply ReplayGain to file content" does a comparable lossless AAC adjustment in MP4/MKA from its desktop GUI on Windows, without an undo path. **On a Windows desktop, foobar2000 is the one to reach for**; from a script, a container, or a non-Windows host, mp3rgain is.
 
 > **A note on framing:** every tool discussed here is a ReplayGain tool, mp3rgain included. The mp3gain lineage (mp3gain, aacgain, mp3rgain) runs a ReplayGain analysis, writes the standard `REPLAYGAIN_*` tags, *and* bakes the correction into the bitstream; foobar2000 can do both as well. "Tagger vs gain tool" is the wrong axis. The axis that matters is whether a tool can touch the bitstream at all, and whether it can put it back.
 
@@ -28,10 +28,10 @@ How mp3rgain compares with the tools it replaces, mp3gain and aacgain, and where
 Notes on mp3rgain:
 
 - **AAC** gain has been lossless since 2.0.0: like aacgain, mp3rgain rewrites the `global_gain` field of each channel element. The audio track of a video `.mp4` is handled since 3.7.0 ([#327](https://github.com/M-Igashi/mp3rgain/issues/327)).
-- **Raw ADTS** streams (from `ffmpeg -f adts`, DVB/HLS captures and some rippers) have no container for metadata, so their undo and `REPLAYGAIN_*` values go into an ID3v2 tag ([#330](https://github.com/M-Igashi/mp3rgain/issues/330)).
+- **Raw ADTS** streams (from `ffmpeg -f adts`, DVB/HLS captures, and some rippers) have no container for metadata, so their undo and `REPLAYGAIN_*` values go into an ID3v2 tag ([#330](https://github.com/M-Igashi/mp3rgain/issues/330)).
 - **HE-AAC** files are reported as skipped ([#403](https://github.com/M-Igashi/mp3rgain/issues/403)). `global_gain` only scales the AAC core; the decoder rebuilds the SBR high band at levels stored in absolute form, so a gain change left that band at its original level, about as many dB too loud as the change. The decoder mp3rgain analyzes with has no SBR either, so loudness and peak were measured on the core alone. Earlier versions applied the core-only gain, and undo still works on those files.
 - **ALAC and DRM-protected M4P** files are reported as skipped and do not fail the run (since 3.7.0).
-- **FLAC, Ogg, Opus and WAV** are not supported: passed by name they fail with an error, and `-R` ignores them.
+- **FLAC, Ogg, Opus, and WAV** are not supported: passed by name they fail with an error, and `-R` ignores them.
 
 ## Command-line options
 
@@ -171,7 +171,7 @@ docker run --rm -v /path/to/music:/music ghcr.io/m-igashi/mp3rgain:latest -r -R 
 cargo install mp3rgain
 ```
 
-Prebuilt binaries for macOS (universal), Linux x86_64/arm64 and Windows x86_64/arm64 are on the [releases page](https://github.com/M-Igashi/mp3rgain/releases). Each is a single executable of a few MB with no dependencies. The Linux binaries are statically linked against musl, so they run regardless of the glibc version, and the C runtime is linked statically on Windows.
+Prebuilt binaries for macOS (universal), Linux x86_64/arm64, and Windows x86_64/arm64 are on the [releases page](https://github.com/M-Igashi/mp3rgain/releases). Each is a single executable of a few MB with no dependencies. The Linux binaries are statically linked against musl, so they run regardless of the glibc version, and the C runtime is linked statically on Windows.
 
 ## Migrating
 
@@ -218,9 +218,9 @@ For AAC/M4A the choice of tool matters more than for MP3, because few tools can 
 | FFmpeg `volume` / `loudnorm` | Re-encode | No | No (lossy) | Yes | Yes |
 | beets ReplayGain plugin | Tags via backend | Yes (backend-dependent) | Yes (file untouched) | No (player must read tags) | Yes |
 
-Lossless, player-agnostic, reversible and scriptable together is mp3rgain's niche. It matters for DJ equipment, car audio, smart speakers, batch / Docker / CI pipelines, and anywhere the playback device ignores ReplayGain tags or a desktop GUI is not an option.
+Lossless, player-agnostic, reversible, and scriptable together is mp3rgain's niche. It matters for DJ equipment, car audio, smart speakers, batch / Docker / CI pipelines, and anywhere the playback device ignores ReplayGain tags or a desktop GUI is not an option.
 
-That is a statement about the intersection, not a ranking. [foobar2000](https://www.foobar2000.org/) covers the lossless and player-agnostic cells and does so well; what it does not offer is a command line, a non-Windows host or an undo path. **On Windows, in a GUI, wanting the most standards-faithful ReplayGain, foobar2000 is the tool to recommend.** It is the closest thing ReplayGain 2.0 has to a reference implementation, and it tags far more formats than mp3rgain does. The two interoperate: mp3rgain writes the standard `REPLAYGAIN_*` tags foobar2000 reads, and `--rg2` is built to reproduce its measurement rather than to offer a rival one.
+That is a statement about the intersection, not a ranking. [foobar2000](https://www.foobar2000.org/) covers the lossless and player-agnostic cells and does so well; what it does not offer is a command line, a non-Windows host, or an undo path. **On Windows, in a GUI, wanting the most standards-faithful ReplayGain, foobar2000 is the tool to recommend.** It is the closest thing ReplayGain 2.0 has to a reference implementation, and it tags far more formats than mp3rgain does. The two interoperate: mp3rgain writes the standard `REPLAYGAIN_*` tags foobar2000 reads, and `--rg2` is built to reproduce its measurement rather than to offer a rival one.
 
 ## When to use global_gain vs ReplayGain tags
 
@@ -250,14 +250,14 @@ See [security.md](security.md) for the CVE details.
 |------|-----------------|
 | mp3rgain | Rust with no `unsafe` blocks, and none of the C code behind mp3gain's and aacgain's CVEs |
 | mp3gain 1.6.2 | The release and the Windows binaries are unpatched; Debian/Ubuntu and some other distributions ship patched builds, and upstream master carries the APE tag fixes (2025-11) without a new release |
-| aacgain 2.0.0 | Still bundles mpglibDBL and mp3gain's unpatched `apetag.c` (CVE-2021-34085, CVE-2023-49356 and others) |
+| aacgain 2.0.0 | Still bundles mpglibDBL and mp3gain's unpatched `apetag.c` (CVE-2021-34085, CVE-2023-49356, and others) |
 
 ## Known limitations
 
 ### mp3rgain
 
 - Lossless gain moves in whole 1.5 dB steps, so the audio lands within about 0.75 dB of the target (`--tags-only` writes exact values).
-- MP3 and AAC-LC only: no HE-AAC, FLAC, Ogg, Opus, WAV or ALAC.
+- MP3 and AAC-LC only: no HE-AAC, FLAC, Ogg, Opus, WAV, or ALAC.
 - `-g` and `-l` leave existing `REPLAYGAIN_*` tags unchanged (see [Avoiding double volume adjustment](#avoiding-double-volume-adjustment)).
 - Undo restores every audio frame, but after an ID3v2 tag write the file is not byte-identical to the original (the ID3v2 tag is rewritten as ID3v2.4). Frames whose `global_gain` clamped at 0 or 255 cannot be restored.
 - Raw ADTS streams with CRC protection (`protection_absent = 0`) keep their original CRC after a gain change. ffmpeg and Apple's encoder do not write ADTS CRCs, so there is nothing to test the update against.

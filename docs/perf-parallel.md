@@ -1,12 +1,12 @@
 # Parallel ReplayGain analysis: `-j` / `--threads`
 
-mp3rgain 2.4 introduced multi-file parallelism for ReplayGain analysis, addressing issues [#125] and [#126]. This document records the design decisions and the real-corpus benchmark numbers behind the default-on choice. The TL;DR describes current behaviour, the sections from the benchmark methodology to "Concurrency safety" describe 2.4, and the sections marked 3.8 cover the later album-crossing, pipelining and file-splitting work. Every benchmark is reported as measured at the time and has not been re-run since.
+mp3rgain 2.4 introduced multi-file parallelism for ReplayGain analysis, addressing issues [#125] and [#126]. This document records the design decisions and the real-corpus benchmark numbers behind the default-on choice. The TL;DR describes current behaviour, the sections from the benchmark methodology to "Concurrency safety" describe 2.4, and the sections marked 3.8 cover the later album-crossing, pipelining, and file-splitting work. Every benchmark is reported as measured at the time and has not been re-run since.
 
 ## TL;DR
 
 Current behaviour (v3.14.0):
 
-- **Parallel by default.** Every per-file command runs on `std::thread::available_parallelism()` rayon worker threads: the default info scan, `-r` and `-a` since 2.4, and apply, undo and the tag commands since 2.5.0 ([#134]).
+- **Parallel by default.** Every per-file command runs on `std::thread::available_parallelism()` rayon worker threads: the default info scan, `-r`, and `-a` since 2.4, and apply, undo, and the tag commands since 2.5.0 ([#134]).
 - **`-j 1` is the legacy fallback** for behavioural parity with mp3gain or for debugging. `-j 0` and `MP3RGAIN_THREADS=0` mean "auto".
 - **`-o json` keeps input order at every `-j`.** Since [#348] (3.9.0) the TSV and text output is written as each unit finishes, so its *line order* follows completion rather than input; `-j 1` still emits in input order.
 - **The numbers do not depend on `-j`**, with one exception: under `--rg2` / `--r128` a long file divided across workers (3.8) can differ in the last bit, at most 7.1e-15 dB as measured. See [Accuracy](#accuracy). RG1 is never divided and stays bit-identical.
@@ -154,7 +154,7 @@ Synthesized corpus, one directory per album, 6 tracks each with deliberately rag
 
 The rightmost column is the floor: the same files analyzed as a single pooled album, which has no album boundary to stall on. The per-directory run now sits within 3 to 5% of it, so the barrier is gone rather than merely reduced.
 
-`-j 1` is unaffected (18.56 s → 18.37 s on the 6-album corpus): with one worker thread there is nothing to overlap, so that path keeps the sequential loop, the per-album progress bars and the direct-to-stdout writes it always had.
+`-j 1` is unaffected (18.56 s → 18.37 s on the 6-album corpus): with one worker thread there is nothing to overlap, so that path keeps the sequential loop, the per-album progress bars, and the direct-to-stdout writes it always had.
 
 ### Memory
 
@@ -169,9 +169,9 @@ Per-directory stays flat as the library doubles; pooling does not. That is the p
 
 ### Output identity
 
-Albums finish out of order. Album runs are collected by index, so the JSON `albums` array, the `files` array, the counters and the exit code are all built in group order after the fact, and the album fold was already associative and folded in input order, which is what keeps the numbers bit-identical.
+Albums finish out of order. Album runs are collected by index, so the JSON `albums` array, the `files` array, the counters, and the exit code are all built in group order after the fact, and the album fold was already associative and folded in input order, which is what keeps the numbers bit-identical.
 
-Each album's text is buffered and handed to the flusher when the album finishes. Until [#348] the flusher also gated on input order, which turned out to cost most of the benefit: on a 16-album run album 2 is the *second* album on worker 0 while albums 3, 5, 7 and so on are the *first* on their own workers, so fourteen finished albums sat waiting behind it. It now writes each block as it arrives, under the same lock, so a block still lands whole and the group order follows completion.
+Each album's text is buffered and handed to the flusher when the album finishes. Until [#348] the flusher also gated on input order, which turned out to cost most of the benefit: on a 16-album run album 2 is the *second* album on worker 0 while albums 3, 5, 7, and so on are the *first* on their own workers, so fourteen finished albums sat waiting behind it. It now writes each block as it arrives, under the same lock, so a block still lands whole and the group order follows completion.
 
 Verified on the 12-album corpus and on a 30-file apply, against the 3.7.0 binary:
 
@@ -194,7 +194,7 @@ The other half of [#332] is granularity: the smallest schedulable unit is still 
 
 ## Overlapping the decode with the analysis (3.8, issue [#337])
 
-Every level of parallelism above was between files. The work unit was still one whole file, so a single track could never use more than one core: `mp3rgain -r --rg2 --true-peak long.mp3` took the same 0.94 s at `-j 1`, `-j 4` and `-j 8`, because there was nothing to hand to the other cores.
+Every level of parallelism above was between files. The work unit was still one whole file, so a single track could never use more than one core: `mp3rgain -r --rg2 --true-peak long.mp3` took the same 0.94 s at `-j 1`, `-j 4`, and `-j 8`, because there was nothing to hand to the other cores.
 
 The bitstream decode cannot be parallelized, but the DSP behind it can be taken off the decode thread. With true peak on, the split for a 10 minute 44.1 kHz file is roughly 0.46 s of decode plus conversion and 0.59 s of analysis, so overlapping them takes the file from the sum of the two down to the larger of them. The analyzer still receives every frame exactly once and in order, so this is not an approximation: output is byte-identical.
 

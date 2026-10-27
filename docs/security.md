@@ -78,7 +78,7 @@ Because there is no patched release, each distribution decides for itself. As of
 
 Details:
 
-- **Debian / Ubuntu:** `fix-security-bugs.patch` covers CVE-2019-18359, CVE-2023-49356 and other APE tag issues ([security tracker](https://security-tracker.debian.org/tracker/source-package/mp3gain)). mp3gain was removed from Debian in 2014 over security issues and the lack of a maintainer, and re-introduced in 2018 with patches. Ubuntu inherits Debian's patches.
+- **Debian / Ubuntu:** `fix-security-bugs.patch` covers CVE-2019-18359, CVE-2023-49356, and other APE tag issues ([security tracker](https://security-tracker.debian.org/tracker/source-package/mp3gain)). mp3gain was removed from Debian in 2014 over security issues and the lack of a maintainer, and re-introduced in 2018 with patches. Ubuntu inherits Debian's patches.
 - **openSUSE:** openSUSE-SU-2020:0522-1 fixed CVE-2017-12911 and CVE-2019-18359; openSUSE-SU-2020:0539-1 shipped the same fixes for Backports SLE-15-SP1.
 - **Fedora:** CVE-2018-10777 is tracked in Red Hat Bugzilla (#1903788, #1903789, #1903790).
 - **Homebrew:** linking libmpg123 avoids the mpglibDBL CVEs, but the APE tag fixes exist only in upstream master, which Homebrew does not build.
@@ -92,9 +92,9 @@ Details:
 aacgain bundles all of its dependencies as source code, none of them updated for security:
 
 - **mpglibDBL** (`mp3gain/mpglibDBL/`): unlike mp3gain 1.6.x, which can link the system libmpg123, aacgain still bundles the mpglibDBL fork, so the mpglibDBL CVEs in the first table above are unpatched.
-- **faad2** (`3rdparty/faad2/`, updated to about 2.9.1 in July 2022): faad2 has its own vulnerabilities, including CVE-2008-4201 (heap-based buffer overflow), [Gentoo GLSA 202006-17](https://security.gentoo.org/glsa/202006-17) and [Gentoo GLSA 202401-13](https://security.gentoo.org/glsa/202401-13).
+- **faad2** (`3rdparty/faad2/`, updated to about 2.9.1 in July 2022): faad2 has its own vulnerabilities, including CVE-2008-4201 (heap-based buffer overflow), [Gentoo GLSA 202006-17](https://security.gentoo.org/glsa/202006-17), and [Gentoo GLSA 202401-13](https://security.gentoo.org/glsa/202401-13).
 - **mp4v2** (`3rdparty/mp4v2/`, 3.0.4): CVE-2018-14326 (integer overflow), CVE-2018-14379 (memory corruption), CVE-2023-1451 (denial of service), CVE-2023-29584 (heap buffer overflow).
-- **`apetag.c` and `gain_analysis.c`** from mp3gain, without the patches: CVE-2023-49356, CVE-2019-18359, CVE-2018-10777, CVE-2017-12911 and CVE-2017-14407.
+- **`apetag.c` and `gain_analysis.c`** from mp3gain, without the patches: CVE-2023-49356, CVE-2019-18359, CVE-2018-10777, CVE-2017-12911, and CVE-2017-14407.
 
 No distribution patches aacgain:
 
@@ -120,24 +120,24 @@ aacgain is not available in the official Debian/Ubuntu or Fedora/RHEL repositori
 | MP4 container | mp4v2 (C) | symphonia, plus mp3rgain's own MP4 parser (Rust) |
 | APE tags | `apetag.c` (C) | `src/ape.rs` (Rust) |
 
-mp3rgain does not contain mpglib, mpglibDBL, faad2, mp4v2, `apetag.c` or `gain_analysis.c`; its ReplayGain analysis is a Rust implementation checked against the reference `gain_analysis.c` output.
+mp3rgain does not contain mpglib, mpglibDBL, faad2, mp4v2, `apetag.c`, or `gain_analysis.c`; its ReplayGain analysis is a Rust implementation checked against the reference `gain_analysis.c` output.
 
 ### Safe Rust
 
-mp3rgain's own source (the library, the CLI and the GUI) contains no `unsafe` blocks. This is a property of the current code that you can check with `grep`; the crate does not declare `#![forbid(unsafe_code)]`, so the compiler does not enforce it. In safe Rust:
+mp3rgain's own source (the library, the CLI, and the GUI) contains no `unsafe` blocks. This is a property of the current code that you can check with `grep`; the crate does not declare `#![forbid(unsafe_code)]`, so the compiler does not enforce it. In safe Rust:
 
 - **Out-of-bounds access** cannot corrupt memory: every index is bounds-checked at run time, and a bad one stops the program with a panic instead.
 - **Use-after-free** and dangling pointers are rejected at compile time by ownership and borrowing.
 - **Null pointer dereferences** cannot happen: absence is an explicit `Option`.
 - **Data races** are rejected at compile time.
 
-The buffer overflows, over-reads and invalid writes that make up nearly every CVE above are exactly the class this removes. What safe Rust does not remove is ordinary bugs: a malformed file can still make mp3rgain fail with an error or spend more memory than it should. The parsers check sizes read from a file against the data actually present (for example APE tag sizes and MP4 sample tables), and such a failure is worth [reporting](../SECURITY.md).
+The buffer overflows, over-reads, and invalid writes that make up nearly every CVE above are exactly the class this removes. What safe Rust does not remove is ordinary bugs: a malformed file can still make mp3rgain fail with an error or spend more memory than it should. The parsers check sizes read from a file against the data actually present (for example APE tag sizes and MP4 sample tables), and such a failure is worth [reporting](../SECURITY.md).
 
 The symphonia crates mp3rgain uses for decoding contain no `unsafe` code either, and most declare `#![forbid(unsafe_code)]`. Some other dependencies, such as rayon for parallelism, do use `unsafe` internally.
 
 ### What a gain change touches
 
-Applying a gain to an MP3 does not decode any audio: mp3rgain finds each frame, reads its side information and changes the 8-bit `global_gain` field of each granule and channel. AAC needs more parsing, because finding every `global_gain` means walking the bitstream element by element (`src/aac.rs`); that parser is safe Rust too. Decoding with symphonia happens only for analysis (`-r`, `-a`, `-x` and the default scan).
+Applying a gain to an MP3 does not decode any audio: mp3rgain finds each frame, reads its side information, and changes the 8-bit `global_gain` field of each granule and channel. AAC needs more parsing, because finding every `global_gain` means walking the bitstream element by element (`src/aac.rs`); that parser is safe Rust too. Decoding with symphonia happens only for analysis (`-r`, `-a`, `-x`, and the default scan).
 
 ## Checking it yourself
 

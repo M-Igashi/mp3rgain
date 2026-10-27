@@ -12,7 +12,7 @@ Where a scriptable, cross-platform option helps:
 - **DJ workflows with AAC.** DJ hardware (CDJs, XDJs, controllers) ignores ReplayGain tags, so the gain has to be in the audio. Without a lossless option, a purchased M4A has to be re-encoded to change its level.
 - **Smart speakers and car audio.** The same problem: these devices do not read ReplayGain tags.
 - **Archiving.** Volume changes are reversible with `-u`.
-- **Headless, batch, CI and Docker pipelines**, where a desktop GUI is not an option.
+- **Headless, batch, CI, and Docker pipelines**, where a desktop GUI is not an option.
 
 For MP3, mp3rgain is one of several mp3gain replacements.
 
@@ -79,7 +79,7 @@ Bake'n Deck for Mac, the native app edition, is on the [Mac App Store](https://a
 
 Game developers often use mp3gain to prepare audio assets: BGM and sound effects collected from different free asset sites vary a lot in level, and players notice the jumps between tracks. mp3rgain batch-normalizes them to one ReplayGain level (89 dB by default) without re-encoding.
 
-Engines whose projects benefit from pre-normalized audio include RPG Maker (MV, MZ), WOLF RPG Editor, Unity, Godot, Ren'Py and TyranoBuilder.
+Engines whose projects benefit from pre-normalized audio include RPG Maker (MV, MZ), WOLF RPG Editor, Unity, Godot, Ren'Py, and TyranoBuilder.
 
 ```bash
 # Show each file's level and recommended change (read-only)
@@ -90,7 +90,7 @@ mp3rgain -r -R ./assets/bgm/
 mp3rgain -r -R ./assets/se/
 ```
 
-Why it fits: the change is lossless and reversible (`-u`), it handles large asset folders in one run, and it runs on Windows, macOS and Linux.
+Why it fits: the change is lossless and reversible (`-u`), it handles large asset folders in one run, and it runs on Windows, macOS, and Linux.
 
 ### Podcast production
 
@@ -141,9 +141,9 @@ mp3rgain -r -R -o json /archive/audio/ > normalization_log.json
 
 ### Commercial audio and digital signage
 
-Retail stores, restaurants, hotels and signage systems need a consistent level, and their players rarely help:
+Retail stores, restaurants, hotels, and signage systems need a consistent level, and their players rarely help:
 
-1. **Playback devices ignore ReplayGain tags.** Embedded systems, simple media players and PA systems do not apply metadata-based volume adjustment.
+1. **Playback devices ignore ReplayGain tags.** Embedded systems, simple media players, and PA systems do not apply metadata-based volume adjustment.
 2. **Jarring volume changes disrupt the customer experience.**
 3. **Chains need the same audio at every site.**
 4. **Nobody configures ReplayGain on hundreds of devices.**
@@ -165,7 +165,7 @@ done
 Why it fits:
 
 - Works with any playback device or software, since the level is in the audio
-- Runs on a Raspberry Pi 4/5 with a 64-bit OS: Linux arm64 release binaries, an apt repository and a Docker image are provided
+- Runs on a Raspberry Pi 4/5 with a 64-bit OS: Linux arm64 release binaries, an apt repository, and a Docker image are provided
 - Changes are reversible if needed
 
 ## Integration examples
@@ -205,9 +205,9 @@ Host crontab entry, running at 03:00 daily during Plex maintenance (crontab entr
 0 3 * * * docker run --rm --user 1000:1000 -v /srv/plex/music:/music ghcr.io/m-igashi/mp3rgain:v3 -r -R /music
 ```
 
-The image is tagged `latest`, `vX` and `vX.Y.Z`. Pin the major tag (`:v3`) to receive minor and patch releases without breaking changes, or an exact version (`:v3.9.2`) for fully reproducible runs. `--user` makes the rewritten files belong to that UID instead of root.
+The image is tagged `latest`, `vX`, and `vX.Y.Z`. Pin the major tag (`:v3`) to receive minor and patch releases without breaking changes, or an exact version (`:v3.9.2`) for fully reproducible runs. `--user` makes the rewritten files belong to that UID instead of root.
 
-The image's entrypoint is `mp3rgain` itself, so every flag works as on the host: `-r`, `-a`, `-R`, `-k`, `-u`, `-o json` and so on.
+The image's entrypoint is `mp3rgain` itself, so every flag works as on the host: `-r`, `-a`, `-R`, `-k`, `-u`, `-o json`, and so on.
 
 ### Rust projects
 
