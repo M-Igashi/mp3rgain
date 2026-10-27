@@ -11,7 +11,7 @@ What ships today:
 - mp3gain command-line compatibility, down to the stored tags; the differences are listed in [migrating-from-mp3gain.md](migrating-from-mp3gain.md)
 - Tags-only mode, album grouping by directory, release tags or depth, reuse of stored tags (`-s R`)
 - Parallel processing across and within files, JSON and TSV output
-- GUI (mp3rgui) for macOS, Windows and Linux, in English, Brazilian Portuguese, Italian, Japanese and Turkish
+- GUI (mp3rgui) for macOS, Windows, and Linux, in English, Brazilian Portuguese, Italian, Japanese, and Turkish
 - A documented library API on crates.io and docs.rs
 - Distribution through crates.io, Homebrew, winget, .deb with an apt repository, Ubuntu PPA (deprecated, updated until 2026-12-31), AUR (GUI), MacPorts, pkgx, Termux (TUR), a Nix flake and a GHCR Docker image
 

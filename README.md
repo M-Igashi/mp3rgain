@@ -140,7 +140,7 @@ Where it differs from the CLI:
 - Clipping prevention and timestamp preservation are on by default (`-k` and `-p` are off in the CLI).
 - There is no tags-only mode and no true-peak option; use the CLI for those.
 
-Languages: mp3rgui follows the system language and has a Language menu. It ships in English, Brazilian Portuguese, Italian, Japanese and Turkish; the command line stays English. Each language is one gettext `.po` file compiled into the app, and adding yours needs no programming: see [#440](https://github.com/M-Igashi/mp3rgain/issues/440).
+Languages: mp3rgui follows the system language and has a Language menu. It ships in English, Brazilian Portuguese, Italian, Japanese, and Turkish; the command line stays English. Each language is one gettext `.po` file compiled into the app, and adding yours needs no programming: see [#440](https://github.com/M-Igashi/mp3rgain/issues/440).
 
 Platform notes: the macOS app needs macOS 11 or later. macOS and Linux draw with OpenGL 2.0+; Windows uses Direct3D 12 or Vulkan with a software fallback, and `MP3RGUI_RENDERER=glow` switches it to OpenGL. If the window cannot open, mp3rgui shows a dialog explaining why and pointing to the CLI. File names in Japanese, Chinese or Korean are rendered with a CJK font already installed on your system; set `MP3RGUI_FONT` to a font file path to pick a different one.
 
