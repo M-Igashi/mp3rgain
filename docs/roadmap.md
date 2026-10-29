@@ -42,6 +42,7 @@ What ships today:
 - mp3rgui: an Apply that first rescans the files without stored tags applies to the rows selected at the click, not to whatever is selected when the rescan ends
 - mp3rgui: Apply Channel Gain, and an Undo that rolls the channels back by different amounts, clear the row's numbers instead of shifting them as if both channels moved, which also fed the next Apply Track Gain a wrong gain; library: `read_undo_channel_steps` (#471)
 - `-s d` leaves an untagged M4A alone, including one whose metadata ends in an empty `ilst`, and `-u` no longer leaves an empty `udta` behind
+- `-s d` and mp3rgui's Delete stored tags find out from `moov` alone that an M4A has no tags to delete, instead of reading and rebuilding the whole file (#468)
 - `-s c` shows an album range that `-a -s i` stored in ID3v2 under the default layout too
 - `-g -o tsv` prints `-` for a `global_gain` range it did not scan, and the steps `-k` actually applied
 - The M4A line of `-r` and `-a` shows the gain applied, the album gain under `-a`

@@ -1312,6 +1312,13 @@ pub fn delete_replaygain_tags(file_path: &Path) -> Result<()> {
 /// reads and rewrites the whole file twice, which on an album-length M4A is
 /// hundreds of megabytes of avoidable I/O for a few dozen bytes of metadata.
 pub fn delete_gain_tags(file_path: &Path) -> Result<()> {
+    // The tags live in moov, so a file without any is left alone after reading
+    // that alone, instead of being read whole and rebuilt to learn there was
+    // nothing to delete (issue #468).
+    let (undo, rg) = read_gain_tags(file_path)?;
+    if undo.is_empty() && rg.is_empty() {
+        return Ok(());
+    }
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
     let new_data = rebuild_mp4_with_ilst(&data, |existing| {
         create_ilst_box_filtered(&[], existing, |data, pos, header| {
