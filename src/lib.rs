@@ -105,8 +105,8 @@ pub use ape::{
 };
 pub use apply::{
     apply_with_options, predict_apply, write_album_minmax, write_album_minmax_with_layout,
-    write_replaygain_tags_only, AacAlbumInfo, ApplyOptions, ApplyReport, ClippingDetection,
-    TagsOnlyOptions,
+    write_album_minmax_with_options, write_replaygain_tags_only, AacAlbumInfo, AlbumMinmaxOptions,
+    ApplyOptions, ApplyReport, ClippingDetection, TagsOnlyOptions,
 };
 pub use bitrate::{read_bitrate, Bitrate, BitrateMode};
 pub use error::{Error, Result};
