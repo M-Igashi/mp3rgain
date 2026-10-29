@@ -8,7 +8,7 @@ msgstr ""
 "Project-Id-Version: mp3rgui\n"
 "Report-Msgid-Bugs-To: https://github.com/M-Igashi/mp3rgain/issues\n"
 "POT-Creation-Date: 2026-10-26 18:42+0000\n"
-"PO-Revision-Date: 2026-10-29 13:16+0100\n"
+"PO-Revision-Date: 2026-10-29 22:35+0100\n"
 "Last-Translator: M-Igashi\n"
 "Language: de\n"
 "MIME-Version: 1.0\n"
@@ -90,7 +90,7 @@ msgstr "{} Datei(en) ohne gespeicherte Tags werden analysiert..."
 
 #: src/app.rs:1149
 msgid "No track gain values — run Track Analysis first"
-msgstr "Keine Titel-Gain-Werte – zuerst die Titelanalyse ausführen"
+msgstr "Keine Track-Gain-Werte – zuerst die Trackanalyse ausführen"
 
 #: src/app.rs:1391
 msgid "Channel gain only applies to MP3 — selection had no eligible files"
@@ -106,7 +106,7 @@ msgstr "Keine Album-Gain-Werte – zuerst die Albumanalyse ausführen"
 
 #: src/app.rs:1624
 msgid "Analyzing tracks..."
-msgstr "Titel werden analysiert..."
+msgstr "Tracks werden analysiert..."
 
 #: src/app.rs:1625
 msgid "Analyzing album..."
@@ -114,7 +114,7 @@ msgstr "Album wird analysiert..."
 
 #: src/app.rs:1626
 msgid "Applying track gain..."
-msgstr "Titel-Gain wird angewendet..."
+msgstr "Track-Gain wird angewendet..."
 
 #: src/app.rs:1627
 msgid "Applying album gain..."
@@ -199,7 +199,7 @@ msgstr "Analyse"
 
 #: src/ui/menu.rs:86 src/ui/toolbar.rs:24
 msgid "Track Analysis"
-msgstr "Titelanalyse"
+msgstr "Trackanalyse"
 
 #: src/ui/menu.rs:90 src/ui/toolbar.rs:27
 msgid "Album Analysis"
@@ -219,7 +219,7 @@ msgstr "Gain ändern"
 
 #: src/ui/menu.rs:110
 msgid "Apply Track Gain"
-msgstr "Titel-Gain anwenden"
+msgstr "Track-Gain anwenden"
 
 #: src/ui/menu.rs:114
 msgid "Apply Album Gain"
@@ -311,7 +311,7 @@ msgstr "Probelauf"
 
 #: src/ui/options.rs:77
 msgid "Preview Apply Track / Album Gain without modifying any file. The Status column shows the steps that would be applied. CLI -n."
-msgstr "Zeigt vorab, was „Titel-Gain anwenden“ und „Album-Gain anwenden“ bewirken würden, ohne eine Datei zu ändern. Die Spalte Status zeigt die Schritte, die angewendet würden. CLI-Option -n."
+msgstr "Zeigt vorab, was „Track-Gain anwenden“ und „Album-Gain anwenden“ bewirken würden, ohne eine Datei zu ändern. Die Spalte Status zeigt die Schritte, die angewendet würden. CLI-Option -n."
 
 #: src/ui/options.rs:88
 msgid "Use stored tags"
@@ -319,7 +319,7 @@ msgstr "Gespeicherte Tags verwenden"
 
 #: src/ui/options.rs:91
 msgid "Apply Track / Album Gain from stored REPLAYGAIN_* tags instead of re-analyzing; only files without usable tags are rescanned. Album Gain reuses tags only when every file in the album carries a consistent set; any gap rescans the whole album. CLI -s R. RG 1.0 mode only."
-msgstr "Wendet Titel- und Album-Gain anhand gespeicherter REPLAYGAIN_*-Tags an, statt neu zu analysieren; nur Dateien ohne verwendbare Tags werden neu analysiert. Album-Gain verwendet die Tags nur, wenn jede Datei des Albums einen einheitlichen Satz enthält; fehlt etwas, wird das ganze Album neu analysiert. CLI-Option -s R. Nur im Modus RG 1.0."
+msgstr "Wendet Track- und Album-Gain anhand gespeicherter REPLAYGAIN_*-Tags an, statt neu zu analysieren; nur Dateien ohne verwendbare Tags werden neu analysiert. Album-Gain verwendet die Tags nur, wenn jede Datei des Albums einen einheitlichen Satz enthält; fehlt etwas, wird das ganze Album neu analysiert. CLI-Option -s R. Nur im Modus RG 1.0."
 
 #. What one album is, for Album Analysis / Apply Album Gain.
 #. The CLI's --album-by, in the same three units (issue #338).
@@ -345,7 +345,7 @@ msgstr "Ein Album pro Veröffentlichung, gelesen aus ALBUMARTIST / ALBUM (und MU
 
 #: src/ui/options.rs:123
 msgid "Single album"
-msgstr "Ein Album"
+msgstr "Einzelnes Album"
 
 #: src/ui/options.rs:126
 msgid "Treat every loaded file as one album, ignoring folders. Select rows first to group just those, which is how to handle a release that has no usable tags. CLI -a."
@@ -444,11 +444,11 @@ msgstr "Album-Lautst."
 
 #: src/ui/table.rs:101
 msgid "Track Analysis: BS.1770 integrated loudness in LUFS. Find Max Amplitude: available headroom in dB before clipping. Click to sort."
-msgstr "Titelanalyse: integrierte Lautheit nach BS.1770 in LUFS. Maximale Amplitude ermitteln: verfügbarer Headroom in dB bis zum Clipping. Zum Sortieren klicken."
+msgstr "Trackanalyse: integrierte Lautheit nach BS.1770 in LUFS. Maximale Amplitude ermitteln: verfügbarer Headroom in dB bis zum Clipping. Zum Sortieren klicken."
 
 #: src/ui/table.rs:106
 msgid "Track Analysis: current loudness relative to ReplayGain reference (89 dB). Find Max Amplitude: available headroom in dB before clipping. Click to sort."
-msgstr "Titelanalyse: aktuelle Lautstärke relativ zur ReplayGain-Referenz (89 dB). Maximale Amplitude ermitteln: verfügbarer Headroom in dB bis zum Clipping. Zum Sortieren klicken."
+msgstr "Trackanalyse: aktuelle Lautstärke relativ zur ReplayGain-Referenz (89 dB). Maximale Amplitude ermitteln: verfügbarer Headroom in dB bis zum Clipping. Zum Sortieren klicken."
 
 #: src/ui/table.rs:144
 msgid "Path/File"
@@ -460,7 +460,7 @@ msgstr "Clip"
 
 #: src/ui/table.rs:153 src/ui/toolbar.rs:36
 msgid "Track Gain"
-msgstr "Titel-Gain"
+msgstr "Track-Gain"
 
 #: src/ui/table.rs:156
 msgid "Clip(T)"
@@ -476,7 +476,7 @@ msgstr "Clip(A)"
 
 #: src/ui/table.rs:168
 msgid "Stored RG"
-msgstr "RG-Tags"
+msgstr "Gespeichertes RG"
 
 #: src/ui/table.rs:169
 msgid "Existing ReplayGain/undo tags read from the file. Run Analysis > Check Stored Tags to populate. Hover a cell for full tag details."
@@ -699,19 +699,19 @@ msgstr "Gespeicherte Tags für {} Datei(en) geprüft"
 
 #: src/worker.rs:981
 msgid "Applied track gain on {} file(s)"
-msgstr "Titel-Gain auf {} Datei(en) angewendet"
+msgstr "Track-Gain auf {} Datei(en) angewendet"
 
 #: src/worker.rs:984
 msgid "Applied track gain on {} file(s), {} error(s)"
-msgstr "Titel-Gain auf {} Datei(en) angewendet, {} Fehler"
+msgstr "Track-Gain auf {} Datei(en) angewendet, {} Fehler"
 
 #: src/worker.rs:989
 msgid "Dry-ran track gain on {} file(s)"
-msgstr "Titel-Gain für {} Datei(en) probeweise berechnet"
+msgstr "Track-Gain für {} Datei(en) probeweise berechnet"
 
 #: src/worker.rs:992
 msgid "Dry-ran track gain on {} file(s), {} error(s)"
-msgstr "Titel-Gain für {} Datei(en) probeweise berechnet, {} Fehler"
+msgstr "Track-Gain für {} Datei(en) probeweise berechnet, {} Fehler"
 
 #: src/worker.rs:997
 msgid "Applied manual gain on {} file(s)"
