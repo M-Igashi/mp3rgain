@@ -90,6 +90,10 @@ pub enum WorkerEvent {
         /// AAC frames left at their original gain because they could not be
         /// parsed (issue #402).
         unparsed_frames: u32,
+        /// One channel moved and the other did not (Apply Channel Gain),
+        /// which leaves the file at no single level the row can show
+        /// (issue #471).
+        one_channel: bool,
     },
     /// Dry-run analog of `FileApplied`: predict_apply succeeded, no bytes
     /// changed. UI shows "Would apply N steps" in the row status.
@@ -130,15 +134,17 @@ pub enum WorkerEvent {
         message: String,
     },
 
-    /// Undo succeeded on `idx`. `steps_undone` is the left-channel gain
-    /// step value that was stored in the undo tag — i.e. the cumulative
-    /// gain that was applied to this file across previous applies, and
-    /// that the undo just rolled back. The UI uses it to reverse the
-    /// post-apply display shift so the volume / gain columns return to
-    /// their pre-apply values without forcing a re-analyze (issue #171).
+    /// Undo succeeded on `idx`. `steps_undone` is the gain step value that
+    /// was stored in the undo tag — i.e. the cumulative gain that was
+    /// applied to this file across previous applies, and that the undo just
+    /// rolled back. The UI uses it to reverse the post-apply display shift so
+    /// the volume / gain columns return to their pre-apply values without
+    /// forcing a re-analyze (issue #171). `None` when the two channels were
+    /// rolled back by different amounts, which no single shift describes
+    /// (issue #471).
     FileUndone {
         idx: usize,
-        steps_undone: i32,
+        steps_undone: Option<i32>,
     },
     /// `frames == 0` outcome: undo ran but the file had no recorded changes
     /// to roll back. Kept separate so the row status reads "no changes" rather
@@ -472,6 +478,7 @@ pub fn spawn_apply(
                 send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
                 let album_member = writes_album_minmax && job.album_info.is_some();
+                let one_channel = job.channel.is_some();
                 let opts = build_apply_options(
                     job.steps,
                     job.track_result,
@@ -513,6 +520,7 @@ pub fn spawn_apply(
                                     actual_steps: report.actual_steps,
                                     from_stored: job.from_stored,
                                     unparsed_frames: report.unparsed_frames,
+                                    one_channel,
                                 },
                             );
                         }
@@ -629,7 +637,11 @@ pub fn spawn_undo(
                 // UI how many steps to reverse on the display. We can't read
                 // it after undo because undo_gain_auto deletes the tag (issue #171).
                 let steps_undone =
-                    mp3rgain::read_undo_steps(&path, ui_opts.tag_layout).unwrap_or(0);
+                    match mp3rgain::read_undo_channel_steps(&path, ui_opts.tag_layout) {
+                        Some((left, right)) if left != right => None,
+                        Some((left, _)) => Some(left),
+                        None => Some(0),
+                    };
 
                 let result = mp3rgain::undo_gain_auto(&path, ui_opts.tag_layout);
                 match result {

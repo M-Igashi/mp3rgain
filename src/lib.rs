@@ -583,26 +583,32 @@ pub fn expand_audio_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
 /// matches what `undo_gain_auto` would actually reverse. Returns `None` if the
 /// tag is absent or unreadable.
 pub fn read_undo_steps(file_path: &Path, layout: TagLayout) -> Option<i32> {
+    read_undo_channel_steps(file_path, layout).map(|(left, _)| left)
+}
+
+/// [`read_undo_steps`] for both channels, as `(left, right)`. The two differ
+/// only on an MP3 one of whose channels was adjusted on its own (`-l`), which
+/// leaves the file at no single level a caller could shift a reading by.
+pub fn read_undo_channel_steps(file_path: &Path, layout: TagLayout) -> Option<(i32, i32)> {
     // MP3 stores the undo delta (the value to re-add to restore the
     // original), so the applied gain is its negation.
+    let applied = |undo: &str| {
+        let (left, right) = ape::parse_undo_values(Some(undo));
+        (left.wrapping_neg(), right.wrapping_neg())
+    };
     let from_ape = || {
-        ape::read_ape_tag_from_file(file_path)
-            .ok()
-            .flatten()
-            .and_then(|t| t.get_undo_gain())
-            .map(i32::wrapping_neg)
+        let tag = ape::read_ape_tag_from_file(file_path).ok().flatten()?;
+        tag.get(TAG_MP3GAIN_UNDO).map(applied)
     };
     let from_id3v2 = || {
         let rg = id3v2::read_id3v2_replaygain(file_path).ok()?;
-        rg.undo
-            .as_deref()
-            .map(|u| ape::parse_undo_values(Some(u)).0.wrapping_neg())
+        rg.undo.as_deref().map(applied)
     };
     match AudioFileType::from_path(file_path) {
         AudioFileType::Aac => {
             let undo_tags = mp4meta::read_undo_tags(file_path).ok()?;
             // AAC already stores the applied gain.
-            return Some(ape::parse_undo_values(undo_tags.undo()).0);
+            return Some(ape::parse_undo_values(undo_tags.undo()));
         }
         // Raw ADTS keeps the MP3 undo-delta convention, in ID3v2 only.
         AudioFileType::Adts => return from_id3v2(),
@@ -685,6 +691,22 @@ mod undo_steps_tests {
         // No tag at all stays None rather than reading as 0.
         let path = write_temp("untagged.mp3", &vec![0u8; 8_000]);
         assert_eq!(read_undo_steps(&path, TagLayout::Split), None);
+    }
+
+    /// Issue #471: after `-l` the channels carry different values, and the
+    /// left one alone hides it. What `-l 1 2` records reads back as (0, 2).
+    #[test]
+    fn read_undo_channel_steps_reports_both_channels() {
+        let mut tag = ape::ApeTag::new();
+        tag.set_undo_gain(0, -2, false);
+        let data = ape::replace_ape_tag(&vec![0u8; 8_000], &tag);
+        let path = write_temp("right_plus2.mp3", &data);
+
+        assert_eq!(
+            read_undo_channel_steps(&path, TagLayout::Split),
+            Some((0, 2))
+        );
+        assert_eq!(read_undo_steps(&path, TagLayout::Split), Some(0));
     }
 }
 
