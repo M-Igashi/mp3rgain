@@ -1,13 +1,14 @@
 # Translators:
 # M-Igashi (https://github.com/M-Igashi)
 # Claude Code (https://claude.com/claude-code)
+# Rosenheim23 (https://github.com/Rosenheim23)
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: mp3rgui\n"
 "Report-Msgid-Bugs-To: https://github.com/M-Igashi/mp3rgain/issues\n"
 "POT-Creation-Date: 2026-10-26 18:42+0000\n"
-"PO-Revision-Date: 2026-10-29 00:35+0100\n"
+"PO-Revision-Date: 2026-10-29 13:16+0100\n"
 "Last-Translator: M-Igashi\n"
 "Language: de\n"
 "MIME-Version: 1.0\n"
@@ -622,7 +623,7 @@ msgstr "Betroffene Dateien: {}"
 
 #: src/ui/mod.rs:170
 msgid "1 step ≈ 1.5 dB. Negative values lower the volume."
-msgstr "1 Schritt ≈ 1,5 dB. Negative Werte verringern die Lautstärke."
+msgstr "1 Schritt ≈ 1.5 dB. Negative Werte verringern die Lautstärke."
 
 #: src/ui/mod.rs:188
 msgid "Delete stored tags"
