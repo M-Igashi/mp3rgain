@@ -45,6 +45,7 @@ What ships today:
 - `-s c` shows an album range that `-a -s i` stored in ID3v2 under the default layout too
 - `-g -o tsv` prints `-` for a `global_gain` range it did not scan, and the steps `-k` actually applied
 - The M4A line of `-r` and `-a` shows the gain applied, the album gain under `-a`
+- An ID3v2 write keeps the tag's padding and rewrites the tag in place when it fits, instead of moving the audio after it; a tag that grows gets 2 KB of padding (#467)
 - A crafted `MP3GAIN_UNDO` can no longer overflow the undo arithmetic
 - Library: without the `aac` feature, the `*_auto` functions refuse AAC instead of running the MP3 path over an M4A (#149)
 - A ReplayGain re-run that needs no change syncs each file once, and the album range reuses the apply's scan
