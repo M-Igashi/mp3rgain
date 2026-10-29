@@ -47,6 +47,7 @@ What ships today:
 - A crafted `MP3GAIN_UNDO` can no longer overflow the undo arithmetic
 - Library: without the `aac` feature, the `*_auto` functions refuse AAC instead of running the MP3 path over an M4A (#149)
 - A ReplayGain re-run that needs no change syncs each file once, and the album range reuses the apply's scan
+- mp3rgui: a capped dry run below zero reads "-1 steps (capped)" rather than "+-1", and manual and channel gain say so while they run (#466)
 - Cleanup from a whole-codebase review, with no other change in behaviour
 
 ## Release history

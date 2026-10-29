@@ -983,9 +983,10 @@ fn send(tx: &Sender<WorkerEvent>, ctx: &egui::Context, event: WorkerEvent) {
     ctx.request_repaint();
 }
 
-/// Which apply finished. The status line is one sentence so a translation
-/// can reorder it; the English matches the old "<verb> <action> on N file(s)".
-#[derive(Clone, Copy)]
+/// Which apply is running or finished. The status line is one sentence so a
+/// translation can reorder it; the English matches the old "<verb> <action>
+/// on N file(s)".
+#[derive(Clone, Copy, PartialEq)]
 pub enum GainPhrase {
     Track,
     Manual,

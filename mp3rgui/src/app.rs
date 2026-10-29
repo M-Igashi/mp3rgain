@@ -1,6 +1,8 @@
-use crate::worker::{self, ApplyJob, ApplyOptionsUi, StoredTagsView, WorkerEvent, WorkerHandle};
+use crate::worker::{
+    self, ApplyJob, ApplyOptionsUi, GainPhrase, StoredTagsView, WorkerEvent, WorkerHandle,
+};
 use mp3rgain::replaygain::{
-    self, AnalysisMode, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB,
+    AnalysisMode, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB,
 };
 use mp3rgain::{
     apply_gain_to_peak, db_to_steps, read_album_tags, would_clip, AacAlbumInfo, AlbumLabel,
@@ -53,8 +55,10 @@ impl FileStatus {
                 steps,
                 clipping_prevented,
             } => {
+                // The sign is formatted here: Prevent clipping can cap a
+                // file that already clips below zero (issue #466).
                 if *clipping_prevented {
-                    tr!("Dry run: +{} steps (capped)", steps)
+                    tr!("Dry run: {} steps (capped)", format!("{:+}", steps))
                 } else {
                     tr!("Dry run: {} steps", format!("{:+}", steps))
                 }
@@ -311,8 +315,9 @@ pub enum SortColumn {
 enum WorkerKind {
     TrackAnalysis,
     AlbumAnalysis,
-    TrackApply,
-    AlbumApply,
+    /// Any gain apply. The phrase names it in the running status and in the
+    /// summary, so the two cannot disagree (issue #466).
+    Apply(GainPhrase),
     Undo,
     CheckTags,
     MaxAmplitude,
@@ -989,10 +994,7 @@ impl Mp3rgainApp {
     }
 
     pub fn start_analyze_tracks(&mut self, ctx: &egui::Context) {
-        if self.files.is_empty() || self.is_processing() || !replaygain::is_available() {
-            if !replaygain::is_available() {
-                self.status_message = tr!("ReplayGain feature not available");
-            }
+        if self.files.is_empty() || self.is_processing() {
             return;
         }
 
@@ -1018,10 +1020,7 @@ impl Mp3rgainApp {
     }
 
     pub fn start_analyze_album(&mut self, ctx: &egui::Context) {
-        if self.files.is_empty() || self.is_processing() || !replaygain::is_available() {
-            if !replaygain::is_available() {
-                self.status_message = tr!("ReplayGain feature not available");
-            }
+        if self.files.is_empty() || self.is_processing() {
             return;
         }
 
@@ -1134,22 +1133,27 @@ impl Mp3rgainApp {
             self.status_message = tr!("No track gain values — run Track Analysis first");
             return;
         }
+        self.start_apply(ctx, GainPhrase::Track, jobs, Vec::new());
+    }
 
-        for &job_idx in jobs.iter().map(|j| &j.idx) {
-            self.files[job_idx].status = FileStatus::Pending;
+    /// Mark the jobs' rows pending and start the apply worker, which reports
+    /// as `phrase` while it runs and when it is done.
+    fn start_apply(
+        &mut self,
+        ctx: &egui::Context,
+        phrase: GainPhrase,
+        jobs: Vec<ApplyJob>,
+        album_minmax_groups: Vec<Vec<PathBuf>>,
+    ) {
+        for job in &jobs {
+            self.files[job.idx].status = FileStatus::Pending;
         }
         let count = jobs.len();
         let ui_opts = self.apply_options;
         self.begin_worker(
-            WorkerKind::TrackApply,
+            WorkerKind::Apply(phrase),
             count,
-            worker::spawn_apply(
-                ctx.clone(),
-                jobs,
-                worker::GainPhrase::Track,
-                ui_opts,
-                Vec::new(),
-            ),
+            worker::spawn_apply(ctx.clone(), jobs, phrase, ui_opts, album_minmax_groups),
         );
     }
 
@@ -1326,23 +1330,7 @@ impl Mp3rgainApp {
         if jobs.is_empty() {
             return;
         }
-
-        for &job_idx in jobs.iter().map(|j| &j.idx) {
-            self.files[job_idx].status = FileStatus::Pending;
-        }
-        let count = jobs.len();
-        let ui_opts = self.apply_options;
-        self.begin_worker(
-            WorkerKind::TrackApply,
-            count,
-            worker::spawn_apply(
-                ctx.clone(),
-                jobs,
-                worker::GainPhrase::Manual,
-                ui_opts,
-                Vec::new(),
-            ),
-        );
+        self.start_apply(ctx, GainPhrase::Manual, jobs, Vec::new());
     }
 
     /// `-l`: apply gain to a single channel of the targeted files. AAC files,
@@ -1375,23 +1363,7 @@ impl Mp3rgainApp {
                 tr!("Channel gain only applies to MP3 — selection had no eligible files");
             return;
         }
-
-        for &job_idx in jobs.iter().map(|j| &j.idx) {
-            self.files[job_idx].status = FileStatus::Pending;
-        }
-        let count = jobs.len();
-        let ui_opts = self.apply_options;
-        self.begin_worker(
-            WorkerKind::TrackApply,
-            count,
-            worker::spawn_apply(
-                ctx.clone(),
-                jobs,
-                worker::GainPhrase::Channel,
-                ui_opts,
-                Vec::new(),
-            ),
-        );
+        self.start_apply(ctx, GainPhrase::Channel, jobs, Vec::new());
     }
 
     /// Undo gain changes on selected files (or all files when no selection).
@@ -1548,11 +1520,6 @@ impl Mp3rgainApp {
             return;
         }
 
-        for &job_idx in jobs.iter().map(|j| &j.idx) {
-            self.files[job_idx].status = FileStatus::Pending;
-        }
-        let count = jobs.len();
-        let ui_opts = self.apply_options;
         // The album-wide MINMAX range is stamped per album, so the worker is
         // given the grouping rather than re-deriving it: with three grouping
         // modes (issue #338) a second copy of that decision would drift.
@@ -1560,17 +1527,7 @@ impl Mp3rgainApp {
             .into_iter()
             .map(|g| g.rows.into_iter().map(|(_, path)| path).collect())
             .collect();
-        self.begin_worker(
-            WorkerKind::AlbumApply,
-            count,
-            worker::spawn_apply(
-                ctx.clone(),
-                jobs,
-                worker::GainPhrase::Album,
-                ui_opts,
-                album_minmax_groups,
-            ),
-        );
+        self.start_apply(ctx, GainPhrase::Album, jobs, album_minmax_groups);
     }
 
     pub fn is_processing(&self) -> bool {
@@ -1590,8 +1547,10 @@ impl Mp3rgainApp {
         self.status_message = match kind {
             WorkerKind::TrackAnalysis => tr!("Analyzing tracks..."),
             WorkerKind::AlbumAnalysis => tr!("Analyzing album..."),
-            WorkerKind::TrackApply => tr!("Applying track gain..."),
-            WorkerKind::AlbumApply => tr!("Applying album gain..."),
+            WorkerKind::Apply(GainPhrase::Track) => tr!("Applying track gain..."),
+            WorkerKind::Apply(GainPhrase::Album) => tr!("Applying album gain..."),
+            WorkerKind::Apply(GainPhrase::Manual) => tr!("Applying manual gain..."),
+            WorkerKind::Apply(GainPhrase::Channel) => tr!("Applying channel gain..."),
             WorkerKind::Undo => tr!("Undoing gain changes..."),
             WorkerKind::CheckTags => tr!("Checking stored tags..."),
             WorkerKind::MaxAmplitude => tr!("Finding max amplitude..."),
@@ -1652,9 +1611,7 @@ impl Mp3rgainApp {
                 let kind = self.worker_kind();
                 if let Some(file) = self.files.get_mut(idx) {
                     match kind {
-                        Some(WorkerKind::TrackApply)
-                        | Some(WorkerKind::AlbumApply)
-                        | Some(WorkerKind::DeleteTags) => {
+                        Some(WorkerKind::Apply(_)) | Some(WorkerKind::DeleteTags) => {
                             file.status = FileStatus::Applying;
                         }
                         Some(WorkerKind::Undo) => {
