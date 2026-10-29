@@ -255,6 +255,38 @@ impl FileEntry {
         self.measurement = measurement;
         self.applied_db = 0.0;
     }
+
+    /// Account for an apply that wrote `steps`, so the columns show the file
+    /// as it is now without a rescan (issue #160). An apply to one channel
+    /// leaves the file at no level a shift could describe, so the row drops
+    /// its numbers until the file is analyzed again (issue #471): shifted as
+    /// if both channels had moved, they also fed the next apply a wrong gain.
+    fn record_apply(&mut self, steps: i32, one_channel: bool) {
+        if one_channel {
+            self.forget_measurement();
+        } else {
+            self.applied_db += mp3rgain::steps_to_db(steps);
+        }
+    }
+
+    /// Account for an undo that rolled back `steps`, the cumulative gain its
+    /// record held (issues #171, #315). Subtract rather than reset: the
+    /// measurement may predate an earlier apply that the undo also reverted.
+    /// `None` means the channels were rolled back by different amounts, which
+    /// no shift describes either (issue #471).
+    fn record_undo(&mut self, steps: Option<i32>) {
+        match steps {
+            Some(steps) => self.applied_db -= mp3rgain::steps_to_db(steps),
+            None => self.forget_measurement(),
+        }
+    }
+
+    /// Drop the measurement and the album values that came with it.
+    fn forget_measurement(&mut self) {
+        self.set_measurement(None);
+        self.album_info = None;
+        self.album_label = None;
+    }
 }
 
 /// State for the "Apply Manual Gain" modal. `open` toggles visibility;
@@ -1668,6 +1700,7 @@ impl Mp3rgainApp {
                 actual_steps,
                 from_stored,
                 unparsed_frames,
+                one_channel,
             } => {
                 if let Some(file) = self.files.get_mut(idx) {
                     // Issue #302: make it visible which rows were applied
@@ -1682,10 +1715,7 @@ impl Mp3rgainApp {
                     };
                     // File contents changed; cached tag snapshot is stale.
                     file.stored_tags = None;
-                    // The columns are derived from `applied_db`, so this one
-                    // line shows the post-apply state without rescanning
-                    // (issue #160).
-                    file.applied_db += mp3rgain::steps_to_db(actual_steps);
+                    file.record_apply(actual_steps, one_channel);
                 }
             }
             WorkerEvent::FileApplyDryRun {
@@ -1709,12 +1739,7 @@ impl Mp3rgainApp {
                 if let Some(file) = self.files.get_mut(idx) {
                     file.status = FileStatus::Done;
                     file.stored_tags = None;
-                    // `steps_undone` is the cumulative gain the undo rolled
-                    // back (issue #315), so subtracting it lines the row up
-                    // with the file again (issue #171). Subtract rather than
-                    // reset: the measurement may predate an earlier apply
-                    // that the undo also reverted.
-                    file.applied_db -= mp3rgain::steps_to_db(steps_undone);
+                    file.record_undo(steps_undone);
                 }
             }
             WorkerEvent::FileUndoSkipped { idx } => {
@@ -2075,13 +2100,13 @@ mod tests {
         assert!(close(before.album_volume, Some(93.0)));
         assert!(close(before.album_gain, Some(-4.0)));
 
-        file.applied_db += steps_to_db(-4);
+        file.record_apply(-4, false);
         let after = file.display(89.0, AnalysisMode::Rg1);
         assert!(close(after.volume, Some(95.0 + steps_to_db(-4))));
         assert!(close(after.track_gain, Some(-6.0 - steps_to_db(-4))));
         assert!(close(after.album_gain, Some(-4.0 - steps_to_db(-4))));
 
-        file.applied_db -= steps_to_db(-4);
+        file.record_undo(Some(-4));
         let restored = file.display(89.0, AnalysisMode::Rg1);
         assert!(close(restored.volume, before.volume));
         assert!(close(restored.track_gain, before.track_gain));
@@ -2090,6 +2115,35 @@ mod tests {
         assert_eq!(restored.clipping, before.clipping);
         assert_eq!(restored.track_clip, before.track_clip);
         assert_eq!(restored.album_clip, before.album_clip);
+    }
+
+    /// Issue #471: a channel apply, and an undo that rolls the channels back
+    /// by different amounts, leave the file at no single level. The row drops
+    /// its numbers instead of showing the whole file 3 dB off, which Apply
+    /// Track Gain would then have turned into 2 steps too few.
+    #[test]
+    fn one_channel_changes_drop_the_measurement() {
+        let with_album = || {
+            let mut file = analyzed(-6.0, 0.5);
+            file.album_info = Some(AacAlbumInfo {
+                album_gain_db: -4.0,
+                album_peak: 0.7,
+            });
+            file.album_label = Some("Album".to_string());
+            file
+        };
+        let empty = RowDisplay::default();
+
+        let mut file = with_album();
+        file.record_apply(2, true);
+        assert!(file.measurement.is_none() && file.album_info.is_none());
+        assert_eq!(file.display(89.0, AnalysisMode::Rg1), empty);
+        assert!(file.apply_track_result().is_none());
+
+        let mut file = with_album();
+        file.record_undo(None);
+        assert!(file.measurement.is_none() && file.album_label.is_none());
+        assert_eq!(file.display(89.0, AnalysisMode::Rg1), empty);
     }
 
     #[test]
