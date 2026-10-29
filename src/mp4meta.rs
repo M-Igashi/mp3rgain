@@ -739,6 +739,30 @@ pub(crate) fn update_mp4_undo_metadata(data: &[u8], tags: &UndoTags) -> Result<V
     rebuild_mp4_with_ilst(data, make_ilst)
 }
 
+/// [`update_mp4_undo_metadata`] followed, when `rg` is given, by
+/// [`update_mp4_metadata`], as one rebuild with the same result: the undo
+/// items go after the items kept and the ReplayGain items after them. Two
+/// rebuilds held three copies of the file during the second one and walked
+/// the chunk offsets twice (issue #469).
+#[cfg(feature = "aac")]
+pub(crate) fn update_mp4_gain_metadata(
+    data: &[u8],
+    undo: &UndoTags,
+    rg: Option<&ReplayGainTags>,
+) -> Result<Vec<u8>> {
+    let mut new_tags = undo.to_freeform_tags();
+    if let Some(rg) = rg {
+        new_tags.extend(rg.to_freeform_tags());
+    }
+    let replaced = |data: &[u8], pos: usize, header: &BoxHeader| {
+        is_undo_freeform(data, pos, header)
+            || (rg.is_some() && is_replaygain_freeform(data, pos, header))
+    };
+    rebuild_mp4_with_ilst(data, |existing| {
+        create_ilst_box_filtered(&new_tags, existing, replaced)
+    })
+}
+
 /// Common logic for rebuilding MP4 file with updated ilst content.
 /// `make_ilst` takes existing ilst content (or empty) and returns the new ilst box.
 fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl Fn(&[u8]) -> Vec<u8>) -> Result<Vec<u8>> {
@@ -1866,6 +1890,80 @@ mod tests {
         let untagged = update_mp4_undo_metadata(&tagged, &UndoTags::default()).unwrap();
         let untagged = update_mp4_metadata(&untagged, &ReplayGainTags::default()).unwrap();
         assert_eq!(untagged, original);
+    }
+
+    /// Issue #469: the single rebuild an AAC apply or undo now makes gives the
+    /// bytes of the undo rebuild and the ReplayGain rebuild it replaces, over
+    /// every metadata path, items of both kinds and others, a pre-#363 item,
+    /// and a `moov` in front of `mdat`, whose chunk offsets move.
+    #[cfg(feature = "aac")]
+    #[test]
+    fn test_gain_metadata_rebuild_matches_two_rebuilds() {
+        let item = |name: &str, value: &str| {
+            serialize_freeform_tag(&FreeformTag::new(
+                ITUNES_NAMESPACE.to_string(),
+                name.to_string(),
+                value.to_string(),
+            ))
+        };
+        let mut legacy_rg = item(RG_TRACK_PEAK, "0.500000");
+        let at = legacy_rg.windows(4).position(|w| w == b"data").unwrap() + 4;
+        legacy_rg[at..at + 8].copy_from_slice(&SWAPPED_DATA_HEADER);
+
+        // stco's one chunk offset points at mdat's payload, behind moov.
+        let file = |udta: Vec<u8>| {
+            let ftyp = mp4_box(b"ftyp", b"M4A \0\0\0\0M4A ");
+            let stco = |offset: u32| {
+                let mut content = vec![0, 0, 0, 0, 0, 0, 0, 1];
+                content.extend(offset.to_be_bytes());
+                mp4_box(b"stco", &content)
+            };
+            let moov = |offset: u32| {
+                let stbl = mp4_box(b"stbl", &stco(offset));
+                let trak = mp4_box(b"trak", &mp4_box(b"mdia", &mp4_box(b"minf", &stbl)));
+                let mut content = mp4_box(b"mvhd", &[0u8; 100]);
+                content.extend(trak);
+                content.extend(&udta);
+                mp4_box(b"moov", &content)
+            };
+            let offset = (ftyp.len() + moov(0).len() + 8) as u32;
+            [ftyp, moov(offset), mp4_box(b"mdat", &[0u8; 16])].concat()
+        };
+        let ilst = |items: &[&[u8]]| mp4_box(b"ilst", &items.concat());
+        let originals = [
+            file(Vec::new()),
+            file(mp4_box(b"udta", &[])),
+            file(create_udta_box(&create_meta_box(&ilst(&[])))),
+            file(create_udta_box(&create_meta_box(&ilst(&[
+                &item("Label", "x"),
+                &item(RG_TRACK_GAIN, "-1.000000 dB"),
+                &item(UNDO_TAG, "+001,+001,N"),
+                &legacy_rg,
+                &item(MINMAX_TAG, "100,200"),
+                &item("Other", "y"),
+            ])))),
+            file(create_udta_box(&create_meta_box(&ilst(&[
+                &item(UNDO_TAG, "+001,+001,N"),
+                &item(RG_TRACK_GAIN, "-1.000000 dB"),
+            ])))),
+        ];
+
+        let undo = UndoTags::new(Some("+003,+003,N".to_string()), Some("98,198".to_string()));
+        let mut rg = ReplayGainTags::default();
+        rg.set_track(-2.0, 0.25);
+        let none = (UndoTags::default(), Some(ReplayGainTags::default()));
+        let cases = [(undo.clone(), Some(rg)), (undo, None), none];
+
+        for original in &originals {
+            for (undo, rg) in &cases {
+                let mut two = update_mp4_undo_metadata(original, undo).unwrap();
+                if let Some(rg) = rg {
+                    two = update_mp4_metadata(&two, rg).unwrap();
+                }
+                let one = update_mp4_gain_metadata(original, undo, rg.as_ref()).unwrap();
+                assert_eq!(one, two, "{undo:?} {rg:?}");
+            }
+        }
     }
 
     #[test]
