@@ -417,6 +417,31 @@ fn cap_album_jobs(jobs: &mut [ApplyJob], groups: &[AlbumGroup]) {
     }
 }
 
+/// `read_album_tags` for every row, in row order, split across the cores.
+/// Grouping by tags runs on the UI thread, and the metadata probe, cover art
+/// included, is what it spends its time on: 70 ms per 1000 files on a local
+/// disk read one after another, 25 ms on eight threads, and far more on a
+/// network share (issue #470).
+fn read_album_tags_in_parallel(rows: &[(usize, PathBuf)]) -> Vec<Option<AlbumTags>> {
+    let per_thread = rows.len().div_ceil(worker::available_threads()).max(1);
+    std::thread::scope(|scope| {
+        let parts: Vec<_> = rows
+            .chunks(per_thread)
+            .map(|part| {
+                scope.spawn(move || {
+                    part.iter()
+                        .map(|(_, path)| read_album_tags(path))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        parts
+            .into_iter()
+            .flat_map(|part| part.join().expect("album tag reader panicked"))
+            .collect()
+    })
+}
+
 /// Split rows into albums. A free function so it can be tested without an
 /// `Mp3rgainApp`, which needs an eframe context to exist.
 fn group_albums(rows: Vec<(usize, PathBuf)>, grouping: AlbumGrouping) -> Vec<AlbumGroup> {
@@ -454,8 +479,8 @@ fn group_albums(rows: Vec<(usize, PathBuf)>, grouping: AlbumGrouping) -> Vec<Alb
             let mut order: Vec<TagGroupKey> = Vec::new();
             type Pending = (Option<AlbumLabel>, Vec<AlbumTags>, Vec<(usize, PathBuf)>);
             let mut groups: HashMap<TagGroupKey, Pending> = HashMap::new();
-            for (idx, path) in rows {
-                let tags = read_album_tags(&path);
+            let all_tags = read_album_tags_in_parallel(&rows);
+            for ((idx, path), tags) in rows.into_iter().zip(all_tags) {
                 let (key, label) = match tags.as_ref().and_then(AlbumTags::release_key) {
                     Some(release) => (
                         TagGroupKey::Release(release),

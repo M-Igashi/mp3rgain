@@ -947,7 +947,7 @@ fn build_apply_options(
 }
 
 /// Worker thread count: available cores, falling back to 1.
-fn available_threads() -> usize {
+pub(crate) fn available_threads() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)

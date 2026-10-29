@@ -49,6 +49,7 @@ What ships today:
 - Library: without the `aac` feature, the `*_auto` functions refuse AAC instead of running the MP3 path over an M4A (#149)
 - A ReplayGain re-run that needs no change syncs each file once, and the album range reuses the apply's scan
 - mp3rgui: a capped dry run below zero reads "-1 steps (capped)" rather than "+-1", and manual and channel gain say so while they run (#466)
+- mp3rgui: the CJK fallback font takes half the memory, and grouping albums by tags reads the files in parallel (#470)
 - Cleanup from a whole-codebase review, with no other change in behaviour
 
 ## Release history
