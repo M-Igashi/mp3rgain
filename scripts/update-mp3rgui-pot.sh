@@ -31,7 +31,7 @@ trap 'rm -f "$tmp"' EXIT
 # mp3rgui translation template.
 #
 # Translate only the msgstr lines. Leave msgid and msgctxt unchanged.
-# Keep placeholders such as {count}, {n} and {} exactly as they appear;
+# Keep placeholders such as {count}, {n}, and {} exactly as they appear;
 # named ones may be reordered. An empty msgstr shows the English text.
 # Do not mark an entry fuzzy: that flag is compiled as a finished translation.
 # Name yourself in your language file, in a header comment:

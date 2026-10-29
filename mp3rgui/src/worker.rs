@@ -1,5 +1,5 @@
-//! Background workers for the four batch operations (analyze tracks,
-//! analyze album, apply track gain, apply album gain).
+//! Background workers for the GUI's batch operations: analysis, apply, undo,
+//! tag checks and deletion, and the max-amplitude scan.
 //!
 //! The pre-#152 GUI ran these synchronously on the egui main thread, so
 //! the window froze and `total_progress` / `status_message` mutations
@@ -426,7 +426,8 @@ pub fn spawn_album_analysis(
     WorkerHandle { rx, cancel }
 }
 
-/// Spawn the apply worker (used by both Track Gain and Album Gain).
+/// Spawn the apply worker, used by every gain apply: track, album, manual,
+/// and channel gain.
 ///
 /// Jobs run through [`run_job_pool`], matching the parallel Track Analysis
 /// path so wall time scales with cores (issue #158 follow-up comment). Each
@@ -916,6 +917,9 @@ fn build_apply_options(
     ui_opts: ApplyOptionsUi,
 ) -> ApplyOptions {
     let mut opts = ApplyOptions::new(steps);
+    // The analysis has already classified the container, which the apply
+    // would otherwise probe again, as the CLI passes it too.
+    opts.file_type = track_result.as_ref().map(ReplayGainResult::file_type);
     opts.track_result = track_result;
     opts.album_info = album_info;
     opts.channel = channel;

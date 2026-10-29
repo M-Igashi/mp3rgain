@@ -15,8 +15,8 @@
 
 use crate::analysis::ChannelMode;
 use crate::ape::{
-    parse_undo_values, parse_undo_wrap, read_ape_tag, replace_ape_tag, ApeReplayGain,
-    TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
+    accumulate_undo, parse_undo_values, parse_undo_wrap, read_ape_tag, replace_ape_tag,
+    ApeReplayGain, TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
 };
 use crate::error::{Error, Result};
 use crate::frame::{apply_gain_to_data, iterate_frames, GainMode, SaturationStats};
@@ -71,6 +71,14 @@ impl Channel {
         match self {
             Channel::Left => "left",
             Channel::Right => "right",
+        }
+    }
+
+    /// `steps` as `(left, right)` for an apply that moves this channel alone.
+    pub(crate) fn steps(self, steps: i32) -> (i32, i32) {
+        match self {
+            Channel::Left => (steps, 0),
+            Channel::Right => (0, steps),
         }
     }
 }
@@ -474,17 +482,11 @@ fn apply_gain_with_undo_impl_to_path(
     // into a single value corrupts the right channel's undo history.
     //
     // MP3GAIN_UNDO stores the *undo* delta (mp3gain convention, issue #210):
-    // the value to re-add to restore the original. Applying `+gain_steps`
-    // makes the stored undo `-gain_steps`, so it accumulates by subtraction.
-    // NOTE: AAC uses the opposite sign (stores the applied gain) — see the
-    // convention note on `crate::ape::format_undo_value`.
-    let (existing_left, existing_right) = parse_undo_values(tag.get(TAG_MP3GAIN_UNDO));
-    let wrap = mode == GainMode::Wrapping;
-    tag.set_undo_gain(
-        existing_left.saturating_sub(gain_steps),
-        existing_right.saturating_sub(gain_steps),
-        wrap,
-    );
+    // the value to re-add to restore the original. NOTE: AAC uses the
+    // opposite sign (stores the applied gain); see the convention note on
+    // `crate::ape::format_undo_value`.
+    let (left, right) = accumulate_undo(tag.get(TAG_MP3GAIN_UNDO), (gain_steps, gain_steps));
+    tag.set_undo_gain(left, right, mode == GainMode::Wrapping);
 
     let stats = apply_gain_to_data(&mut data, gain_steps, mode, None);
 
@@ -559,16 +561,8 @@ fn apply_gain_channel_with_undo(
     ensure_channels_separable(&data)?;
 
     let mut tag = read_ape_tag(&data).unwrap_or_default();
-
-    let (existing_left, existing_right) = parse_undo_values(tag.get(TAG_MP3GAIN_UNDO));
-
-    // Undo delta accumulates by subtraction (mp3gain convention, issue #210).
-    let (new_left, new_right) = match channel {
-        Channel::Left => (existing_left - gain_steps, existing_right),
-        Channel::Right => (existing_left, existing_right - gain_steps),
-    };
-
-    tag.set_undo_gain(new_left, new_right, mode == GainMode::Wrapping);
+    let (left, right) = accumulate_undo(tag.get(TAG_MP3GAIN_UNDO), channel.steps(gain_steps));
+    tag.set_undo_gain(left, right, mode == GainMode::Wrapping);
 
     let stats = apply_gain_to_data(&mut data, gain_steps, mode, Some(channel.index()));
 

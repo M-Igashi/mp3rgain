@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::utils::{finish_with_summary, for_each_file, report_zero_steps, TSV_HEADER};
 use crate::processors::apply::{process_apply, process_apply_channel};
+use crate::processors::info::gain_range_fields;
 use crate::util::get_path;
 
 pub fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
@@ -44,16 +45,19 @@ pub fn cmd_apply(files: &[PathBuf], steps: i32, opts: &Options) -> Result<()> {
     let (json_results, successful, failed) = for_each_file(files, opts, |file| {
         let (result, mut text) = process_apply(file, steps, opts)?;
         if opts.output_format == OutputFormat::Tsv {
-            // Max Amplitude is unknown without a full decode; emit "-"
-            // instead of fabricating a value (issue #231).
+            // Max Amplitude is unknown without a full decode, and so is the
+            // range of a file the apply did not scan (an M4A, a dry run, a
+            // failure): emit "-" instead of fabricating a value (issues #231,
+            // #329). The steps are the ones applied, which -k may have capped.
+            let (max_gain, min_gain) = gain_range_fields(result.max_gain.zip(result.min_gain));
             writeln!(
                 text,
                 "{}\t{}\t{:.6}\t-\t{}\t{}",
                 get_path(file),
-                steps,
-                db_value,
-                result.max_gain.unwrap_or(255),
-                result.min_gain.unwrap_or(0)
+                result.gain_applied_steps.unwrap_or(steps),
+                result.gain_applied_db.unwrap_or(db_value),
+                max_gain,
+                min_gain
             )?;
         }
         Ok((Some(result), text))

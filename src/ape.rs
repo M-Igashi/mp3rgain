@@ -10,7 +10,9 @@
 //! counterparts in [`crate::mp4meta`] are lowercase.
 
 use crate::error::{Error, Result};
-use crate::frame::{ape_tag_start, read_u32_le, APE_FLAG_HEADER_PRESENT, APE_PREAMBLE};
+use crate::frame::{
+    ape_tag_start, ends_with_id3v1, read_u32_le, APE_FLAG_HEADER_PRESENT, APE_PREAMBLE,
+};
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -30,7 +32,8 @@ pub const TAG_MP3GAIN_UNDO: &str = "MP3GAIN_UNDO";
 /// Post-apply `global_gain` range of one file, `min,max`.
 pub const TAG_MP3GAIN_MINMAX: &str = "MP3GAIN_MINMAX";
 /// Post-apply `global_gain` range across a whole album, `min,max`. The same
-/// value is stored on every member. APEv2 only.
+/// value is stored on every member, in APEv2, or in ID3v2 under `-s i`
+/// (issue #450).
 pub const TAG_MP3GAIN_ALBUM_MINMAX: &str = "MP3GAIN_ALBUM_MINMAX";
 
 /// `REPLAYGAIN_TRACK_GAIN`, in dB at 6 decimals.
@@ -232,9 +235,7 @@ pub(crate) fn find_ape_footer(data: &[u8]) -> Option<usize> {
 
     if data.len() >= 160 {
         let footer_start = data.len() - 32 - 128;
-        if &data[footer_start..footer_start + 8] == APE_PREAMBLE
-            && &data[data.len() - 128..data.len() - 125] == b"TAG"
-        {
+        if &data[footer_start..footer_start + 8] == APE_PREAMBLE && ends_with_id3v1(data) {
             return Some(footer_start);
         }
     }
@@ -407,10 +408,7 @@ fn split_ape_tag(data: &[u8]) -> (&[u8], &[u8]) {
 pub(crate) fn replace_ape_tag(data: &[u8], tag: &ApeTag) -> Vec<u8> {
     let (mut audio, mut id3v1) = split_ape_tag(data);
     // A bare ID3v1 block with no APE tag in front of it stays last too.
-    if id3v1.is_empty()
-        && audio.len() >= 128
-        && &audio[audio.len() - 128..audio.len() - 125] == b"TAG"
-    {
+    if id3v1.is_empty() && ends_with_id3v1(audio) {
         (audio, id3v1) = audio.split_at(audio.len() - 128);
     }
 
@@ -435,7 +433,11 @@ pub(crate) fn replace_ape_tag(data: &[u8], tag: &ApeTag) -> Vec<u8> {
 ///
 /// A read-only file is opened for reading only and refused once a write turns
 /// out to be needed, so a no-op succeeds on it (issue #398).
-fn rewrite_ape_tail(file_path: &Path, mutate: impl FnOnce(&mut ApeTag)) -> Result<()> {
+fn rewrite_ape_tail(
+    file_path: &Path,
+    flush: Flush,
+    mutate: impl FnOnce(&mut ApeTag),
+) -> Result<()> {
     let read_only = crate::apply::is_read_only(file_path);
     let mut file = fs::OpenOptions::new()
         .read(true)
@@ -475,10 +477,9 @@ fn rewrite_ape_tail(file_path: &Path, mutate: impl FnOnce(&mut ApeTag)) -> Resul
             had_tag = true;
         }
     }
-    if audio_end == file_len
-        && file_len >= 128
-        && &probe[probe.len() - 128..probe.len() - 125] == b"TAG"
-    {
+    // The probe is the last min(160, file_len) bytes, so it holds a whole
+    // ID3v1 block whenever the file can.
+    if audio_end == file_len && ends_with_id3v1(&probe) {
         // No (valid) APE tag; keep the bare trailing ID3v1 block after the
         // new tag, like replace_ape_tag does.
         audio_end = file_len - 128;
@@ -506,12 +507,26 @@ fn rewrite_ape_tail(file_path: &Path, mutate: impl FnOnce(&mut ApeTag)) -> Resul
         .map_err(|e| Error::io_write(file_path, e))?;
     file.set_len((audio_end + tag_bytes.len() + id3v1.len()) as u64)
         .map_err(|e| Error::io_write(file_path, e))?;
-    file.sync_all().map_err(|e| Error::io_write(file_path, e))
+    if flush == Flush::Now {
+        file.sync_all().map_err(|e| Error::io_write(file_path, e))?;
+    }
+    Ok(())
+}
+
+/// When a tail rewrite reaches the disk.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Flush {
+    /// Before it returns: the file is the visible one, written in place.
+    Now,
+    /// With the rename: the file is a temp that `persist_temp` syncs before
+    /// renaming it over the original, so syncing it here as well would flush
+    /// it twice (`F_FULLFSYNC` on macOS).
+    AtRename,
 }
 
 /// Write APEv2 tag to file, replacing any existing tag (tail-only rewrite).
 pub fn write_ape_tag(file_path: &Path, tag: &ApeTag) -> Result<()> {
-    rewrite_ape_tail(file_path, |t| *t = tag.clone())
+    rewrite_ape_tail(file_path, Flush::Now, |t| *t = tag.clone())
 }
 
 /// ReplayGain analysis values written into an APEv2 tag (issue #204).
@@ -541,7 +556,7 @@ pub struct ApeReplayGain {
 /// `MP3GAIN_MINMAX`) are preserved — only the ReplayGain keys present in
 /// `rg` are set.
 pub fn write_ape_replaygain(file_path: &Path, rg: &ApeReplayGain) -> Result<()> {
-    rewrite_ape_tail(file_path, |tag| tag.set_replaygain(rg))
+    rewrite_ape_tail(file_path, Flush::Now, |tag| tag.set_replaygain(rg))
 }
 
 /// Drop the `REPLAYGAIN_*` items from `file_path`'s APEv2 tag, keeping
@@ -557,13 +572,13 @@ pub(crate) fn remove_ape_replaygain(file_path: &Path) -> Result<()> {
     if !has_rg {
         return Ok(());
     }
-    rewrite_ape_tail(file_path, |tag| tag.remove_replaygain())
+    rewrite_ape_tail(file_path, Flush::Now, |tag| tag.remove_replaygain())
 }
 
 /// The values mp3gain keeps in its tag, whichever container that is: the undo
 /// value, both ranges and the `REPLAYGAIN_*` items (mp3rgain's
 /// `REPLAYGAIN_ALGORITHM` among them).
-const MP3GAIN_VALUE_KEYS: [&str; 8] = [
+pub(crate) const MP3GAIN_VALUE_KEYS: [&str; 8] = [
     TAG_MP3GAIN_UNDO,
     TAG_MP3GAIN_MINMAX,
     TAG_MP3GAIN_ALBUM_MINMAX,
@@ -577,7 +592,7 @@ const MP3GAIN_VALUE_KEYS: [&str; 8] = [
 /// Remove the mp3gain values from `file_path`'s APEv2 tag and return them as
 /// `(key, value)` pairs, keeping every other item. An apply under `-s i` moves
 /// them into ID3v2, as mp3gain's `-s i` does (issue #449). A file with none is
-/// left untouched.
+/// left untouched. For a temp file only, which is synced at its rename.
 pub(crate) fn take_ape_mp3gain_values(file_path: &Path) -> Result<Vec<(String, String)>> {
     let Some(tag) = read_ape_tag_from_file(file_path)? else {
         return Ok(Vec::new());
@@ -587,7 +602,7 @@ pub(crate) fn take_ape_mp3gain_values(file_path: &Path) -> Result<Vec<(String, S
         .filter_map(|&key| tag.get(key).map(|v| (key.to_string(), v.to_string())))
         .collect();
     if !values.is_empty() {
-        rewrite_ape_tail(file_path, |tag| {
+        rewrite_ape_tail(file_path, Flush::AtRename, |tag| {
             for (key, _) in &values {
                 tag.remove(key);
             }
@@ -596,34 +611,47 @@ pub(crate) fn take_ape_mp3gain_values(file_path: &Path) -> Result<Vec<(String, S
     Ok(values)
 }
 
+/// What an undo leaves stale in either container: the `REPLAYGAIN_*` values
+/// and the album range, which described the gained audio. The undo value and
+/// the track range are not among them.
+pub(crate) const UNDONE_KEYS: [&str; 6] = [
+    TAG_REPLAYGAIN_TRACK_GAIN,
+    TAG_REPLAYGAIN_TRACK_PEAK,
+    TAG_REPLAYGAIN_ALBUM_GAIN,
+    TAG_REPLAYGAIN_ALBUM_PEAK,
+    TAG_REPLAYGAIN_ALGORITHM,
+    TAG_MP3GAIN_ALBUM_MINMAX,
+];
+
 /// Post-undo cleanup for cross-container layouts (issue #306): drop the
-/// `REPLAYGAIN_*` items and `MP3GAIN_ALBUM_MINMAX`, all of which described
-/// the pre-undo audio, but keep any `MP3GAIN_UNDO` / `MP3GAIN_MINMAX`. Files
-/// carrying none of them are left untouched rather than rewritten.
+/// [`UNDONE_KEYS`], which described the pre-undo audio, but keep any
+/// `MP3GAIN_UNDO` / `MP3GAIN_MINMAX`. Files carrying none of them are left
+/// untouched rather than rewritten. For a temp file only, which is synced at
+/// its rename.
 pub(crate) fn remove_ape_undone_gain_values(file_path: &Path) -> Result<()> {
-    let has_stale = read_ape_tag_from_file(file_path)?.is_some_and(|tag| {
-        REPLAYGAIN_KEYS.iter().any(|k| tag.get(k).is_some())
-            || tag.get(TAG_MP3GAIN_ALBUM_MINMAX).is_some()
-    });
+    let has_stale = read_ape_tag_from_file(file_path)?
+        .is_some_and(|tag| UNDONE_KEYS.iter().any(|k| tag.get(k).is_some()));
     if !has_stale {
         return Ok(());
     }
-    rewrite_ape_tail(file_path, |tag| {
-        tag.remove_replaygain();
-        tag.remove(TAG_MP3GAIN_ALBUM_MINMAX);
+    rewrite_ape_tail(file_path, Flush::AtRename, |tag| {
+        for key in UNDONE_KEYS {
+            tag.remove(key);
+        }
     })
 }
 
 /// Shift the stored ReplayGain values and both `global_gain` ranges in
 /// `file_path`'s APEv2 tag by `steps` of applied gain (issues #377, #451).
-/// Files carrying none of them are left untouched rather than rewritten.
+/// Files carrying none of them are left untouched rather than rewritten. For
+/// a temp file only, which is synced at its rename.
 pub(crate) fn shift_ape_stored_gain(file_path: &Path, steps: i32, wrap: bool) -> Result<()> {
     let has_values = read_ape_tag_from_file(file_path)?
         .is_some_and(|mut tag| tag.shift_stored_gain(steps, wrap));
     if !has_values {
         return Ok(());
     }
-    rewrite_ape_tail(file_path, |tag| {
+    rewrite_ape_tail(file_path, Flush::AtRename, |tag| {
         tag.shift_stored_gain(steps, wrap);
     })
 }
@@ -633,21 +661,22 @@ pub(crate) fn shift_ape_stored_gain(file_path: &Path, steps: i32, wrap: bool) ->
 /// post-apply `global_gain` range (`min,max`) in album (`-a`) mode (issue
 /// #210); the same value is stored on every file in the album.
 pub fn write_ape_album_minmax(file_path: &Path, min: u8, max: u8) -> Result<()> {
-    rewrite_ape_tail(file_path, |tag| {
+    rewrite_ape_tail(file_path, Flush::Now, |tag| {
         tag.set(TAG_MP3GAIN_ALBUM_MINMAX, &format_minmax(min, max))
     })
 }
 
 /// Add (or replace) the `MP3GAIN_MINMAX` item in `file_path`'s APEv2 tag,
-/// preserving all other items (issue #437).
+/// preserving all other items (issue #437). For a temp file only, which is
+/// synced at its rename.
 pub(crate) fn write_ape_minmax(file_path: &Path, min: u8, max: u8) -> Result<()> {
-    rewrite_ape_tail(file_path, |tag| tag.set_minmax(min, max))
+    rewrite_ape_tail(file_path, Flush::AtRename, |tag| tag.set_minmax(min, max))
 }
 
 /// Delete APEv2 tag from file (tail-only truncate; a trailing ID3v1 block
 /// is preserved)
 pub fn delete_ape_tag(file_path: &Path) -> Result<()> {
-    rewrite_ape_tail(file_path, |tag| tag.items.clear())
+    rewrite_ape_tail(file_path, Flush::Now, |tag| tag.items.clear())
 }
 
 /// Format an undo tag value: `+LLL,+RRR,W|N`.
@@ -703,23 +732,6 @@ pub fn parse_rg_peak(s: &str) -> Option<f64> {
     s.trim().parse().ok()
 }
 
-/// The value a stored item should hold once `steps` of gain have been applied
-/// to the audio it describes, or `None` when `key` is not one that moves with
-/// the audio or `value` does not parse, so the caller leaves it as it is.
-///
-/// mp3gain shifts these after `-g` (issue #377): the gains by the applied dB,
-/// the peaks by the matching linear factor 2^(steps/4), and the track and
-/// album `global_gain` ranges by the steps (issue #451), clamped to 0..=255
-/// like the frames themselves, which also leave a 0 where it is (issue #417).
-/// Under `-w` a range that would leave 0..=255 is dropped instead
-/// ([`range_wraps_out`]).
-/// `REPLAYGAIN_ALGORITHM`, `REPLAYGAIN_REFERENCE_LOUDNESS` and every other
-/// item stay as they are. Keys match case-insensitively, which also covers
-/// the lowercase MP4 and ID3v2 spellings.
-///
-/// The shift stays arithmetic when frames saturate, as in mp3gain, where the
-/// `-r` residual re-analyzes: nothing records how another tool measured the
-/// stored values, and the album ones cannot be re-measured from one file.
 /// Whether `steps` of wrapping gain move a stored `global_gain` range outside
 /// 0..=255, where mp3gain's `-w` drops it because the real range is lost
 /// (`changeGainAndTag`, issue #451). Inside those bounds mp3gain 1.6.2 leaves
@@ -739,6 +751,23 @@ pub(crate) fn range_wraps_out(key: &str, value: &str, steps: i32) -> bool {
             .is_some_and(|(min, max)| leaves(min) || leaves(max))
 }
 
+/// The value a stored item should hold once `steps` of gain have been applied
+/// to the audio it describes, or `None` when `key` is not one that moves with
+/// the audio or `value` does not parse, so the caller leaves it as it is.
+///
+/// mp3gain shifts these after `-g` (issue #377): the gains by the applied dB,
+/// the peaks by the matching linear factor 2^(steps/4), and the track and
+/// album `global_gain` ranges by the steps (issue #451), clamped to 0..=255
+/// like the frames themselves, which also leave a 0 where it is (issue #417).
+/// Under `-w` a range that would leave 0..=255 is dropped instead
+/// ([`range_wraps_out`]).
+/// `REPLAYGAIN_ALGORITHM`, `REPLAYGAIN_REFERENCE_LOUDNESS` and every other
+/// item stay as they are. Keys match case-insensitively, which also covers
+/// the lowercase MP4 and ID3v2 spellings.
+///
+/// The shift stays arithmetic when frames saturate, as in mp3gain, where the
+/// `-r` residual re-analyzes: nothing records how another tool measured the
+/// stored values, and the album ones cannot be re-measured from one file.
 pub(crate) fn shift_stored_value(key: &str, value: &str, steps: i32) -> Option<String> {
     let is = |name: &str| key.eq_ignore_ascii_case(name);
     let db = crate::gain::steps_to_db(steps);
@@ -769,6 +798,18 @@ pub fn parse_undo_wrap(undo_str: Option<&str>) -> bool {
     undo_str
         .and_then(|v| v.split(',').nth(2))
         .is_some_and(|s| s.trim().eq_ignore_ascii_case("W"))
+}
+
+/// The MP3 undo delta once `(left, right)` steps are applied on top of the
+/// stored `undo` value. The delta is what restores the original when applied
+/// as it is, so it accumulates by subtraction (issue #210). Saturating, since
+/// the stored value comes from an untrusted tag.
+pub(crate) fn accumulate_undo(undo: Option<&str>, (left, right): (i32, i32)) -> (i32, i32) {
+    let (stored_left, stored_right) = parse_undo_values(undo);
+    (
+        stored_left.saturating_sub(left),
+        stored_right.saturating_sub(right),
+    )
 }
 
 /// Parse an undo tag value into (left_gain, right_gain).

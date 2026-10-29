@@ -1,13 +1,16 @@
 //! MP3 frame inspection: gain statistics, headroom and peak amplitude.
 //!
-//! Everything here reads `global_gain` out of the frame side information
-//! without decoding audio, so it is cheap compared with a ReplayGain
-//! analysis. [`analyze`] walks every frame; [`read_channel_mode`] reads one
-//! header; [`gain_range`] and [`find_max_amplitude`] dispatch on the
-//! container so AAC input reports the same values as MP3.
+//! Everything here except the peak of [`find_max_amplitude`] reads
+//! `global_gain` out of the frame side information without decoding audio,
+//! so it is cheap compared with a ReplayGain analysis. [`analyze`] walks
+//! every frame; [`read_channel_mode`] reads one header; [`gain_range`] and
+//! [`find_max_amplitude`] dispatch on the container so AAC input reports the
+//! same values as MP3.
 
 use crate::error::{Error, Result};
-use crate::frame::{first_frame_header, iterate_frames, read_gain_at, scan_gain_range, skip_id3v2};
+use crate::frame::{
+    first_frame_header, iterate_frames, open_after_id3v2, read_gain_at, scan_gain_range,
+};
 use crate::gain::{steps_to_db, MAX_GAIN};
 
 use std::fs;
@@ -279,7 +282,8 @@ pub fn analyze_data(data: &[u8]) -> Result<Mp3Analysis> {
 /// that build.
 ///
 /// The file is read from disk once: the same buffer feeds the gain-range
-/// scan and the decoder (previously each did its own full read).
+/// scan and the decoder (previously each did its own full read). Only the
+/// HE-AAC check before the decode reads the head of the file again.
 ///
 /// Note: The max_amplitude is normalized (0.0 to 1.0+), where values > 1.0 indicate clipping.
 /// To get the value in 16-bit PCM scale (like mp3gain), multiply by 32768.
@@ -341,10 +345,7 @@ fn gain_range_of(data: &[u8]) -> Result<(u8, u8)> {
     }
     #[cfg(not(feature = "aac"))]
     if is_mp4_aac {
-        return Err(Error::FeatureNotAvailable {
-            feature: "AAC support",
-            feature_flag: "aac",
-        });
+        return Err(Error::aac_unavailable());
     }
     scan_gain_range(data)
 }
@@ -357,15 +358,11 @@ fn gain_range_of(data: &[u8]) -> Result<(u8, u8)> {
 /// holds the first frame plus the sync check on the one following. The rare
 /// stream that starts later than that falls back to a full read.
 pub fn read_channel_mode(file_path: &Path) -> Result<ChannelMode> {
-    use std::io::{Read, Seek, SeekFrom};
+    use std::io::Read;
     const WINDOW: usize = 64 * 1024;
 
     let read_err = |e| Error::io_read(file_path, e);
-    let mut file = fs::File::open(file_path).map_err(|e| Error::io_open(file_path, e))?;
-    let mut head = [0u8; 10];
-    let n = file.read(&mut head).map_err(read_err)?;
-    let start = skip_id3v2(&head[..n]) as u64;
-    file.seek(SeekFrom::Start(start)).map_err(read_err)?;
+    let mut file = open_after_id3v2(file_path).map_err(|e| Error::io_open(file_path, e))?;
 
     let mut window = vec![0u8; WINDOW];
     let mut filled = 0;

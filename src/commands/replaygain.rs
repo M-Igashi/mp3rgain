@@ -1,9 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use indicatif::{MultiProgress, ProgressBar};
-use mp3rgain::replaygain::{
-    self, AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult,
-};
+use mp3rgain::replaygain::{AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult};
 use mp3rgain::{mp4meta, AacAlbumInfo, AlbumLabel, Error};
 use rayon::prelude::*;
 use std::io::{self, Write};
@@ -51,20 +49,7 @@ fn print_target_with_modifier(opts: &Options) {
     }
 }
 
-fn require_replaygain_feature() {
-    if !replaygain::is_available() {
-        eprintln!(
-            "{}: ReplayGain analysis requires the 'replaygain' feature",
-            "error".red().bold()
-        );
-        eprintln!("  Install with: cargo install mp3rgain --features replaygain");
-        std::process::exit(1);
-    }
-}
-
 pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
-    require_replaygain_feature();
-
     let dry_run_prefix = opts.dry_run_prefix();
 
     if opts.output_format == OutputFormat::Tsv {
@@ -288,7 +273,6 @@ fn print_album_intro(file_count: usize, groups: Option<usize>, opts: &Options) {
 }
 
 pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
-    require_replaygain_feature();
     print_album_intro(files.len(), None, opts);
     let run = run_album(files, opts, &mut AlbumSink::direct(), None)?;
     let output = JsonOutput {
@@ -317,7 +301,6 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 /// Text output is buffered per album and each album's block is written whole
 /// as soon as it finishes, in completion order (issue #348).
 pub fn cmd_album_gain_grouped(files: &[PathBuf], opts: &Options) -> Result<()> {
-    require_replaygain_feature();
     let (groups, warnings) = group_files(files, opts);
     print_album_intro(files.len(), Some(groups.len()), opts);
     // Printed before any analysis starts: a grouping that merged two releases

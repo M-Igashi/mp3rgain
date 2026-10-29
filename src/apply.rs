@@ -94,8 +94,8 @@ pub struct ApplyOptions {
     /// `-p`: restore the file's mtime after writing.
     pub preserve_timestamp: bool,
 
-    /// Record an undo tag (MP4 freeform for AAC; for MP3 the container is
-    /// [`Self::tag_layout`] — APEv2 unless `-s i`).
+    /// Record an undo tag (MP4 freeform for M4A, ID3v2 for raw ADTS; for MP3
+    /// the container is [`Self::tag_layout`], APEv2 unless `-s i`).
     pub write_undo: bool,
 
     /// Write ReplayGain metadata tags. Requires [`Self::track_result`] to
@@ -198,10 +198,12 @@ pub struct ApplyReport {
     /// saturating apply (issue #207).
     pub saturated_high: usize,
 
-    /// Post-apply (max, min) global_gain range across the modified MP3
-    /// frames, recorded during the apply pass so callers don't need to
-    /// re-read the file (issue #231). `None` for AAC, channel-specific
-    /// applies, dry runs, and zero-frame applies.
+    /// Post-apply (max, min) global_gain range of an MP3 or raw ADTS stream,
+    /// recorded during the apply pass so callers don't need to re-read the
+    /// file (issue #231). A zero-step ReplayGain apply reports the range it
+    /// scanned for `MP3GAIN_MINMAX` (issue #437). `None` for M4A,
+    /// channel-specific applies, dry runs, and applies with no range to
+    /// report.
     pub gain_range: Option<(u8, u8)>,
 
     /// AAC frames the parser could not read, which therefore kept their
@@ -231,9 +233,9 @@ pub enum ClippingDetection {
 ///    container [`ApplyOptions::tag_layout`] selects (issue #204), and a
 ///    failure anywhere leaves the original untouched (issues #227, #232).
 ///    An apply that records its undo value but writes no fresh ReplayGain
-///    values (`-g`) shifts the ones already stored, and
-///    `MP3GAIN_ALBUM_MINMAX`, in every container that holds them, by the
-///    steps actually applied (issue #377).
+///    values (`-g`) shifts the ones already stored, and both `global_gain`
+///    ranges, in every container that holds them, by the steps actually
+///    applied (issues #377, #451).
 /// 3. Mtime restoration when [`ApplyOptions::preserve_timestamp`] is on.
 pub fn apply_with_options(file_path: &Path, opts: &ApplyOptions) -> Result<ApplyReport> {
     apply_with_options_inner(file_path, opts).map_err(|e| e.refine_format(file_path))
@@ -252,9 +254,9 @@ fn apply_with_options_inner(file_path: &Path, opts: &ApplyOptions) -> Result<App
     // 1) Clipping check + cap.
     //
     // The AAC bitstream analysis is cached so the apply step below can reuse
-    // it instead of a second scan (issue #188). MINMAX / ReplayGain are now
-    // recorded from a *post-apply* scan (issue #210), so no pre-apply MP3
-    // analysis needs to be threaded through here.
+    // it instead of a second scan (issue #188). MINMAX and ReplayGain describe
+    // the file after the apply (issue #210), so no pre-apply MP3 analysis
+    // needs to be threaded through here.
     // The MP3 headroom check likewise keeps the bytes it read so the apply
     // step below reuses them instead of a second full read + frame walk of
     // the unchanged file (issue #251).
@@ -313,10 +315,12 @@ fn apply_with_options_inner(file_path: &Path, opts: &ApplyOptions) -> Result<App
 
     let gain_range = match container {
         // The raw ADTS apply reports its own post-apply range; the MP4 path
-        // has never tracked one (`MP3GAIN_ALBUM_MINMAX` is MP3/APEv2-only).
+        // has never tracked one (`MP3GAIN_ALBUM_MINMAX` is MP3-only).
         AudioFileType::Adts => aac.gain_range,
         AudioFileType::Aac => None,
-        _ => (opts.channel.is_none() && saturation.frames > 0)
+        // A range, not a frame count: a zero-step ReplayGain apply moves no
+        // frame but reports the range it scanned (`record_scanned_range`).
+        _ => (opts.channel.is_none() && saturation.min_gain <= saturation.max_gain)
             .then_some((saturation.max_gain, saturation.min_gain)),
     };
 
@@ -506,10 +510,7 @@ fn apply_aac_bytes(
     _analysis: AacAnalysisCache,
     _replaygain: Option<&mp4meta::ReplayGainTags>,
 ) -> Result<AacApplyOutcome> {
-    Err(Error::FeatureNotAvailable {
-        feature: "AAC support",
-        feature_flag: "aac",
-    })
+    Err(Error::aac_unavailable())
 }
 
 /// Raw ADTS apply (issue #330): the AAC bitstream gain, then every tag in
@@ -537,16 +538,14 @@ fn apply_adts_bytes(
         let mut rg = id3v2::Id3v2ReplayGain::default();
 
         if opts.write_undo && steps != 0 {
+            // MP3 convention (issue #210): the tag holds the *undo* delta.
+            // Both halves move together, ADTS having no per-channel apply.
             let existing = id3v2::get_txxx(&tag, ape::TAG_MP3GAIN_UNDO);
-            let (existing_left, existing_right) = ape::parse_undo_values(existing.as_deref());
-            // MP3 convention (issue #210): the tag holds the *undo* delta, so
-            // applying `+steps` accumulates onto it by subtraction. Both
-            // halves move together — ADTS has no per-channel apply.
-            let undo = ape::format_undo_value(existing_left - steps, existing_right - steps, false);
-            rg.undo = Some(undo);
-            // MP3GAIN_MINMAX is the post-apply range, and only ever written
-            // alongside the undo value: on its own it would claim an apply
-            // that never happened.
+            let (left, right) = ape::accumulate_undo(existing.as_deref(), (steps, steps));
+            rg.undo = Some(ape::format_undo_value(left, right, false));
+            // MP3GAIN_MINMAX is the post-apply range from the apply's own
+            // analysis. Unlike MP3, `-g` records it here instead of shifting
+            // a stored one: mp3gain has no AAC to follow (issue #451).
             if let Some((max, min)) = outcome.gain_range {
                 rg.minmax = Some(ape::format_minmax(min, max));
             }
@@ -588,10 +587,7 @@ fn apply_adts_bytes(
     _opts: &ApplyOptions,
     _analysis: AacAnalysisCache,
 ) -> Result<AacApplyOutcome> {
-    Err(Error::FeatureNotAvailable {
-        feature: "AAC support",
-        feature_flag: "aac",
-    })
+    Err(Error::aac_unavailable())
 }
 
 /// Post-apply residual ReplayGain values — the gain a player should still
@@ -741,7 +737,7 @@ fn apply_mp3_ape_bytes(
         if let Some(rg) = folded_rg {
             gain = gain.replaygain(rg);
         }
-        let stats = gain.apply_to_path_with_stats_preread(r, w, preread)?;
+        let mut stats = gain.apply_to_path_with_stats_preread(r, w, preread)?;
 
         // Issue #377: whichever container holds stored values, they described
         // the audio before this apply. Each write is skipped when its
@@ -767,9 +763,18 @@ fn apply_mp3_ape_bytes(
 
         if let Some((min, max)) = zero_step_range(w, steps, opts) {
             ape::write_ape_minmax(w, min, max)?;
+            record_scanned_range(&mut stats, (min, max));
         }
         Ok(stats)
     })
+}
+
+/// Report a zero-step apply's scanned range the way a nonzero apply reports
+/// the range it tracked, so the album pass need not scan the file again. No
+/// frame moved, so the scanned range is the post-apply one.
+fn record_scanned_range(stats: &mut SaturationStats, (min, max): (u8, u8)) {
+    stats.min_gain = min;
+    stats.max_gain = max;
 }
 
 /// The scanned `(min, max)` global_gain range a ReplayGain apply that rounds
@@ -803,7 +808,7 @@ fn apply_mp3_id3v2_bytes(
         if let Some(ch) = opts.channel {
             gain = gain.channel(ch);
         }
-        let stats = gain.apply_to_path_with_stats_preread(r, w, preread)?;
+        let mut stats = gain.apply_to_path_with_stats_preread(r, w, preread)?;
 
         // Parsed once: the undo read below and the frame write at the end
         // both work on this tag, where they used to parse the temp twice.
@@ -822,19 +827,11 @@ fn apply_mp3_id3v2_bytes(
         };
 
         if opts.write_undo {
-            let (delta_left, delta_right) = match opts.channel {
-                Some(Channel::Left) => (steps, 0),
-                Some(Channel::Right) => (0, steps),
-                None => (steps, steps),
-            };
-            let existing_undo = id3v2::get_txxx(&tag, ape::TAG_MP3GAIN_UNDO);
-            let (existing_left, existing_right) = ape::parse_undo_values(existing_undo.as_deref());
-
             // MP3GAIN_UNDO stores the *undo* delta (mp3gain convention, issue
-            // #210): applying `+delta` makes the stored undo `-delta`,
-            // accumulating by subtraction onto any prior undo value.
-            let (undo_left, undo_right) =
-                (existing_left - delta_left, existing_right - delta_right);
+            // #210), accumulated onto any prior undo value.
+            let existing_undo = id3v2::get_txxx(&tag, ape::TAG_MP3GAIN_UNDO);
+            let applied = opts.channel.map_or((steps, steps), |ch| ch.steps(steps));
+            let (undo_left, undo_right) = ape::accumulate_undo(existing_undo.as_deref(), applied);
             // A zero undo delta describes nothing to roll back. Writing it
             // anyway (as an already-on-target `-r -s i` track would) leaves a
             // permanent `+000,+000` tag: both undo paths early-return on 0,0
@@ -846,12 +843,10 @@ fn apply_mp3_id3v2_bytes(
 
                 // MP3GAIN_MINMAX is the *post-apply* global_gain range
                 // (mp3gain convention), which the apply pass already tracked
-                // in the saturation stats (issue #231). Written alongside the
-                // undo value, never on its own: on a file with no gain applied
-                // it would claim an apply that never happened. A channel apply
-                // leaves any stored range as it is and adds none, as mp3gain's
-                // `-l` does: it updates stored values only when both channels
-                // move by the same amount (issue #433). `-g` shifts the stored
+                // in the saturation stats (issue #231). A channel apply leaves
+                // any stored range as it is and adds none, as mp3gain's `-l`
+                // does: it updates stored values only when both channels move
+                // by the same amount (issue #433). `-g` shifts the stored
                 // range below instead and adds none (issue #451).
                 if opts.channel.is_none() && !opts.shifts_stored_gain(steps) {
                     let (min, max) = if stats.frames > 0 {
@@ -868,15 +863,16 @@ fn apply_mp3_id3v2_bytes(
         if rg.minmax.is_none() {
             if let Some((min, max)) = zero_step_range(w, steps, opts) {
                 rg.minmax = Some(ape::format_minmax(min, max));
+                record_scanned_range(&mut stats, (min, max));
             }
         }
 
         // Issue #377. A nonzero apply always writes the undo value above, so
-        // the shifted ID3v2 frames ride along in that tag write; values
-        // mp3gain left in APEv2 describe the old audio too.
+        // the shifted ID3v2 frames ride along in that tag write. Values
+        // mp3gain left in APEv2 were moved into this tag above (issue #449),
+        // so they are shifted with it.
         if opts.shifts_stored_gain(steps) {
             id3v2::shift_stored_gain(&mut tag, steps, opts.wrap);
-            ape::shift_ape_stored_gain(w, steps, opts.wrap)?;
         }
 
         if opts.write_replaygain_tags {
@@ -1153,9 +1149,10 @@ pub fn write_replaygain_tags_only(file_path: &Path, opts: &TagsOnlyOptions) -> R
 /// album (`-a`) mode (issue #210).
 ///
 /// The album-wide range is only known once every file has had its gain
-/// applied, so callers invoke this *after* the per-file apply pass. Shared by
-/// the CLI (`cmd_album_gain`) and the GUI apply worker so both frontends stay
-/// in parity (the GUI path was missing it in 2.9.0).
+/// applied, so callers invoke this *after* the per-file apply pass. The CLI's
+/// `-a` runs and the GUI apply worker both go through
+/// [`write_album_minmax_with_layout`], so the two frontends stay in parity
+/// (the GUI path was missing it in 2.9.0).
 ///
 /// Pass only the files whose apply succeeded: a file the apply left alone has
 /// no post-apply range to contribute, and must not be stamped with the album's
@@ -1164,8 +1161,8 @@ pub fn write_replaygain_tags_only(file_path: &Path, opts: &TagsOnlyOptions) -> R
 /// re-analyzing every file (issue #232); files without one (zero-frame
 /// applies) fall back to a fresh `analyze()`.
 ///
-/// AAC members are dropped (issue #307): `MP3GAIN_ALBUM_MINMAX` is an
-/// MP3/APEv2 concept, and the `analyze()` fallback is the raw MP3 frame
+/// AAC members are dropped (issue #307): `MP3GAIN_ALBUM_MINMAX` is an MP3
+/// concept, and the `analyze()` fallback is the raw MP3 frame
 /// scanner, which can false-sync on MP4 bytes and "succeed" with garbage
 /// values, skewing the album range and appending an APEv2 tag after the MP4
 /// data. A file whose scan fails is left out of the range. A failed tag write

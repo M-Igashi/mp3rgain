@@ -18,7 +18,7 @@ use crate::util::get_filename;
 
 /// Run one album analysis over `paths`, driving the shared album progress
 /// bar. Serial runs get the byte-level bar via `on_progress`; parallel runs
-/// tick per file via `on_complete`. Shared by `cmd_info` and `cmd_album_gain`.
+/// tick per file via `on_complete`. Shared by `cmd_info` and the `-a` runs.
 /// The thread count follows `-j` (see [`effective_threads`]); only
 /// `skip_errors` varies between callers.
 ///
@@ -68,9 +68,7 @@ pub fn run_album_analysis(
         },
     );
 
-    if let Some(pb) = pb {
-        pb.finish_and_clear();
-    }
+    progress_finish(pb);
     report
 }
 

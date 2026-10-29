@@ -40,6 +40,13 @@ fn loudness_to_energy(lufs: f64) -> f64 {
     10f64.powf((lufs - LOUDNESS_OFFSET) / 10.0)
 }
 
+/// Samples in one 100 ms sub-block, rounded to the nearest sample. A divided
+/// track is cut on this grid (issue #337), so the planner and the analyzer
+/// have to agree on it exactly.
+pub(crate) fn subblock_len(sample_rate: u32) -> usize {
+    (sample_rate as usize + 5) / 10
+}
+
 /// Second-order IIR section, direct form II transposed.
 #[derive(Clone)]
 struct Biquad {
@@ -415,7 +422,7 @@ impl Bs1770Analyzer {
             filters: vec![KWeightingFilter::new(sample_rate); channels],
             weights: channel_weights(channels),
             true_peak: None,
-            subblock_len: (sample_rate as usize + 5) / 10,
+            subblock_len: subblock_len(sample_rate),
             subblock_sum: 0.0,
             subblock_samples: 0,
             subblock_sums: Vec::new(),
@@ -470,8 +477,9 @@ impl Bs1770Analyzer {
     /// through here (issue #337): the K-weighting biquads and the true-peak
     /// FIR history converge to the state the whole-file pass would have had,
     /// while the sub-block sums stay owned by whichever chunk the samples
-    /// actually belong to. The peaks are deliberately still updated, since a
-    /// maximum over a superset of the file's samples is the same maximum.
+    /// actually belong to. The true-peak meter is fed too, for its history;
+    /// what it reports over the warm-up is a cold-start artifact, which the
+    /// caller discards with [`reset_true_peak`](Self::reset_true_peak).
     #[inline]
     pub fn warm_up_frame(&mut self, frame: &[f64]) {
         if let Some(meter) = &mut self.true_peak {

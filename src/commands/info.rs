@@ -16,6 +16,10 @@ use crate::processors::info::{
 use crate::util::get_filename;
 
 pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
+    if opts.output_format == OutputFormat::Json {
+        return cmd_info_json(files, opts);
+    }
+
     // Print mp3gain-compatible TSV header
     if opts.output_format == OutputFormat::Tsv {
         println!("{}", TSV_HEADER);
@@ -25,13 +29,7 @@ pub fn cmd_info(files: &[PathBuf], opts: &Options) -> Result<()> {
     // the per-file rows and the album summary. The previous flow analyzed
     // per-track first and then re-decoded every file for the album summary,
     // doubling the runtime of the default command.
-    if replaygain::is_available()
-        && matches!(opts.output_format, OutputFormat::Tsv | OutputFormat::Text)
-    {
-        return cmd_info_replaygain(files, opts);
-    }
-
-    cmd_info_basic(files, opts)
+    cmd_info_replaygain(files, opts)
 }
 
 /// Per-file row produced by the single-pass album analysis.
@@ -120,10 +118,8 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
         for (i, file) in files.iter().enumerate() {
             match &rows[i] {
                 Some(Row::Analyzed(rg)) => {
-                    let (_, text) = format_rg_row(file, opts, rg, gain_ranges[i])?;
-                    if !text.is_empty() {
-                        handle.write_all(text.as_bytes())?;
-                    }
+                    let text = format_rg_row(file, opts, rg, gain_ranges[i])?;
+                    handle.write_all(text.as_bytes())?;
                     any_ok = true;
                 }
                 Some(Row::Failed(msg)) => {
@@ -181,10 +177,10 @@ fn analyze_set(set: &[(usize, &Path)], opts: &Options) -> Option<AlbumAnalysisRe
     run_album_analysis(&paths, opts, true, None).ok()
 }
 
-/// Basic per-file info (JSON output or builds without the replaygain feature).
-fn cmd_info_basic(files: &[PathBuf], opts: &Options) -> Result<()> {
+/// `-o json` info: per-file MP3 frame statistics.
+fn cmd_info_json(files: &[PathBuf], opts: &Options) -> Result<()> {
     let (json_results, _, failed) = for_each_file(files, opts, |file| {
-        process_info(file, opts).map(|(r, t)| (Some(r), t))
+        Ok((Some(process_info(file)), String::new()))
     })?;
 
     finish_without_summary(json_results, failed, opts)

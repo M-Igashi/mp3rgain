@@ -1,5 +1,6 @@
 use crate::analysis::{ChannelMode, MpegVersion};
 use crate::error::{Error, Result};
+use std::path::Path;
 
 /// APEv2 tag preamble (needed for find_audio_end)
 pub(crate) const APE_PREAMBLE: &[u8; 8] = b"APETAGEX";
@@ -45,6 +46,14 @@ impl FrameHeader {
             (_, ChannelMode::Mono) => 9,
             (_, _) => 17,
         }
+    }
+
+    /// Where a Xing or Info VBR header starts within the frame: 4 + the side
+    /// info length, even when the frame has a CRC. That is where LAME writes
+    /// it and where mpg123, ffmpeg and symphonia look. Adding the 2 CRC bytes
+    /// missed it, so the Info frame was gained as audio (issue #374).
+    pub fn xing_offset(&self) -> usize {
+        4 + self.side_info_len()
     }
 }
 
@@ -293,6 +302,23 @@ pub(crate) fn skip_id3v2(data: &[u8]) -> usize {
     10 + size
 }
 
+/// Open `path` positioned after a leading ID3v2 tag, which is skipped by its
+/// declared size rather than read (cover art can run to megabytes), for the
+/// readers that only need the head of the audio.
+pub(crate) fn open_after_id3v2(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    let mut head = [0u8; 10];
+    let n = file.read(&mut head)?;
+    file.seek(SeekFrom::Start(skip_id3v2(&head[..n]) as u64))?;
+    Ok(file)
+}
+
+/// Whether `data` ends in a 128-byte ID3v1 tag.
+pub(crate) fn ends_with_id3v1(data: &[u8]) -> bool {
+    data.len() >= 128 && data[data.len() - 128..].starts_with(b"TAG")
+}
+
 /// Read u32 little-endian from slice
 pub(crate) fn read_u32_le(data: &[u8]) -> u32 {
     u32::from_le_bytes([data[0], data[1], data[2], data[3]])
@@ -320,8 +346,7 @@ pub(crate) fn ape_tag_start(footer: &[u8], footer_start: usize) -> Option<usize>
 pub(crate) fn find_audio_end(data: &[u8]) -> usize {
     let mut audio_end = data.len();
 
-    // Check for ID3v1 tag at end (128 bytes, starts with "TAG")
-    if audio_end >= 128 && &data[audio_end - 128..audio_end - 125] == b"TAG" {
+    if ends_with_id3v1(data) {
         audio_end -= 128;
     }
 
@@ -336,14 +361,10 @@ pub(crate) fn find_audio_end(data: &[u8]) -> usize {
     audio_end
 }
 
-/// Check if a frame contains a Xing or Info VBR header.
-///
-/// The marker sits at 4 + side info length even when the frame has a CRC:
-/// that is where LAME writes it and where mpg123, ffmpeg and symphonia look.
-/// Adding the 2 CRC bytes missed it, so the Info frame was gained as audio
-/// (issue #374).
+/// Check if a frame carries a Xing or Info VBR header at
+/// [`FrameHeader::xing_offset`].
 pub(crate) fn is_xing_frame(data: &[u8], frame_offset: usize, header: &FrameHeader) -> bool {
-    let xing_offset = frame_offset + 4 + header.side_info_len();
+    let xing_offset = frame_offset + header.xing_offset();
 
     if xing_offset + 4 > data.len() {
         return false;

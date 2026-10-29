@@ -39,7 +39,15 @@ What ships today:
 
 ## Unreleased
 
-Nothing yet.
+- mp3rgui: an Apply that first rescans the files without stored tags applies to the rows selected at the click, not to whatever is selected when the rescan ends
+- `-s d` leaves an untagged M4A alone, including one whose metadata ends in an empty `ilst`, and `-u` no longer leaves an empty `udta` behind
+- `-s c` shows an album range that `-a -s i` stored in ID3v2 under the default layout too
+- `-g -o tsv` prints `-` for a `global_gain` range it did not scan, and the steps `-k` actually applied
+- The M4A line of `-r` and `-a` shows the gain applied, the album gain under `-a`
+- A crafted `MP3GAIN_UNDO` can no longer overflow the undo arithmetic
+- Library: without the `aac` feature, the `*_auto` functions refuse AAC instead of running the MP3 path over an M4A (#149)
+- A ReplayGain re-run that needs no change syncs each file once, and the album range reuses the apply's scan
+- Cleanup from a whole-codebase review, with no other change in behaviour
 
 ## Release history
 

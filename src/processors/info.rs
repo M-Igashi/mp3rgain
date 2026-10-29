@@ -80,30 +80,27 @@ pub fn tsv_album_row(
     )
 }
 
-/// Format one mp3gain-compatible per-file row from a ReplayGain analysis
-/// result. Shared by the per-file path below and the single-pass album flow
-/// in `cmd_info`, which pre-computes `gain_range` in parallel instead of
-/// re-scanning each file inside its sequential emit loop.
+/// The mp3gain-compatible text block or TSV row for one file of `cmd_info`'s
+/// single-pass ReplayGain flow, which pre-computes `gain_range` in parallel
+/// instead of re-scanning each file inside its sequential emit loop.
 pub fn format_rg_row(
     file: &Path,
     opts: &Options,
     rg_result: &ReplayGainResult,
     gain_range: Option<(u8, u8)>,
-) -> Result<(JsonFileResult, String)> {
+) -> Result<String> {
     let mut out = String::new();
     let filename = get_filename(file);
 
-    // Reuse the ReplayGain peak instead of re-decoding the audio
-    // via find_max_amplitude (issue #135).
-    let max_amp = rg_result.peak();
     let (max_gain_field, min_gain_field) = gain_range_fields(gain_range);
 
     // Gain with the -m / -d modifiers folded in, the same way the apply
     // paths report it.
     let (gain_steps, gain_db) = opts.modified_gain(rg_result.gain_db());
 
-    // Max Amplitude scaled to 32768 (mp3gain format for beets)
-    // beets divides by 32768, so we output peak * 32768
+    // Max Amplitude scaled to 32768 (mp3gain format for beets), from the
+    // ReplayGain peak rather than a second decode (issue #135). beets divides
+    // by 32768, so we output peak * 32768.
     let max_amplitude_scaled = peak_to_pcm_sample(rg_result.peak());
 
     match opts.output_format {
@@ -132,153 +129,35 @@ pub fn format_rg_row(
         OutputFormat::Json => {}
     }
 
-    Ok((
-        JsonFileResult {
-            gain_applied_db: Some(gain_db),
-            gain_applied_steps: Some(gain_steps),
-            max_amplitude: Some(max_amp),
-            max_gain: gain_range.map(|(max, _)| max),
-            min_gain: gain_range.map(|(_, min)| min),
-            ..JsonFileResult::from_analysis(file, rg_result)
-        },
-        out,
-    ))
+    Ok(out)
 }
 
-/// Per-file info for the paths `cmd_info` does *not* hand to the single-pass
-/// ReplayGain flow: `-o json`, and builds without the `replaygain` feature.
-/// A ReplayGain analysis is therefore never available here — `cmd_info` routes
-/// every case that has one to `cmd_info_replaygain` instead.
-pub fn process_info(file: &Path, opts: &Options) -> Result<(JsonFileResult, String)> {
-    let mut out = String::new();
-    let result = process_info_into(file, opts, &mut out)?;
-    Ok((result, out))
-}
-
-fn process_info_into(file: &Path, opts: &Options, out: &mut String) -> Result<JsonFileResult> {
-    let filename = get_filename(file);
-
-    // Check if this is an M4A/AAC file - if so, show appropriate message
+/// The `-o json` info record: MP3 frame statistics rather than a ReplayGain
+/// analysis, which `cmd_info` runs for text and TSV only.
+pub fn process_info(file: &Path) -> JsonFileResult {
+    // An MP4 has no MP3 frames to report on.
     if mp4meta::is_mp4_file(file) {
-        let codec = mp4meta::detect_mp4_audio_codec(file);
-        let is_alac = matches!(codec, Some(mp4meta::Mp4AudioCodec::Alac));
-        let format_str = if is_alac { "M4A/ALAC" } else { "M4A/AAC" };
-
-        match opts.output_format {
-            OutputFormat::Text => {
-                if opts.quiet {
-                    writeln!(out, "{}\t{}\t-\t-\t-\t-\t-", filename, format_str)?;
-                } else {
-                    writeln!(out, "{}", filename.cyan().bold())?;
-                    writeln!(out, "  Format:      {}", format_str)?;
-                    if is_alac {
-                        writeln!(
-                            out,
-                            "  {}",
-                            "ALAC files are not supported for gain adjustment".yellow()
-                        )?;
-                    } else {
-                        writeln!(
-                            out,
-                            "  {}",
-                            "Note: Use -r or -a for ReplayGain analysis".yellow()
-                        )?;
-                    }
-                    writeln!(out)?;
-                }
-            }
-            OutputFormat::Tsv => {
-                writeln!(out, "{}\t-\t-\t-\t-\t-", get_path(file))?;
-            }
-            OutputFormat::Json => {}
-        }
-
-        return Ok(JsonFileResult {
+        return JsonFileResult {
             file: file.display().to_string(),
             status: Some(FileStatus::Info),
             ..Default::default()
-        });
+        };
     }
 
-    // MP3 file: use basic analysis
     match analyze(file) {
-        Ok(info) => {
-            match opts.output_format {
-                OutputFormat::Text => {
-                    if opts.quiet {
-                        // Quiet mode: tab-separated output
-                        writeln!(
-                            out,
-                            "{}\t{}\t{}\t{}\t{:.1}\t{}\t{:.1}",
-                            filename,
-                            info.frame_count(),
-                            info.min_gain(),
-                            info.max_gain(),
-                            info.avg_gain(),
-                            info.headroom_steps(),
-                            info.headroom_db()
-                        )?;
-                    } else {
-                        writeln!(out, "{}", filename.cyan().bold())?;
-                        writeln!(
-                            out,
-                            "  Format:      {} Layer III, {}",
-                            info.mpeg_version(),
-                            info.channel_mode()
-                        )?;
-                        writeln!(out, "  Frames:      {}", info.frame_count())?;
-                        writeln!(
-                            out,
-                            "  Gain range:  {} - {} (avg: {:.1})",
-                            info.min_gain(),
-                            info.max_gain(),
-                            info.avg_gain()
-                        )?;
-                        writeln!(
-                            out,
-                            "  Headroom:    {} steps ({:+.1} dB)",
-                            info.headroom_steps().to_string().green(),
-                            info.headroom_db()
-                        )?;
-                        writeln!(out)?;
-                    }
-                }
-                OutputFormat::Tsv => {
-                    // Fallback TSV (ReplayGain not available): basic info
-                    writeln!(
-                        out,
-                        "{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
-                        get_path(file),
-                        info.headroom_steps(),
-                        info.headroom_db(),
-                        1.0,
-                        info.max_gain(),
-                        info.min_gain()
-                    )?;
-                }
-                OutputFormat::Json => {}
-            }
-
-            Ok(JsonFileResult {
-                file: file.display().to_string(),
-                mpeg_version: Some(info.mpeg_version().to_string()),
-                channel_mode: Some(info.channel_mode().to_string()),
-                frames: Some(info.frame_count()),
-                min_gain: Some(info.min_gain()),
-                max_gain: Some(info.max_gain()),
-                avg_gain: Some(info.avg_gain()),
-                headroom_steps: Some(info.headroom_steps()),
-                headroom_db: Some(info.headroom_db()),
-                ..Default::default()
-            })
-        }
-        Err(e) => {
-            if opts.output_format != OutputFormat::Json {
-                eprintln!("{} - {}", filename.red(), e);
-            }
-
-            Ok(JsonFileResult::error(file, e))
-        }
+        Ok(info) => JsonFileResult {
+            file: file.display().to_string(),
+            mpeg_version: Some(info.mpeg_version().to_string()),
+            channel_mode: Some(info.channel_mode().to_string()),
+            frames: Some(info.frame_count()),
+            min_gain: Some(info.min_gain()),
+            max_gain: Some(info.max_gain()),
+            avg_gain: Some(info.avg_gain()),
+            headroom_steps: Some(info.headroom_steps()),
+            headroom_db: Some(info.headroom_db()),
+            ..Default::default()
+        },
+        Err(e) => JsonFileResult::error(file, e),
     }
 }
 

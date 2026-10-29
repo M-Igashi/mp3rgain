@@ -642,7 +642,6 @@ pub fn read_replaygain_tags(file_path: &Path) -> Result<ReplayGainTags> {
 
 /// Read the undo and ReplayGain tags in a single `moov` pass, for callers that
 /// need both — reading them separately walked the file twice (issue #188).
-#[cfg(feature = "aac")]
 pub(crate) fn read_gain_tags(file_path: &Path) -> Result<(UndoTags, ReplayGainTags)> {
     let freeform_tags = read_itunes_freeform_tags(file_path)?;
     Ok((
@@ -754,6 +753,17 @@ fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl Fn(&[u8]) -> Vec<u8>) -> R
     let (new_ilst, ilst_info) =
         find_ilst_location(data, moov_content_start, moov_content_size, &make_ilst)?;
 
+    // A header-only ilst holds no tags. With no ilst to empty, or one that
+    // was empty already, there is nothing to write: inserting empty
+    // containers, or removing the empty ones the file came with, would
+    // rewrite a file the caller asked nothing of (`-s d` on an untagged M4A,
+    // the second pass of an undo).
+    let new_ilst_is_empty = new_ilst.len() <= 8;
+    let had_tags = matches!(ilst_info, IlstLocation::Existing { ilst_size, .. } if ilst_size > 8);
+    if new_ilst_is_empty && !had_tags {
+        return Ok(data.to_vec());
+    }
+
     // Rebuild the file
     let mut result = Vec::with_capacity(data.len() + 1024);
 
@@ -764,8 +774,6 @@ fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl Fn(&[u8]) -> Vec<u8>) -> R
             meta_pos,
             udta_pos,
         } => {
-            let new_ilst_is_empty = new_ilst.len() <= 8; // header-only = no tags
-
             let ilst_end = box_end(data, ilst_pos, ilst_size, "ilst")?;
 
             if new_ilst_is_empty {
@@ -1818,6 +1826,39 @@ mod tests {
         assert_eq!(parsed.namespace(), tag.namespace());
         assert_eq!(parsed.name(), tag.name());
         assert_eq!(parsed.value(), tag.value());
+    }
+
+    /// A rebuild with no tags to write leaves the file as it is, whether its
+    /// metadata path is missing or ends in an empty ilst. `-s d` on such an
+    /// untagged M4A used to add an empty udta, or drop the empty one the file
+    /// came with, and so rewrite the file, and undo's second pass re-added the
+    /// udta its first pass had removed.
+    #[test]
+    fn test_rebuild_without_tags_leaves_the_file_alone() {
+        let file = |moov_content: &[u8]| {
+            let mut data = mp4_box(b"ftyp", b"M4A \0\0\0\0M4A ");
+            data.extend(mp4_box(b"moov", moov_content));
+            data.extend(mp4_box(b"mdat", &[0u8; 16]));
+            data
+        };
+        let mvhd = mp4_box(b"mvhd", &[0u8; 100]);
+        let mut empty_ilst = mvhd.clone();
+        empty_ilst.extend(create_udta_box(&create_meta_box(&mp4_box(b"ilst", &[]))));
+
+        for original in [file(&mvhd), file(&empty_ilst)] {
+            let rg = update_mp4_metadata(&original, &ReplayGainTags::default()).unwrap();
+            assert_eq!(rg, original);
+            let undo = update_mp4_undo_metadata(&original, &UndoTags::default()).unwrap();
+            assert_eq!(undo, original);
+        }
+
+        let original = file(&mvhd);
+        let undo = UndoTags::new(Some("+002,+002,N".to_string()), None);
+        let tagged = update_mp4_undo_metadata(&original, &undo).unwrap();
+        assert_ne!(tagged, original);
+        let untagged = update_mp4_undo_metadata(&tagged, &UndoTags::default()).unwrap();
+        let untagged = update_mp4_metadata(&untagged, &ReplayGainTags::default()).unwrap();
+        assert_eq!(untagged, original);
     }
 
     #[test]

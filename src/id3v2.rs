@@ -5,10 +5,10 @@
 //! subsumed by a broader rewrite of this module.
 
 use crate::ape::{
-    parse_undo_values, parse_undo_wrap, range_wraps_out, shift_stored_value,
+    parse_undo_values, parse_undo_wrap, range_wraps_out, shift_stored_value, MP3GAIN_VALUE_KEYS,
     TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN,
     TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_ALGORITHM, TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK,
+    TAG_REPLAYGAIN_TRACK_PEAK, UNDONE_KEYS,
 };
 use crate::error::{Error, Result};
 use crate::gain::apply_undo_to_data;
@@ -17,30 +17,6 @@ use id3::TagLike;
 use std::path::Path;
 
 const TARGET_VERSION: id3::Version = id3::Version::Id3v24;
-
-/// What an undo leaves stale in the other container: the `REPLAYGAIN_*`
-/// values and the album range, as the APEv2 cleanup drops them, but not the
-/// undo value or the track range.
-const UNDONE_VALUE_DESCRIPTIONS: &[&str] = &[
-    TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK,
-    TAG_REPLAYGAIN_ALBUM_GAIN,
-    TAG_REPLAYGAIN_ALBUM_PEAK,
-    TAG_REPLAYGAIN_ALGORITHM,
-    TAG_MP3GAIN_ALBUM_MINMAX,
-];
-
-/// All known mp3gain/ReplayGain TXXX descriptions.
-const ALL_RG_DESCRIPTIONS: &[&str] = &[
-    TAG_MP3GAIN_UNDO,
-    TAG_MP3GAIN_MINMAX,
-    TAG_MP3GAIN_ALBUM_MINMAX,
-    TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK,
-    TAG_REPLAYGAIN_ALBUM_GAIN,
-    TAG_REPLAYGAIN_ALBUM_PEAK,
-    TAG_REPLAYGAIN_ALGORITHM,
-];
 
 /// ReplayGain and undo data stored in ID3v2 TXXX frames
 #[derive(Debug, Clone, Default)]
@@ -56,9 +32,10 @@ pub struct Id3v2ReplayGain {
     pub album_peak: Option<String>,
     /// `REPLAYGAIN_ALGORITHM`; `None` in the mp3gain-compatible RG1 mode.
     pub algorithm: Option<String>,
-    /// `MP3GAIN_UNDO`, present in this container only under `-s i`.
+    /// `MP3GAIN_UNDO`, present in this container only under `-s i` and in a
+    /// raw ADTS stream.
     pub undo: Option<String>,
-    /// `MP3GAIN_MINMAX`, written alongside the undo value and never alone.
+    /// `MP3GAIN_MINMAX`, the file's `global_gain` range, `min,max`.
     pub minmax: Option<String>,
 }
 
@@ -162,6 +139,16 @@ pub(crate) fn add_missing_txxx(tag: &mut id3::Tag, values: &[(String, String)]) 
     }
 }
 
+/// Replace every TXXX frame `description` names, whatever its case, with one
+/// holding `value`.
+fn set_txxx(tag: &mut id3::Tag, description: &str, value: String) {
+    remove_txxx_ci(tag, description);
+    tag.add_frame(id3::frame::ExtendedText {
+        description: description.to_string(),
+        value,
+    });
+}
+
 /// Remove all TXXX frames matching `description` case-insensitively.
 ///
 /// `Tag::add_frame` and `Tag::remove_extended_text` only match the exact
@@ -213,11 +200,7 @@ fn add_rg_frames(tag: &mut id3::Tag, rg: &Id3v2ReplayGain) {
 
     for &(desc, value) in fields {
         if let Some(v) = value {
-            remove_txxx_ci(tag, desc);
-            tag.add_frame(id3::frame::ExtendedText {
-                description: desc.to_string(),
-                value: v.clone(),
-            });
+            set_txxx(tag, desc, v.clone());
         }
     }
 }
@@ -253,7 +236,7 @@ pub(crate) fn write_rg_frames_direct(
 /// had no tag at all, a new empty) ID3v2 tag.
 pub fn delete_id3v2_replaygain(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
-    if !strip_txxx(&mut tag, ALL_RG_DESCRIPTIONS) {
+    if !strip_txxx(&mut tag, &MP3GAIN_VALUE_KEYS) {
         return Ok(());
     }
     write_tag(path, &mut tag)
@@ -263,7 +246,7 @@ pub fn delete_id3v2_replaygain(path: &Path) -> Result<()> {
 /// already writing onto a not-yet-visible temp file (issue #232).
 pub(crate) fn delete_id3v2_replaygain_direct(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
-    if !strip_txxx(&mut tag, ALL_RG_DESCRIPTIONS) {
+    if !strip_txxx(&mut tag, &MP3GAIN_VALUE_KEYS) {
         return Ok(());
     }
     write_tag_direct(path, &mut tag)
@@ -320,9 +303,9 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
     Ok(frames)
 }
 
-/// Post-undo cleanup for cross-container layouts (issue #306): drop only the
-/// `REPLAYGAIN_*` TXXX frames, leaving any `MP3GAIN_UNDO` / `MP3GAIN_MINMAX`
-/// alone. Files without ReplayGain frames are left untouched rather than
+/// Post-undo cleanup for cross-container layouts (issue #306): drop the
+/// [`UNDONE_KEYS`] frames, leaving any `MP3GAIN_UNDO` / `MP3GAIN_MINMAX`
+/// alone. Files without such frames are left untouched rather than
 /// rewritten.
 ///
 /// Writes in place, without the temp+rename dance, because the only caller
@@ -331,7 +314,7 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
 /// costing a second full-file copy.
 pub(crate) fn remove_id3v2_rg_values_direct(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
-    if !strip_txxx(&mut tag, UNDONE_VALUE_DESCRIPTIONS) {
+    if !strip_txxx(&mut tag, &UNDONE_KEYS) {
         return Ok(());
     }
     write_tag_direct(path, &mut tag)
@@ -343,11 +326,11 @@ pub(crate) fn remove_id3v2_rg_values_direct(path: &Path) -> Result<()> {
 /// a temp file.
 pub(crate) fn write_id3v2_album_minmax(path: &Path, min: u8, max: u8) -> Result<()> {
     let mut tag = read_tag(path)?;
-    remove_txxx_ci(&mut tag, TAG_MP3GAIN_ALBUM_MINMAX);
-    tag.add_frame(id3::frame::ExtendedText {
-        description: TAG_MP3GAIN_ALBUM_MINMAX.to_string(),
-        value: crate::ape::format_minmax(min, max),
-    });
+    set_txxx(
+        &mut tag,
+        TAG_MP3GAIN_ALBUM_MINMAX,
+        crate::ape::format_minmax(min, max),
+    );
     write_tag(path, &mut tag)
 }
 
