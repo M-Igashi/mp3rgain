@@ -1,18 +1,18 @@
 {
-  "date": "2026-10-28",
+  "date": "2026-10-29",
   "github_releases": [
     {
       "assets": [
         {
-          "download_count": 110,
+          "download_count": 197,
           "name": "InRelease"
         },
         {
-          "download_count": 7,
+          "download_count": 11,
           "name": "mp3rgain-archive-keyring.gpg"
         },
         {
-          "download_count": 4,
+          "download_count": 5,
           "name": "mp3rgain-linux-arm64.tar.gz"
         },
         {
@@ -20,7 +20,7 @@
           "name": "mp3rgain-linux-arm64.tar.gz.sha256"
         },
         {
-          "download_count": 8,
+          "download_count": 11,
           "name": "mp3rgain-linux-x86_64.tar.gz"
         },
         {
@@ -36,7 +36,7 @@
           "name": "mp3rgain-v3.14.0-linux-arm64.tar.gz.sha256"
         },
         {
-          "download_count": 56,
+          "download_count": 68,
           "name": "mp3rgain-v3.14.0-linux-x86_64.tar.gz"
         },
         {
@@ -44,7 +44,7 @@
           "name": "mp3rgain-v3.14.0-linux-x86_64.tar.gz.sha256"
         },
         {
-          "download_count": 13,
+          "download_count": 21,
           "name": "mp3rgain-v3.14.0-macos-universal.tar.gz"
         },
         {
@@ -52,7 +52,7 @@
           "name": "mp3rgain-v3.14.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 15,
+          "download_count": 16,
           "name": "mp3rgain-v3.14.0-windows-arm64.zip"
         },
         {
@@ -60,23 +60,23 @@
           "name": "mp3rgain-v3.14.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 63,
+          "download_count": 79,
           "name": "mp3rgain-v3.14.0-windows-x86_64.zip"
         },
         {
-          "download_count": 5,
+          "download_count": 6,
           "name": "mp3rgain-v3.14.0-windows-x86_64.zip.sha256"
         },
         {
-          "download_count": 23,
+          "download_count": 26,
           "name": "mp3rgain_3.14.0-1_amd64.deb"
         },
         {
-          "download_count": 0,
+          "download_count": 1,
           "name": "mp3rgain_3.14.0-1_amd64.deb.sha256"
         },
         {
-          "download_count": 4,
+          "download_count": 5,
           "name": "mp3rgain_3.14.0-1_arm64.deb"
         },
         {
@@ -92,15 +92,15 @@
           "name": "mp3rgui-v3.14.0-linux-arm64.tar.gz.sha256"
         },
         {
-          "download_count": 57,
+          "download_count": 70,
           "name": "mp3rgui-v3.14.0-linux-x86_64.tar.gz"
         },
         {
-          "download_count": 0,
+          "download_count": 1,
           "name": "mp3rgui-v3.14.0-linux-x86_64.tar.gz.sha256"
         },
         {
-          "download_count": 15,
+          "download_count": 24,
           "name": "mp3rgui-v3.14.0-macos-universal.dmg"
         },
         {
@@ -116,7 +116,7 @@
           "name": "mp3rgui-v3.14.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 13,
+          "download_count": 15,
           "name": "mp3rgui-v3.14.0-windows-arm64.zip"
         },
         {
@@ -124,7 +124,7 @@
           "name": "mp3rgui-v3.14.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 11,
+          "download_count": 13,
           "name": "mp3rgui-v3.14.0-windows-setup.exe"
         },
         {
@@ -132,7 +132,7 @@
           "name": "mp3rgui-v3.14.0-windows-setup.exe.sha256"
         },
         {
-          "download_count": 51,
+          "download_count": 65,
           "name": "mp3rgui-v3.14.0-windows-x86_64.zip"
         },
         {
@@ -140,7 +140,7 @@
           "name": "mp3rgui-v3.14.0-windows-x86_64.zip.sha256"
         },
         {
-          "download_count": 73,
+          "download_count": 101,
           "name": "mp3rgui-windows-setup.exe"
         },
         {
@@ -148,7 +148,7 @@
           "name": "mp3rgui-windows-setup.exe.sha256"
         },
         {
-          "download_count": 15,
+          "download_count": 17,
           "name": "mp3rgui_3.14.0-1_amd64.deb"
         },
         {
@@ -168,7 +168,7 @@
           "name": "Packages"
         },
         {
-          "download_count": 24,
+          "download_count": 27,
           "name": "Packages.gz"
         },
         {
@@ -202,7 +202,7 @@
           "name": "mp3rgain-linux-arm64.tar.gz.sha256"
         },
         {
-          "download_count": 8,
+          "download_count": 9,
           "name": "mp3rgain-linux-x86_64.tar.gz"
         },
         {
@@ -764,7 +764,7 @@
           "name": "mp3rgain-v3.11.1-linux-arm64.tar.gz.sha256"
         },
         {
-          "download_count": 127,
+          "download_count": 128,
           "name": "mp3rgain-v3.11.1-linux-x86_64.tar.gz"
         },
         {
@@ -780,7 +780,7 @@
           "name": "mp3rgain-v3.11.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 49,
+          "download_count": 50,
           "name": "mp3rgain-v3.11.1-windows-arm64.zip"
         },
         {
@@ -788,7 +788,7 @@
           "name": "mp3rgain-v3.11.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 270,
+          "download_count": 272,
           "name": "mp3rgain-v3.11.1-windows-x86_64.zip"
         },
         {
@@ -844,7 +844,7 @@
           "name": "mp3rgui-v3.11.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 43,
+          "download_count": 44,
           "name": "mp3rgui-v3.11.1-windows-arm64.zip"
         },
         {
@@ -860,7 +860,7 @@
           "name": "mp3rgui-v3.11.1-windows-setup.exe.sha256"
         },
         {
-          "download_count": 158,
+          "download_count": 159,
           "name": "mp3rgui-v3.11.1-windows-x86_64.zip"
         },
         {
@@ -1538,7 +1538,7 @@
           "name": "mp3rgain-v3.9.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 79,
+          "download_count": 80,
           "name": "mp3rgain-v3.9.0-windows-arm64.zip"
         },
         {
@@ -1546,7 +1546,7 @@
           "name": "mp3rgain-v3.9.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 195,
+          "download_count": 196,
           "name": "mp3rgain-v3.9.0-windows-x86_64.zip"
         },
         {
@@ -1594,7 +1594,7 @@
           "name": "mp3rgui-v3.9.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 51,
+          "download_count": 52,
           "name": "mp3rgui-v3.9.0-windows-arm64.zip"
         },
         {
@@ -1610,7 +1610,7 @@
           "name": "mp3rgui-v3.9.0-windows-setup.exe.sha256"
         },
         {
-          "download_count": 134,
+          "download_count": 135,
           "name": "mp3rgui-v3.9.0-windows-x86_64.zip"
         },
         {
@@ -1672,7 +1672,7 @@
           "name": "mp3rgain-v3.8.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 72,
+          "download_count": 74,
           "name": "mp3rgain-v3.8.1-windows-arm64.zip"
         },
         {
@@ -1680,7 +1680,7 @@
           "name": "mp3rgain-v3.8.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 176,
+          "download_count": 178,
           "name": "mp3rgain-v3.8.1-windows-x86_64.zip"
         },
         {
@@ -1728,7 +1728,7 @@
           "name": "mp3rgui-v3.8.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 54,
+          "download_count": 56,
           "name": "mp3rgui-v3.8.1-windows-arm64.zip"
         },
         {
@@ -1744,7 +1744,7 @@
           "name": "mp3rgui-v3.8.1-windows-setup.exe.sha256"
         },
         {
-          "download_count": 130,
+          "download_count": 132,
           "name": "mp3rgui-v3.8.1-windows-x86_64.zip"
         },
         {
@@ -1806,7 +1806,7 @@
           "name": "mp3rgain-v3.8.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 72,
+          "download_count": 73,
           "name": "mp3rgain-v3.8.0-windows-arm64.zip"
         },
         {
@@ -1814,7 +1814,7 @@
           "name": "mp3rgain-v3.8.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 138,
+          "download_count": 139,
           "name": "mp3rgain-v3.8.0-windows-x86_64.zip"
         },
         {
@@ -1862,7 +1862,7 @@
           "name": "mp3rgui-v3.8.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 57,
+          "download_count": 58,
           "name": "mp3rgui-v3.8.0-windows-arm64.zip"
         },
         {
@@ -1878,7 +1878,7 @@
           "name": "mp3rgui-v3.8.0-windows-setup.exe.sha256"
         },
         {
-          "download_count": 113,
+          "download_count": 114,
           "name": "mp3rgui-v3.8.0-windows-x86_64.zip"
         },
         {
@@ -1940,7 +1940,7 @@
           "name": "mp3rgain-v3.7.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 75,
+          "download_count": 76,
           "name": "mp3rgain-v3.7.0-windows-arm64.zip"
         },
         {
@@ -1948,7 +1948,7 @@
           "name": "mp3rgain-v3.7.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 122,
+          "download_count": 123,
           "name": "mp3rgain-v3.7.0-windows-x86_64.zip"
         },
         {
@@ -1996,7 +1996,7 @@
           "name": "mp3rgui-v3.7.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 64,
+          "download_count": 65,
           "name": "mp3rgui-v3.7.0-windows-arm64.zip"
         },
         {
@@ -2012,7 +2012,7 @@
           "name": "mp3rgui-v3.7.0-windows-setup.exe.sha256"
         },
         {
-          "download_count": 112,
+          "download_count": 113,
           "name": "mp3rgui-v3.7.0-windows-x86_64.zip"
         },
         {
@@ -2074,7 +2074,7 @@
           "name": "mp3rgain-v3.6.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 70,
+          "download_count": 72,
           "name": "mp3rgain-v3.6.1-windows-arm64.zip"
         },
         {
@@ -2082,7 +2082,7 @@
           "name": "mp3rgain-v3.6.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 109,
+          "download_count": 111,
           "name": "mp3rgain-v3.6.1-windows-x86_64.zip"
         },
         {
@@ -2130,7 +2130,7 @@
           "name": "mp3rgui-v3.6.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 63,
+          "download_count": 65,
           "name": "mp3rgui-v3.6.1-windows-arm64.zip"
         },
         {
@@ -2146,7 +2146,7 @@
           "name": "mp3rgui-v3.6.1-windows-setup.exe.sha256"
         },
         {
-          "download_count": 97,
+          "download_count": 99,
           "name": "mp3rgui-v3.6.1-windows-x86_64.zip"
         },
         {
@@ -2208,7 +2208,7 @@
           "name": "mp3rgain-v3.6.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 79,
+          "download_count": 80,
           "name": "mp3rgain-v3.6.0-windows-arm64.zip"
         },
         {
@@ -2216,7 +2216,7 @@
           "name": "mp3rgain-v3.6.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 153,
+          "download_count": 154,
           "name": "mp3rgain-v3.6.0-windows-x86_64.zip"
         },
         {
@@ -2264,7 +2264,7 @@
           "name": "mp3rgui-v3.6.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 71,
+          "download_count": 72,
           "name": "mp3rgui-v3.6.0-windows-arm64.zip"
         },
         {
@@ -2280,7 +2280,7 @@
           "name": "mp3rgui-v3.6.0-windows-setup.exe.sha256"
         },
         {
-          "download_count": 129,
+          "download_count": 130,
           "name": "mp3rgui-v3.6.0-windows-x86_64.zip"
         },
         {
@@ -2342,7 +2342,7 @@
           "name": "mp3rgain-v3.5.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 75,
+          "download_count": 77,
           "name": "mp3rgain-v3.5.1-windows-arm64.zip"
         },
         {
@@ -2350,7 +2350,7 @@
           "name": "mp3rgain-v3.5.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 132,
+          "download_count": 134,
           "name": "mp3rgain-v3.5.1-windows-x86_64.zip"
         },
         {
@@ -2398,7 +2398,7 @@
           "name": "mp3rgui-v3.5.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 71,
+          "download_count": 73,
           "name": "mp3rgui-v3.5.1-windows-arm64.zip"
         },
         {
@@ -2414,7 +2414,7 @@
           "name": "mp3rgui-v3.5.1-windows-setup.exe.sha256"
         },
         {
-          "download_count": 110,
+          "download_count": 112,
           "name": "mp3rgui-v3.5.1-windows-x86_64.zip"
         },
         {
@@ -2476,7 +2476,7 @@
           "name": "mp3rgain-v3.5.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 70,
+          "download_count": 73,
           "name": "mp3rgain-v3.5.0-windows-arm64.zip"
         },
         {
@@ -2484,7 +2484,7 @@
           "name": "mp3rgain-v3.5.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 80,
+          "download_count": 83,
           "name": "mp3rgain-v3.5.0-windows-x86_64.zip"
         },
         {
@@ -2532,7 +2532,7 @@
           "name": "mp3rgui-v3.5.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 73,
+          "download_count": 76,
           "name": "mp3rgui-v3.5.0-windows-arm64.zip"
         },
         {
@@ -2548,7 +2548,7 @@
           "name": "mp3rgui-v3.5.0-windows-setup.exe.sha256"
         },
         {
-          "download_count": 77,
+          "download_count": 80,
           "name": "mp3rgui-v3.5.0-windows-x86_64.zip"
         },
         {
@@ -2610,7 +2610,7 @@
           "name": "mp3rgain-v3.4.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 82,
+          "download_count": 83,
           "name": "mp3rgain-v3.4.0-windows-arm64.zip"
         },
         {
@@ -2618,7 +2618,7 @@
           "name": "mp3rgain-v3.4.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 213,
+          "download_count": 214,
           "name": "mp3rgain-v3.4.0-windows-x86_64.zip"
         },
         {
@@ -2666,7 +2666,7 @@
           "name": "mp3rgui-v3.4.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 75,
+          "download_count": 76,
           "name": "mp3rgui-v3.4.0-windows-arm64.zip"
         },
         {
@@ -2682,7 +2682,7 @@
           "name": "mp3rgui-v3.4.0-windows-setup.exe.sha256"
         },
         {
-          "download_count": 156,
+          "download_count": 157,
           "name": "mp3rgui-v3.4.0-windows-x86_64.zip"
         },
         {
@@ -2744,7 +2744,7 @@
           "name": "mp3rgain-v3.3.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 80,
+          "download_count": 81,
           "name": "mp3rgain-v3.3.0-windows-arm64.zip"
         },
         {
@@ -2752,7 +2752,7 @@
           "name": "mp3rgain-v3.3.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 176,
+          "download_count": 177,
           "name": "mp3rgain-v3.3.0-windows-x86_64.zip"
         },
         {
@@ -2800,7 +2800,7 @@
           "name": "mp3rgui-v3.3.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 75,
+          "download_count": 76,
           "name": "mp3rgui-v3.3.0-windows-arm64.zip"
         },
         {
@@ -2816,7 +2816,7 @@
           "name": "mp3rgui-v3.3.0-windows-setup.exe.sha256"
         },
         {
-          "download_count": 148,
+          "download_count": 149,
           "name": "mp3rgui-v3.3.0-windows-x86_64.zip"
         },
         {
@@ -2878,7 +2878,7 @@
           "name": "mp3rgain-v3.2.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 138,
+          "download_count": 139,
           "name": "mp3rgain-v3.2.0-windows-arm64.zip"
         },
         {
@@ -2886,7 +2886,7 @@
           "name": "mp3rgain-v3.2.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 275,
+          "download_count": 276,
           "name": "mp3rgain-v3.2.0-windows-x86_64.zip"
         },
         {
@@ -2934,7 +2934,7 @@
           "name": "mp3rgui-v3.2.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 104,
+          "download_count": 105,
           "name": "mp3rgui-v3.2.0-windows-arm64.zip"
         },
         {
@@ -2942,7 +2942,7 @@
           "name": "mp3rgui-v3.2.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 264,
+          "download_count": 265,
           "name": "mp3rgui-v3.2.0-windows-x86_64.zip"
         },
         {
@@ -2996,7 +2996,7 @@
           "name": "mp3rgain-v3.1.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 102,
+          "download_count": 103,
           "name": "mp3rgain-v3.1.1-windows-arm64.zip"
         },
         {
@@ -3004,7 +3004,7 @@
           "name": "mp3rgain-v3.1.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 164,
+          "download_count": 165,
           "name": "mp3rgain-v3.1.1-windows-x86_64.zip"
         },
         {
@@ -3052,7 +3052,7 @@
           "name": "mp3rgui-v3.1.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 97,
+          "download_count": 98,
           "name": "mp3rgui-v3.1.1-windows-arm64.zip"
         },
         {
@@ -3060,7 +3060,7 @@
           "name": "mp3rgui-v3.1.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 168,
+          "download_count": 169,
           "name": "mp3rgui-v3.1.1-windows-x86_64.zip"
         },
         {
@@ -3232,7 +3232,7 @@
           "name": "mp3rgain-v3.0.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 101,
+          "download_count": 102,
           "name": "mp3rgain-v3.0.0-windows-arm64.zip"
         },
         {
@@ -3240,7 +3240,7 @@
           "name": "mp3rgain-v3.0.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 163,
+          "download_count": 164,
           "name": "mp3rgain-v3.0.0-windows-x86_64.zip"
         },
         {
@@ -3288,7 +3288,7 @@
           "name": "mp3rgui-v3.0.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 108,
+          "download_count": 109,
           "name": "mp3rgui-v3.0.0-windows-arm64.zip"
         },
         {
@@ -3296,7 +3296,7 @@
           "name": "mp3rgui-v3.0.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 154,
+          "download_count": 155,
           "name": "mp3rgui-v3.0.0-windows-x86_64.zip"
         },
         {
@@ -3350,7 +3350,7 @@
           "name": "mp3rgain-v2.11.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 121,
+          "download_count": 122,
           "name": "mp3rgain-v2.11.0-windows-arm64.zip"
         },
         {
@@ -3358,7 +3358,7 @@
           "name": "mp3rgain-v2.11.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 214,
+          "download_count": 215,
           "name": "mp3rgain-v2.11.0-windows-x86_64.zip"
         },
         {
@@ -3468,7 +3468,7 @@
           "name": "mp3rgain-v2.10.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 151,
+          "download_count": 152,
           "name": "mp3rgain-v2.10.0-windows-arm64.zip"
         },
         {
@@ -3476,7 +3476,7 @@
           "name": "mp3rgain-v2.10.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 284,
+          "download_count": 285,
           "name": "mp3rgain-v2.10.0-windows-x86_64.zip"
         },
         {
@@ -3524,7 +3524,7 @@
           "name": "mp3rgui-v2.10.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 132,
+          "download_count": 133,
           "name": "mp3rgui-v2.10.0-windows-arm64.zip"
         },
         {
@@ -3532,7 +3532,7 @@
           "name": "mp3rgui-v2.10.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 322,
+          "download_count": 323,
           "name": "mp3rgui-v2.10.0-windows-x86_64.zip"
         },
         {
@@ -3586,7 +3586,7 @@
           "name": "mp3rgain-v2.9.6-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 139,
+          "download_count": 140,
           "name": "mp3rgain-v2.9.6-windows-arm64.zip"
         },
         {
@@ -3594,7 +3594,7 @@
           "name": "mp3rgain-v2.9.6-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 218,
+          "download_count": 219,
           "name": "mp3rgain-v2.9.6-windows-x86_64.zip"
         },
         {
@@ -3642,7 +3642,7 @@
           "name": "mp3rgui-v2.9.6-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 128,
+          "download_count": 129,
           "name": "mp3rgui-v2.9.6-windows-arm64.zip"
         },
         {
@@ -3650,7 +3650,7 @@
           "name": "mp3rgui-v2.9.6-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 206,
+          "download_count": 207,
           "name": "mp3rgui-v2.9.6-windows-x86_64.zip"
         },
         {
@@ -3704,7 +3704,7 @@
           "name": "mp3rgain-v2.9.5-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 140,
+          "download_count": 141,
           "name": "mp3rgain-v2.9.5-windows-arm64.zip"
         },
         {
@@ -3712,7 +3712,7 @@
           "name": "mp3rgain-v2.9.5-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 187,
+          "download_count": 188,
           "name": "mp3rgain-v2.9.5-windows-x86_64.zip"
         },
         {
@@ -3760,7 +3760,7 @@
           "name": "mp3rgui-v2.9.5-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 133,
+          "download_count": 134,
           "name": "mp3rgui-v2.9.5-windows-arm64.zip"
         },
         {
@@ -3768,7 +3768,7 @@
           "name": "mp3rgui-v2.9.5-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 188,
+          "download_count": 189,
           "name": "mp3rgui-v2.9.5-windows-x86_64.zip"
         },
         {
@@ -3822,7 +3822,7 @@
           "name": "mp3rgain-v2.9.4-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 140,
+          "download_count": 141,
           "name": "mp3rgain-v2.9.4-windows-arm64.zip"
         },
         {
@@ -3830,7 +3830,7 @@
           "name": "mp3rgain-v2.9.4-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 192,
+          "download_count": 193,
           "name": "mp3rgain-v2.9.4-windows-x86_64.zip"
         },
         {
@@ -3878,7 +3878,7 @@
           "name": "mp3rgui-v2.9.4-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 135,
+          "download_count": 136,
           "name": "mp3rgui-v2.9.4-windows-arm64.zip"
         },
         {
@@ -3886,7 +3886,7 @@
           "name": "mp3rgui-v2.9.4-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 186,
+          "download_count": 187,
           "name": "mp3rgui-v2.9.4-windows-x86_64.zip"
         },
         {
@@ -3996,7 +3996,7 @@
           "name": "mp3rgui-v2.9.3-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 134,
+          "download_count": 135,
           "name": "mp3rgui-v2.9.3-windows-arm64.zip"
         },
         {
@@ -4004,7 +4004,7 @@
           "name": "mp3rgui-v2.9.3-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 157,
+          "download_count": 158,
           "name": "mp3rgui-v2.9.3-windows-x86_64.zip"
         },
         {
@@ -4058,7 +4058,7 @@
           "name": "mp3rgain-v2.9.2-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 140,
+          "download_count": 141,
           "name": "mp3rgain-v2.9.2-windows-arm64.zip"
         },
         {
@@ -4066,7 +4066,7 @@
           "name": "mp3rgain-v2.9.2-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 177,
+          "download_count": 178,
           "name": "mp3rgain-v2.9.2-windows-x86_64.zip"
         },
         {
@@ -4114,7 +4114,7 @@
           "name": "mp3rgui-v2.9.2-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 139,
+          "download_count": 140,
           "name": "mp3rgui-v2.9.2-windows-arm64.zip"
         },
         {
@@ -4122,7 +4122,7 @@
           "name": "mp3rgui-v2.9.2-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 177,
+          "download_count": 178,
           "name": "mp3rgui-v2.9.2-windows-x86_64.zip"
         },
         {
@@ -4232,7 +4232,7 @@
           "name": "mp3rgui-v2.9.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 138,
+          "download_count": 139,
           "name": "mp3rgui-v2.9.1-windows-arm64.zip"
         },
         {
@@ -4240,7 +4240,7 @@
           "name": "mp3rgui-v2.9.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 197,
+          "download_count": 198,
           "name": "mp3rgui-v2.9.1-windows-x86_64.zip"
         },
         {
@@ -4350,7 +4350,7 @@
           "name": "mp3rgui-v2.9.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 139,
+          "download_count": 140,
           "name": "mp3rgui-v2.9.0-windows-arm64.zip"
         },
         {
@@ -4358,7 +4358,7 @@
           "name": "mp3rgui-v2.9.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 177,
+          "download_count": 178,
           "name": "mp3rgui-v2.9.0-windows-x86_64.zip"
         },
         {
@@ -4412,7 +4412,7 @@
           "name": "mp3rgain-v2.8.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 162,
+          "download_count": 163,
           "name": "mp3rgain-v2.8.1-windows-arm64.zip"
         },
         {
@@ -4420,7 +4420,7 @@
           "name": "mp3rgain-v2.8.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 250,
+          "download_count": 251,
           "name": "mp3rgain-v2.8.1-windows-x86_64.zip"
         },
         {
@@ -4468,7 +4468,7 @@
           "name": "mp3rgui-v2.8.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 146,
+          "download_count": 147,
           "name": "mp3rgui-v2.8.1-windows-arm64.zip"
         },
         {
@@ -4476,7 +4476,7 @@
           "name": "mp3rgui-v2.8.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 210,
+          "download_count": 211,
           "name": "mp3rgui-v2.8.1-windows-x86_64.zip"
         },
         {
@@ -4586,7 +4586,7 @@
           "name": "mp3rgui-v2.8.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 161,
+          "download_count": 162,
           "name": "mp3rgui-v2.8.0-windows-arm64.zip"
         },
         {
@@ -4594,7 +4594,7 @@
           "name": "mp3rgui-v2.8.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 246,
+          "download_count": 247,
           "name": "mp3rgui-v2.8.0-windows-x86_64.zip"
         },
         {
@@ -4648,7 +4648,7 @@
           "name": "mp3rgain-v2.7.3-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 221,
+          "download_count": 222,
           "name": "mp3rgain-v2.7.3-windows-arm64.zip"
         },
         {
@@ -4656,7 +4656,7 @@
           "name": "mp3rgain-v2.7.3-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 345,
+          "download_count": 346,
           "name": "mp3rgain-v2.7.3-windows-x86_64.zip"
         },
         {
@@ -4704,7 +4704,7 @@
           "name": "mp3rgui-v2.7.3-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 188,
+          "download_count": 189,
           "name": "mp3rgui-v2.7.3-windows-arm64.zip"
         },
         {
@@ -4712,7 +4712,7 @@
           "name": "mp3rgui-v2.7.3-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 295,
+          "download_count": 296,
           "name": "mp3rgui-v2.7.3-windows-x86_64.zip"
         },
         {
@@ -4766,7 +4766,7 @@
           "name": "mp3rgain-v2.7.2-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 202,
+          "download_count": 203,
           "name": "mp3rgain-v2.7.2-windows-arm64.zip"
         },
         {
@@ -4774,7 +4774,7 @@
           "name": "mp3rgain-v2.7.2-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 262,
+          "download_count": 263,
           "name": "mp3rgain-v2.7.2-windows-x86_64.zip"
         },
         {
@@ -4822,7 +4822,7 @@
           "name": "mp3rgui-v2.7.2-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 186,
+          "download_count": 187,
           "name": "mp3rgui-v2.7.2-windows-arm64.zip"
         },
         {
@@ -4830,7 +4830,7 @@
           "name": "mp3rgui-v2.7.2-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 243,
+          "download_count": 244,
           "name": "mp3rgui-v2.7.2-windows-x86_64.zip"
         },
         {
@@ -4884,7 +4884,7 @@
           "name": "mp3rgain-v2.7.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 186,
+          "download_count": 187,
           "name": "mp3rgain-v2.7.1-windows-arm64.zip"
         },
         {
@@ -4892,7 +4892,7 @@
           "name": "mp3rgain-v2.7.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 203,
+          "download_count": 204,
           "name": "mp3rgain-v2.7.1-windows-x86_64.zip"
         },
         {
@@ -5002,7 +5002,7 @@
           "name": "mp3rgain-v2.7.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 184,
+          "download_count": 185,
           "name": "mp3rgain-v2.7.0-windows-arm64.zip"
         },
         {
@@ -5010,7 +5010,7 @@
           "name": "mp3rgain-v2.7.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 220,
+          "download_count": 221,
           "name": "mp3rgain-v2.7.0-windows-x86_64.zip"
         },
         {
@@ -5058,7 +5058,7 @@
           "name": "mp3rgui-v2.7.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 187,
+          "download_count": 188,
           "name": "mp3rgui-v2.7.0-windows-arm64.zip"
         },
         {
@@ -5066,7 +5066,7 @@
           "name": "mp3rgui-v2.7.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 215,
+          "download_count": 216,
           "name": "mp3rgui-v2.7.0-windows-x86_64.zip"
         },
         {
@@ -5238,7 +5238,7 @@
           "name": "mp3rgain-v2.6.2-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 190,
+          "download_count": 191,
           "name": "mp3rgain-v2.6.2-windows-arm64.zip"
         },
         {
@@ -5246,7 +5246,7 @@
           "name": "mp3rgain-v2.6.2-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 212,
+          "download_count": 213,
           "name": "mp3rgain-v2.6.2-windows-x86_64.zip"
         },
         {
@@ -5294,7 +5294,7 @@
           "name": "mp3rgui-v2.6.2-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 187,
+          "download_count": 188,
           "name": "mp3rgui-v2.6.2-windows-arm64.zip"
         },
         {
@@ -5302,7 +5302,7 @@
           "name": "mp3rgui-v2.6.2-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 205,
+          "download_count": 206,
           "name": "mp3rgui-v2.6.2-windows-x86_64.zip"
         },
         {
@@ -5356,7 +5356,7 @@
           "name": "mp3rgain-v2.6.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 203,
+          "download_count": 204,
           "name": "mp3rgain-v2.6.1-windows-arm64.zip"
         },
         {
@@ -5364,7 +5364,7 @@
           "name": "mp3rgain-v2.6.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 269,
+          "download_count": 270,
           "name": "mp3rgain-v2.6.1-windows-x86_64.zip"
         },
         {
@@ -5412,7 +5412,7 @@
           "name": "mp3rgui-v2.6.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 199,
+          "download_count": 200,
           "name": "mp3rgui-v2.6.1-windows-arm64.zip"
         },
         {
@@ -5420,7 +5420,7 @@
           "name": "mp3rgui-v2.6.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 254,
+          "download_count": 255,
           "name": "mp3rgui-v2.6.1-windows-x86_64.zip"
         },
         {
@@ -5474,7 +5474,7 @@
           "name": "mp3rgain-v2.6.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 212,
+          "download_count": 213,
           "name": "mp3rgain-v2.6.0-windows-arm64.zip"
         },
         {
@@ -5482,7 +5482,7 @@
           "name": "mp3rgain-v2.6.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 258,
+          "download_count": 259,
           "name": "mp3rgain-v2.6.0-windows-x86_64.zip"
         },
         {
@@ -5530,7 +5530,7 @@
           "name": "mp3rgui-v2.6.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 195,
+          "download_count": 196,
           "name": "mp3rgui-v2.6.0-windows-arm64.zip"
         },
         {
@@ -5538,7 +5538,7 @@
           "name": "mp3rgui-v2.6.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 255,
+          "download_count": 256,
           "name": "mp3rgui-v2.6.0-windows-x86_64.zip"
         },
         {
@@ -5592,7 +5592,7 @@
           "name": "mp3rgain-v2.5.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 218,
+          "download_count": 219,
           "name": "mp3rgain-v2.5.0-windows-arm64.zip"
         },
         {
@@ -5600,7 +5600,7 @@
           "name": "mp3rgain-v2.5.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 256,
+          "download_count": 257,
           "name": "mp3rgain-v2.5.0-windows-x86_64.zip"
         },
         {
@@ -5710,7 +5710,7 @@
           "name": "mp3rgain-v2.4.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 219,
+          "download_count": 220,
           "name": "mp3rgain-v2.4.0-windows-arm64.zip"
         },
         {
@@ -5718,7 +5718,7 @@
           "name": "mp3rgain-v2.4.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 276,
+          "download_count": 277,
           "name": "mp3rgain-v2.4.0-windows-x86_64.zip"
         },
         {
@@ -5766,7 +5766,7 @@
           "name": "mp3rgui-v2.4.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 211,
+          "download_count": 212,
           "name": "mp3rgui-v2.4.0-windows-arm64.zip"
         },
         {
@@ -5774,7 +5774,7 @@
           "name": "mp3rgui-v2.4.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 284,
+          "download_count": 285,
           "name": "mp3rgui-v2.4.0-windows-x86_64.zip"
         },
         {
@@ -5828,7 +5828,7 @@
           "name": "mp3rgain-v2.3.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 201,
+          "download_count": 202,
           "name": "mp3rgain-v2.3.1-windows-arm64.zip"
         },
         {
@@ -5836,7 +5836,7 @@
           "name": "mp3rgain-v2.3.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 229,
+          "download_count": 230,
           "name": "mp3rgain-v2.3.1-windows-x86_64.zip"
         },
         {
@@ -5946,7 +5946,7 @@
           "name": "mp3rgain-v2.3.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 229,
+          "download_count": 230,
           "name": "mp3rgain-v2.3.0-windows-arm64.zip"
         },
         {
@@ -5954,7 +5954,7 @@
           "name": "mp3rgain-v2.3.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 282,
+          "download_count": 283,
           "name": "mp3rgain-v2.3.0-windows-x86_64.zip"
         },
         {
@@ -6002,7 +6002,7 @@
           "name": "mp3rgui-v2.3.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 215,
+          "download_count": 216,
           "name": "mp3rgui-v2.3.0-windows-arm64.zip"
         },
         {
@@ -6010,7 +6010,7 @@
           "name": "mp3rgui-v2.3.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 267,
+          "download_count": 268,
           "name": "mp3rgui-v2.3.0-windows-x86_64.zip"
         },
         {
@@ -6064,7 +6064,7 @@
           "name": "mp3rgain-v2.2.3-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 243,
+          "download_count": 244,
           "name": "mp3rgain-v2.2.3-windows-arm64.zip"
         },
         {
@@ -6072,7 +6072,7 @@
           "name": "mp3rgain-v2.2.3-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 294,
+          "download_count": 295,
           "name": "mp3rgain-v2.2.3-windows-x86_64.zip"
         },
         {
@@ -6120,7 +6120,7 @@
           "name": "mp3rgui-v2.2.3-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 217,
+          "download_count": 218,
           "name": "mp3rgui-v2.2.3-windows-arm64.zip"
         },
         {
@@ -6128,7 +6128,7 @@
           "name": "mp3rgui-v2.2.3-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 272,
+          "download_count": 273,
           "name": "mp3rgui-v2.2.3-windows-x86_64.zip"
         },
         {
@@ -6182,7 +6182,7 @@
           "name": "mp3rgain-v2.2.2-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 220,
+          "download_count": 221,
           "name": "mp3rgain-v2.2.2-windows-arm64.zip"
         },
         {
@@ -6190,7 +6190,7 @@
           "name": "mp3rgain-v2.2.2-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 246,
+          "download_count": 247,
           "name": "mp3rgain-v2.2.2-windows-x86_64.zip"
         },
         {
@@ -6238,7 +6238,7 @@
           "name": "mp3rgui-v2.2.2-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 218,
+          "download_count": 219,
           "name": "mp3rgui-v2.2.2-windows-arm64.zip"
         },
         {
@@ -6246,7 +6246,7 @@
           "name": "mp3rgui-v2.2.2-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 232,
+          "download_count": 233,
           "name": "mp3rgui-v2.2.2-windows-x86_64.zip"
         },
         {
@@ -6300,7 +6300,7 @@
           "name": "mp3rgain-v2.2.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 214,
+          "download_count": 215,
           "name": "mp3rgain-v2.2.1-windows-arm64.zip"
         },
         {
@@ -6308,7 +6308,7 @@
           "name": "mp3rgain-v2.2.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 235,
+          "download_count": 236,
           "name": "mp3rgain-v2.2.1-windows-x86_64.zip"
         },
         {
@@ -6356,7 +6356,7 @@
           "name": "mp3rgui-v2.2.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 218,
+          "download_count": 219,
           "name": "mp3rgui-v2.2.1-windows-arm64.zip"
         },
         {
@@ -6364,7 +6364,7 @@
           "name": "mp3rgui-v2.2.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 232,
+          "download_count": 233,
           "name": "mp3rgui-v2.2.1-windows-x86_64.zip"
         },
         {
@@ -6536,7 +6536,7 @@
           "name": "mp3rgain-v2.1.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 257,
+          "download_count": 258,
           "name": "mp3rgain-v2.1.0-windows-arm64.zip"
         },
         {
@@ -6544,7 +6544,7 @@
           "name": "mp3rgain-v2.1.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 360,
+          "download_count": 361,
           "name": "mp3rgain-v2.1.0-windows-x86_64.zip"
         },
         {
@@ -6592,7 +6592,7 @@
           "name": "mp3rgui-v2.1.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 231,
+          "download_count": 232,
           "name": "mp3rgui-v2.1.0-windows-arm64.zip"
         },
         {
@@ -6600,7 +6600,7 @@
           "name": "mp3rgui-v2.1.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 644,
+          "download_count": 646,
           "name": "mp3rgui-v2.1.0-windows-x86_64.zip"
         },
         {
@@ -6690,7 +6690,7 @@
           "name": "mp3rgui-v2.0.4-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 232,
+          "download_count": 233,
           "name": "mp3rgui-v2.0.4-windows-arm64.zip"
         },
         {
@@ -6698,7 +6698,7 @@
           "name": "mp3rgui-v2.0.4-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 255,
+          "download_count": 256,
           "name": "mp3rgui-v2.0.4-windows-x86_64.zip"
         },
         {
@@ -6728,7 +6728,7 @@
           "name": "mp3rgain-v2.0.3-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 290,
+          "download_count": 291,
           "name": "mp3rgain-v2.0.3-windows-arm64.zip"
         },
         {
@@ -6736,7 +6736,7 @@
           "name": "mp3rgain-v2.0.3-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 396,
+          "download_count": 397,
           "name": "mp3rgain-v2.0.3-windows-x86_64.zip"
         },
         {
@@ -6772,7 +6772,7 @@
           "name": "mp3rgui-v2.0.3-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 234,
+          "download_count": 235,
           "name": "mp3rgui-v2.0.3-windows-arm64.zip"
         },
         {
@@ -6780,7 +6780,7 @@
           "name": "mp3rgui-v2.0.3-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 320,
+          "download_count": 321,
           "name": "mp3rgui-v2.0.3-windows-x86_64.zip"
         },
         {
@@ -6810,7 +6810,7 @@
           "name": "mp3rgain-v2.0.2-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 236,
+          "download_count": 237,
           "name": "mp3rgain-v2.0.2-windows-arm64.zip"
         },
         {
@@ -6818,7 +6818,7 @@
           "name": "mp3rgain-v2.0.2-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 247,
+          "download_count": 248,
           "name": "mp3rgain-v2.0.2-windows-x86_64.zip"
         },
         {
@@ -6854,7 +6854,7 @@
           "name": "mp3rgui-v2.0.2-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 226,
+          "download_count": 227,
           "name": "mp3rgui-v2.0.2-windows-arm64.zip"
         },
         {
@@ -6862,7 +6862,7 @@
           "name": "mp3rgui-v2.0.2-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 250,
+          "download_count": 251,
           "name": "mp3rgui-v2.0.2-windows-x86_64.zip"
         },
         {
@@ -6892,7 +6892,7 @@
           "name": "mp3rgain-v2.0.1-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 229,
+          "download_count": 230,
           "name": "mp3rgain-v2.0.1-windows-arm64.zip"
         },
         {
@@ -6900,7 +6900,7 @@
           "name": "mp3rgain-v2.0.1-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 241,
+          "download_count": 242,
           "name": "mp3rgain-v2.0.1-windows-x86_64.zip"
         },
         {
@@ -6974,7 +6974,7 @@
           "name": "mp3rgain-v2.0.0-macos-universal.tar.gz.sha256"
         },
         {
-          "download_count": 268,
+          "download_count": 269,
           "name": "mp3rgain-v2.0.0-windows-arm64.zip"
         },
         {
@@ -6982,7 +6982,7 @@
           "name": "mp3rgain-v2.0.0-windows-arm64.zip.sha256"
         },
         {
-          "download_count": 326,
+          "download_count": 327,
           "name": "mp3rgain-v2.0.0-windows-x86_64.zip"
         },
         {
@@ -7130,12 +7130,12 @@
     }
   ],
   "crates_io": {
-    "total_downloads": 3976,
-    "recent_downloads": 1939,
+    "total_downloads": 4006,
+    "recent_downloads": 1962,
     "versions": [
       {
         "num": "3.14.0",
-        "downloads": 94,
+        "downloads": 118,
         "created_at": "2026-10-27T00:13:42.026650Z"
       },
       {
@@ -7165,7 +7165,7 @@
       },
       {
         "num": "3.10.0",
-        "downloads": 226,
+        "downloads": 229,
         "created_at": "2026-10-08T17:59:15.647476Z"
       },
       {
@@ -7175,7 +7175,7 @@
       },
       {
         "num": "3.9.1",
-        "downloads": 127,
+        "downloads": 128,
         "created_at": "2026-09-30T11:12:57.087295Z"
       },
       {
@@ -7235,7 +7235,7 @@
       },
       {
         "num": "3.1.1",
-        "downloads": 25,
+        "downloads": 26,
         "created_at": "2026-08-09T11:21:09.844060Z"
       },
       {
@@ -7300,7 +7300,7 @@
       },
       {
         "num": "2.8.0",
-        "downloads": 80,
+        "downloads": 81,
         "created_at": "2026-06-12T05:52:42.645718Z"
       },
       {
@@ -8217,7 +8217,7 @@
   },
   "ppa_gui": {
     "ppa": "mp3rgui",
-    "total_downloads": 63,
+    "total_downloads": 64,
     "items": [
       {
         "version": "2.2.1-0ppa1~questing1",
@@ -8721,7 +8721,7 @@
         "version": "3.14.0-0ppa1~resolute1",
         "series": "resolute",
         "arch": "amd64",
-        "downloads": 2
+        "downloads": 3
       },
       {
         "version": "3.14.0-0ppa1~resolute1",
