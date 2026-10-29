@@ -50,6 +50,7 @@ What ships today:
 - A ReplayGain re-run that needs no change syncs each file once, and the album range reuses the apply's scan
 - mp3rgui: a capped dry run below zero reads "-1 steps (capped)" rather than "+-1", and manual and channel gain say so while they run (#466)
 - mp3rgui: the CJK fallback font takes half the memory, and grouping albums by tags reads the files in parallel (#470)
+- An MP3 apply or undo that writes APEv2 holds one copy of the file instead of two, and an M4A apply or undo two instead of three (#469)
 - Cleanup from a whole-codebase review, with no other change in behaviour
 
 ## Release history

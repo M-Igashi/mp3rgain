@@ -402,22 +402,35 @@ fn split_ape_tag(data: &[u8]) -> (&[u8], &[u8]) {
     (&data[..audio_end], &data[footer_start + 32..])
 }
 
-/// Replace (or remove, when `tag` is empty) the APEv2 tag in file data,
-/// keeping a trailing ID3v1 tag after the APE tag. The result is built in one
-/// allocation of its final size: the input is a whole file.
-pub(crate) fn replace_ape_tag(data: &[u8], tag: &ApeTag) -> Vec<u8> {
+/// File data with its APEv2 tag replaced by `tag` (removed when `tag` is
+/// empty), as the three parts that follow each other: the audio, the new tag,
+/// and a trailing ID3v1 block, which stays after the APE tag.
+fn ape_tag_parts<'a>(data: &'a [u8], tag: &ApeTag) -> (&'a [u8], Vec<u8>, &'a [u8]) {
     let (mut audio, mut id3v1) = split_ape_tag(data);
     // A bare ID3v1 block with no APE tag in front of it stays last too.
     if id3v1.is_empty() && ends_with_id3v1(audio) {
         (audio, id3v1) = audio.split_at(audio.len() - 128);
     }
+    (audio, serialize_ape_tag(tag), id3v1)
+}
 
-    let tag_data = serialize_ape_tag(tag);
-    let mut result = Vec::with_capacity(audio.len() + tag_data.len() + id3v1.len());
-    result.extend_from_slice(audio);
-    result.extend_from_slice(&tag_data);
-    result.extend_from_slice(id3v1);
-    result
+/// Replace (or remove, when `tag` is empty) the APEv2 tag in file data,
+/// keeping a trailing ID3v1 tag after the APE tag.
+#[cfg(test)]
+pub(crate) fn replace_ape_tag(data: &[u8], tag: &ApeTag) -> Vec<u8> {
+    let (audio, tag_data, id3v1) = ape_tag_parts(data, tag);
+    [audio, &tag_data, id3v1].concat()
+}
+
+/// Write `data` to `path` with its APEv2 tag replaced (removed when `tag` is
+/// empty), part by part: the input is a whole file, and building the result
+/// in memory first held a second copy of it (issue #469).
+pub(crate) fn write_with_ape_tag(path: &Path, data: &[u8], tag: &ApeTag) -> std::io::Result<()> {
+    let (audio, tag_data, id3v1) = ape_tag_parts(data, tag);
+    let mut file = fs::File::create(path)?;
+    file.write_all(audio)?;
+    file.write_all(&tag_data)?;
+    file.write_all(id3v1)
 }
 
 /// Rewrite only the trailing metadata of `file_path` in place: parse the

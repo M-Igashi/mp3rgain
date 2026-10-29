@@ -15,7 +15,7 @@
 
 use crate::analysis::ChannelMode;
 use crate::ape::{
-    accumulate_undo, parse_undo_values, parse_undo_wrap, read_ape_tag, replace_ape_tag,
+    accumulate_undo, parse_undo_values, parse_undo_wrap, read_ape_tag, write_with_ape_tag,
     ApeReplayGain, TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO,
 };
 use crate::error::{Error, Result};
@@ -228,8 +228,8 @@ impl GainOptions {
                 let data = read(preread)?;
                 let mut tag = read_ape_tag(&data).unwrap_or_default();
                 tag.set_replaygain(rg);
-                let new_data = replace_ape_tag(&data, &tag);
-                fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
+                write_with_ape_tag(write_to, &data, &tag)
+                    .map_err(|e| Error::io_write(write_to, e))?;
             } else if !same_path {
                 match preread {
                     Some(data) => {
@@ -354,13 +354,12 @@ pub fn undo_gain(file_path: &Path) -> Result<usize> {
     tag.remove(TAG_MP3GAIN_ALBUM_MINMAX);
     tag.remove_replaygain();
 
-    let new_data = replace_ape_tag(&data, &tag);
     // Under the split layout the REPLAYGAIN_* residuals live in ID3v2 and
     // described the gained audio too (issue #306). Strip them on the temp
     // file so the rollback and both containers' cleanup land in one rename,
     // where a separate pass afterwards cost a second full-file copy.
     crate::apply::with_temp_file(file_path, |original, temp| {
-        fs::write(temp, &new_data).map_err(|e| Error::io_write(original, e))?;
+        write_with_ape_tag(temp, &data, &tag).map_err(|e| Error::io_write(original, e))?;
         crate::id3v2::remove_id3v2_rg_values_direct(temp)
     })?;
 
@@ -453,8 +452,7 @@ fn apply_gain_simple_to_path(
     if let Some(rg) = replaygain {
         let mut tag = read_ape_tag(&data).unwrap_or_default();
         tag.set_replaygain(rg);
-        let new_data = replace_ape_tag(&data, &tag);
-        fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
+        write_with_ape_tag(write_to, &data, &tag).map_err(|e| Error::io_write(write_to, e))?;
     } else {
         fs::write(write_to, &data).map_err(|e| Error::io_write(write_to, e))?;
     }
@@ -505,8 +503,7 @@ fn apply_gain_with_undo_impl_to_path(
         tag.set_replaygain(rg);
     }
 
-    let new_data = replace_ape_tag(&data, &tag);
-    fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
+    write_with_ape_tag(write_to, &data, &tag).map_err(|e| Error::io_write(write_to, e))?;
 
     Ok(stats)
 }
@@ -569,8 +566,7 @@ fn apply_gain_channel_with_undo(
     // MP3GAIN_MINMAX is left as it is, and none is added: mp3gain's `-l`
     // updates stored values only when both channels move by the same amount
     // (issue #433).
-    let new_data = replace_ape_tag(&data, &tag);
-    fs::write(write_to, &new_data).map_err(|e| Error::io_write(write_to, e))?;
+    write_with_ape_tag(write_to, &data, &tag).map_err(|e| Error::io_write(write_to, e))?;
 
     Ok(stats)
 }
