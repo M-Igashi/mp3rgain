@@ -49,6 +49,7 @@ What ships today:
 - An ID3v2 write keeps the tag's padding and rewrites the tag in place when it fits, instead of moving the audio after it; a tag that grows gets 2 KB of padding (#467)
 - A crafted `MP3GAIN_UNDO` can no longer overflow the undo arithmetic
 - Library: without the `aac` feature, the `*_auto` functions refuse AAC instead of running the MP3 path over an M4A (#149)
+- Library: `write_album_minmax_with_options` keeps each file's mtime itself, so the CLI and mp3rgui no longer wrap the call to restore it (#463)
 - A ReplayGain re-run that needs no change syncs each file once, and the album range reuses the apply's scan
 - mp3rgui: a capped dry run below zero reads "-1 steps (capped)" rather than "+-1", and manual and channel gain say so while they run (#466)
 - mp3rgui: the CJK fallback font takes half the memory, and grouping albums by tags reads the files in parallel (#470)

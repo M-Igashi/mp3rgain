@@ -1151,7 +1151,7 @@ pub fn write_replaygain_tags_only(file_path: &Path, opts: &TagsOnlyOptions) -> R
 /// The album-wide range is only known once every file has had its gain
 /// applied, so callers invoke this *after* the per-file apply pass. The CLI's
 /// `-a` runs and the GUI apply worker both go through
-/// [`write_album_minmax_with_layout`], so the two frontends stay in parity
+/// [`write_album_minmax_with_options`], so the two frontends stay in parity
 /// (the GUI path was missing it in 2.9.0).
 ///
 /// Pass only the files whose apply succeeded: a file the apply left alone has
@@ -1181,6 +1181,35 @@ pub fn write_album_minmax<'a>(files: &[(&'a Path, Option<(u8, u8)>)]) -> Vec<(&'
 pub fn write_album_minmax_with_layout<'a>(
     files: &[(&'a Path, Option<(u8, u8)>)],
     layout: TagLayout,
+) -> Vec<(&'a Path, Error)> {
+    write_album_minmax_with_options(
+        files,
+        &AlbumMinmaxOptions {
+            tag_layout: layout,
+            ..Default::default()
+        },
+    )
+}
+
+/// Driver configuration for [`write_album_minmax_with_options`].
+///
+/// Construct via `AlbumMinmaxOptions::default()` and set fields directly.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct AlbumMinmaxOptions {
+    /// Which container the mp3gain values go in, as for
+    /// [`write_album_minmax_with_layout`].
+    pub tag_layout: TagLayout,
+    /// `-p`: restore each file's mtime after its write (issue #463).
+    pub preserve_timestamp: bool,
+}
+
+/// [`write_album_minmax_with_layout`] that can also keep each file's mtime,
+/// as [`ApplyOptions::preserve_timestamp`] does for the apply before it, so a
+/// frontend does not have to wrap the call to restore the times (issue #436).
+pub fn write_album_minmax_with_options<'a>(
+    files: &[(&'a Path, Option<(u8, u8)>)],
+    opts: &AlbumMinmaxOptions,
 ) -> Vec<(&'a Path, Error)> {
     use rayon::prelude::*;
 
@@ -1214,11 +1243,15 @@ pub fn write_album_minmax_with_layout<'a>(
     mp3_files
         .par_iter()
         .filter_map(|&file| {
-            let written = if layout.mp3gain_in_id3v2() {
+            let original_mtime = read_mtime_if(file, opts.preserve_timestamp);
+            let written = if opts.tag_layout.mp3gain_in_id3v2() {
                 id3v2::write_id3v2_album_minmax(file, album_min, album_max)
             } else {
                 ape::write_ape_album_minmax(file, album_min, album_max)
             };
+            if let Some(mtime) = original_mtime {
+                restore_timestamp(file, mtime);
+            }
             written.err().map(|e| (file, e))
         })
         .collect()

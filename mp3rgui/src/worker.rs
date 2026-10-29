@@ -10,7 +10,7 @@
 
 use mp3rgain::apply::{
     apply_with_options, predict_apply, read_mtime_if, restore_timestamp,
-    write_album_minmax_with_layout, ApplyOptions,
+    write_album_minmax_with_options, AlbumMinmaxOptions, ApplyOptions,
 };
 use mp3rgain::replaygain::{self, AnalysisMode, ReplayGainResult};
 use mp3rgain::{
@@ -552,6 +552,9 @@ pub fn spawn_apply(
         // of the three modes that was (issues #159, #224, #338). A row whose
         // write fails is gained but incomplete, so it counts as an error.
         let album_members = album_members.into_inner().unwrap();
+        let mut minmax_opts = AlbumMinmaxOptions::default();
+        minmax_opts.tag_layout = ui_opts.tag_layout;
+        minmax_opts.preserve_timestamp = ui_opts.preserve_timestamp;
         for group in &album_minmax_groups {
             // A group's rows that never reached the apply (skipped, not MP3)
             // or failed it are not members and must not be stamped.
@@ -561,16 +564,7 @@ pub fn spawn_apply(
                 .collect();
             // A second write after the apply restored the mtime, so Preserve
             // mtime has to restore it again (issue #436).
-            let mtimes: Vec<_> = entries
-                .iter()
-                .map(|&(path, _)| read_mtime_if(path, ui_opts.preserve_timestamp))
-                .collect();
-            let minmax_errors = write_album_minmax_with_layout(&entries, ui_opts.tag_layout);
-            for (&(path, _), mtime) in entries.iter().zip(mtimes) {
-                if let Some(mtime) = mtime {
-                    restore_timestamp(path, mtime);
-                }
-            }
+            let minmax_errors = write_album_minmax_with_options(&entries, &minmax_opts);
             for (path, e) in minmax_errors {
                 applied.fetch_sub(1, Ordering::Relaxed);
                 errors.fetch_add(1, Ordering::Relaxed);
