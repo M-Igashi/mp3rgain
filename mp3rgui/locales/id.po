@@ -1,0 +1,806 @@
+# Indonesian translation of mp3rgui.
+# Translators:
+# saimskywalker
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: mp3rgui\n"
+"Report-Msgid-Bugs-To: https://github.com/M-Igashi/mp3rgain/issues\n"
+"POT-Creation-Date: 2026-10-29 09:47+0000\n"
+"PO-Revision-Date: 2026-10-31 08:00+0800\n"
+"Last-Translator: saimskywalker\n"
+"Language-Team: Indonesian\n"
+"Language: id\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: src/app.rs:46
+msgid "Analyzing..."
+msgstr "Menganalisis..."
+
+#: src/app.rs:47
+msgid "OK"
+msgstr "OK"
+
+#: src/app.rs:48
+msgid "Applying..."
+msgstr "Menerapkan..."
+
+#: src/app.rs:49
+msgid "Undoing..."
+msgstr "Mengurungkan..."
+
+#: src/app.rs:50
+msgid "Done"
+msgstr "Selesai"
+
+#: src/app.rs:51
+msgid "Done (from tags)"
+msgstr "Selesai (dari tag)"
+
+#: src/app.rs:52
+msgid "Done ({n} frames unparsed)"
+msgstr "Selesai ({n} frame tidak terurai)"
+
+#: src/app.rs:53
+msgid "Nothing to undo"
+msgstr "Tidak ada yang dapat diurungkan"
+
+#: src/app.rs:61
+msgid "Dry run: {} steps (capped)"
+msgstr "Simulasi: {} langkah (dibatasi)"
+
+#: src/app.rs:63
+msgid "Dry run: {} steps"
+msgstr "Simulasi: {} langkah"
+
+#: src/app.rs:66
+msgid "Error"
+msgstr "Kesalahan"
+
+#: src/app.rs:813
+msgid "{} file(s) queued, will be added when processing finishes"
+msgstr "{} berkas dalam antrean, akan ditambahkan setelah pemrosesan selesai"
+
+#: src/app.rs:856
+msgid "Added {} file(s), {} duplicate(s) skipped"
+msgstr "{} berkas ditambahkan, {} duplikat dilewati"
+
+#: src/app.rs:858
+msgid "Added {} file(s)"
+msgstr "{} berkas ditambahkan"
+
+#: src/app.rs:982
+msgid "Cancelling..."
+msgstr "Membatalkan..."
+
+#: src/app.rs:992
+msgid "Could not open file location: {}"
+msgstr "Tidak dapat membuka lokasi berkas: {}"
+
+#: src/app.rs:1078
+msgid "Analyzing {} file(s) without stored tags..."
+msgstr "Menganalisis {} berkas tanpa tag tersimpan..."
+
+#: src/app.rs:1133
+msgid "No track gain values — run Track Analysis first"
+msgstr "Belum ada nilai gain trek — jalankan Analisis Trek terlebih dahulu"
+
+#: src/app.rs:1363
+msgid "Channel gain only applies to MP3 — selection had no eligible files"
+msgstr "Gain kanal hanya berlaku untuk MP3 — pilihan tidak berisi berkas yang sesuai"
+
+#: src/app.rs:1432
+msgid "Analyzing {} file(s) without consistent stored album tags..."
+msgstr "Menganalisis {} berkas tanpa tag album tersimpan yang konsisten..."
+
+#: src/app.rs:1519
+msgid "No album gain values — run Album Analysis first"
+msgstr "Belum ada nilai gain album — jalankan Analisis Album terlebih dahulu"
+
+#: src/app.rs:1548
+msgid "Analyzing tracks..."
+msgstr "Menganalisis trek..."
+
+#: src/app.rs:1549
+msgid "Analyzing album..."
+msgstr "Menganalisis album..."
+
+#: src/app.rs:1550
+msgid "Applying track gain..."
+msgstr "Menerapkan gain trek..."
+
+#: src/app.rs:1551
+msgid "Applying album gain..."
+msgstr "Menerapkan gain album..."
+
+#: src/app.rs:1552
+msgid "Applying manual gain..."
+msgstr "Menerapkan gain manual..."
+
+#: src/app.rs:1553
+msgid "Applying channel gain..."
+msgstr "Menerapkan gain kanal..."
+
+#: src/app.rs:1554
+msgid "Undoing gain changes..."
+msgstr "Mengurungkan perubahan gain..."
+
+#: src/app.rs:1555
+msgid "Checking stored tags..."
+msgstr "Memeriksa tag tersimpan..."
+
+#: src/app.rs:1556
+msgid "Finding max amplitude..."
+msgstr "Mencari amplitudo maksimum..."
+
+#: src/app.rs:1557
+msgid "Deleting stored tags..."
+msgstr "Menghapus tag tersimpan..."
+
+#: src/app.rs:1558
+msgid "Reading existing ReplayGain values..."
+msgstr "Membaca nilai ReplayGain yang ada..."
+
+#: src/app.rs:1664
+msgid "Album analysis failed: {}"
+msgstr "Analisis album gagal: {}"
+
+#: src/app.rs:1761
+msgid "Cancelled"
+msgstr "Dibatalkan"
+
+#: src/i18n.rs:60
+msgctxt "language name"
+msgid "English"
+msgstr "Bahasa Indonesia"
+
+#: src/i18n.rs:105 src/ui/menu.rs:59
+msgid "Add Files..."
+msgstr "Tambah Berkas..."
+
+#: src/i18n.rs:115 src/i18n.rs:119 src/ui/menu.rs:18
+msgid "System default"
+msgstr "Bawaan sistem"
+
+#: src/ui/menu.rs:16
+msgid "Language"
+msgstr "Bahasa"
+
+#: src/ui/menu.rs:49
+msgid "Help"
+msgstr "Bantuan"
+
+#: src/ui/menu.rs:50 src/ui/mod.rs:26
+msgid "About mp3rgui"
+msgstr "Tentang mp3rgui"
+
+#: src/ui/menu.rs:58
+msgid "File"
+msgstr "Berkas"
+
+#: src/ui/menu.rs:63
+msgid "Add Folder..."
+msgstr "Tambah Folder..."
+
+#: src/ui/menu.rs:67
+msgid "Add Folder (with subfolders)..."
+msgstr "Tambah Folder (dengan subfolder)..."
+
+#: src/ui/menu.rs:72
+msgid "Clear File List"
+msgstr "Kosongkan Daftar Berkas"
+
+#: src/ui/menu.rs:77 src/ui/status.rs:14
+msgid "Exit"
+msgstr "Keluar"
+
+#: src/ui/menu.rs:84
+msgid "Analysis"
+msgstr "Analisis"
+
+#: src/ui/menu.rs:86 src/ui/toolbar.rs:24
+msgid "Track Analysis"
+msgstr "Analisis Trek"
+
+#: src/ui/menu.rs:90 src/ui/toolbar.rs:27
+msgid "Album Analysis"
+msgstr "Analisis Album"
+
+#: src/ui/menu.rs:94
+msgid "Find Max Amplitude"
+msgstr "Cari Amplitudo Maksimum"
+
+#: src/ui/menu.rs:99
+msgid "Check Stored Tags"
+msgstr "Periksa Tag Tersimpan"
+
+#: src/ui/menu.rs:108
+msgid "Modify Gain"
+msgstr "Ubah Gain"
+
+#: src/ui/menu.rs:110
+msgid "Apply Track Gain"
+msgstr "Terapkan Gain Trek"
+
+#: src/ui/menu.rs:114
+msgid "Apply Album Gain"
+msgstr "Terapkan Gain Album"
+
+#: src/ui/menu.rs:118
+msgid "Apply Manual Gain..."
+msgstr "Terapkan Gain Manual..."
+
+#: src/ui/menu.rs:122
+msgid "Apply Channel Gain (MP3)..."
+msgstr "Terapkan Gain Kanal (MP3)..."
+
+#: src/ui/menu.rs:128
+msgid "Undo All"
+msgstr "Urungkan Semua"
+
+#: src/ui/menu.rs:130
+msgid "Undo Selected"
+msgstr "Urungkan yang Dipilih"
+
+#: src/ui/menu.rs:137
+msgid "Delete Stored Tags (All)..."
+msgstr "Hapus Tag Tersimpan (Semua)..."
+
+#: src/ui/menu.rs:139
+msgid "Delete Stored Tags (Selected)..."
+msgstr "Hapus Tag Tersimpan (yang Dipilih)..."
+
+#: src/ui/options.rs:13
+msgid "Options:"
+msgstr "Opsi:"
+
+#: src/ui/options.rs:17
+msgid "Prevent clipping"
+msgstr "Cegah clipping"
+
+#: src/ui/options.rs:20
+msgid "Cap the applied gain at the available headroom so the output cannot clip. Equivalent to the CLI's -k flag."
+msgstr "Batasi gain yang diterapkan sesuai headroom yang tersedia agar keluaran tidak mengalami clipping. Setara dengan flag -k pada CLI."
+
+#: src/ui/options.rs:26
+msgid "Preserve mtime"
+msgstr "Pertahankan mtime"
+
+#: src/ui/options.rs:29
+msgid "Restore the file's last-modified timestamp after writing so it doesn't jump to the top of playlists sorted by date. CLI -p."
+msgstr "Kembalikan waktu terakhir diubah berkas setelah penulisan agar berkas tidak melompat ke atas daftar putar yang diurutkan menurut tanggal. CLI -p."
+
+#: src/ui/options.rs:34
+msgid "Wrap mode"
+msgstr "Mode wrap"
+
+#: src/ui/options.rs:36
+msgid "Allow gain values to wrap around 0–255 instead of saturating. Disables the clipping check. CLI -w. Rarely useful — leave off."
+msgstr "Izinkan nilai gain berputar balik dalam rentang 0–255 alih-alih tertahan di batasnya. Menonaktifkan pemeriksaan clipping. CLI -w. Jarang berguna — biarkan nonaktif."
+
+#: src/ui/options.rs:41
+msgid "MP3 tags:"
+msgstr "Tag MP3:"
+
+#: src/ui/options.rs:45 src/ui/options.rs:53
+msgid "ReplayGain in ID3v2"
+msgstr "ReplayGain di ID3v2"
+
+#: src/ui/options.rs:46 src/ui/options.rs:60
+msgid "All in APEv2"
+msgstr "Semua di APEv2"
+
+#: src/ui/options.rs:47 src/ui/options.rs:65
+msgid "All in ID3v2"
+msgstr "Semua di ID3v2"
+
+#: src/ui/options.rs:56
+msgid "Default. REPLAYGAIN_* in ID3v2 TXXX where players look, MP3GAIN_UNDO / MINMAX in APEv2 where mp3gain looks."
+msgstr "Bawaan. REPLAYGAIN_* di ID3v2 TXXX, tempat pemutar mencarinya, MP3GAIN_UNDO / MINMAX di APEv2, tempat mp3gain mencarinya."
+
+#: src/ui/options.rs:62
+msgid "Byte-for-byte mp3gain behaviour. ReplayGain-aware players will not find the values. CLI -s a."
+msgstr "Perilaku mp3gain yang sama persis hingga tiap byte. Pemutar yang mendukung ReplayGain tidak akan menemukan nilainya. CLI -s a."
+
+#: src/ui/options.rs:67
+msgid "Undo and ReplayGain both in ID3v2 TXXX frames. CLI -s i."
+msgstr "Data urungkan dan ReplayGain sama-sama di frame ID3v2 TXXX. CLI -s i."
+
+#: src/ui/options.rs:75
+msgid "Dry run"
+msgstr "Simulasi"
+
+#: src/ui/options.rs:77
+msgid "Preview Apply Track / Album Gain without modifying any file. The Status column shows the steps that would be applied. CLI -n."
+msgstr "Pratinjau Terapkan Gain Trek / Album tanpa mengubah berkas apa pun. Kolom Status menampilkan langkah yang akan diterapkan. CLI -n."
+
+#: src/ui/options.rs:88
+msgid "Use stored tags"
+msgstr "Gunakan tag tersimpan"
+
+#: src/ui/options.rs:91
+msgid "Apply Track / Album Gain from stored REPLAYGAIN_* tags instead of re-analyzing; only files without usable tags are rescanned. Album Gain reuses tags only when every file in the album carries a consistent set; any gap rescans the whole album. CLI -s R. RG 1.0 mode only."
+msgstr "Terapkan Gain Trek / Album dari tag REPLAYGAIN_* yang tersimpan alih-alih menganalisis ulang; hanya berkas tanpa tag yang dapat dipakai yang dipindai ulang. Gain Album memakai ulang tag hanya jika setiap berkas di album memiliki set tag yang konsisten; satu saja yang kurang membuat seluruh album dipindai ulang. CLI -s R. Hanya mode RG 1.0."
+
+#. What one album is, for Album Analysis / Apply Album Gain.
+#. The CLI's --album-by, in the same three units (issue #338).
+#: src/ui/options.rs:102
+msgid "Album:"
+msgstr "Album:"
+
+#: src/ui/options.rs:106
+msgid "Per folder"
+msgstr "Per folder"
+
+#: src/ui/options.rs:109
+msgid "Each folder is its own album. A release whose discs live in subfolders gets one album gain per disc, so use By tags for those. CLI --album-by=dir."
+msgstr "Setiap folder adalah satu album. Rilisan yang disknya berada di subfolder mendapat satu gain album per disk, jadi gunakan Menurut tag untuk rilisan seperti itu. CLI --album-by=dir."
+
+#: src/ui/options.rs:113
+msgid "By tags"
+msgstr "Menurut tag"
+
+#: src/ui/options.rs:115
+msgid "One album per release, read from ALBUMARTIST / ALBUM (and MUSICBRAINZ_ALBUMID when present), so discs in subfolders share one album gain. Files with no ALBUM tag fall back to their own folder. CLI --album-by=tag."
+msgstr "Satu album per rilisan, dibaca dari ALBUMARTIST / ALBUM (dan MUSICBRAINZ_ALBUMID jika ada), sehingga disk di subfolder berbagi satu gain album. Berkas tanpa tag ALBUM dikelompokkan menurut foldernya sendiri. CLI --album-by=tag."
+
+#: src/ui/options.rs:123
+msgid "Single album"
+msgstr "Satu album"
+
+#: src/ui/options.rs:126
+msgid "Treat every loaded file as one album, ignoring folders. Select rows first to group just those, which is how to handle a release that has no usable tags. CLI -a."
+msgstr "Perlakukan semua berkas yang dimuat sebagai satu album, tanpa memedulikan folder. Pilih baris terlebih dahulu untuk mengelompokkan baris itu saja; begitulah cara menangani rilisan yang tidak memiliki tag yang dapat dipakai. CLI -a."
+
+#: src/ui/options.rs:131
+msgid "Filename only"
+msgstr "Nama berkas saja"
+
+#: src/ui/options.rs:133
+msgid "Show only the file name in the Path/File column instead of the full path. The full path is still shown on hover."
+msgstr "Tampilkan hanya nama berkas di kolom Jalur/Berkas, bukan jalur lengkapnya. Jalur lengkap tetap ditampilkan saat kursor diarahkan."
+
+#. Loudness measurement mode (issue #272). Switching modes
+#. invalidates cached analysis results — RG1 and BS.1770
+#. numbers live on different scales.
+#: src/ui/options.rs:142
+msgid "Analysis:"
+msgstr "Analisis:"
+
+#: src/ui/options.rs:144
+msgid "RG 1.0"
+msgstr "RG 1.0"
+
+#: src/ui/options.rs:145
+msgid "ReplayGain 1.0 (default): mp3gain-compatible values, 89 dB reference. Keeps re-scans consistent with libraries normalized by mp3gain."
+msgstr "ReplayGain 1.0 (bawaan): nilai yang kompatibel dengan mp3gain, referensi 89 dB. Menjaga hasil pindai ulang tetap konsisten dengan pustaka yang dinormalisasi oleh mp3gain."
+
+#: src/ui/options.rs:148
+msgid "RG 2.0"
+msgstr "RG 2.0"
+
+#: src/ui/options.rs:150
+msgid "ReplayGain 2.0: BS.1770 integrated loudness, -18 LUFS reference (same perceived level as 89 dB). CLI --rg2."
+msgstr "ReplayGain 2.0: kenyaringan terintegrasi BS.1770, referensi -18 LUFS (tingkat yang terdengar sama dengan 89 dB). CLI --rg2."
+
+#: src/ui/options.rs:154
+msgid "R128"
+msgstr "R128"
+
+#: src/ui/options.rs:155
+msgid "EBU R128: BS.1770 integrated loudness, -23 LUFS broadcast target. CLI --r128."
+msgstr "EBU R128: kenyaringan terintegrasi BS.1770, target siaran -23 LUFS. CLI --r128."
+
+#: src/ui/status.rs:6
+msgid "Progress:"
+msgstr "Kemajuan:"
+
+#: src/ui/status.rs:26
+msgid "No files loaded"
+msgstr "Belum ada berkas yang dimuat"
+
+#: src/ui/status.rs:28
+msgid "1 file"
+msgstr "1 berkas"
+
+#: src/ui/status.rs:30
+msgid "{} files"
+msgstr "{} berkas"
+
+#: src/ui/table.rs:12
+msgid "none"
+msgstr "tidak ada"
+
+#: src/ui/table.rs:13
+msgid "No stored tags found ({} container)"
+msgstr "Tidak ditemukan tag tersimpan (kontainer {})"
+
+#: src/ui/table.rs:20
+msgid "Container: {}"
+msgstr "Kontainer: {}"
+
+#: src/ui/table.rs:51
+msgid "{name}: {value}"
+msgstr "{name}: {value}"
+
+#: src/ui/table.rs:81
+msgid "Click to sort"
+msgstr "Klik untuk mengurutkan"
+
+#: src/ui/table.rs:96
+msgid "Volume (LUFS)"
+msgstr "Volume (LUFS)"
+
+#: src/ui/table.rs:96
+msgid "Album (LUFS)"
+msgstr "Album (LUFS)"
+
+#: src/ui/table.rs:98
+msgid "Volume"
+msgstr "Volume"
+
+#: src/ui/table.rs:98
+msgid "Album Vol"
+msgstr "Vol. Album"
+
+#: src/ui/table.rs:101
+msgid "Track Analysis: BS.1770 integrated loudness in LUFS. Find Max Amplitude: available headroom in dB before clipping. Click to sort."
+msgstr "Analisis Trek: kenyaringan terintegrasi BS.1770 dalam LUFS. Cari Amplitudo Maksimum: headroom yang tersedia dalam dB sebelum clipping. Klik untuk mengurutkan."
+
+#: src/ui/table.rs:106
+msgid "Track Analysis: current loudness relative to ReplayGain reference (89 dB). Find Max Amplitude: available headroom in dB before clipping. Click to sort."
+msgstr "Analisis Trek: kenyaringan saat ini relatif terhadap referensi ReplayGain (89 dB). Cari Amplitudo Maksimum: headroom yang tersedia dalam dB sebelum clipping. Klik untuk mengurutkan."
+
+#: src/ui/table.rs:140
+msgid "Path/File"
+msgstr "Jalur/Berkas"
+
+#: src/ui/table.rs:146
+msgid "Clip"
+msgstr "Clip"
+
+#: src/ui/table.rs:149 src/ui/toolbar.rs:36
+msgid "Track Gain"
+msgstr "Gain Trek"
+
+#: src/ui/table.rs:152
+msgid "Clip(T)"
+msgstr "Clip(T)"
+
+#: src/ui/table.rs:158 src/ui/toolbar.rs:39
+msgid "Album Gain"
+msgstr "Gain Album"
+
+#: src/ui/table.rs:161
+msgid "Clip(A)"
+msgstr "Clip(A)"
+
+#: src/ui/table.rs:164
+msgid "Stored RG"
+msgstr "RG Tersimpan"
+
+#: src/ui/table.rs:165
+msgid "Existing ReplayGain/undo tags read from the file. Run Analysis > Check Stored Tags to populate. Hover a cell for full tag details."
+msgstr "Tag ReplayGain/urungkan yang ada, dibaca dari berkas. Jalankan Analisis > Periksa Tag Tersimpan untuk mengisinya. Arahkan kursor ke sel untuk melihat detail lengkap tag."
+
+#: src/ui/table.rs:174
+msgid "Bitrate"
+msgstr "Bitrate"
+
+#: src/ui/table.rs:176
+msgid "Average bitrate, read when files are added. Click to sort."
+msgstr "Bitrate rata-rata, dibaca saat berkas ditambahkan. Klik untuk mengurutkan."
+
+#: src/ui/table.rs:183
+msgid "CBR/VBR"
+msgstr "CBR/VBR"
+
+#: src/ui/table.rs:186
+msgid "MP3 only: CBR when every frame has the same bitrate, VBR otherwise. AAC frames vary in size whatever the encoder setting, so M4A rows stay empty. Click to sort."
+msgstr "Hanya MP3: CBR jika setiap frame memiliki bitrate yang sama, VBR jika tidak. Ukuran frame AAC selalu bervariasi apa pun pengaturan encoder-nya, sehingga baris M4A tetap kosong. Klik untuk mengurutkan."
+
+#: src/ui/table.rs:193
+msgid "Status"
+msgstr "Status"
+
+#: src/ui/table.rs:244
+msgid "Open file location"
+msgstr "Buka lokasi berkas"
+
+#: src/ui/table.rs:258 src/ui/table.rs:273 src/ui/table.rs:300
+msgid "Y"
+msgstr "Y"
+
+#: src/ui/table.rs:268 src/ui/table.rs:288
+msgid "{} dB"
+msgstr "{} dB"
+
+#: src/ui/table.rs:294
+msgid "Album: {}"
+msgstr "Album: {}"
+
+#: src/ui/table.rs:308
+msgid "{} kbps"
+msgstr "{} kbps"
+
+#: src/ui/table.rs:313
+msgid "CBR"
+msgstr "CBR"
+
+#: src/ui/table.rs:314
+msgid "VBR"
+msgstr "VBR"
+
+#: src/ui/table.rs:323
+msgid "These AAC frames could not be parsed and kept their original gain, which can be heard as clicks. Undo restores the file. Please report it at https://github.com/M-Igashi/mp3rgain/issues"
+msgstr "Frame AAC ini tidak dapat diurai dan tetap memakai gain aslinya, yang bisa terdengar sebagai bunyi klik. Urungkan akan memulihkan berkas. Harap laporkan di https://github.com/M-Igashi/mp3rgain/issues"
+
+#: src/ui/toolbar.rs:11
+msgid "Add Files"
+msgstr "Tambah Berkas"
+
+#: src/ui/toolbar.rs:15
+msgid "Add Folder"
+msgstr "Tambah Folder"
+
+#: src/ui/toolbar.rs:50
+msgid "Remove"
+msgstr "Hapus"
+
+#: src/ui/toolbar.rs:57
+msgid "Clear All"
+msgstr "Kosongkan Semua"
+
+#: src/ui/toolbar.rs:66 src/ui/mod.rs:71
+msgid "Cancel"
+msgstr "Batal"
+
+#. Target volume. Stored on the 89 dB scale and shown on the
+#. selected mode's scale, so one offset carries across modes:
+#. 95 dB in RG 1.0 is -12 LUFS in RG 2.0 (issues #272, #364).
+#: src/ui/toolbar.rs:76
+msgid "Target:"
+msgstr "Target:"
+
+#: src/ui/toolbar.rs:88
+msgid "Level to normalize to. One setting shared by all analysis modes as an offset from the reference: 95 dB in RG 1.0 is -12 LUFS in RG 2.0 and -17 LUFS in R128. Equivalent to the CLI's -d."
+msgstr "Tingkat tujuan normalisasi. Satu pengaturan yang dipakai bersama oleh semua mode analisis sebagai selisih dari referensi: 95 dB di RG 1.0 setara dengan -12 LUFS di RG 2.0 dan -17 LUFS di R128. Setara dengan -d pada CLI."
+
+#: src/ui/mod.rs:32
+msgid "mp3rgui {}"
+msgstr "mp3rgui {}"
+
+#: src/ui/mod.rs:34
+msgid "Lossless MP3 and AAC volume normalizer using ReplayGain"
+msgstr "Normalisasi volume MP3 dan AAC tanpa kehilangan kualitas dengan ReplayGain"
+
+#: src/ui/mod.rs:38
+msgid "{} License"
+msgstr "Lisensi {}"
+
+#: src/ui/mod.rs:101
+msgid "Apply channel gain"
+msgstr "Terapkan gain kanal"
+
+#: src/ui/mod.rs:103 src/ui/mod.rs:155
+msgid "Apply"
+msgstr "Terapkan"
+
+#: src/ui/mod.rs:106
+msgid "Target: {} file(s) (MP3 only)"
+msgstr "Target: {} berkas (hanya MP3)"
+
+#: src/ui/mod.rs:109
+msgid "Channel:"
+msgstr "Kanal:"
+
+#: src/ui/mod.rs:113
+msgid "Left"
+msgstr "Kiri"
+
+#: src/ui/mod.rs:118
+msgid "Right"
+msgstr "Kanan"
+
+#: src/ui/mod.rs:122 src/ui/mod.rs:161
+msgid "Steps:"
+msgstr "Langkah:"
+
+#: src/ui/mod.rs:129 src/ui/mod.rs:168
+msgid "= {} dB"
+msgstr "= {} dB"
+
+#: src/ui/mod.rs:132
+msgid "Stereo / Dual Channel MP3s only. Mono and joint stereo files are refused."
+msgstr "Hanya MP3 Stereo / Dual Channel. Berkas mono dan joint stereo ditolak."
+
+#: src/ui/mod.rs:153
+msgid "Apply manual gain"
+msgstr "Terapkan gain manual"
+
+#: src/ui/mod.rs:158
+msgid "Target: {} file(s)"
+msgstr "Target: {} berkas"
+
+#: src/ui/mod.rs:170
+msgid "1 step ≈ 1.5 dB. Negative values lower the volume."
+msgstr "1 langkah ≈ 1,5 dB. Nilai negatif menurunkan volume."
+
+#: src/ui/mod.rs:188
+msgid "Delete stored tags"
+msgstr "Hapus tag tersimpan"
+
+#: src/ui/mod.rs:190
+msgid "Delete"
+msgstr "Hapus"
+
+#: src/ui/mod.rs:194
+msgid "Delete stored ReplayGain / undo tags from {} file(s)?"
+msgstr "Hapus tag ReplayGain / urungkan yang tersimpan dari {} berkas?"
+
+#: src/ui/mod.rs:197
+msgid "This cannot be undone."
+msgstr "Tindakan ini tidak dapat diurungkan."
+
+#: src/ui/mod.rs:234
+msgid "Audio files"
+msgstr "Berkas audio"
+
+#: src/ui/mod.rs:273
+msgid "Drag and drop MP3 files here, or use the toolbar buttons to add files"
+msgstr "Seret dan lepas berkas MP3 di sini, atau gunakan tombol bilah alat untuk menambahkan berkas"
+
+#: src/worker.rs:282
+msgid "Analyzed {} file(s), {} error(s)"
+msgstr "{} berkas dianalisis, {} kesalahan"
+
+#: src/worker.rs:284
+msgid "Analyzed {} file(s)"
+msgstr "{} berkas dianalisis"
+
+#: src/worker.rs:575
+msgid "Gain applied, but MP3GAIN_ALBUM_MINMAX was not written: {e}"
+msgstr "Gain diterapkan, tetapi MP3GAIN_ALBUM_MINMAX tidak ditulis: {e}"
+
+#: src/worker.rs:671
+msgid "Undone {} file(s)"
+msgstr "{} berkas diurungkan"
+
+#: src/worker.rs:673
+msgid "Undone {} file(s), {} had no changes to undo"
+msgstr "{} berkas diurungkan, {} tidak memiliki perubahan untuk diurungkan"
+
+#: src/worker.rs:677
+msgid "Undone {} file(s), {} error(s)"
+msgstr "{} berkas diurungkan, {} kesalahan"
+
+#: src/worker.rs:679
+msgid "Undone {} file(s), {} had no changes to undo, {} error(s)"
+msgstr "{} berkas diurungkan, {} tidak memiliki perubahan untuk diurungkan, {} kesalahan"
+
+#: src/worker.rs:757
+msgid "Deleted stored tags from {} file(s), {} error(s)"
+msgstr "Tag tersimpan dihapus dari {} berkas, {} kesalahan"
+
+#: src/worker.rs:762
+msgid "Deleted stored tags from {} file(s)"
+msgstr "Tag tersimpan dihapus dari {} berkas"
+
+#: src/worker.rs:828
+msgid "Max amplitude scanned on {} file(s), {} error(s)"
+msgstr "Amplitudo maksimum dipindai pada {} berkas, {} kesalahan"
+
+#: src/worker.rs:833
+msgid "Max amplitude scanned on {} file(s)"
+msgstr "Amplitudo maksimum dipindai pada {} berkas"
+
+#: src/worker.rs:887
+msgid "Checked stored tags for {} file(s)"
+msgstr "Tag tersimpan diperiksa untuk {} berkas"
+
+#: src/worker.rs:999
+msgid "Applied track gain on {} file(s)"
+msgstr "Gain trek diterapkan pada {} berkas"
+
+#: src/worker.rs:1002
+msgid "Applied track gain on {} file(s), {} error(s)"
+msgstr "Gain trek diterapkan pada {} berkas, {} kesalahan"
+
+#: src/worker.rs:1007
+msgid "Dry-ran track gain on {} file(s)"
+msgstr "Gain trek disimulasikan pada {} berkas"
+
+#: src/worker.rs:1010
+msgid "Dry-ran track gain on {} file(s), {} error(s)"
+msgstr "Gain trek disimulasikan pada {} berkas, {} kesalahan"
+
+#: src/worker.rs:1015
+msgid "Applied manual gain on {} file(s)"
+msgstr "Gain manual diterapkan pada {} berkas"
+
+#: src/worker.rs:1018
+msgid "Applied manual gain on {} file(s), {} error(s)"
+msgstr "Gain manual diterapkan pada {} berkas, {} kesalahan"
+
+#: src/worker.rs:1023
+msgid "Dry-ran manual gain on {} file(s)"
+msgstr "Gain manual disimulasikan pada {} berkas"
+
+#: src/worker.rs:1026
+msgid "Dry-ran manual gain on {} file(s), {} error(s)"
+msgstr "Gain manual disimulasikan pada {} berkas, {} kesalahan"
+
+#: src/worker.rs:1031
+msgid "Applied channel gain on {} file(s)"
+msgstr "Gain kanal diterapkan pada {} berkas"
+
+#: src/worker.rs:1034
+msgid "Applied channel gain on {} file(s), {} error(s)"
+msgstr "Gain kanal diterapkan pada {} berkas, {} kesalahan"
+
+#: src/worker.rs:1039
+msgid "Dry-ran channel gain on {} file(s)"
+msgstr "Gain kanal disimulasikan pada {} berkas"
+
+#: src/worker.rs:1042
+msgid "Dry-ran channel gain on {} file(s), {} error(s)"
+msgstr "Gain kanal disimulasikan pada {} berkas, {} kesalahan"
+
+#: src/worker.rs:1047
+msgid "Applied album gain on {} file(s)"
+msgstr "Gain album diterapkan pada {} berkas"
+
+#: src/worker.rs:1050
+msgid "Applied album gain on {} file(s), {} error(s)"
+msgstr "Gain album diterapkan pada {} berkas, {} kesalahan"
+
+#: src/worker.rs:1055
+msgid "Dry-ran album gain on {} file(s)"
+msgstr "Gain album disimulasikan pada {} berkas"
+
+#: src/worker.rs:1058
+msgid "Dry-ran album gain on {} file(s), {} error(s)"
+msgstr "Gain album disimulasikan pada {} berkas, {} kesalahan"
+
+#: src/worker.rs:1078
+msgid "Album analysis complete ({} tracks)"
+msgstr "Analisis album selesai ({} trek)"
+
+#: src/worker.rs:1080
+msgid "Album analysis complete ({} tracks); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "Analisis album selesai ({} trek); {} album berisi lebih dari satu rilisan (tag artis dan album sama). Arahkan kursor ke Gain Album untuk melihat pengelompokannya."
+
+#: src/worker.rs:1086
+msgid "Album analysis complete ({} tracks, {} skipped)"
+msgstr "Analisis album selesai ({} trek, {} dilewati)"
+
+#: src/worker.rs:1091
+msgid "Album analysis complete ({} tracks, {} skipped); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "Analisis album selesai ({} trek, {} dilewati); {} album berisi lebih dari satu rilisan (tag artis dan album sama). Arahkan kursor ke Gain Album untuk melihat pengelompokannya."
+
+#: src/worker.rs:1098
+msgid "Album analysis complete ({} albums, {} tracks)"
+msgstr "Analisis album selesai ({} album, {} trek)"
+
+#: src/worker.rs:1103
+msgid "Album analysis complete ({} albums, {} tracks); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "Analisis album selesai ({} album, {} trek); {} album berisi lebih dari satu rilisan (tag artis dan album sama). Arahkan kursor ke Gain Album untuk melihat pengelompokannya."
+
+#: src/worker.rs:1110
+msgid "Album analysis complete ({} albums, {} tracks, {} skipped)"
+msgstr "Analisis album selesai ({} album, {} trek, {} dilewati)"
+
+#: src/worker.rs:1116
+msgid "Album analysis complete ({} albums, {} tracks, {} skipped); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "Analisis album selesai ({} album, {} trek, {} dilewati); {} album berisi lebih dari satu rilisan (tag artis dan album sama). Arahkan kursor ke Gain Album untuk melihat pengelompokannya."
+
+#: src/worker.rs:1125
+msgid "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed"
+msgstr "Analisis album: {} trek dianalisis, {} dilewati, {} album gagal"
+
+#: src/worker.rs:1131
+msgid "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed; {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
+msgstr "Analisis album: {} trek dianalisis, {} dilewati, {} album gagal; {} album berisi lebih dari satu rilisan (tag artis dan album sama). Arahkan kursor ke Gain Album untuk melihat pengelompokannya."
