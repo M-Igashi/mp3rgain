@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current status: v3.14.0 (2026-10-27)
+## Current status: v3.15.0 (2026-10-30)
 
 mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writes standard `REPLAYGAIN_*` tags, and can bake the correction into the bitstream losslessly. For MP3 it is a modern drop-in replacement for mp3gain. For AAC it is the only actively maintained command-line tool that does this: aacgain has been abandoned since about 2009, and foobar2000, the reference-grade ReplayGain suite, offers a comparable scalefactor-based AAC rewrite ("Apply ReplayGain to file content") but only as a Windows GUI with no undo.
 
@@ -11,7 +11,7 @@ What ships today:
 - mp3gain command-line compatibility, down to the stored tags; the differences are listed in [migrating-from-mp3gain.md](migrating-from-mp3gain.md)
 - Tags-only mode, album grouping by directory, release tags, or depth, reuse of stored tags (`-s R`)
 - Parallel processing across and within files, JSON and TSV output
-- GUI (mp3rgui) for macOS, Windows, and Linux, in English, Brazilian Portuguese, Italian, Japanese, and Turkish
+- GUI (mp3rgui) for macOS, Windows, and Linux, in English, Brazilian Portuguese, German, Indonesian, Italian, Japanese, and Turkish
 - A documented library API on crates.io and docs.rs
 - Distribution through crates.io, Homebrew, winget, .deb with an apt repository, Ubuntu PPA (deprecated, updated until 2026-12-31), AUR (GUI), MacPorts, pkgx, Termux (TUR), a Nix flake, and a GHCR Docker image
 
@@ -39,6 +39,16 @@ What ships today:
 
 ## Unreleased
 
+Nothing yet.
+
+## Release history
+
+One line per change. The [release notes](https://github.com/M-Igashi/mp3rgain/releases) and the linked issues have the details.
+
+### v3.15.0 - mp3rgui in German & Indonesian, Lighter Tag Writes
+
+The analysis and the applied gains are unchanged; an ID3v2 tag now keeps its padding, and a few outputs and mp3rgui rows that were wrong are fixed.
+
 - mp3rgui translations: German (@M-Igashi and Claude Code, reviewed by @Rosenheim23) and Indonesian (@saimskywalker); the Japanese and Italian ones refined (#440, #460, #461, #462, #480)
 - mp3rgui: an Apply that first rescans the files without stored tags applies to the rows selected at the click, not to whatever is selected when the rescan ends
 - mp3rgui: Apply Channel Gain, and an Undo that rolls the channels back by different amounts, clear the row's numbers instead of shifting them as if both channels moved, which also fed the next Apply Track Gain a wrong gain; library: `read_undo_channel_steps` (#471)
@@ -56,10 +66,7 @@ What ships today:
 - mp3rgui: the CJK fallback font takes half the memory, and grouping albums by tags reads the files in parallel (#470)
 - An MP3 apply or undo that writes APEv2 holds one copy of the file instead of two, and an M4A apply or undo two instead of three (#469)
 - Cleanup from a whole-codebase review, with no other change in behaviour
-
-## Release history
-
-One line per change. The [release notes](https://github.com/M-Igashi/mp3rgain/releases) and the linked issues have the details.
+- CI: the GitHub Actions bumped (#479)
 
 ### v3.14.0 - mp3rgui in Five Languages & mp3gain Tag Parity
 
