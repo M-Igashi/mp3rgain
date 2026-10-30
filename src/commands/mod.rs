@@ -106,7 +106,7 @@ pub fn run(mut opts: Options) -> Result<()> {
     }
 
     if opts.undo {
-        // -u: undo from APEv2 tags
+        // -u: undo from the stored undo value
         return cmd_undo(&opts.files, &opts);
     }
 

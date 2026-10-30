@@ -1,9 +1,9 @@
 //! Average bitrate and bitrate mode of an audio file, for display (issue #408).
 
-use crate::frame::{frame_at, iterate_frames, skip_id3v2};
+use crate::frame::{frame_at, iterate_frames, open_after_id3v2};
 use crate::mp4meta;
 use std::fs;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
 use std::path::Path;
 
 /// Whether every frame of a stream has the same bitrate.
@@ -47,12 +47,12 @@ pub fn read_bitrate(file_path: &Path) -> Option<Bitrate> {
         return None;
     }
 
-    let mut file = fs::File::open(file_path).ok()?;
-    let mut id3 = [0u8; 10];
-    file.read_exact(&mut id3).ok()?;
-    file.seek(SeekFrom::Start(skip_id3v2(&id3) as u64)).ok()?;
     let mut head = Vec::new();
-    file.take(HEAD_LEN).read_to_end(&mut head).ok()?;
+    open_after_id3v2(file_path)
+        .ok()?
+        .take(HEAD_LEN)
+        .read_to_end(&mut head)
+        .ok()?;
     header_bitrate(&head).or_else(|| scanned_bitrate(&fs::read(file_path).ok()?))
 }
 
@@ -67,7 +67,7 @@ fn header_bitrate(data: &[u8]) -> Option<Bitrate> {
         Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
     };
 
-    let xing = 4 + header.side_info_len();
+    let xing = header.xing_offset();
     let (frames, bytes) = match data.get(pos + xing..pos + xing + 4)? {
         b"Info" => {
             return Some(Bitrate {

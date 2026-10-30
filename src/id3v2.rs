@@ -5,10 +5,10 @@
 //! subsumed by a broader rewrite of this module.
 
 use crate::ape::{
-    parse_undo_values, parse_undo_wrap, range_wraps_out, shift_stored_value,
+    parse_undo_values, parse_undo_wrap, range_wraps_out, shift_stored_value, MP3GAIN_VALUE_KEYS,
     TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN,
     TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_ALGORITHM, TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK,
+    TAG_REPLAYGAIN_TRACK_PEAK, UNDONE_KEYS,
 };
 use crate::error::{Error, Result};
 use crate::gain::apply_undo_to_data;
@@ -17,30 +17,6 @@ use id3::TagLike;
 use std::path::Path;
 
 const TARGET_VERSION: id3::Version = id3::Version::Id3v24;
-
-/// What an undo leaves stale in the other container: the `REPLAYGAIN_*`
-/// values and the album range, as the APEv2 cleanup drops them, but not the
-/// undo value or the track range.
-const UNDONE_VALUE_DESCRIPTIONS: &[&str] = &[
-    TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK,
-    TAG_REPLAYGAIN_ALBUM_GAIN,
-    TAG_REPLAYGAIN_ALBUM_PEAK,
-    TAG_REPLAYGAIN_ALGORITHM,
-    TAG_MP3GAIN_ALBUM_MINMAX,
-];
-
-/// All known mp3gain/ReplayGain TXXX descriptions.
-const ALL_RG_DESCRIPTIONS: &[&str] = &[
-    TAG_MP3GAIN_UNDO,
-    TAG_MP3GAIN_MINMAX,
-    TAG_MP3GAIN_ALBUM_MINMAX,
-    TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK,
-    TAG_REPLAYGAIN_ALBUM_GAIN,
-    TAG_REPLAYGAIN_ALBUM_PEAK,
-    TAG_REPLAYGAIN_ALGORITHM,
-];
 
 /// ReplayGain and undo data stored in ID3v2 TXXX frames
 #[derive(Debug, Clone, Default)]
@@ -56,9 +32,10 @@ pub struct Id3v2ReplayGain {
     pub album_peak: Option<String>,
     /// `REPLAYGAIN_ALGORITHM`; `None` in the mp3gain-compatible RG1 mode.
     pub algorithm: Option<String>,
-    /// `MP3GAIN_UNDO`, present in this container only under `-s i`.
+    /// `MP3GAIN_UNDO`, present in this container only under `-s i` and in a
+    /// raw ADTS stream.
     pub undo: Option<String>,
-    /// `MP3GAIN_MINMAX`, written alongside the undo value and never alone.
+    /// `MP3GAIN_MINMAX`, the file's `global_gain` range, `min,max`.
     pub minmax: Option<String>,
 }
 
@@ -103,6 +80,10 @@ fn is_frame_encodable(frame: &id3::Frame) -> bool {
         .is_ok()
 }
 
+/// Padding left after a tag that has to grow, or is new, so the next write,
+/// which usually changes a few short values, fits in place (issue #467).
+const GROWTH_PADDING: usize = 2048;
+
 /// Write `tag` to `path`, dropping the frames [`is_frame_encodable`] rejects.
 ///
 /// Takes `&mut` so the unencodable frames can be filtered in place: cloning the
@@ -113,23 +94,62 @@ fn is_frame_encodable(frame: &id3::Frame) -> bool {
 /// every frame up front made a tag with embedded cover art clone and encode
 /// those megabytes on every write — for the rare malformed frame the filter
 /// actually exists to catch.
+///
+/// The `id3` crate writes in place only when the encoded tag is exactly as
+/// long as the region it replaces, padding included, and otherwise moves the
+/// whole audio stream after it. So the tag is padded to fill that region when
+/// it fits, and given [`GROWTH_PADDING`] when it has to grow (issue #467). The
+/// crate still locates the region and does the write; a wrong estimate here
+/// only costs the move it used to make every time.
 fn write_tag_direct(path: &Path, tag: &mut id3::Tag) -> Result<()> {
-    if !is_tag_encodable(tag) {
+    let len = encoded_len(tag).or_else(|| {
         tag.frames_vec_mut().retain(is_frame_encodable);
-    }
-    tag.write_to_path(path, TARGET_VERSION)
+        encoded_len(tag)
+    });
+    let padding = match (len, tag_region_len(path)) {
+        (Some(len), Some(region)) if len <= region => region - len,
+        _ => GROWTH_PADDING,
+    };
+    id3::Encoder::new()
+        .version(TARGET_VERSION)
+        .padding(padding)
+        .write_to_path(tag, path)
         .map_err(|e| Error::Id3v2Error {
             message: e.to_string(),
         })
 }
 
-/// Whether `tag` encodes cleanly as [`TARGET_VERSION`] as a whole.
-fn is_tag_encodable(tag: &id3::Tag) -> bool {
+/// Length of `tag` encoded as [`TARGET_VERSION`] without padding, `None` when
+/// it does not encode as a whole.
+fn encoded_len(tag: &id3::Tag) -> Option<usize> {
     let mut buf: Vec<u8> = Vec::new();
     id3::Encoder::new()
         .version(TARGET_VERSION)
         .encode(tag, &mut buf)
-        .is_ok()
+        .ok()
+        .map(|()| buf.len())
+}
+
+/// The region the `id3` crate rewrites at the start of `path`: the ID3v2 tag
+/// by its declared size and the zero bytes after it, which the crate counts as
+/// padding too. `None` without a tag, or when the tag claims the whole file,
+/// which the crate then replaces entirely.
+fn tag_region_len(path: &Path) -> Option<usize> {
+    use std::io::{BufReader, Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let file_len = file.metadata().ok()?.len();
+    let mut head = [0u8; 10];
+    file.read_exact(&mut head).ok()?;
+    let tag_len = crate::frame::skip_id3v2(&head);
+    if tag_len == 0 || tag_len as u64 >= file_len {
+        return None;
+    }
+    file.seek(SeekFrom::Start(tag_len as u64)).ok()?;
+    let zeros = BufReader::new(file)
+        .bytes()
+        .take_while(|b| matches!(b, Ok(0)))
+        .count();
+    Some(tag_len + zeros)
 }
 
 /// Rewrite the tag atomically: copy the file to a sibling temp, write the tag
@@ -160,6 +180,16 @@ pub(crate) fn add_missing_txxx(tag: &mut id3::Tag, values: &[(String, String)]) 
             });
         }
     }
+}
+
+/// Replace every TXXX frame `description` names, whatever its case, with one
+/// holding `value`.
+fn set_txxx(tag: &mut id3::Tag, description: &str, value: String) {
+    remove_txxx_ci(tag, description);
+    tag.add_frame(id3::frame::ExtendedText {
+        description: description.to_string(),
+        value,
+    });
 }
 
 /// Remove all TXXX frames matching `description` case-insensitively.
@@ -213,11 +243,7 @@ fn add_rg_frames(tag: &mut id3::Tag, rg: &Id3v2ReplayGain) {
 
     for &(desc, value) in fields {
         if let Some(v) = value {
-            remove_txxx_ci(tag, desc);
-            tag.add_frame(id3::frame::ExtendedText {
-                description: desc.to_string(),
-                value: v.clone(),
-            });
+            set_txxx(tag, desc, v.clone());
         }
     }
 }
@@ -253,7 +279,7 @@ pub(crate) fn write_rg_frames_direct(
 /// had no tag at all, a new empty) ID3v2 tag.
 pub fn delete_id3v2_replaygain(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
-    if !strip_txxx(&mut tag, ALL_RG_DESCRIPTIONS) {
+    if !strip_txxx(&mut tag, &MP3GAIN_VALUE_KEYS) {
         return Ok(());
     }
     write_tag(path, &mut tag)
@@ -263,7 +289,7 @@ pub fn delete_id3v2_replaygain(path: &Path) -> Result<()> {
 /// already writing onto a not-yet-visible temp file (issue #232).
 pub(crate) fn delete_id3v2_replaygain_direct(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
-    if !strip_txxx(&mut tag, ALL_RG_DESCRIPTIONS) {
+    if !strip_txxx(&mut tag, &MP3GAIN_VALUE_KEYS) {
         return Ok(());
     }
     write_tag_direct(path, &mut tag)
@@ -320,9 +346,9 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
     Ok(frames)
 }
 
-/// Post-undo cleanup for cross-container layouts (issue #306): drop only the
-/// `REPLAYGAIN_*` TXXX frames, leaving any `MP3GAIN_UNDO` / `MP3GAIN_MINMAX`
-/// alone. Files without ReplayGain frames are left untouched rather than
+/// Post-undo cleanup for cross-container layouts (issue #306): drop the
+/// [`UNDONE_KEYS`] frames, leaving any `MP3GAIN_UNDO` / `MP3GAIN_MINMAX`
+/// alone. Files without such frames are left untouched rather than
 /// rewritten.
 ///
 /// Writes in place, without the temp+rename dance, because the only caller
@@ -331,7 +357,7 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
 /// costing a second full-file copy.
 pub(crate) fn remove_id3v2_rg_values_direct(path: &Path) -> Result<()> {
     let mut tag = read_tag(path)?;
-    if !strip_txxx(&mut tag, UNDONE_VALUE_DESCRIPTIONS) {
+    if !strip_txxx(&mut tag, &UNDONE_KEYS) {
         return Ok(());
     }
     write_tag_direct(path, &mut tag)
@@ -343,11 +369,11 @@ pub(crate) fn remove_id3v2_rg_values_direct(path: &Path) -> Result<()> {
 /// a temp file.
 pub(crate) fn write_id3v2_album_minmax(path: &Path, min: u8, max: u8) -> Result<()> {
     let mut tag = read_tag(path)?;
-    remove_txxx_ci(&mut tag, TAG_MP3GAIN_ALBUM_MINMAX);
-    tag.add_frame(id3::frame::ExtendedText {
-        description: TAG_MP3GAIN_ALBUM_MINMAX.to_string(),
-        value: crate::ape::format_minmax(min, max),
-    });
+    set_txxx(
+        &mut tag,
+        TAG_MP3GAIN_ALBUM_MINMAX,
+        crate::ape::format_minmax(min, max),
+    );
     write_tag(path, &mut tag)
 }
 
@@ -462,6 +488,61 @@ mod tests {
                 ("MP3GAIN_UNDO", "-018,-018,N"),
             ]
         );
+    }
+
+    /// Issue #467: a tag that fits the region it replaces, padding included,
+    /// is written in place, so the audio after it stays where it was. A tag
+    /// that has to grow gets room for the next write.
+    #[test]
+    fn writes_fill_the_old_region_and_leave_room_to_grow() {
+        let dir = std::env::temp_dir().join("mp3rgain_id3v2_padding_tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("padded.mp3");
+        let audio = [0xFFu8, 0xFB, 0x90, 0x00, 1, 2, 3, 4];
+        let region_len = |path: &Path| tag_region_len(path).unwrap();
+        let rg = |gain: &str| Id3v2ReplayGain {
+            track_gain: Some(gain.to_string()),
+            ..Default::default()
+        };
+
+        // A tag with 1000 bytes of padding, and 200 zero bytes after it that
+        // the id3 crate counts as padding too.
+        let mut tag = id3::Tag::new();
+        tag.set_title("Title");
+        let mut file = Vec::new();
+        id3::Encoder::new()
+            .version(TARGET_VERSION)
+            .padding(1000)
+            .encode(&tag, &mut file)
+            .unwrap();
+        file.extend([0u8; 200]);
+        file.extend(audio);
+        std::fs::write(&path, &file).unwrap();
+        let region = region_len(&path);
+        assert_eq!(region, file.len() - audio.len());
+
+        for gain in ["-3.390300 dB", "+10.123400 dB", "-0.010000 dB"] {
+            write_id3v2_replaygain_direct(&path, &rg(gain)).unwrap();
+            let written = std::fs::read(&path).unwrap();
+            assert_eq!(written.len(), file.len(), "{gain}");
+            assert_eq!(written[region..], audio, "{gain}");
+            let stored = read_id3v2_replaygain(&path).unwrap();
+            assert_eq!(stored.track_gain.as_deref(), Some(gain));
+        }
+        assert_eq!(read_tag(&path).unwrap().title(), Some("Title"));
+
+        // No tag yet: the new one is followed by GROWTH_PADDING, and the next
+        // write fits in it.
+        std::fs::write(&path, audio).unwrap();
+        write_id3v2_replaygain_direct(&path, &rg("-1.000000 dB")).unwrap();
+        let grown = std::fs::read(&path).unwrap();
+        let region = region_len(&path);
+        assert!(region >= GROWTH_PADDING, "{region}");
+        assert_eq!(grown[region..], audio);
+        write_id3v2_replaygain_direct(&path, &rg("+2.000000 dB")).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap().len(), grown.len());
+
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[test]

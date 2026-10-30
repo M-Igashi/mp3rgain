@@ -183,9 +183,8 @@ test_gain_steps() {
     done
 }
 
-# Note: -d option test removed because mp3gain's -d modifies "suggested gain"
-# (used with ReplayGain), while mp3rgain's -d directly applies dB gain.
-# This is a documented difference, not a compatibility issue.
+# Note: -d is not tested here. Like mp3gain's, it shifts the suggested gain of
+# a ReplayGain analysis (-r / -a), which these fixed-step runs never ask for.
 
 # Extract "<Max global_gain>,<Min global_gain>" from the analysis output.
 # These two columns fully capture a file's lossless-gain state, so they are

@@ -1,9 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use indicatif::{MultiProgress, ProgressBar};
-use mp3rgain::replaygain::{
-    self, AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult,
-};
+use mp3rgain::replaygain::{AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult};
 use mp3rgain::{mp4meta, AacAlbumInfo, AlbumLabel, Error};
 use rayon::prelude::*;
 use std::io::{self, Write};
@@ -23,7 +21,7 @@ use crate::processors::info::{scan_gain_range_for_row, tsv_album_row, tsv_rg_row
 use crate::processors::replaygain::{
     apply_is_noop, capped_tag_gain, process_apply_replaygain_with_album, process_track_gain,
 };
-use crate::processors::utils::{report_unsupported_format, restore_timestamp, save_original_mtime};
+use crate::processors::utils::report_unsupported_format;
 use crate::progress::{
     create_labeled_file_count_pb_in, create_progress_bar, progress_finish, progress_inc,
     progress_set_message,
@@ -51,20 +49,7 @@ fn print_target_with_modifier(opts: &Options) {
     }
 }
 
-fn require_replaygain_feature() {
-    if !replaygain::is_available() {
-        eprintln!(
-            "{}: ReplayGain analysis requires the 'replaygain' feature",
-            "error".red().bold()
-        );
-        eprintln!("  Install with: cargo install mp3rgain --features replaygain");
-        std::process::exit(1);
-    }
-}
-
 pub fn cmd_track_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
-    require_replaygain_feature();
-
     let dry_run_prefix = opts.dry_run_prefix();
 
     if opts.output_format == OutputFormat::Tsv {
@@ -288,7 +273,6 @@ fn print_album_intro(file_count: usize, groups: Option<usize>, opts: &Options) {
 }
 
 pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
-    require_replaygain_feature();
     print_album_intro(files.len(), None, opts);
     let run = run_album(files, opts, &mut AlbumSink::direct(), None)?;
     let output = JsonOutput {
@@ -317,7 +301,6 @@ pub fn cmd_album_gain(files: &[PathBuf], opts: &Options) -> Result<()> {
 /// Text output is buffered per album and each album's block is written whole
 /// as soon as it finishes, in completion order (issue #348).
 pub fn cmd_album_gain_grouped(files: &[PathBuf], opts: &Options) -> Result<()> {
-    require_replaygain_feature();
     let (groups, warnings) = group_files(files, opts);
     print_album_intro(files.len(), Some(groups.len()), opts);
     // Printed before any analysis starts: a grouping that merged two releases
@@ -806,17 +789,11 @@ fn run_album(
                 // A second write after the apply restored the mtime, so -p has
                 // to restore it again, as mp3gain's single tag write does
                 // (issue #436).
-                let mtimes: Vec<_> = album_files
-                    .iter()
-                    .map(|&(file, _)| save_original_mtime(file, opts))
-                    .collect();
+                let mut minmax_opts = mp3rgain::AlbumMinmaxOptions::default();
+                minmax_opts.tag_layout = opts.tag_layout;
+                minmax_opts.preserve_timestamp = opts.preserve_timestamp;
                 let minmax_errors =
-                    mp3rgain::write_album_minmax_with_layout(&album_files, opts.tag_layout);
-                for (&(file, _), mtime) in album_files.iter().zip(mtimes) {
-                    if let Some(mtime) = mtime {
-                        restore_timestamp(file, mtime);
-                    }
-                }
+                    mp3rgain::write_album_minmax_with_options(&album_files, &minmax_opts);
                 for (file, e) in minmax_errors {
                     let msg =
                         format!("gain applied, but MP3GAIN_ALBUM_MINMAX was not written: {e}");

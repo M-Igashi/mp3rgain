@@ -39,7 +39,22 @@ What ships today:
 
 ## Unreleased
 
-Nothing yet.
+- mp3rgui: an Apply that first rescans the files without stored tags applies to the rows selected at the click, not to whatever is selected when the rescan ends
+- mp3rgui: Apply Channel Gain, and an Undo that rolls the channels back by different amounts, clear the row's numbers instead of shifting them as if both channels moved, which also fed the next Apply Track Gain a wrong gain; library: `read_undo_channel_steps` (#471)
+- `-s d` leaves an untagged M4A alone, including one whose metadata ends in an empty `ilst`, and `-u` no longer leaves an empty `udta` behind
+- `-s d` and mp3rgui's Delete stored tags find out from `moov` alone that an M4A has no tags to delete, instead of reading and rebuilding the whole file (#468)
+- `-s c` shows an album range that `-a -s i` stored in ID3v2 under the default layout too
+- `-g -o tsv` prints `-` for a `global_gain` range it did not scan, and the steps `-k` actually applied
+- The M4A line of `-r` and `-a` shows the gain applied, the album gain under `-a`
+- An ID3v2 write keeps the tag's padding and rewrites the tag in place when it fits, instead of moving the audio after it; a tag that grows gets 2 KB of padding (#467)
+- A crafted `MP3GAIN_UNDO` can no longer overflow the undo arithmetic
+- Library: without the `aac` feature, the `*_auto` functions refuse AAC instead of running the MP3 path over an M4A (#149)
+- Library: `write_album_minmax_with_options` keeps each file's mtime itself, so the CLI and mp3rgui no longer wrap the call to restore it (#463)
+- A ReplayGain re-run that needs no change syncs each file once, and the album range reuses the apply's scan
+- mp3rgui: a capped dry run below zero reads "-1 steps (capped)" rather than "+-1", and manual and channel gain say so while they run (#466)
+- mp3rgui: the CJK fallback font takes half the memory, and grouping albums by tags reads the files in parallel (#470)
+- An MP3 apply or undo that writes APEv2 holds one copy of the file instead of two, and an M4A apply or undo two instead of three (#469)
+- Cleanup from a whole-codebase review, with no other change in behaviour
 
 ## Release history
 

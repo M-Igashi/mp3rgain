@@ -28,6 +28,8 @@ It exists because a whole-codebase review finds these reliably and proposes "fix
 
 **The collision scan keys on artist and album strings, not `release_key`.** `src/commands/albumgroup.rs::split_release_warnings` asks which folders share a *title*; keying on `MUSICBRAINZ_ALBUMID` would put two discs of one release in different buckets and find nothing to report. The id is consulted afterwards by `looks_like_one_release`, to decide what a shared title means. Commit `836deee`.
 
+**`-g` records the scanned `MP3GAIN_MINMAX` on raw ADTS and shifts the stored one on MP3.** mp3gain shifts a stored range after `-g` and adds none to a file without one, and the MP3 paths follow it (issue #451). mp3gain has no AAC to follow, so `src/apply.rs::apply_adts_bytes` keeps recording the post-apply range its own analysis already holds. Commit `2c23171`.
+
 ## On-disk formats that cannot be unified
 
 **The undo tag's sign convention differs by container.** MP3 (APEv2 / ID3v2 `MP3GAIN_UNDO`) stores the *undo delta*, the value to re-apply to restore the original, which is mp3gain's convention. AAC (MP4 freeform) stores the cumulative *applied* gain and negates it on undo. Both are load-bearing on-disk formats: changing either corrupts round-trips on files tagged by older versions or by mp3gain itself. The note on `src/ape.rs::format_undo_value` is the authority. Issue #210.
@@ -35,6 +37,8 @@ It exists because a whole-codebase review finds these reliably and proposes "fix
 **The MP4 freeform atom names are lowercase**, unlike the uppercase APEv2 / ID3v2 keys: `mp3rgain_undo`, `mp3rgain_minmax`, `replaygain_track_gain`, in the `com.apple.iTunes` namespace. `src/mp4meta.rs` holds the constants. This has drifted twice, once in `-s c` output and once in `docs/migrating-from-mp3gain.md`; both were fixed in `31265df` by using the constants instead of literals.
 
 **The freeform reader ignores the `data` box's type indicator and locale.** Until #363 mp3rgain wrote the two swapped (type 0, locale 1), which Mp3tag reads as a non-text item and hides. Writes now use type 1 (UTF-8) and locale 0, and every ilst rebuild re-serializes mp3rgain's own items still in the swapped form. The reader must keep accepting both, or files tagged by older versions lose their undo information. `src/mp4meta.rs::repair_swapped_data_header`. Issue #363.
+
+**An M4A metadata rebuild with nothing to write leaves the file alone**, even where an undo then cannot give back the original bytes. `src/mp4meta.rs::rebuild_mp4_with_ilst` neither adds an empty `udta`/`meta`/`ilst` nor removes an empty one the file came with, so `-s d` leaves an untagged M4A alone. When removing mp3rgain's own items empties the `ilst`, the containers go too, which is what makes `-g` then `-u` byte-exact on a file that had no `udta`. The cost falls on a file whose `udta` held only an empty `ilst` (an `ffmpeg -bitexact` file, say): it loses that `udta` on the way back, and the AAC undo has never promised byte-exactness. Keeping empty containers instead would leave 61 bytes behind on every file that had none. Review pass after 3.14.0.
 
 ## Bit-exactness constraints
 
@@ -51,6 +55,8 @@ Do not propose a change to these paths on the grounds that it is equivalent. If 
 ## Shapes that exist for memory, not for style
 
 `run_album` in `src/commands/replaygain.rs` is long, and its nested `par_iter` over albums with an inner `par_iter` over files looks like something to flatten. The flat form was rejected: it holds one `LoudnessHistogram` (48 KB) or `BlockEnergies` per file for the whole run, which is 480 MB on a 10,000 file library. Nested, each album drops its per-track state the moment it folds, so live state tracks the albums in flight rather than the size of the library. PR #335.
+
+**mp3rgui reads its CJK fallback font at startup for every user, and keeps it for the life of the process.** `mp3rgui/src/fonts.rs::install` loads the system's CJK face before the first frame, whatever the UI language, because a file name, an album tag in a tooltip, or an error message can need it. Loading it only when such text appears would mean watching every one of those sources, and a miss brings back the boxes of issue #321, for a saving of a few milliseconds: on an M3, reading took under 1 ms warm for the 7.8 MB Japanese face and 58 ms cold for the 55 MB Korean one, and egui's parse under 1 ms. The bytes are leaked into a static slice because egui parses static data in place and copies owned data, which halved the resident cost: 15 to 7 MB for the Japanese face, 105 to 52 MB for the Korean one. Each face is read once, so switching the UI language back and forth adds nothing. Issue #470.
 
 ## Product decisions that keep being re-proposed
 

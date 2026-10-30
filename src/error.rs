@@ -305,4 +305,14 @@ impl Error {
             source,
         }
     }
+
+    /// [`FeatureNotAvailable`](Self::FeatureNotAvailable) for AAC input in a
+    /// build without the `aac` feature.
+    #[cfg(not(feature = "aac"))]
+    pub(crate) fn aac_unavailable() -> Self {
+        Self::FeatureNotAvailable {
+            feature: "AAC support",
+            feature_flag: "aac",
+        }
+    }
 }

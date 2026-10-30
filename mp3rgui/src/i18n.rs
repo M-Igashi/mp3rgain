@@ -105,6 +105,27 @@ mod tests {
         assert_eq!(tr!("Add Files..."), "Add Files...");
     }
 
+    /// Issue #466: the capped dry run formats its own sign, since Prevent
+    /// clipping can cap below zero, so it reads "-1" and not "+-1", in a
+    /// catalogue too.
+    #[test]
+    fn capped_dry_run_keeps_its_sign() {
+        let _guard = locale_lock();
+        let capped = |steps| {
+            crate::app::FileStatus::DryRunPredicted {
+                steps,
+                clipping_prevented: true,
+            }
+            .label()
+        };
+        let _ = translators::set_locale("en");
+        assert_eq!(capped(-1), "Dry run: -1 steps (capped)");
+        assert_eq!(capped(2), "Dry run: +2 steps (capped)");
+        assert!(translators::set_locale("ja"), "ja.po was not compiled in");
+        assert_eq!(capped(-1), "ドライラン: -1 ステップ（上限で制限）");
+        let _ = translators::set_locale("en");
+    }
+
     #[test]
     fn pt_br_catalogue_translates_and_names_itself() {
         let _guard = locale_lock();

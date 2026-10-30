@@ -23,7 +23,7 @@ use crate::aac::{
     BitReader, SAMPLE_RATE_TABLE,
 };
 use crate::error::{Error, Result};
-use crate::frame::{find_audio_end, skip_id3v2};
+use crate::frame::{find_audio_end, open_after_id3v2, skip_id3v2};
 
 /// Fixed ADTS header length, without the optional 16-bit CRC.
 const HEADER_LEN: usize = 7;
@@ -97,23 +97,15 @@ fn has_adts_frames(data: &[u8]) -> bool {
 /// (cover art can run to megabytes) and a small window read after it, which
 /// holds the two frame headers `has_adts_frames` needs.
 pub fn is_adts_file(file_path: &Path) -> bool {
-    use std::io::{Read, Seek, SeekFrom};
+    use std::io::Read;
     // The largest ADTS frame (`aac_frame_length` is 13 bits, so up to 8191
     // bytes) plus the header after it, so the second-syncword check always has
     // something to look at.
     const WINDOW: usize = 8 * 1024 + HEADER_LEN;
 
-    let Ok(mut file) = fs::File::open(file_path) else {
+    let Ok(mut file) = open_after_id3v2(file_path) else {
         return false;
     };
-    let mut head = [0u8; 10];
-    let Ok(n) = file.read(&mut head) else {
-        return false;
-    };
-    let start = skip_id3v2(&head[..n]) as u64;
-    if file.seek(SeekFrom::Start(start)).is_err() {
-        return false;
-    }
 
     let mut window = [0u8; WINDOW];
     let mut filled = 0;
@@ -137,22 +129,14 @@ pub fn is_adts_file(file_path: &Path) -> bool {
 /// #403). ADTS cannot signal SBR in its header, so the frames themselves are
 /// parsed, the first few being enough.
 pub(crate) fn has_sbr(file_path: &Path) -> bool {
-    use std::io::{Read, Seek, SeekFrom};
+    use std::io::Read;
     // Eight frames of the largest size `aac_frame_length` allows.
     const WINDOW: u64 = 8 * 8 * 1024;
 
-    let Ok(mut file) = fs::File::open(file_path) else {
-        return false;
-    };
-    let mut head = [0u8; 10];
-    let Ok(n) = file.read(&mut head) else {
-        return false;
-    };
-    let start = skip_id3v2(&head[..n]) as u64;
     let mut window = Vec::new();
-    if file.seek(SeekFrom::Start(start)).is_err()
-        || file.take(WINDOW).read_to_end(&mut window).is_err()
-    {
+    let read =
+        open_after_id3v2(file_path).and_then(|file| file.take(WINDOW).read_to_end(&mut window));
+    if read.is_err() {
         return false;
     }
 
@@ -297,7 +281,8 @@ pub struct AdtsApplyOutcome {
 }
 
 /// Apply `gain_steps` to every `global_gain` in a raw ADTS stream, reading
-/// `read_from` and writing `write_to` (in place when they are the same path).
+/// `read_from` and writing `write_to` (replacing it through a temp file when
+/// they are the same path).
 ///
 /// Each step is ~1.5 dB and values saturate at 0-255, matching the M4A path.
 /// Metadata is the caller's job: with no container box for it, undo and

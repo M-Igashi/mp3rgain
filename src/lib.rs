@@ -105,8 +105,8 @@ pub use ape::{
 };
 pub use apply::{
     apply_with_options, predict_apply, write_album_minmax, write_album_minmax_with_layout,
-    write_replaygain_tags_only, AacAlbumInfo, ApplyOptions, ApplyReport, ClippingDetection,
-    TagsOnlyOptions,
+    write_album_minmax_with_options, write_replaygain_tags_only, AacAlbumInfo, AlbumMinmaxOptions,
+    ApplyOptions, ApplyReport, ClippingDetection, TagsOnlyOptions,
 };
 pub use bitrate::{read_bitrate, Bitrate, BitrateMode};
 pub use error::{Error, Result};
@@ -120,6 +120,7 @@ pub use id3v2::{
     Id3v2ReplayGain,
 };
 
+use replaygain::AudioFileType;
 use std::path::{Path, PathBuf};
 
 /// File extensions mp3rgain can process.
@@ -156,26 +157,27 @@ pub fn collect_audio_files(dir: &Path, recursive: bool) -> Result<Vec<PathBuf>> 
 
 /// Apply gain in dB, auto-dispatching by file format.
 ///
-/// Detects MP4/AAC files via [`mp4meta::is_aac_file`] and raw ADTS streams via
-/// [`adts::is_adts_file`], routing each through the AAC pipeline (which
-/// rewrites only the AAC `global_gain` bitfields). All other files fall back to
-/// the MP3 pipeline.
+/// Classifies the file with [`AudioFileType::from_path`] and routes MP4/AAC
+/// and raw ADTS through the AAC pipeline (which rewrites only the AAC
+/// `global_gain` bitfields). All other files take the MP3 pipeline. A build
+/// without the `aac` feature refuses AAC with [`Error::FeatureNotAvailable`].
 ///
 /// Calling [`gain::apply_gain_db`] directly on an M4A file would scan the raw
 /// bytes for MP3 sync words and overwrite the byte following any match,
 /// corrupting the MP4 container — see issue #149.
 pub fn apply_gain_db_auto(file_path: &Path, gain_db: f64) -> Result<usize> {
-    #[cfg(feature = "aac")]
-    {
-        let steps = gain::db_to_steps(gain_db);
-        if mp4meta::is_aac_file(file_path) {
-            return aac::apply_aac_gain_to_path(file_path, file_path, steps);
+    let steps = gain::db_to_steps(gain_db);
+    match AudioFileType::from_path(file_path) {
+        AudioFileType::Mp3 => gain::apply_gain(file_path, steps),
+        #[cfg(feature = "aac")]
+        AudioFileType::Aac => aac::apply_aac_gain_to_path(file_path, file_path, steps),
+        #[cfg(feature = "aac")]
+        AudioFileType::Adts => {
+            adts::apply_adts_gain(file_path, file_path, steps, None).map(|o| o.modified)
         }
-        if adts::is_adts_file(file_path) {
-            return adts::apply_adts_gain(file_path, file_path, steps, None).map(|o| o.modified);
-        }
+        #[cfg(not(feature = "aac"))]
+        _ => Err(Error::aac_unavailable()),
     }
-    gain::apply_gain_db(file_path, gain_db)
 }
 
 /// Which container MP3 tags are written to.
@@ -216,14 +218,14 @@ impl TagLayout {
 /// wherever `layout` puts it, falling back to the other container so a file
 /// tagged under a different layout still rolls back.
 pub fn undo_gain_auto(file_path: &Path, layout: TagLayout) -> Result<usize> {
-    #[cfg(feature = "aac")]
-    {
-        if mp4meta::is_aac_file(file_path) {
-            return aac::undo_aac_gain(file_path);
-        }
-        if adts::is_adts_file(file_path) {
-            return adts::undo_adts_gain(file_path);
-        }
+    match AudioFileType::from_path(file_path) {
+        AudioFileType::Mp3 => {}
+        #[cfg(feature = "aac")]
+        AudioFileType::Aac => return aac::undo_aac_gain(file_path),
+        #[cfg(feature = "aac")]
+        AudioFileType::Adts => return adts::undo_adts_gain(file_path),
+        #[cfg(not(feature = "aac"))]
+        _ => return Err(Error::aac_unavailable()),
     }
     let ape_has_undo = || {
         ape::read_ape_tag_from_file(file_path)
@@ -262,16 +264,12 @@ pub fn undo_gain_auto(file_path: &Path, layout: TagLayout) -> Result<usize> {
 /// to leave no gain tags behind, and a split-tagged file has them in two
 /// places.
 pub fn delete_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<()> {
-    #[cfg(feature = "aac")]
-    {
-        if mp4meta::is_aac_file(file_path) {
-            return mp4meta::delete_gain_tags(file_path);
-        }
+    match AudioFileType::from_path(file_path) {
+        AudioFileType::Aac => return mp4meta::delete_gain_tags(file_path),
         // Raw ADTS keeps everything in ID3v2, so that is the only container
         // to clear (issue #330).
-        if adts::is_adts_file(file_path) {
-            return id3v2::delete_id3v2_replaygain(file_path);
-        }
+        AudioFileType::Adts => return id3v2::delete_id3v2_replaygain(file_path),
+        _ => {}
     }
     match layout {
         TagLayout::Id3v2 => id3v2::delete_id3v2_replaygain(file_path),
@@ -336,7 +334,7 @@ pub struct StoredGainTags {
     pub undo: Option<String>,
     /// `MP3GAIN_MINMAX`, the post-apply `global_gain` range.
     pub minmax: Option<String>,
-    /// APE-only `MP3GAIN_ALBUM_MINMAX`; always `None` for AAC and ID3v2.
+    /// `MP3GAIN_ALBUM_MINMAX`, MP3 only; always `None` for AAC.
     pub album_minmax: Option<String>,
 }
 
@@ -440,9 +438,8 @@ impl StoredGainTags {
 /// fail-soft (unreadable tags come back empty); ID3v2/APE read errors are
 /// propagated.
 pub fn read_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<StoredGainTags> {
-    #[cfg(feature = "aac")]
-    {
-        if mp4meta::is_aac_file(file_path) {
+    match AudioFileType::from_path(file_path) {
+        AudioFileType::Aac => {
             let (undo_tags, rg_tags) = mp4meta::read_gain_tags(file_path).unwrap_or_default();
             return Ok(StoredGainTags {
                 source: GainTagSource::Aac,
@@ -458,11 +455,12 @@ pub fn read_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<Stored
         }
         // Raw ADTS writes to ID3v2 whatever the layout, so that is where its
         // tags are read from too (issue #330).
-        if adts::is_adts_file(file_path) {
+        AudioFileType::Adts => {
             return Ok(StoredGainTags::from_id3v2(id3v2::read_id3v2_replaygain(
                 file_path,
-            )?));
+            )?))
         }
+        _ => {}
     }
     if layout.mp3gain_in_id3v2() {
         let (rg, album_minmax) = id3v2::read_id3v2_stored(file_path)?;
@@ -472,7 +470,7 @@ pub fn read_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<Stored
         });
     }
     if layout == TagLayout::Split {
-        let id3 = id3v2::read_id3v2_replaygain(file_path)?;
+        let (id3, id3_album_minmax) = id3v2::read_id3v2_stored(file_path)?;
         let ape_tag = ape::read_ape_tag_from_file(file_path)?;
         let ape_get = |key: &str| {
             ape_tag
@@ -497,7 +495,7 @@ pub fn read_gain_tags_auto(file_path: &Path, layout: TagLayout) -> Result<Stored
             algorithm: id3.algorithm.or_else(|| ape_get(TAG_REPLAYGAIN_ALGORITHM)),
             undo: ape_get(TAG_MP3GAIN_UNDO).or(id3.undo),
             minmax: ape_get(TAG_MP3GAIN_MINMAX).or(id3.minmax),
-            album_minmax: ape_get(TAG_MP3GAIN_ALBUM_MINMAX),
+            album_minmax: ape_get(TAG_MP3GAIN_ALBUM_MINMAX).or(id3_album_minmax),
         });
     }
     match ape::read_ape_tag_from_file(file_path)? {
@@ -585,32 +583,36 @@ pub fn expand_audio_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
 /// matches what `undo_gain_auto` would actually reverse. Returns `None` if the
 /// tag is absent or unreadable.
 pub fn read_undo_steps(file_path: &Path, layout: TagLayout) -> Option<i32> {
+    read_undo_channel_steps(file_path, layout).map(|(left, _)| left)
+}
+
+/// [`read_undo_steps`] for both channels, as `(left, right)`. The two differ
+/// only on an MP3 one of whose channels was adjusted on its own (`-l`), which
+/// leaves the file at no single level a caller could shift a reading by.
+pub fn read_undo_channel_steps(file_path: &Path, layout: TagLayout) -> Option<(i32, i32)> {
     // MP3 stores the undo delta (the value to re-add to restore the
     // original), so the applied gain is its negation.
+    let applied = |undo: &str| {
+        let (left, right) = ape::parse_undo_values(Some(undo));
+        (left.wrapping_neg(), right.wrapping_neg())
+    };
     let from_ape = || {
-        ape::read_ape_tag_from_file(file_path)
-            .ok()
-            .flatten()
-            .and_then(|t| t.get_undo_gain())
-            .map(i32::wrapping_neg)
+        let tag = ape::read_ape_tag_from_file(file_path).ok().flatten()?;
+        tag.get(TAG_MP3GAIN_UNDO).map(applied)
     };
     let from_id3v2 = || {
         let rg = id3v2::read_id3v2_replaygain(file_path).ok()?;
-        rg.undo
-            .as_deref()
-            .map(|u| ape::parse_undo_values(Some(u)).0.wrapping_neg())
+        rg.undo.as_deref().map(applied)
     };
-    #[cfg(feature = "aac")]
-    {
-        if mp4meta::is_aac_file(file_path) {
+    match AudioFileType::from_path(file_path) {
+        AudioFileType::Aac => {
             let undo_tags = mp4meta::read_undo_tags(file_path).ok()?;
             // AAC already stores the applied gain.
-            return Some(ape::parse_undo_values(undo_tags.undo()).0);
+            return Some(ape::parse_undo_values(undo_tags.undo()));
         }
-        if adts::is_adts_file(file_path) {
-            // Raw ADTS keeps the MP3 undo-delta convention, in ID3v2 only.
-            return from_id3v2();
-        }
+        // Raw ADTS keeps the MP3 undo-delta convention, in ID3v2 only.
+        AudioFileType::Adts => return from_id3v2(),
+        _ => {}
     }
     // Same fallback order as undo_gain_auto, so the reported value matches
     // what an undo would actually roll back.
@@ -689,6 +691,22 @@ mod undo_steps_tests {
         // No tag at all stays None rather than reading as 0.
         let path = write_temp("untagged.mp3", &vec![0u8; 8_000]);
         assert_eq!(read_undo_steps(&path, TagLayout::Split), None);
+    }
+
+    /// Issue #471: after `-l` the channels carry different values, and the
+    /// left one alone hides it. What `-l 1 2` records reads back as (0, 2).
+    #[test]
+    fn read_undo_channel_steps_reports_both_channels() {
+        let mut tag = ape::ApeTag::new();
+        tag.set_undo_gain(0, -2, false);
+        let data = ape::replace_ape_tag(&vec![0u8; 8_000], &tag);
+        let path = write_temp("right_plus2.mp3", &data);
+
+        assert_eq!(
+            read_undo_channel_steps(&path, TagLayout::Split),
+            Some((0, 2))
+        );
+        assert_eq!(read_undo_steps(&path, TagLayout::Split), Some(0));
     }
 }
 
