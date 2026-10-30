@@ -6,7 +6,7 @@ msgstr ""
 "Project-Id-Version: mp3rgui\n"
 "Report-Msgid-Bugs-To: https://github.com/M-Igashi/mp3rgain/issues\n"
 "POT-Creation-Date: 2026-10-29 09:47+0000\n"
-"PO-Revision-Date: 2026-10-26 22:05+0100\n"
+"PO-Revision-Date: 2026-10-27 13:00+0100\n"
 "Last-Translator: Privato72\n"
 "Language: it\n"
 "MIME-Version: 1.0\n"
@@ -261,7 +261,7 @@ msgstr "Previeni clipping"
 
 #: src/ui/options.rs:20
 msgid "Cap the applied gain at the available headroom so the output cannot clip. Equivalent to the CLI's -k flag."
-msgstr "Limita il guadagno applicato al margine disponibile, così l'uscita non può andare in clipping. Equivale al parametro -k della CLI."
+msgstr "Limita il guadagno applicato in base allo spazio di manovra (headroom) disponibile in modo che l'output non vada in clipping. Equivalente al parametro -k della CLI."
 
 #: src/ui/options.rs:26
 msgid "Preserve mtime"
@@ -269,7 +269,7 @@ msgstr "Preserva mtime"
 
 #: src/ui/options.rs:29
 msgid "Restore the file's last-modified timestamp after writing so it doesn't jump to the top of playlists sorted by date. CLI -p."
-msgstr "Ripristina la data di ultima modifica del file dopo la scrittura, così non finisce in cima alle playlist ordinate per data. Parametro -p della CLI."
+msgstr "Ripristina la data di ultima modifica del file dopo la scrittura in modo che non salti in cima alle playlist ordinate per data. Parametro -p della CLI."
 
 #: src/ui/options.rs:34
 msgid "Wrap mode"
@@ -297,15 +297,15 @@ msgstr "Tutto in ID3v2"
 
 #: src/ui/options.rs:56
 msgid "Default. REPLAYGAIN_* in ID3v2 TXXX where players look, MP3GAIN_UNDO / MINMAX in APEv2 where mp3gain looks."
-msgstr "Predefinito. REPLAYGAIN_* in ID3v2 TXXX, dove li cercano i lettori, e MP3GAIN_UNDO / MINMAX in APEv2, dove li cerca mp3gain."
+msgstr "Predefinito. REPLAYGAIN_* nei frame TXXX di ID3v2 dove cercano i lettori, MP3GAIN_UNDO / MINMAX in APEv2 dove cerca mp3gain."
 
 #: src/ui/options.rs:62
 msgid "Byte-for-byte mp3gain behaviour. ReplayGain-aware players will not find the values. CLI -s a."
-msgstr "Comportamento identico a mp3gain, byte per byte. I lettori che supportano ReplayGain non troveranno i valori. Parametro -s a della CLI."
+msgstr "Comportamento identico bit per bit a mp3gain. I lettori che supportano ReplayGain non troveranno i valori. Parametro -s a della CLI."
 
 #: src/ui/options.rs:67
 msgid "Undo and ReplayGain both in ID3v2 TXXX frames. CLI -s i."
-msgstr "Dati di annullamento e ReplayGain, entrambi in frame TXXX di ID3v2. Parametro -s i della CLI."
+msgstr "Sia Undo che ReplayGain inseriti nei frame TXXX di ID3v2. Parametro -s i della CLI."
 
 #: src/ui/options.rs:75
 msgid "Dry run"
@@ -313,7 +313,7 @@ msgstr "Simulazione (Dry run)"
 
 #: src/ui/options.rs:77
 msgid "Preview Apply Track / Album Gain without modifying any file. The Status column shows the steps that would be applied. CLI -n."
-msgstr "Mostra in anteprima Applica guadagno traccia / album senza modificare alcun file. La colonna Stato mostra i passi che verrebbero applicati. Parametro -n della CLI."
+msgstr "Anteprima di Applica guadagno traccia / album senza modificare alcun file. La colonna Stato mostra i passaggi che verrebbero applicati. Parametro -n della CLI."
 
 #: src/ui/options.rs:88
 msgid "Use stored tags"
@@ -321,7 +321,7 @@ msgstr "Usa tag salvati"
 
 #: src/ui/options.rs:91
 msgid "Apply Track / Album Gain from stored REPLAYGAIN_* tags instead of re-analyzing; only files without usable tags are rescanned. Album Gain reuses tags only when every file in the album carries a consistent set; any gap rescans the whole album. CLI -s R. RG 1.0 mode only."
-msgstr "Applica il guadagno traccia / album dai tag REPLAYGAIN_* salvati invece di rianalizzare; vengono rianalizzati solo i file senza tag utilizzabili. Il guadagno album riutilizza i tag solo se tutti i file dell'album ne hanno un insieme coerente; qualsiasi mancanza fa rianalizzare l'intero album. Parametro -s R della CLI. Solo in modalità RG 1.0."
+msgstr "Applica guadagno traccia / album dai tag REPLAYGAIN_* già salvati invece di rianalizzare; vengono scansionati solo i file senza tag utilizzabili. Il guadagno album riutilizza i tag solo quando ogni file dell'album ha un set coerente; qualsiasi mancanza comporta la riscansione dell'intero album. Parametro -s R della CLI. Solo in modalità RG 1.0."
 
 #. What one album is, for Album Analysis / Apply Album Gain.
 #. The CLI's --album-by, in the same three units (issue #338).
@@ -335,7 +335,7 @@ msgstr "Per cartella"
 
 #: src/ui/options.rs:109
 msgid "Each folder is its own album. A release whose discs live in subfolders gets one album gain per disc, so use By tags for those. CLI --album-by=dir."
-msgstr "Ogni cartella è un album a sé. Una pubblicazione con i dischi in sottocartelle riceve un guadagno album per disco, quindi in quel caso usa In base ai tag. Parametro --album-by=dir della CLI."
+msgstr "Ogni cartella è un album a sé. Una pubblicazione i cui dischi si trovano in sottocartelle otterrà un guadagno album per ciascun disco; per questi usa 'In base ai tag'. Parametro --album-by=dir della CLI."
 
 #: src/ui/options.rs:113
 msgid "By tags"
@@ -343,7 +343,7 @@ msgstr "In base ai tag"
 
 #: src/ui/options.rs:115
 msgid "One album per release, read from ALBUMARTIST / ALBUM (and MUSICBRAINZ_ALBUMID when present), so discs in subfolders share one album gain. Files with no ALBUM tag fall back to their own folder. CLI --album-by=tag."
-msgstr "Un album per pubblicazione, letto da ALBUMARTIST / ALBUM (e MUSICBRAINZ_ALBUMID se presente), così i dischi in sottocartelle condividono un unico guadagno album. I file senza tag ALBUM vengono raggruppati per cartella. Parametro --album-by=tag della CLI."
+msgstr "Un album per ogni pubblicazione, letto da ALBUMARTIST / ALBUM (e MUSICBRAINZ_ALBUMID se presente), così i dischi nelle sottocartelle condividono lo stesso guadagno album. I file senza tag ALBUM tornano alla propria cartella. Parametro --album-by=tag della CLI."
 
 #: src/ui/options.rs:123
 msgid "Single album"
@@ -351,7 +351,7 @@ msgstr "Album singolo"
 
 #: src/ui/options.rs:126
 msgid "Treat every loaded file as one album, ignoring folders. Select rows first to group just those, which is how to handle a release that has no usable tags. CLI -a."
-msgstr "Tratta tutti i file caricati come un unico album, ignorando le cartelle. Seleziona prima delle righe per raggruppare solo quelle: è il modo di gestire una pubblicazione senza tag utilizzabili. Parametro -a della CLI."
+msgstr "Tratta tutti i file caricati come un unico album, ignorando le cartelle. Seleziona prima le righe per raggruppare solo quelle, utile per gestire una pubblicazione che non ha tag utilizzabili. Parametro -a della CLI."
 
 #: src/ui/options.rs:131
 msgid "Filename only"
@@ -359,7 +359,7 @@ msgstr "Solo nome file"
 
 #: src/ui/options.rs:133
 msgid "Show only the file name in the Path/File column instead of the full path. The full path is still shown on hover."
-msgstr "Mostra solo il nome del file nella colonna Percorso/File invece del percorso completo. Il percorso completo resta visibile al passaggio del mouse."
+msgstr "Mostra solo il nome del file nella colonna Percorso/File invece del percorso completo. Il percorso completo viene comunque mostrato al passaggio del mouse."
 
 #. Loudness measurement mode (issue #272). Switching modes
 #. invalidates cached analysis results — RG1 and BS.1770
@@ -374,7 +374,7 @@ msgstr "RG 1.0"
 
 #: src/ui/options.rs:145
 msgid "ReplayGain 1.0 (default): mp3gain-compatible values, 89 dB reference. Keeps re-scans consistent with libraries normalized by mp3gain."
-msgstr "ReplayGain 1.0 (predefinito): valori compatibili con mp3gain, riferimento a 89 dB. Mantiene le nuove analisi coerenti con le librerie normalizzate da mp3gain."
+msgstr "ReplayGain 1.0 (predefinito): valori compatibili con mp3gain, riferimento a 89 dB. Mantiene le riscansioni coerenti con le librerie normalizzate da mp3gain."
 
 #: src/ui/options.rs:148
 msgid "RG 2.0"
@@ -382,7 +382,7 @@ msgstr "RG 2.0"
 
 #: src/ui/options.rs:150
 msgid "ReplayGain 2.0: BS.1770 integrated loudness, -18 LUFS reference (same perceived level as 89 dB). CLI --rg2."
-msgstr "ReplayGain 2.0: loudness integrata BS.1770, riferimento a -18 LUFS (stesso livello percepito di 89 dB). Parametro --rg2 della CLI."
+msgstr "ReplayGain 2.0: volume integrato BS.1770, riferimento a -18 LUFS (stesso livello percepito degli 89 dB). Parametro --rg2 della CLI."
 
 #: src/ui/options.rs:154
 msgid "R128"
@@ -390,7 +390,7 @@ msgstr "R128"
 
 #: src/ui/options.rs:155
 msgid "EBU R128: BS.1770 integrated loudness, -23 LUFS broadcast target. CLI --r128."
-msgstr "EBU R128: loudness integrata BS.1770, obiettivo broadcast di -23 LUFS. Parametro --r128 della CLI."
+msgstr "EBU R128: volume integrato BS.1770, target di trasmissione a -23 LUFS. Parametro --r128 della CLI."
 
 #: src/ui/status.rs:6
 msgid "Progress:"
@@ -426,7 +426,7 @@ msgstr "{name}: {value}"
 
 #: src/ui/table.rs:81
 msgid "Click to sort"
-msgstr "Clic per ordinare"
+msgstr "Fai clic per ordinare"
 
 #: src/ui/table.rs:96
 msgid "Volume (LUFS)"
@@ -446,11 +446,11 @@ msgstr "Vol. album"
 
 #: src/ui/table.rs:101
 msgid "Track Analysis: BS.1770 integrated loudness in LUFS. Find Max Amplitude: available headroom in dB before clipping. Click to sort."
-msgstr "Analisi traccia: loudness integrata BS.1770 in LUFS. Trova ampiezza massima: margine disponibile in dB prima del clipping. Clic per ordinare."
+msgstr "Analisi traccia: volume integrato BS.1770 in LUFS. Trova ampiezza massima: spazio di manovra (headroom) disponibile in dB prima del clipping. Fai clic per ordinare."
 
 #: src/ui/table.rs:106
 msgid "Track Analysis: current loudness relative to ReplayGain reference (89 dB). Find Max Amplitude: available headroom in dB before clipping. Click to sort."
-msgstr "Analisi traccia: loudness attuale rispetto al riferimento ReplayGain (89 dB). Trova ampiezza massima: margine disponibile in dB prima del clipping. Clic per ordinare."
+msgstr "Analisi traccia: volume attuale relativo al riferimento ReplayGain (89 dB). Trova ampiezza massima: spazio di manovra (headroom) disponibile in dB prima del clipping. Fai clic per ordinare."
 
 #: src/ui/table.rs:140
 msgid "Path/File"
@@ -482,7 +482,7 @@ msgstr "RG salvato"
 
 #: src/ui/table.rs:165
 msgid "Existing ReplayGain/undo tags read from the file. Run Analysis > Check Stored Tags to populate. Hover a cell for full tag details."
-msgstr "Tag ReplayGain e di annullamento già presenti nel file. Usa Analisi > Controlla tag salvati per compilare la colonna. Passa il mouse su una cella per i dettagli completi dei tag."
+msgstr "Tag di ripristino/ReplayGain esistenti letti dal file. Esegui Analisi > Controlla tag salvati per inserirli. Passa il mouse su una cella per i dettagli completi dei tag."
 
 #: src/ui/table.rs:174
 msgid "Bitrate"
@@ -490,7 +490,7 @@ msgstr "Bitrate"
 
 #: src/ui/table.rs:176
 msgid "Average bitrate, read when files are added. Click to sort."
-msgstr "Bitrate medio, letto quando i file vengono aggiunti. Clic per ordinare."
+msgstr "Bitrate medio, letto quando i file vengono aggiunti. Fai clic per ordinare."
 
 #: src/ui/table.rs:183
 msgid "CBR/VBR"
@@ -498,7 +498,7 @@ msgstr "CBR/VBR"
 
 #: src/ui/table.rs:186
 msgid "MP3 only: CBR when every frame has the same bitrate, VBR otherwise. AAC frames vary in size whatever the encoder setting, so M4A rows stay empty. Click to sort."
-msgstr "Solo MP3: CBR se tutti i frame hanno lo stesso bitrate, altrimenti VBR. I frame AAC variano di dimensione qualunque sia l'impostazione dell'encoder, quindi le righe M4A restano vuote. Clic per ordinare."
+msgstr "Solo MP3: CBR quando ogni frame ha lo stesso bitrate, VBR altrimenti. I frame AAC variano in dimensione indipendentemente dalle impostazioni dell'encoder, quindi le righe M4A rimangono vuote. Fai clic per ordinare."
 
 #: src/ui/table.rs:193
 msgid "Status"
@@ -534,7 +534,7 @@ msgstr "VBR"
 
 #: src/ui/table.rs:323
 msgid "These AAC frames could not be parsed and kept their original gain, which can be heard as clicks. Undo restores the file. Please report it at https://github.com/M-Igashi/mp3rgain/issues"
-msgstr "Questi frame AAC non sono stati interpretati e hanno mantenuto il guadagno originale, il che può causare clic udibili. Annulla ripristina il file. Segnalalo su https://github.com/M-Igashi/mp3rgain/issues"
+msgstr "Questi frame AAC non hanno potuto essere analizzati e hanno mantenuto il loro guadagno originale, il che potrebbe causare dei clic audio. L'operazione di 'Annulla' ripristina il file originario. Si prega di segnalare il problema su https://github.com/M-Igashi/mp3rgain/issues"
 
 #: src/ui/toolbar.rs:11
 msgid "Add Files"
@@ -565,7 +565,7 @@ msgstr "Target:"
 
 #: src/ui/toolbar.rs:88
 msgid "Level to normalize to. One setting shared by all analysis modes as an offset from the reference: 95 dB in RG 1.0 is -12 LUFS in RG 2.0 and -17 LUFS in R128. Equivalent to the CLI's -d."
-msgstr "Livello a cui normalizzare. Un'unica impostazione condivisa da tutte le modalità di analisi, come scostamento dal riferimento: 95 dB in RG 1.0 corrispondono a -12 LUFS in RG 2.0 e a -17 LUFS in R128. Equivale al parametro -d della CLI."
+msgstr "Livello su cui normalizzare. Impostazione unica condivisa da tutte le modalità di analisi come scostamento dal riferimento: 95 dB in RG 1.0 equivale a -12 LUFS in RG 2.0 e -17 LUFS in R128. Equivalente al parametro -d della CLI."
 
 #: src/ui/mod.rs:32
 msgid "mp3rgui {}"
