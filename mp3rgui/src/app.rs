@@ -1,6 +1,8 @@
-use crate::worker::{self, ApplyJob, ApplyOptionsUi, StoredTagsView, WorkerEvent, WorkerHandle};
+use crate::worker::{
+    self, ApplyJob, ApplyOptionsUi, GainPhrase, StoredTagsView, WorkerEvent, WorkerHandle,
+};
 use mp3rgain::replaygain::{
-    self, AnalysisMode, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB,
+    AnalysisMode, AudioFileType, ReplayGainResult, REPLAYGAIN_REFERENCE_DB,
 };
 use mp3rgain::{
     apply_gain_to_peak, db_to_steps, read_album_tags, would_clip, AacAlbumInfo, AlbumLabel,
@@ -53,8 +55,10 @@ impl FileStatus {
                 steps,
                 clipping_prevented,
             } => {
+                // The sign is formatted here: Prevent clipping can cap a
+                // file that already clips below zero (issue #466).
                 if *clipping_prevented {
-                    tr!("Dry run: +{} steps (capped)", steps)
+                    tr!("Dry run: {} steps (capped)", format!("{:+}", steps))
                 } else {
                     tr!("Dry run: {} steps", format!("{:+}", steps))
                 }
@@ -251,6 +255,38 @@ impl FileEntry {
         self.measurement = measurement;
         self.applied_db = 0.0;
     }
+
+    /// Account for an apply that wrote `steps`, so the columns show the file
+    /// as it is now without a rescan (issue #160). An apply to one channel
+    /// leaves the file at no level a shift could describe, so the row drops
+    /// its numbers until the file is analyzed again (issue #471): shifted as
+    /// if both channels had moved, they also fed the next apply a wrong gain.
+    fn record_apply(&mut self, steps: i32, one_channel: bool) {
+        if one_channel {
+            self.forget_measurement();
+        } else {
+            self.applied_db += mp3rgain::steps_to_db(steps);
+        }
+    }
+
+    /// Account for an undo that rolled back `steps`, the cumulative gain its
+    /// record held (issues #171, #315). Subtract rather than reset: the
+    /// measurement may predate an earlier apply that the undo also reverted.
+    /// `None` means the channels were rolled back by different amounts, which
+    /// no shift describes either (issue #471).
+    fn record_undo(&mut self, steps: Option<i32>) {
+        match steps {
+            Some(steps) => self.applied_db -= mp3rgain::steps_to_db(steps),
+            None => self.forget_measurement(),
+        }
+    }
+
+    /// Drop the measurement and the album values that came with it.
+    fn forget_measurement(&mut self) {
+        self.set_measurement(None);
+        self.album_info = None;
+        self.album_label = None;
+    }
 }
 
 /// State for the "Apply Manual Gain" modal. `open` toggles visibility;
@@ -311,8 +347,9 @@ pub enum SortColumn {
 enum WorkerKind {
     TrackAnalysis,
     AlbumAnalysis,
-    TrackApply,
-    AlbumApply,
+    /// Any gain apply. The phrase names it in the running status and in the
+    /// summary, so the two cannot disagree (issue #466).
+    Apply(GainPhrase),
     Undo,
     CheckTags,
     MaxAmplitude,
@@ -327,13 +364,15 @@ enum WorkerKind {
 /// Apply action queued behind a stored-tag rescan phase (issue #302). With
 /// "Use stored tags" on, Apply first analyzes the files (or albums) that lack
 /// a usable gain source, then chains into the apply once that worker exits.
-#[derive(Clone, Copy)]
+/// It carries the rows chosen at the click: the selection can change while
+/// the rescan runs, and an emptied one would otherwise mean every file.
 enum PendingApply {
-    Track,
-    Album,
+    Track(Vec<usize>),
+    Album(Vec<AlbumGroup>),
 }
 
 /// One album: how it was identified, and the rows in it.
+#[derive(Clone)]
 pub struct AlbumGroup {
     /// `None` only for [`AlbumGrouping::Single`], where the album is
     /// "everything given" and there is nothing to name (issue #344).
@@ -351,20 +390,56 @@ pub struct AlbumGroup {
 /// to cap. Rows without a peak cannot be judged, but are lowered with their
 /// album.
 fn cap_album_jobs(jobs: &mut [ApplyJob], groups: &[AlbumGroup]) {
-    for group in groups {
-        let in_group = |job: &ApplyJob| group.rows.iter().any(|&(idx, _)| idx == job.idx);
-        let reduction = mp3rgain::album_clip_reduction(
-            jobs.iter()
-                .filter(|job| in_group(job))
-                .filter_map(|job| Some((job.steps, job.track_result.as_ref()?.peak()))),
-        );
-        if reduction > 0 {
-            for job in jobs.iter_mut().filter(|job| in_group(job)) {
-                job.steps -= reduction;
+    // One lookup per job rather than a scan of its group's rows, which was
+    // quadratic in the number of rows.
+    let group_of: HashMap<usize, usize> = groups
+        .iter()
+        .enumerate()
+        .flat_map(|(g, group)| group.rows.iter().map(move |&(idx, _)| (idx, g)))
+        .collect();
+    let mut members: Vec<Vec<(i32, f64)>> = vec![Vec::new(); groups.len()];
+    for job in jobs.iter() {
+        if let (Some(&g), Some(result)) = (group_of.get(&job.idx), &job.track_result) {
+            members[g].push((job.steps, result.peak()));
+        }
+    }
+    let reductions: Vec<i32> = members
+        .into_iter()
+        .map(mp3rgain::album_clip_reduction)
+        .collect();
+    for job in jobs.iter_mut() {
+        if let Some(&g) = group_of.get(&job.idx) {
+            if reductions[g] > 0 {
+                job.steps -= reductions[g];
                 job.clipping_prevented = true;
             }
         }
     }
+}
+
+/// `read_album_tags` for every row, in row order, split across the cores.
+/// Grouping by tags runs on the UI thread, and the metadata probe, cover art
+/// included, is what it spends its time on: 70 ms per 1000 files on a local
+/// disk read one after another, 25 ms on eight threads, and far more on a
+/// network share (issue #470).
+fn read_album_tags_in_parallel(rows: &[(usize, PathBuf)]) -> Vec<Option<AlbumTags>> {
+    let per_thread = rows.len().div_ceil(worker::available_threads()).max(1);
+    std::thread::scope(|scope| {
+        let parts: Vec<_> = rows
+            .chunks(per_thread)
+            .map(|part| {
+                scope.spawn(move || {
+                    part.iter()
+                        .map(|(_, path)| read_album_tags(path))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        parts
+            .into_iter()
+            .flat_map(|part| part.join().expect("album tag reader panicked"))
+            .collect()
+    })
 }
 
 /// Split rows into albums. A free function so it can be tested without an
@@ -404,8 +479,8 @@ fn group_albums(rows: Vec<(usize, PathBuf)>, grouping: AlbumGrouping) -> Vec<Alb
             let mut order: Vec<TagGroupKey> = Vec::new();
             type Pending = (Option<AlbumLabel>, Vec<AlbumTags>, Vec<(usize, PathBuf)>);
             let mut groups: HashMap<TagGroupKey, Pending> = HashMap::new();
-            for (idx, path) in rows {
-                let tags = read_album_tags(&path);
+            let all_tags = read_album_tags_in_parallel(&rows);
+            for ((idx, path), tags) in rows.into_iter().zip(all_tags) {
                 let (key, label) = match tags.as_ref().and_then(AlbumTags::release_key) {
                     Some(release) => (
                         TagGroupKey::Release(release),
@@ -523,7 +598,10 @@ const SETTINGS_KEY: &str = "mp3rgui_settings";
 pub struct Mp3rgainApp {
     pub files: Vec<FileEntry>,
     pub target_volume: f64,
-    pub selected_indices: Vec<usize>,
+    /// Selected rows by file index. A set, since the table asks every row
+    /// whether it is selected on every frame (issue #190); `target_indices`
+    /// gives the sorted list a worker takes.
+    pub selected_indices: HashSet<usize>,
     pub total_progress: f32,
     pub status_message: String,
     /// User-toggleable apply flags surfaced in the Options panel.
@@ -570,15 +648,6 @@ pub struct Mp3rgainApp {
     display_order_cache: Vec<usize>,
     /// Set whenever the sort key or any row data changes.
     display_order_dirty: bool,
-
-    /// Reusable set mirror of `selected_indices`, refreshed by
-    /// `rebuild_selection_set` at the start of each table frame. Kept on the
-    /// app so its allocation is reused instead of rebuilt per frame.
-    pub selection_set: HashSet<usize>,
-    /// Set by every method that writes `selected_indices`. Without it the
-    /// mirror was re-hashed on every frame the table drew — 50k inserts a
-    /// frame after Select All, for data that only changes on a click.
-    selection_dirty: bool,
 
     /// File indices added since the last import scan, awaiting an automatic
     /// stored-tag read (issue #203). Drained by `start_import_scan` on the
@@ -636,7 +705,7 @@ impl Mp3rgainApp {
         Self {
             files: Vec::new(),
             target_volume: settings.target_volume,
-            selected_indices: Vec::new(),
+            selected_indices: HashSet::new(),
             total_progress: 0.0,
             status_message: String::new(),
             apply_options: settings.apply_options,
@@ -652,8 +721,6 @@ impl Mp3rgainApp {
             sort_descending: false,
             display_order_cache: Vec::new(),
             display_order_dirty: true,
-            selection_set: HashSet::new(),
-            selection_dirty: false,
             pending_import_scan: Vec::new(),
             pending_drops: Vec::new(),
             show_filename_only: settings.show_filename_only,
@@ -736,20 +803,6 @@ impl Mp3rgainApp {
     /// from the cache. [`Self::ensure_display_order`] must run first.
     pub fn display_order(&self) -> &[usize] {
         &self.display_order_cache
-    }
-
-    /// Refresh `selection_set` from `selected_indices` when the selection has
-    /// changed since the last refresh, reusing its allocation. Called once per
-    /// table frame; row rendering then does set lookups instead of
-    /// `Vec::contains` (issue #190).
-    pub fn rebuild_selection_set(&mut self) {
-        if !self.selection_dirty {
-            return;
-        }
-        self.selection_set.clear();
-        self.selection_set
-            .extend(self.selected_indices.iter().copied());
-        self.selection_dirty = false;
     }
 
     /// Sort `0..files.len()` by the active column. String columns
@@ -886,7 +939,6 @@ impl Mp3rgainApp {
         let mut flags = remove.into_iter();
         self.files.retain(|_| !flags.next().unwrap_or(false));
         self.selected_indices.clear();
-        self.selection_dirty = true;
         // Removing rows shifts indices, so the anchor and any queued import
         // scan are stale.
         self.selection_anchor = None;
@@ -900,7 +952,6 @@ impl Mp3rgainApp {
         }
         self.files.clear();
         self.selected_indices.clear();
-        self.selection_dirty = true;
         self.selection_anchor = None;
         self.pending_import_scan.clear();
         self.display_order_dirty = true;
@@ -913,7 +964,6 @@ impl Mp3rgainApp {
             return;
         }
         self.selected_indices = (0..self.files.len()).collect();
-        self.selection_dirty = true;
         // Anchor at the first row so a follow-up Shift+click extends a sane
         // range. (Without this, an Esc-then-Cmd-A flow would lose the
         // anchor and Shift+click would behave like a plain click.)
@@ -923,7 +973,6 @@ impl Mp3rgainApp {
     /// Drop the current selection. Used by Escape (when no modal is open).
     pub fn clear_selection(&mut self) {
         self.selected_indices.clear();
-        self.selection_dirty = true;
         self.selection_anchor = None;
     }
 
@@ -935,18 +984,15 @@ impl Mp3rgainApp {
         if idx >= self.files.len() {
             return;
         }
-        self.selection_dirty = true;
         match mode {
             ClickMode::Replace => {
                 self.selected_indices.clear();
-                self.selected_indices.push(idx);
+                self.selected_indices.insert(idx);
                 self.selection_anchor = Some(idx);
             }
             ClickMode::Toggle => {
-                if let Some(pos) = self.selected_indices.iter().position(|&i| i == idx) {
-                    self.selected_indices.remove(pos);
-                } else {
-                    self.selected_indices.push(idx);
+                if !self.selected_indices.remove(&idx) {
+                    self.selected_indices.insert(idx);
                 }
                 self.selection_anchor = Some(idx);
             }
@@ -955,18 +1001,16 @@ impl Mp3rgainApp {
                 // Range must follow visible (display) order so that a sorted
                 // table still extends "between these two visible rows"
                 // (issue #167).
-                self.selected_indices = self.range_in_display_order(anchor, idx);
+                self.selected_indices = self
+                    .range_in_display_order(anchor, idx)
+                    .into_iter()
+                    .collect();
                 // Anchor stays put.
             }
             ClickMode::RangeAdd => {
                 let anchor = self.selection_anchor.unwrap_or(idx);
                 let range = self.range_in_display_order(anchor, idx);
-                // Set membership rather than a `Vec::contains` per candidate:
-                // Select All followed by Shift+Cmd+click is otherwise
-                // quadratic and freezes the UI on a large table.
-                let mut seen: HashSet<usize> = self.selected_indices.iter().copied().collect();
-                self.selected_indices
-                    .extend(range.into_iter().filter(|i| seen.insert(*i)));
+                self.selected_indices.extend(range);
             }
         }
     }
@@ -1007,10 +1051,7 @@ impl Mp3rgainApp {
     }
 
     pub fn start_analyze_tracks(&mut self, ctx: &egui::Context) {
-        if self.files.is_empty() || self.is_processing() || !replaygain::is_available() {
-            if !replaygain::is_available() {
-                self.status_message = tr!("ReplayGain feature not available");
-            }
+        if self.files.is_empty() || self.is_processing() {
             return;
         }
 
@@ -1036,10 +1077,7 @@ impl Mp3rgainApp {
     }
 
     pub fn start_analyze_album(&mut self, ctx: &egui::Context) {
-        if self.files.is_empty() || self.is_processing() || !replaygain::is_available() {
-            if !replaygain::is_available() {
-                self.status_message = tr!("ReplayGain feature not available");
-            }
+        if self.files.is_empty() || self.is_processing() {
             return;
         }
 
@@ -1069,13 +1107,15 @@ impl Mp3rgainApp {
         if self.files.is_empty() || self.is_processing() {
             return;
         }
+        // Issue #161: act on the current selection (or all files when none
+        // selected).
+        let targets = self.target_indices();
 
         // Issue #302: with stored-tag reuse on, first analyze only the files
         // that carry neither a fresh analysis nor trusted stored tags, then
         // chain into the apply via `pending_apply`.
         if self.stored_reuse_active() {
-            let missing: Vec<(usize, PathBuf)> = self
-                .target_indices()
+            let missing: Vec<(usize, PathBuf)> = targets
                 .iter()
                 .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
                 .filter(|(_, f)| !f.is_analyzed() && trusted_track_tags(f).is_none())
@@ -1086,7 +1126,7 @@ impl Mp3rgainApp {
                     self.files[idx].status = FileStatus::Pending;
                 }
                 let count = missing.len();
-                self.pending_apply = Some(PendingApply::Track);
+                self.pending_apply = Some(PendingApply::Track(targets));
                 self.begin_worker(
                     WorkerKind::TrackAnalysis,
                     count,
@@ -1096,24 +1136,21 @@ impl Mp3rgainApp {
                 return;
             }
         }
-        self.apply_track_gain_now(ctx);
+        self.apply_track_gain_now(ctx, &targets);
     }
 
-    /// Apply phase of Apply Track Gain: build jobs from the current row state
-    /// and spawn the apply worker. With stored-tag reuse on (issue #302),
-    /// rows without a fresh analysis fall back to a result built from their
-    /// stored tags (the same `ReplayGainResult::from_stored_tags` the CLI's
-    /// -s R path uses), so apply gets the real peak for its clipping check
-    /// and writes correct residual RG tags.
-    fn apply_track_gain_now(&mut self, ctx: &egui::Context) {
+    /// Apply phase of Apply Track Gain: build jobs for `targets` from the
+    /// current row state and spawn the apply worker. With stored-tag reuse on
+    /// (issue #302), rows without a fresh analysis fall back to a result built
+    /// from their stored tags (the same `ReplayGainResult::from_stored_tags`
+    /// the CLI's -s R path uses), so apply gets the real peak for its clipping
+    /// check and writes correct residual RG tags.
+    fn apply_track_gain_now(&mut self, ctx: &egui::Context, targets: &[usize]) {
         let reuse = self.stored_reuse_active();
         let target = self.target_volume;
         let mode = self.analysis_mode;
         let target_offset = target - REPLAYGAIN_REFERENCE_DB;
 
-        // Issue #161: act on the current selection (or all files when none
-        // selected).
-        let targets = self.target_indices();
         let jobs: Vec<ApplyJob> = targets
             .iter()
             .filter_map(|&idx| self.files.get(idx).map(|f| (idx, f)))
@@ -1153,22 +1190,27 @@ impl Mp3rgainApp {
             self.status_message = tr!("No track gain values — run Track Analysis first");
             return;
         }
+        self.start_apply(ctx, GainPhrase::Track, jobs, Vec::new());
+    }
 
-        for &job_idx in jobs.iter().map(|j| &j.idx) {
-            self.files[job_idx].status = FileStatus::Pending;
+    /// Mark the jobs' rows pending and start the apply worker, which reports
+    /// as `phrase` while it runs and when it is done.
+    fn start_apply(
+        &mut self,
+        ctx: &egui::Context,
+        phrase: GainPhrase,
+        jobs: Vec<ApplyJob>,
+        album_minmax_groups: Vec<Vec<PathBuf>>,
+    ) {
+        for job in &jobs {
+            self.files[job.idx].status = FileStatus::Pending;
         }
         let count = jobs.len();
         let ui_opts = self.apply_options;
         self.begin_worker(
-            WorkerKind::TrackApply,
+            WorkerKind::Apply(phrase),
             count,
-            worker::spawn_apply(
-                ctx.clone(),
-                jobs,
-                worker::GainPhrase::Track,
-                ui_opts,
-                Vec::new(),
-            ),
+            worker::spawn_apply(ctx.clone(), jobs, phrase, ui_opts, album_minmax_groups),
         );
     }
 
@@ -1213,14 +1255,13 @@ impl Mp3rgainApp {
     }
 
     /// Selected files, or all loaded files when nothing is selected.
-    /// Returned indices are sorted and deduplicated.
+    /// Returned indices are sorted.
     pub fn target_indices(&self) -> Vec<usize> {
         if self.selected_indices.is_empty() {
             (0..self.files.len()).collect()
         } else {
-            let mut v = self.selected_indices.clone();
+            let mut v: Vec<usize> = self.selected_indices.iter().copied().collect();
             v.sort_unstable();
-            v.dedup();
             v
         }
     }
@@ -1346,23 +1387,7 @@ impl Mp3rgainApp {
         if jobs.is_empty() {
             return;
         }
-
-        for &job_idx in jobs.iter().map(|j| &j.idx) {
-            self.files[job_idx].status = FileStatus::Pending;
-        }
-        let count = jobs.len();
-        let ui_opts = self.apply_options;
-        self.begin_worker(
-            WorkerKind::TrackApply,
-            count,
-            worker::spawn_apply(
-                ctx.clone(),
-                jobs,
-                worker::GainPhrase::Manual,
-                ui_opts,
-                Vec::new(),
-            ),
-        );
+        self.start_apply(ctx, GainPhrase::Manual, jobs, Vec::new());
     }
 
     /// `-l`: apply gain to a single channel of the targeted files. AAC files,
@@ -1395,23 +1420,7 @@ impl Mp3rgainApp {
                 tr!("Channel gain only applies to MP3 — selection had no eligible files");
             return;
         }
-
-        for &job_idx in jobs.iter().map(|j| &j.idx) {
-            self.files[job_idx].status = FileStatus::Pending;
-        }
-        let count = jobs.len();
-        let ui_opts = self.apply_options;
-        self.begin_worker(
-            WorkerKind::TrackApply,
-            count,
-            worker::spawn_apply(
-                ctx.clone(),
-                jobs,
-                worker::GainPhrase::Channel,
-                ui_opts,
-                Vec::new(),
-            ),
-        );
+        self.start_apply(ctx, GainPhrase::Channel, jobs, Vec::new());
     }
 
     /// Undo gain changes on selected files (or all files when no selection).
@@ -1460,7 +1469,8 @@ impl Mp3rgainApp {
                 !all_fresh && self.trusted_album_group(&g.rows).is_none()
             };
             if groups.iter().any(needs_rescan) {
-                let rescan: Vec<AlbumGroup> = groups.into_iter().filter(needs_rescan).collect();
+                let rescan: Vec<AlbumGroup> =
+                    groups.iter().filter(|g| needs_rescan(g)).cloned().collect();
                 for &(idx, _) in rescan.iter().flat_map(|g| &g.rows) {
                     if let Some(f) = self.files.get_mut(idx) {
                         f.status = FileStatus::Pending;
@@ -1469,7 +1479,7 @@ impl Mp3rgainApp {
                     }
                 }
                 let total: usize = rescan.iter().map(|g| g.rows.len()).sum();
-                self.pending_apply = Some(PendingApply::Album);
+                self.pending_apply = Some(PendingApply::Album(groups));
                 self.begin_worker(
                     WorkerKind::AlbumAnalysis,
                     total,
@@ -1491,78 +1501,60 @@ impl Mp3rgainApp {
     /// otherwise each row falls back to its displayed values, exactly like
     /// the reuse-off path.
     ///
-    /// `groups` covers the current selection (or all files when none is
-    /// selected, issue #161). Each file's per-folder album_info gives tracks
-    /// from different folders the album RG tags for their own album (issue
-    /// #159).
+    /// `groups` covers the selection at the click (or all files when none
+    /// was selected, issue #161). Each file's per-folder album_info gives
+    /// tracks from different folders the album RG tags for their own album
+    /// (issue #159).
     fn apply_album_gain_now(&mut self, ctx: &egui::Context, groups: Vec<AlbumGroup>) {
         let target = self.target_volume;
         let mode = self.analysis_mode;
+        let reuse = self.stored_reuse_active();
+        let target_offset = target - REPLAYGAIN_REFERENCE_DB;
         let mut jobs: Vec<ApplyJob> = Vec::new();
-        if self.stored_reuse_active() {
-            let target_offset = target - REPLAYGAIN_REFERENCE_DB;
-            for group in &groups {
-                let rows = &group.rows;
-                let all_fresh = rows
-                    .iter()
-                    .all(|&(idx, _)| self.files.get(idx).is_some_and(|f| f.album_info.is_some()));
-                if !all_fresh {
-                    if let Some(info) = self.trusted_album_group(rows) {
-                        let steps = db_to_steps(target_offset + info.album_gain_db);
-                        for &(idx, _) in rows {
-                            let Some(f) = self.files.get(idx) else {
-                                continue;
-                            };
-                            let Some(tags) = trusted_album_tags(f) else {
-                                continue;
-                            };
-                            jobs.push(ApplyJob {
-                                idx,
-                                path: f.path.clone(),
-                                steps,
-                                track_result: Some(ReplayGainResult::from_stored_tags(
-                                    tags.track_gain_db,
-                                    tags.track_peak,
-                                    AudioFileType::from_path(&f.path),
-                                    AnalysisMode::Rg1,
-                                )),
-                                album_info: Some(info),
-                                channel: None,
-                                from_stored: true,
-                                clipping_prevented: false,
-                            });
-                        }
-                        continue;
-                    }
-                }
-                // Fully analyzed group, or one whose rescan partly failed:
-                // apply each row from its displayed values; rows without a
-                // gain (e.g. analysis errors) are skipped.
-                for &(idx, _) in rows {
-                    let Some(f) = self.files.get(idx) else {
-                        continue;
-                    };
-                    if let Some(gain_db) = f.display(target, mode).album_gain {
+        for group in &groups {
+            let rows = &group.rows;
+            let all_fresh = || {
+                rows.iter()
+                    .all(|&(idx, _)| self.files.get(idx).is_some_and(|f| f.album_info.is_some()))
+            };
+            if reuse && !all_fresh() {
+                if let Some(info) = self.trusted_album_group(rows) {
+                    let steps = db_to_steps(target_offset + info.album_gain_db);
+                    for &(idx, _) in rows {
+                        let Some(f) = self.files.get(idx) else {
+                            continue;
+                        };
+                        let Some(tags) = trusted_album_tags(f) else {
+                            continue;
+                        };
                         jobs.push(ApplyJob {
                             idx,
                             path: f.path.clone(),
-                            steps: db_to_steps(gain_db),
-                            track_result: f.apply_track_result(),
-                            album_info: f.album_info,
+                            steps,
+                            track_result: Some(ReplayGainResult::from_stored_tags(
+                                tags.track_gain_db,
+                                tags.track_peak,
+                                AudioFileType::from_path(&f.path),
+                                AnalysisMode::Rg1,
+                            )),
+                            album_info: Some(info),
                             channel: None,
-                            from_stored: false,
+                            from_stored: true,
                             clipping_prevented: false,
                         });
                     }
+                    continue;
                 }
             }
-        } else {
-            jobs = self
-                .target_indices()
-                .into_iter()
-                .filter_map(|idx| self.files.get(idx).map(|f| (idx, f)))
-                .filter_map(|(idx, f)| {
-                    f.display(target, mode).album_gain.map(|gain_db| ApplyJob {
+            // Reuse off, a fully analyzed group, or one whose rescan partly
+            // failed: apply each row from its displayed values; rows without
+            // a gain (e.g. analysis errors) are skipped.
+            for &(idx, _) in rows {
+                let Some(f) = self.files.get(idx) else {
+                    continue;
+                };
+                if let Some(gain_db) = f.display(target, mode).album_gain {
+                    jobs.push(ApplyJob {
                         idx,
                         path: f.path.clone(),
                         steps: db_to_steps(gain_db),
@@ -1571,9 +1563,9 @@ impl Mp3rgainApp {
                         channel: None,
                         from_stored: false,
                         clipping_prevented: false,
-                    })
-                })
-                .collect();
+                    });
+                }
+            }
         }
 
         if self.apply_options.prevent_clipping && !self.apply_options.wrap {
@@ -1585,11 +1577,6 @@ impl Mp3rgainApp {
             return;
         }
 
-        for &job_idx in jobs.iter().map(|j| &j.idx) {
-            self.files[job_idx].status = FileStatus::Pending;
-        }
-        let count = jobs.len();
-        let ui_opts = self.apply_options;
         // The album-wide MINMAX range is stamped per album, so the worker is
         // given the grouping rather than re-deriving it: with three grouping
         // modes (issue #338) a second copy of that decision would drift.
@@ -1597,17 +1584,7 @@ impl Mp3rgainApp {
             .into_iter()
             .map(|g| g.rows.into_iter().map(|(_, path)| path).collect())
             .collect();
-        self.begin_worker(
-            WorkerKind::AlbumApply,
-            count,
-            worker::spawn_apply(
-                ctx.clone(),
-                jobs,
-                worker::GainPhrase::Album,
-                ui_opts,
-                album_minmax_groups,
-            ),
-        );
+        self.start_apply(ctx, GainPhrase::Album, jobs, album_minmax_groups);
     }
 
     pub fn is_processing(&self) -> bool {
@@ -1627,8 +1604,10 @@ impl Mp3rgainApp {
         self.status_message = match kind {
             WorkerKind::TrackAnalysis => tr!("Analyzing tracks..."),
             WorkerKind::AlbumAnalysis => tr!("Analyzing album..."),
-            WorkerKind::TrackApply => tr!("Applying track gain..."),
-            WorkerKind::AlbumApply => tr!("Applying album gain..."),
+            WorkerKind::Apply(GainPhrase::Track) => tr!("Applying track gain..."),
+            WorkerKind::Apply(GainPhrase::Album) => tr!("Applying album gain..."),
+            WorkerKind::Apply(GainPhrase::Manual) => tr!("Applying manual gain..."),
+            WorkerKind::Apply(GainPhrase::Channel) => tr!("Applying channel gain..."),
             WorkerKind::Undo => tr!("Undoing gain changes..."),
             WorkerKind::CheckTags => tr!("Checking stored tags..."),
             WorkerKind::MaxAmplitude => tr!("Finding max amplitude..."),
@@ -1672,11 +1651,8 @@ impl Mp3rgainApp {
             // exits. `add_files` re-queues pending drops if this spawns a
             // new worker.
             match self.pending_apply.take() {
-                Some(PendingApply::Track) => self.apply_track_gain_now(ctx),
-                Some(PendingApply::Album) => {
-                    let groups = self.album_groups(&self.target_indices());
-                    self.apply_album_gain_now(ctx, groups);
-                }
+                Some(PendingApply::Track(targets)) => self.apply_track_gain_now(ctx, &targets),
+                Some(PendingApply::Album(groups)) => self.apply_album_gain_now(ctx, groups),
                 None => {}
             }
             if !self.pending_drops.is_empty() {
@@ -1692,9 +1668,7 @@ impl Mp3rgainApp {
                 let kind = self.worker_kind();
                 if let Some(file) = self.files.get_mut(idx) {
                     match kind {
-                        Some(WorkerKind::TrackApply)
-                        | Some(WorkerKind::AlbumApply)
-                        | Some(WorkerKind::DeleteTags) => {
+                        Some(WorkerKind::Apply(_)) | Some(WorkerKind::DeleteTags) => {
                             file.status = FileStatus::Applying;
                         }
                         Some(WorkerKind::Undo) => {
@@ -1751,6 +1725,7 @@ impl Mp3rgainApp {
                 actual_steps,
                 from_stored,
                 unparsed_frames,
+                one_channel,
             } => {
                 if let Some(file) = self.files.get_mut(idx) {
                     // Issue #302: make it visible which rows were applied
@@ -1765,10 +1740,7 @@ impl Mp3rgainApp {
                     };
                     // File contents changed; cached tag snapshot is stale.
                     file.stored_tags = None;
-                    // The columns are derived from `applied_db`, so this one
-                    // line shows the post-apply state without rescanning
-                    // (issue #160).
-                    file.applied_db += mp3rgain::steps_to_db(actual_steps);
+                    file.record_apply(actual_steps, one_channel);
                 }
             }
             WorkerEvent::FileApplyDryRun {
@@ -1792,12 +1764,7 @@ impl Mp3rgainApp {
                 if let Some(file) = self.files.get_mut(idx) {
                     file.status = FileStatus::Done;
                     file.stored_tags = None;
-                    // `steps_undone` is the cumulative gain the undo rolled
-                    // back (issue #315), so subtracting it lines the row up
-                    // with the file again (issue #171). Subtract rather than
-                    // reset: the measurement may predate an earlier apply
-                    // that the undo also reverted.
-                    file.applied_db -= mp3rgain::steps_to_db(steps_undone);
+                    file.record_undo(steps_undone);
                 }
             }
             WorkerEvent::FileUndoSkipped { idx } => {
@@ -2158,13 +2125,13 @@ mod tests {
         assert!(close(before.album_volume, Some(93.0)));
         assert!(close(before.album_gain, Some(-4.0)));
 
-        file.applied_db += steps_to_db(-4);
+        file.record_apply(-4, false);
         let after = file.display(89.0, AnalysisMode::Rg1);
         assert!(close(after.volume, Some(95.0 + steps_to_db(-4))));
         assert!(close(after.track_gain, Some(-6.0 - steps_to_db(-4))));
         assert!(close(after.album_gain, Some(-4.0 - steps_to_db(-4))));
 
-        file.applied_db -= steps_to_db(-4);
+        file.record_undo(Some(-4));
         let restored = file.display(89.0, AnalysisMode::Rg1);
         assert!(close(restored.volume, before.volume));
         assert!(close(restored.track_gain, before.track_gain));
@@ -2173,6 +2140,35 @@ mod tests {
         assert_eq!(restored.clipping, before.clipping);
         assert_eq!(restored.track_clip, before.track_clip);
         assert_eq!(restored.album_clip, before.album_clip);
+    }
+
+    /// Issue #471: a channel apply, and an undo that rolls the channels back
+    /// by different amounts, leave the file at no single level. The row drops
+    /// its numbers instead of showing the whole file 3 dB off, which Apply
+    /// Track Gain would then have turned into 2 steps too few.
+    #[test]
+    fn one_channel_changes_drop_the_measurement() {
+        let with_album = || {
+            let mut file = analyzed(-6.0, 0.5);
+            file.album_info = Some(AacAlbumInfo {
+                album_gain_db: -4.0,
+                album_peak: 0.7,
+            });
+            file.album_label = Some("Album".to_string());
+            file
+        };
+        let empty = RowDisplay::default();
+
+        let mut file = with_album();
+        file.record_apply(2, true);
+        assert!(file.measurement.is_none() && file.album_info.is_none());
+        assert_eq!(file.display(89.0, AnalysisMode::Rg1), empty);
+        assert!(file.apply_track_result().is_none());
+
+        let mut file = with_album();
+        file.record_undo(None);
+        assert!(file.measurement.is_none() && file.album_label.is_none());
+        assert_eq!(file.display(89.0, AnalysisMode::Rg1), empty);
     }
 
     #[test]

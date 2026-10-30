@@ -7,12 +7,15 @@
 //! fallback. Only glyphs missing from egui's own fonts are taken from it, so
 //! Latin text is unchanged.
 //!
-//! Exactly one font is loaded. egui keeps two copies of the bytes (the
-//! `FontDefinitions` and the parsed `ab_glyph` font), so loading a Japanese,
-//! a Chinese and a Korean face on macOS would cost well over 100 MB.
+//! Exactly one font is loaded, at startup, for every user: a file name can
+//! need it whatever the UI language, and reading it takes a few
+//! milliseconds. The bytes are kept for the life of the process and handed to
+//! egui as static data, which it parses in place; owned bytes it copies, so
+//! the Japanese face cost 15 MB resident instead of 7, and the Korean one
+//! 105 MB instead of 52 (issue #470).
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// Environment variable naming a font file to use instead of the built-in
 /// candidate list. The escape hatch for an OS font set we did not predict.
@@ -92,7 +95,7 @@ pub fn install(ctx: &egui::Context, locale: &str) {
     if let Some((path, bytes)) = load_fallback(locale) {
         let name = path.display().to_string();
         defs.font_data
-            .insert(name.clone(), Arc::new(egui::FontData::from_owned(bytes)));
+            .insert(name.clone(), Arc::new(egui::FontData::from_static(bytes)));
         for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
             defs.families.entry(family).or_default().push(name.clone());
         }
@@ -100,10 +103,21 @@ pub fn install(ctx: &egui::Context, locale: &str) {
     ctx.set_fonts(defs);
 }
 
-fn load_fallback(locale: &str) -> Option<(PathBuf, Vec<u8>)> {
-    fallback_candidates(locale)
-        .into_iter()
-        .find_map(|path| std::fs::read(&path).ok().map(|bytes| (path, bytes)))
+/// Font files read so far. Each is read once and never freed, so a language
+/// switch that changes the CJK group reads its face once and a switch back
+/// reuses the first.
+static LOADED: Mutex<Vec<(PathBuf, &'static [u8])>> = Mutex::new(Vec::new());
+
+fn load_fallback(locale: &str) -> Option<(PathBuf, &'static [u8])> {
+    let mut loaded = LOADED.lock().unwrap_or_else(PoisonError::into_inner);
+    fallback_candidates(locale).into_iter().find_map(|path| {
+        if let Some(&(_, bytes)) = loaded.iter().find(|(p, _)| *p == path) {
+            return Some((path, bytes));
+        }
+        let bytes: &'static [u8] = Box::leak(std::fs::read(&path).ok()?.into_boxed_slice());
+        loaded.push((path.clone(), bytes));
+        Some((path, bytes))
+    })
 }
 
 /// Candidate font files in preference order: the explicit override, the
@@ -230,7 +244,7 @@ mod tests {
         let mut defs = egui::FontDefinitions::default();
         let name = path.display().to_string();
         defs.font_data
-            .insert(name.clone(), Arc::new(egui::FontData::from_owned(bytes)));
+            .insert(name.clone(), Arc::new(egui::FontData::from_static(bytes)));
         defs.families
             .entry(egui::FontFamily::Proportional)
             .or_default()
@@ -243,5 +257,10 @@ mod tests {
             path.display()
         );
         assert!(fonts.has_glyphs(&id, "abc-123"));
+
+        // A second install, after a language switch back, reuses the bytes
+        // rather than keeping another copy (issue #470).
+        let (_, again) = load_fallback("ja").unwrap();
+        assert!(std::ptr::eq(bytes, again));
     }
 }

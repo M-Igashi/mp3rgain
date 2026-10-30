@@ -7,13 +7,13 @@ mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writ
 What ships today:
 
 - Lossless gain via `global_gain` for MP3 (MPEG-1/2/2.5 Layer III) and AAC-LC (M4A/MP4 and raw ADTS), with undo; HE-AAC is skipped
-- ReplayGain 1.0 analysis by default (mp3gain-identical values); ReplayGain 2.0 (`--rg2`), EBU R128 (`--r128`) and true peak (`--true-peak`) as options
+- ReplayGain 1.0 analysis by default (mp3gain-identical values); ReplayGain 2.0 (`--rg2`), EBU R128 (`--r128`), and true peak (`--true-peak`) as options
 - mp3gain command-line compatibility, down to the stored tags; the differences are listed in [migrating-from-mp3gain.md](migrating-from-mp3gain.md)
-- Tags-only mode, album grouping by directory, release tags or depth, reuse of stored tags (`-s R`)
+- Tags-only mode, album grouping by directory, release tags, or depth, reuse of stored tags (`-s R`)
 - Parallel processing across and within files, JSON and TSV output
-- GUI (mp3rgui) for macOS, Windows and Linux, in English, Brazilian Portuguese, Italian, Japanese and Turkish
+- GUI (mp3rgui) for macOS, Windows, and Linux, in English, Brazilian Portuguese, Italian, Japanese, and Turkish
 - A documented library API on crates.io and docs.rs
-- Distribution through crates.io, Homebrew, winget, .deb with an apt repository, Ubuntu PPA (deprecated, updated until 2026-12-31), AUR (GUI), MacPorts, pkgx, Termux (TUR), a Nix flake and a GHCR Docker image
+- Distribution through crates.io, Homebrew, winget, .deb with an apt repository, Ubuntu PPA (deprecated, updated until 2026-12-31), AUR (GUI), MacPorts, pkgx, Termux (TUR), a Nix flake, and a GHCR Docker image
 
 ## Open
 
@@ -33,13 +33,28 @@ What ships today:
 ### Community goals
 
 - [x] Reach 100 GitHub stars (130 on 2026-10-27)
-- [x] 5+ contributors: @valipod, @cfgnunes, @dannyward630, @0anes0 and @Privato72 by v3.14.0
+- [x] 5+ contributors: @valipod, @cfgnunes, @dannyward630, @0anes0, and @Privato72 by v3.14.0
 - [ ] Grow the Windows user base
 - [x] Package availability in major package managers
 
 ## Unreleased
 
-Nothing yet.
+- mp3rgui: an Apply that first rescans the files without stored tags applies to the rows selected at the click, not to whatever is selected when the rescan ends
+- mp3rgui: Apply Channel Gain, and an Undo that rolls the channels back by different amounts, clear the row's numbers instead of shifting them as if both channels moved, which also fed the next Apply Track Gain a wrong gain; library: `read_undo_channel_steps` (#471)
+- `-s d` leaves an untagged M4A alone, including one whose metadata ends in an empty `ilst`, and `-u` no longer leaves an empty `udta` behind
+- `-s d` and mp3rgui's Delete stored tags find out from `moov` alone that an M4A has no tags to delete, instead of reading and rebuilding the whole file (#468)
+- `-s c` shows an album range that `-a -s i` stored in ID3v2 under the default layout too
+- `-g -o tsv` prints `-` for a `global_gain` range it did not scan, and the steps `-k` actually applied
+- The M4A line of `-r` and `-a` shows the gain applied, the album gain under `-a`
+- An ID3v2 write keeps the tag's padding and rewrites the tag in place when it fits, instead of moving the audio after it; a tag that grows gets 2 KB of padding (#467)
+- A crafted `MP3GAIN_UNDO` can no longer overflow the undo arithmetic
+- Library: without the `aac` feature, the `*_auto` functions refuse AAC instead of running the MP3 path over an M4A (#149)
+- Library: `write_album_minmax_with_options` keeps each file's mtime itself, so the CLI and mp3rgui no longer wrap the call to restore it (#463)
+- A ReplayGain re-run that needs no change syncs each file once, and the album range reuses the apply's scan
+- mp3rgui: a capped dry run below zero reads "-1 steps (capped)" rather than "+-1", and manual and channel gain say so while they run (#466)
+- mp3rgui: the CJK fallback font takes half the memory, and grouping albums by tags reads the files in parallel (#470)
+- An MP3 apply or undo that writes APEv2 holds one copy of the file instead of two, and an M4A apply or undo two instead of three (#469)
+- Cleanup from a whole-codebase review, with no other change in behaviour
 
 ## Release history
 
@@ -49,7 +64,7 @@ One line per change. The [release notes](https://github.com/M-Igashi/mp3rgain/re
 
 mp3rgui is translated. On the command line the analysis and the applied gains are unchanged, the stored mp3gain values are written as mp3gain 1.6.2 writes them, and `-a -r` applies track gain.
 
-- mp3rgui translations: one gettext `.po` file per language compiled into the binary, and a Language menu. Mechanism by @cfgnunes; Brazilian Portuguese (@cfgnunes), Italian (@Privato72), Japanese (@M-Igashi) and Turkish (@0anes0) (#422, #439, #443, #445, #448, #457)
+- mp3rgui translations: one gettext `.po` file per language compiled into the binary, and a Language menu. Mechanism by @cfgnunes; Brazilian Portuguese (@cfgnunes), Italian (@Privato72), Japanese (@M-Igashi), and Turkish (@0anes0) (#422, #439, #443, #445, #448, #457)
 - `MP3GAIN_MINMAX` and `MP3GAIN_ALBUM_MINMAX` are zero-padded to three digits, the form mp3gain reads (#432)
 - `-l` leaves `MP3GAIN_MINMAX` alone (#433)
 - `-l -w` wraps and records `W`, and `-u` honours it; fixed by @dannyward630 (#434, #438)
@@ -68,7 +83,7 @@ ReplayGain 1.0 values match mp3gain 1.6.2 on 118 real MP3s, so re-analyzing can 
 
 - MP3 is decoded untrimmed for RG1 and `-x`, keeping the LAME encoder delay and padding, as mp3gain does (#430)
 - RG1 at the MPEG-2 and MPEG-2.5 rates: a swapped 16 kHz filter coefficient and a short RMS window, found and fixed by @cfgnunes (#412, #413)
-- RG1 scales stereo MP3 by 32767 before the filters (#415), drops the partial last window and refuses a track that fills none (#414, #423)
+- RG1 scales stereo MP3 by 32767 before the filters (#415), drops the partial last window, and refuses a track that fills none (#414, #423)
 - `-d` is rounded together with the measured gain (#416)
 - `-k` caps track gain at the 16-bit limit (#418) and album gain once for the whole album (#419)
 - A `global_gain` of 0 is left as it is without `-w` (#417)
@@ -173,7 +188,7 @@ Documentation only, no behaviour change: a published version's docs.rs pages can
 
 - `-a --per-directory` computes one album gain per folder, with an `albums` array in JSON output (#324, #326). Since v3.8.0 it is an alias for `--album-by=dir`
 - `-o tsv` prints the ReplayGain float peak under `--rg2` / `--r128` (#323, #325)
-- mp3rgui loads a system CJK font so Japanese, Chinese and Korean file names render (#321, #322)
+- mp3rgui loads a system CJK font so Japanese, Chinese, and Korean file names render (#321, #322)
 
 ### v3.6.0 - TSV Everywhere & GUI Column Derivation
 
@@ -296,7 +311,7 @@ Documentation only, no behaviour change: a published version's docs.rs pages can
 
 - v2.2.0: Ubuntu PPA, uploaded automatically after each release; weekly download stats workflow (#110)
 - v2.2.2: separate PPAs for the CLI (`ppa:m-igashi/mp3rgain`) and the GUI (`ppa:m-igashi/mp3rgui`)
-- v2.3.0: AAC parser fixes, bounds checks and faster Huffman decoding (#120, #121)
+- v2.3.0: AAC parser fixes, bounds checks, and faster Huffman decoding (#120, #121)
 - v2.3.1: official multi-arch Docker image on GHCR (#123): `ghcr.io/m-igashi/mp3rgain:{latest, vX.Y.Z, vX}`, `linux/amd64` + `linux/arm64` built natively per arch, `FROM scratch` with a static musl binary of about 2 MB
 - v2.3.1: MacPorts Portfile; the port has been upstream since 2026-04-29 (#122)
 
@@ -366,7 +381,7 @@ Documentation only, no behaviour change: a published version's docs.rs pages can
 
 - v0.1.0: MP3 `global_gain` adjustment, macOS universal binary
 - v0.2.0: Windows x86_64 and ARM64 builds, Homebrew tap
-- v0.3.0: mp3gain-style flags replace the original subcommands (`-p`, `-c` and friends)
+- v0.3.0: mp3gain-style flags replace the original subcommands (`-p`, `-c`, and friends)
 - v0.4.0: APEv2 undo tags
 - v0.5.0: ReplayGain track and album analysis (`-r`, `-a`)
 - v0.6.0: clipping prevention (`-k`), recursive directories (`-R`), JSON output, dry run, progress bar for batches

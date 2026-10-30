@@ -109,10 +109,6 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
         )
     };
     app.ensure_display_order();
-    // Set lookup instead of `Vec::contains` per row, which made selection
-    // O(rows × selected) per frame; the set allocation is reused across
-    // frames instead of rebuilt (issue #190).
-    app.rebuild_selection_set();
     // Defer click handling: the row closure borrows `app.files`, so it
     // can't also mutate `app.selected_indices` during the iteration.
     // Capture the requested action and apply it after the table.
@@ -201,7 +197,7 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
         // clicks); the body only reads `app`, so the cache and set can be
         // borrowed instead of cloned per frame.
         let display_order = app.display_order();
-        let selected = &app.selection_set;
+        let selected = &app.selected_indices;
         let target = app.target_volume;
         let mode = app.analysis_mode;
         table.body(|body| {

@@ -1,5 +1,5 @@
 use colored::*;
-use mp3rgain::replaygain::{self, REPLAYGAIN_REFERENCE_DB};
+use mp3rgain::replaygain::REPLAYGAIN_REFERENCE_DB;
 use mp3rgain::GAIN_STEP_DB;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -50,7 +50,7 @@ pub fn print_usage() {
     println!("                only analyzes; with -a it applies track gain like -r");
     println!("    -i <n>      Audio track of a multi-track MP4 to analyze (default: 0).");
     println!("                Analysis only: gain and tags apply to the first track");
-    println!("    -u          Undo gain changes (restore from APEv2 tag)");
+    println!("    -u          Undo gain changes (restore from the stored undo tag)");
     println!("    -x          Only find max amplitude of file");
     println!("    -s <mode>   Stored tag handling:");
     println!("                  c = check/show stored tag info");
@@ -126,18 +126,11 @@ pub fn print_usage() {
         "    - Progress bar shown automatically for {}+ files",
         crate::progress::PROGRESS_THRESHOLD
     );
-    if replaygain::is_available() {
-        println!(
-            "    - ReplayGain analysis is {} (target: {} dB)",
-            "enabled".green(),
-            REPLAYGAIN_REFERENCE_DB
-        );
-        println!("    - Default analysis is ReplayGain 1.0 (mp3gain-identical values);");
-        println!("      --rg2 / --r128 opt into BS.1770 loudness measurement");
-    } else {
-        println!();
-        println!("{}", "REPLAYGAIN:".yellow().bold());
-        println!("    -r and -a options require the 'replaygain' feature:");
-        println!("    cargo install mp3rgain --features replaygain");
-    }
+    println!(
+        "    - ReplayGain analysis is {} (target: {} dB)",
+        "enabled".green(),
+        REPLAYGAIN_REFERENCE_DB
+    );
+    println!("    - Default analysis is ReplayGain 1.0 (mp3gain-identical values);");
+    println!("      --rg2 / --r128 opt into BS.1770 loudness measurement");
 }

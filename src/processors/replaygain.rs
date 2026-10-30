@@ -248,8 +248,8 @@ fn apply_replaygain_with_album_into(
     apply_opts.prevent_clipping = opts.prevent_clipping;
     apply_opts.wrap = opts.wrap_gain;
     apply_opts.preserve_timestamp = opts.preserve_timestamp;
-    // RG path writes undo and ReplayGain tags unless -s s. Default APE,
-    // `-s i` ID3v2, and AAC all write the REPLAYGAIN_* tags (issue #204).
+    // RG path writes undo and ReplayGain tags unless -s s, in whichever
+    // container the layout selects (issue #204).
     apply_opts.write_undo = opts.stored_tag_mode != StoredTagMode::Skip;
     apply_opts.write_replaygain_tags = opts.stored_tag_mode != StoredTagMode::Skip;
     apply_opts.tag_layout = opts.tag_layout;
@@ -378,19 +378,18 @@ fn write_tags_only_into(
         warn_aac_multi_track(file, filename, opts);
     }
 
-    let mut warnings: Vec<String> = Vec::new();
-    let (track_gain_db, warning) = cap_tag_gain(
+    let (track_gain_db, track_warning) = cap_tag_gain(
         result.gain_db() + offset_db,
         result.peak(),
         "track",
         filename,
         opts,
     );
-    warnings.extend(warning);
 
     // The album peak is the loudest across the set, so capping against it
     // keeps the album value identical on every file, which is the whole
     // point of an album tag.
+    let mut album_warning = None;
     let album = album_info.map(|a| {
         let (gain, warning) = cap_tag_gain(
             a.album_gain_db + offset_db,
@@ -399,7 +398,7 @@ fn write_tags_only_into(
             filename,
             opts,
         );
-        warnings.extend(warning);
+        album_warning = warning;
         (gain, a.album_peak)
     });
 
@@ -415,7 +414,7 @@ fn write_tags_only_into(
         ),
         None => format!("{:+.2} dB", track_gain_db),
     };
-    let warning = (!warnings.is_empty()).then(|| warnings.join("; "));
+    let warning = combine_warnings([track_warning, album_warning]);
 
     let base = JsonFileResult {
         // Nothing was applied to the audio; the gain lives in the tag.
@@ -561,6 +560,9 @@ fn apply_replaygain_aac_with_album_into(
         "tags"
     };
 
+    // The gain applied, as the MP3 line reports it: under -a that is the
+    // album gain, and -d, -m and -k move it too. The tags-only line below
+    // reports the measured gain the tags carry instead.
     if opts.text_output() {
         if !write_tags {
             writeln!(
@@ -569,7 +571,7 @@ fn apply_replaygain_aac_with_album_into(
                 "v".green(),
                 filename,
                 gain_modified,
-                result.gain_db()
+                steps_to_db(actual_steps)
             )?;
         } else if gain_modified > 0 {
             writeln!(
@@ -579,7 +581,7 @@ fn apply_replaygain_aac_with_album_into(
                 filename,
                 gain_modified,
                 tag_type,
-                result.gain_db()
+                steps_to_db(actual_steps)
             )?;
         } else {
             writeln!(

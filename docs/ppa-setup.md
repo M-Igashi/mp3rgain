@@ -163,14 +163,14 @@ From the project root:
 1. Exports clean source from git (`git archive HEAD`)
 2. Converts `Cargo.lock` v4 to v3, then, in the vendored crates, downgrades `edition = "2024"` to `"2021"` and strips `rust-version` lines; the `checksum` lines are removed from `Cargo.lock` after vendoring. These are compatibility shims for older distros and no-ops on resolute
 3. Runs `cargo vendor` to bundle all Rust dependencies
-4. Removes prebuilt Windows/macOS libraries (`.a`, `.dll`, `.lib`) and the tests, benches and extra Markdown files from the vendored crates, and clears their checksums
+4. Removes prebuilt Windows/macOS libraries (`.a`, `.dll`, `.lib`) and the tests, benches, and extra Markdown files from the vendored crates, and clears their checksums
 5. Creates `.cargo/config.toml` for offline builds
 6. Creates the `.orig.tar.xz` (source + vendored deps)
 7. Generates `debian/changelog` for each Ubuntu release
 8. Builds signed source packages with `debuild -S -sa`
 9. Optionally uploads with `dput`
 
-The workflow does the same, plus two things the script does not: for the GUI it stubs out Windows- and macOS-only crates (`windows-*`, `objc*`, `cocoa-*`, `metal-*` and similar) and compresses the tarball with `xz -9e`, both to keep the orig tarball small.
+The workflow does the same, plus two things the script does not: for the GUI it stubs out Windows- and macOS-only crates (`windows-*`, `objc*`, `cocoa-*`, `metal-*`, and similar) and compresses the tarball with `xz -9e`, both to keep the orig tarball small.
 
 ### Manual Upload
 
@@ -243,7 +243,7 @@ PPA upload is **automatic**. When you push a release tag:
 
 After a release, the PPA workflow checks out the commit the Release workflow built (the tagged commit), so the version comes from that commit's `Cargo.toml` and the orig tarball is the tagged tree. Commits pushed to `master` in the meantime, such as the AUR update the Release workflow pushes itself, are not included. A manual run builds `master` as it is when the run starts.
 
-To manually trigger: Actions → PPA Upload → Run workflow. The inputs choose the package (`all`, `cli` or `gui`), the PPA revision, the two target PPAs and the target series (default `resolute`).
+To manually trigger: Actions → PPA Upload → Run workflow. The inputs choose the package (`all`, `cli`, or `gui`), the PPA revision, the two target PPAs, and the target series (default `resolute`).
 
 The workflow needs three secrets. They are stored as secrets of the GitHub environment `ppa`, which both upload jobs declare with `environment: ppa` and which only the `master` branch can use:
 

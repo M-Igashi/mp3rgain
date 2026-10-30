@@ -260,7 +260,7 @@ ReplayGain analysis requires decoding the MP3 to PCM audio. mp3gain decodes with
 
 ### Q: Can I use APEv2 tags created by mp3gain with mp3rgain?
 
-Yes. mp3rgain reads mp3gain's APEv2 `MP3GAIN_UNDO`, `MP3GAIN_MINMAX` and `REPLAYGAIN_*` items, and each tool can undo a change made by the other (CI tests both directions). Since v3.2.0 mp3rgain writes `REPLAYGAIN_*` to ID3v2 by default, where most players look; use `-s a` to keep everything in APEv2 as mp3gain does.
+Yes. mp3rgain reads mp3gain's APEv2 `MP3GAIN_UNDO`, `MP3GAIN_MINMAX`, and `REPLAYGAIN_*` items, and each tool can undo a change made by the other (CI tests both directions). Since v3.2.0 mp3rgain writes `REPLAYGAIN_*` to ID3v2 by default, where most players look; use `-s a` to keep everything in APEv2 as mp3gain does.
 
 ### Q: Is mp3rgain compatible with mp3gain on all platforms?
 

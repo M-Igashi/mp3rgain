@@ -3,7 +3,8 @@
 //! This module implements the ReplayGain 1.0 algorithm for calculating
 //! the perceived loudness of audio tracks. The algorithm uses:
 //!
-//! 1. Equal-loudness filter (ITU-R BS.468 / A-weighting approximation)
+//! 1. Equal-loudness filter (the Yule-Walker and Butterworth pair of the
+//!    reference `gain_analysis.c`)
 //! 2. RMS calculation in 50ms windows
 //! 3. 95th percentile statistical analysis
 //!
@@ -29,7 +30,7 @@ use symphonia::core::codecs::audio::{AudioCodecId, AudioDecoderOptions, CODEC_ID
 #[cfg(feature = "replaygain")]
 use symphonia::core::formats::probe::Hint;
 #[cfg(feature = "replaygain")]
-use symphonia::core::formats::{FormatOptions, SeekMode, SeekTo};
+use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, Track};
 #[cfg(feature = "replaygain")]
 use symphonia::core::io::{MediaSource, MediaSourceStream};
 #[cfg(feature = "replaygain")]
@@ -419,12 +420,14 @@ impl std::fmt::Display for AlbumGainResult {
     }
 }
 
-/// Report from a "lenient" album analysis that may skip files.
+/// Report from an album analysis, which may leave files out.
 ///
-/// Returned by [`analyze_album_with_options`]. `album` is computed from the
-/// successfully-analyzed tracks only; `failures` lists `(file_index,
-/// error_message)` pairs in input order; `successful_indices` maps
-/// `album.tracks()[k]` back to `files[successful_indices[k]]`.
+/// Returned by [`analyze_album_with_options`]. Any file that fails is left
+/// out under [`AlbumAnalysisOptions::skip_errors`], and one that
+/// [`Error::drops_from_album`] names is left out in every mode. `album` is
+/// computed from the successfully-analyzed tracks only; `failures` lists
+/// `(file_index, error_message)` pairs in input order; `successful_indices`
+/// maps `album.tracks()[k]` back to `files[successful_indices[k]]`.
 #[derive(Debug, Clone)]
 pub struct AlbumAnalysisReport {
     /// The album result, computed from the successfully-analyzed tracks only.
@@ -1270,6 +1273,41 @@ enum TrackAnalyzer {
     },
 }
 
+/// Probe `mss` the way every decode here does: the extension of `file_path`
+/// is the format hint, and a failure is [`Error::ProbeFailed`] for that path.
+#[cfg(feature = "replaygain")]
+pub(crate) fn probe<'s>(
+    file_path: &Path,
+    mss: MediaSourceStream<'s>,
+) -> Result<Box<dyn FormatReader + 's>> {
+    let mut hint = Hint::new();
+    if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    symphonia::default::get_probe()
+        .probe(
+            &hint,
+            mss,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
+        .map_err(|e| Error::ProbeFailed {
+            path: file_path.to_path_buf(),
+            source: Box::new(e),
+        })
+}
+
+/// The tracks of `format` that carry decodable audio, in container order.
+#[cfg(feature = "replaygain")]
+fn audio_tracks(format: &dyn FormatReader) -> impl Iterator<Item = &Track> {
+    format.tracks().iter().filter(|t| {
+        t.codec_params
+            .as_ref()
+            .and_then(|p| p.audio())
+            .is_some_and(|a| a.codec != CODEC_ID_NULL_AUDIO)
+    })
+}
+
 /// Internal function to analyze a track and return both result and loudness
 /// state, with a "this format is unsupported" failure named as such.
 ///
@@ -1343,35 +1381,8 @@ fn analyze_track_decoded(
         MediaSourceStream::new(Box::new(file), Default::default())
     };
 
-    // Probe the format
-    let mut hint = Hint::new();
-    if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
-    }
-
-    let mut format = symphonia::default::get_probe()
-        .probe(
-            &hint,
-            mss,
-            FormatOptions::default(),
-            MetadataOptions::default(),
-        )
-        .map_err(|e| Error::ProbeFailed {
-            path: file_path.to_path_buf(),
-            source: Box::new(e),
-        })?;
-
-    // Find audio tracks
-    let audio_tracks: Vec<_> = format
-        .tracks()
-        .iter()
-        .filter(|t| {
-            t.codec_params
-                .as_ref()
-                .and_then(|p| p.audio())
-                .is_some_and(|a| a.codec != CODEC_ID_NULL_AUDIO)
-        })
-        .collect();
+    let mut format = probe(file_path, mss)?;
+    let audio_tracks: Vec<_> = audio_tracks(&*format).collect();
 
     if audio_tracks.is_empty() {
         return Err(Error::NoAudioTrack);
@@ -1594,8 +1605,9 @@ pub struct TrackAnalysisOptions<'a> {
     /// Only worth setting when the pool has room, which is why it is the
     /// caller's decision: a run that already has a file per thread gains
     /// nothing and pays for the warm-up regions and the seeks. Ignored for
-    /// [`AnalysisMode::Rg1`] and for containers whose frame count or time base
-    /// cannot be trusted, which fall back to the whole-file pass.
+    /// [`AnalysisMode::Rg1`], for AAC (a seeked AAC decode does not reproduce
+    /// the linear one, issue #349), and for containers whose frame count or
+    /// time base cannot be trusted, which fall back to the whole-file pass.
     pub chunk: bool,
 }
 
@@ -1922,7 +1934,7 @@ fn append_interleaved(buffer: &GenericAudioBufferRef, out: &mut Vec<f64>) {
 }
 
 /// Feed interleaved frames to the BS.1770 analyzer, the receiving half of
-/// [`buffer_to_interleaved`].
+/// [`append_interleaved`].
 #[cfg(feature = "replaygain")]
 fn analyze_interleaved(
     samples: &[f64],
@@ -2075,33 +2087,8 @@ struct ChunkOutcome {
 fn plan_chunks(file_path: &Path, track_index: Option<u32>, threads: usize) -> Option<ChunkPlan> {
     let file = std::fs::File::open(file_path).ok()?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let mut hint = Hint::new();
-    if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
-    }
-    let format = symphonia::default::get_probe()
-        .probe(
-            &hint,
-            mss,
-            FormatOptions::default(),
-            MetadataOptions::default(),
-        )
-        .ok()?;
-
-    let audio_tracks: Vec<_> = format
-        .tracks()
-        .iter()
-        .filter(|t| {
-            t.codec_params
-                .as_ref()
-                .and_then(|p| p.audio())
-                .is_some_and(|a| a.codec != CODEC_ID_NULL_AUDIO)
-        })
-        .collect();
-    let track = match track_index {
-        Some(idx) => audio_tracks.get(idx as usize)?,
-        None => audio_tracks.first()?,
-    };
+    let format = probe(file_path, mss).ok()?;
+    let track = audio_tracks(&*format).nth(track_index.unwrap_or(0) as usize)?;
 
     let audio = track.codec_params.as_ref()?.audio()?;
     // AAC is never divided (issue #349). Chunking assumes a seeked decode
@@ -2132,7 +2119,7 @@ fn plan_chunks(file_path: &Path, track_index: Option<u32>, threads: usize) -> Op
         return None;
     }
 
-    let subblock_len = (sample_rate as usize + 5) / 10;
+    let subblock_len = crate::bs1770::subblock_len(sample_rate);
     let total = n_frames as usize / subblock_len;
     let min_per_chunk = CHUNK_MIN_SECS * 10;
     let chunks = (total / min_per_chunk).min(threads);
@@ -2166,7 +2153,6 @@ fn analyze_chunk(
     file_path: &Path,
     plan: &ChunkPlan,
     index: usize,
-    mode: AnalysisMode,
     true_peak: bool,
 ) -> Result<ChunkOutcome> {
     let (start_sb, end_sb) = plan.bounds[index];
@@ -2176,21 +2162,7 @@ fn analyze_chunk(
 
     let file = std::fs::File::open(file_path).map_err(|e| Error::io_open(file_path, e))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let mut hint = Hint::new();
-    if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
-    }
-    let mut format = symphonia::default::get_probe()
-        .probe(
-            &hint,
-            mss,
-            FormatOptions::default(),
-            MetadataOptions::default(),
-        )
-        .map_err(|e| Error::ProbeFailed {
-            path: file_path.to_path_buf(),
-            source: Box::new(e),
-        })?;
+    let mut format = probe(file_path, mss)?;
     let audio = format
         .tracks()
         .iter()
@@ -2217,7 +2189,8 @@ fn analyze_chunk(
             .map_err(|e| Error::Decode(Box::new(e)))?;
     }
 
-    let mut analyzer = if true_peak && mode != AnalysisMode::Rg1 {
+    // Only the BS.1770 modes are divided, so `true_peak` is never an RG1 one.
+    let mut analyzer = if true_peak {
         crate::bs1770::Bs1770Analyzer::new_with_true_peak(plan.sample_rate, plan.channels)
     } else {
         crate::bs1770::Bs1770Analyzer::new(plan.sample_rate, plan.channels)
@@ -2226,8 +2199,8 @@ fn analyze_chunk(
     let mut samples: Vec<f64> = Vec::new();
     let mut position: Option<u64> = None;
     // Whether the warm-up region is still running, and therefore whether the
-    // peaks measured so far have to be thrown away before the chunk's own
-    // range starts.
+    // true peak measured so far has to be thrown away before the chunk's own
+    // range starts. The sample peak never sees the warm-up.
     let mut warming = start > 0;
 
     loop {
@@ -2279,7 +2252,6 @@ fn analyze_chunk(
                 // still partly zeros is a cold-start artifact and would
                 // otherwise be reported as a peak the signal never reaches.
                 analyzer.reset_true_peak();
-                peak = 0.0;
                 warming = false;
             }
             for &v in frame {
@@ -2334,7 +2306,7 @@ fn analyze_track_chunked(
     let outcomes: Vec<Result<ChunkOutcome>> = (0..plan.bounds.len())
         .into_par_iter()
         .map(|i| {
-            let outcome = analyze_chunk(file_path, &plan, i, mode, true_peak);
+            let outcome = analyze_chunk(file_path, &plan, i, true_peak);
             // Chunk granularity, since a divided read has no single byte
             // position to report.
             if let Some(cb) = progress {
@@ -2408,7 +2380,9 @@ pub struct AlbumAnalysisOptions<'a> {
     pub threads: usize,
     /// Lenient mode: files that fail to analyze are skipped instead of
     /// aborting the album. Failures land in [`AlbumAnalysisReport::failures`];
-    /// it is only an error when every file fails.
+    /// it is only an error when every file fails. Without it, a file that
+    /// [`Error::drops_from_album`] names is still skipped, and any other
+    /// failure aborts the album.
     pub skip_errors: bool,
     /// Byte-level progress callback `(file_index, bytes_read, total_bytes)`,
     /// called after each decoded packet (#106). Only driven on the serial
@@ -2436,7 +2410,9 @@ pub struct AlbumAnalysisOptions<'a> {
 }
 
 /// Analyze multiple tracks for album gain (strict, serial, no callbacks).
-/// Convenience wrapper over [`analyze_album_with_options`].
+/// Convenience wrapper over [`analyze_album_with_options`]. A file that
+/// [`Error::drops_from_album`] names is left out even here, so the album can
+/// hold fewer tracks than `files`; use the full report to tell which.
 #[cfg(feature = "replaygain")]
 pub fn analyze_album(files: &[&Path]) -> Result<AlbumGainResult> {
     Ok(analyze_album_with_options(files, &AlbumAnalysisOptions::default())?.album)
@@ -2480,12 +2456,7 @@ fn analyze_album_serial(
         chunk,
         ..
     } = *opts;
-    let mut track_results = Vec::with_capacity(files.len());
-    let mut album_peak: f64 = 0.0;
-    // Album state accumulates all track states (like B[] in original mp3gain)
-    let mut album_state = LoudnessState::new(mode);
-    let mut failures: Vec<(usize, String)> = Vec::new();
-    let mut successful_indices: Vec<usize> = Vec::with_capacity(files.len());
+    let mut album = AlbumFold::new(mode, files.len());
 
     for (i, file) in files.iter().enumerate() {
         if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
@@ -2508,37 +2479,17 @@ fn analyze_album_serial(
             cb(i, file);
         }
         match track {
-            Ok(internal) => {
-                album_peak = album_peak.max(internal.result.peak);
-                album_state.accumulate(&internal.state);
-                track_results.push(internal.result);
-                successful_indices.push(i);
-            }
             // A file whose *format* mp3rgain cannot process, or one too short
             // to analyze, is dropped from the set whether or not
             // `--skip-errors` is on (issues #330, #423): the album gain over
             // the remaining tracks is still correct, and one ALAC track
             // should not fail the whole album.
-            Err(e) if skip_errors || e.drops_from_album() => {
-                failures.push((i, format!("{}", e)));
-            }
-            Err(e) => return Err(e),
+            Err(e) if !(skip_errors || e.drops_from_album()) => return Err(e),
+            track => album.add(i, track),
         }
     }
 
-    if track_results.is_empty() && !files.is_empty() {
-        return Err(Error::AllFilesFailed { count: files.len() });
-    }
-
-    // Calculate album loudness from the combined state
-    let (album_loudness_db, album_gain_db) = album_state.loudness_and_gain(mode);
-
-    let album = AlbumGainResult::new(track_results, album_loudness_db, album_gain_db, album_peak);
-    Ok(AlbumAnalysisReport {
-        album,
-        failures,
-        successful_indices,
-    })
+    album.finish(files.len(), mode)
 }
 
 #[cfg(feature = "replaygain")]
@@ -2559,94 +2510,91 @@ fn analyze_album_parallel_internal(
         ..
     } = *opts;
 
-    let mut track_results = Vec::with_capacity(files.len());
-    let mut album_peak: f64 = 0.0;
-    let mut album_state = LoudnessState::new(mode);
-    let mut failures: Vec<(usize, String)> = Vec::new();
-    let mut successful_indices: Vec<usize> = Vec::with_capacity(files.len());
+    // par_iter().collect() preserves input order, which keeps the album fold
+    // deterministic and matches the serial path bit-for-bit. A failure the
+    // album goes on without rides through as an *inner* Err and joins the
+    // failures, the same rule as the serial path; any other short-circuits
+    // the collect, matching its fail-fast behavior.
+    let tracks: Vec<Result<TrackAnalysisInternal>> = files
+        .par_iter()
+        .enumerate()
+        .map(|(i, file)| {
+            if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+                return Err(Error::Cancelled);
+            }
+            let track = analyze_track_internal(file, track_index, None, mode, true_peak, chunk);
+            if let Some(cb) = on_complete {
+                cb(i, file);
+            }
+            match track {
+                Err(e) if skip_errors || e.drops_from_album() => Ok(Err(e)),
+                track => track.map(Ok),
+            }
+        })
+        .collect::<Result<_>>()?;
+    // A cancel that arrives after every file has started still cancels a
+    // lenient run, as it always has.
+    if skip_errors && cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+        return Err(Error::Cancelled);
+    }
 
-    // par_iter().collect() preserves input order, which keeps album_peak
-    // / album_state folding deterministic and matches the serial path
-    // bit-for-bit. Strict mode short-circuits at the first error; lenient
-    // collects all outcomes so failures can be reported alongside successes.
-    if skip_errors {
-        let internals: Vec<Result<TrackAnalysisInternal>> = files
-            .par_iter()
-            .enumerate()
-            .map(|(i, file)| {
-                if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
-                    return Err(Error::Cancelled);
-                }
-                let r = analyze_track_internal(file, track_index, None, mode, true_peak, chunk);
-                if let Some(cb) = on_complete {
-                    cb(i, file);
-                }
-                r
-            })
-            .collect();
-        if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
-            return Err(Error::Cancelled);
-        }
-        for (i, r) in internals.into_iter().enumerate() {
-            match r {
-                Ok(internal) => {
-                    album_peak = album_peak.max(internal.result.peak);
-                    album_state.accumulate(&internal.state);
-                    track_results.push(internal.result);
-                    successful_indices.push(i);
-                }
-                Err(e) => failures.push((i, format!("{}", e))),
-            }
-        }
-    } else {
-        // collect::<Result<Vec<_>>>() short-circuits at the first error,
-        // matching the serial path's fail-fast behavior. An unsupported
-        // format or a file too short to analyze is not such an error (issues
-        // #330, #423), so it rides through as an *inner* Err — the collect
-        // keeps going, and it joins `failures` below like a `--skip-errors`
-        // skip would.
-        let internals: Vec<Result<TrackAnalysisInternal>> = files
-            .par_iter()
-            .enumerate()
-            .map(|(i, file)| {
-                if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
-                    return Err(Error::Cancelled);
-                }
-                let r = analyze_track_internal(file, track_index, None, mode, true_peak, chunk);
-                if let Some(cb) = on_complete {
-                    cb(i, file);
-                }
-                match r {
-                    Err(e) if e.drops_from_album() => Ok(Err(e)),
-                    other => other.map(Ok),
-                }
-            })
-            .collect::<Result<Vec<_>>>()?;
-        for (i, r) in internals.into_iter().enumerate() {
-            match r {
-                Ok(internal) => {
-                    album_peak = album_peak.max(internal.result.peak);
-                    album_state.accumulate(&internal.state);
-                    track_results.push(internal.result);
-                    successful_indices.push(i);
-                }
-                Err(e) => failures.push((i, format!("{}", e))),
-            }
+    let mut album = AlbumFold::new(mode, files.len());
+    for (i, track) in tracks.into_iter().enumerate() {
+        album.add(i, track);
+    }
+    album.finish(files.len(), mode)
+}
+
+/// An album as its tracks fold into it. Tracks are added in input order, so
+/// the album state and peak come out the same whichever path analyzed them.
+#[cfg(feature = "replaygain")]
+struct AlbumFold {
+    tracks: Vec<ReplayGainResult>,
+    peak: f64,
+    /// Accumulates every track's state, like B[] in the original mp3gain.
+    state: LoudnessState,
+    failures: Vec<(usize, String)>,
+    successful_indices: Vec<usize>,
+}
+
+#[cfg(feature = "replaygain")]
+impl AlbumFold {
+    fn new(mode: AnalysisMode, files: usize) -> Self {
+        Self {
+            tracks: Vec::with_capacity(files),
+            peak: 0.0,
+            state: LoudnessState::new(mode),
+            failures: Vec::new(),
+            successful_indices: Vec::with_capacity(files),
         }
     }
 
-    if track_results.is_empty() && !files.is_empty() {
-        return Err(Error::AllFilesFailed { count: files.len() });
+    /// Fold in file `i`: its track, or the failure that leaves it out.
+    fn add(&mut self, i: usize, track: Result<TrackAnalysisInternal>) {
+        match track {
+            Ok(internal) => {
+                self.peak = self.peak.max(internal.result.peak);
+                self.state.accumulate(&internal.state);
+                self.tracks.push(internal.result);
+                self.successful_indices.push(i);
+            }
+            Err(e) => self.failures.push((i, e.to_string())),
+        }
     }
 
-    let (album_loudness_db, album_gain_db) = album_state.loudness_and_gain(mode);
-
-    let album = AlbumGainResult::new(track_results, album_loudness_db, album_gain_db, album_peak);
-    Ok(AlbumAnalysisReport {
-        album,
-        failures,
-        successful_indices,
-    })
+    /// The album over `files` inputs, which is an error only when none of
+    /// them made it in.
+    fn finish(self, files: usize, mode: AnalysisMode) -> Result<AlbumAnalysisReport> {
+        if self.tracks.is_empty() && files > 0 {
+            return Err(Error::AllFilesFailed { count: files });
+        }
+        let (album_loudness_db, album_gain_db) = self.state.loudness_and_gain(mode);
+        Ok(AlbumAnalysisReport {
+            album: AlbumGainResult::new(self.tracks, album_loudness_db, album_gain_db, self.peak),
+            failures: self.failures,
+            successful_indices: self.successful_indices,
+        })
+    }
 }
 
 // =============================================================================
@@ -2786,9 +2734,8 @@ impl std::fmt::Display for PeakAmplitudeResult {
     }
 }
 
-/// Find the peak amplitude of an audio file by decoding the audio.
-/// This properly decodes the audio to measure actual PCM sample values,
-/// unlike the old method that estimated from global_gain fields.
+/// Find the peak amplitude of an audio file by decoding the audio and
+/// measuring the actual PCM sample values.
 ///
 /// Returns peak amplitude that can exceed 1.0 for clipping audio.
 #[cfg(feature = "replaygain")]
@@ -2799,7 +2746,8 @@ pub fn find_peak_amplitude(file_path: &Path) -> Result<PeakAmplitudeResult> {
 
 /// [`find_peak_amplitude`] over bytes already in memory, for callers that
 /// read the file for another scan and shouldn't pay a second disk read.
-/// `file_path` is only used for the format hint and error messages.
+/// `file_path` gives the format hint and error messages, and the HE-AAC
+/// check reads the head of the file through it.
 #[cfg(feature = "replaygain")]
 pub fn find_peak_amplitude_in_data(file_path: &Path, data: Vec<u8>) -> Result<PeakAmplitudeResult> {
     find_peak_amplitude_from_source(file_path, Box::new(std::io::Cursor::new(data)))
@@ -2813,34 +2761,8 @@ fn find_peak_amplitude_from_source(
     #[cfg(feature = "aac")]
     crate::aac::ensure_analyzable(file_path, AudioFileType::from_path(file_path))?;
     let mss = MediaSourceStream::new(source, Default::default());
-
-    let mut hint = Hint::new();
-    if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
-    }
-
-    let mut format = symphonia::default::get_probe()
-        .probe(
-            &hint,
-            mss,
-            FormatOptions::default(),
-            MetadataOptions::default(),
-        )
-        .map_err(|e| Error::ProbeFailed {
-            path: file_path.to_path_buf(),
-            source: Box::new(e),
-        })?;
-
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| {
-            t.codec_params
-                .as_ref()
-                .and_then(|p| p.audio())
-                .is_some_and(|a| a.codec != CODEC_ID_NULL_AUDIO)
-        })
-        .ok_or(Error::NoAudioTrack)?;
+    let mut format = probe(file_path, mss)?;
+    let track = audio_tracks(&*format).next().ok_or(Error::NoAudioTrack)?;
 
     let track_id = track.id;
     let audio_params = track
@@ -2875,15 +2797,8 @@ fn find_peak_amplitude_from_source(
             Err(e) => return Err(Error::Decode(Box::new(e))),
         };
 
-        // Process each sample format and track peak
-        // Symphonia's MP3 decoder outputs F32 samples in the range [-1.0, 1.0]
-        // However, the decoder internally clips samples that exceed this range.
-        // For accurate peak detection of potentially clipping audio, we need to
-        // access the raw decoded values before normalization.
-        //
-        // The F32 buffer from Symphonia is already normalized and clipped.
-        // To detect clipping, we check if the peak is exactly 1.0 (or very close),
-        // which indicates the audio may have been clipped by the decoder.
+        // The decoder's output is not clamped: a float sample above full scale
+        // passes through, and that is the peak reported (issue #350).
         // Iterate plane-major so `plane(ch).unwrap()` happens once per channel
         // rather than once per sample.
         match &decoded {
@@ -2897,8 +2812,7 @@ fn find_peak_amplitude_from_source(
             GenericAudioBufferRef::S16(buf) => {
                 for ch in 0..buf.num_planes() {
                     for &sample in buf.plane(ch).unwrap() {
-                        // S16 samples: convert to normalized range
-                        // This can exceed 1.0 if sample is at max (32767/32768 ≈ 0.99997)
+                        // On the 32768 scale, so -32768 reads exactly 1.0.
                         let s = (sample as f64).abs() / SAMPLE_SCALE_16BIT;
                         max_peak = max_peak.max(s);
                     }

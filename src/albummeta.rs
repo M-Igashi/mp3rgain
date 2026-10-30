@@ -154,19 +154,12 @@ pub fn repeated_position<'a>(
 /// [`AlbumTags`], which is a different thing from a file that cannot be read.
 #[cfg(feature = "replaygain")]
 pub fn read_album_tags(path: &Path) -> Option<AlbumTags> {
-    use symphonia::core::formats::probe::Hint;
     use symphonia::core::io::MediaSourceStream;
-    use symphonia::core::meta::{MetadataOptions, StandardTag};
+    use symphonia::core::meta::StandardTag;
 
     let file = std::fs::File::open(path).ok()?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let mut hint = Hint::new();
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
-    }
-    let mut format = symphonia::default::get_probe()
-        .probe(&hint, mss, Default::default(), MetadataOptions::default())
-        .ok()?;
+    let mut format = crate::replaygain::probe(path, mss).ok()?;
 
     // Every revision is merged, not just the latest: a file routinely carries
     // more than one (ID3v2 at the front plus ID3v1 at the end, or a second

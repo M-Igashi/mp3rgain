@@ -1,5 +1,5 @@
-//! Background workers for the four batch operations (analyze tracks,
-//! analyze album, apply track gain, apply album gain).
+//! Background workers for the GUI's batch operations: analysis, apply, undo,
+//! tag checks and deletion, and the max-amplitude scan.
 //!
 //! The pre-#152 GUI ran these synchronously on the egui main thread, so
 //! the window froze and `total_progress` / `status_message` mutations
@@ -10,7 +10,7 @@
 
 use mp3rgain::apply::{
     apply_with_options, predict_apply, read_mtime_if, restore_timestamp,
-    write_album_minmax_with_layout, ApplyOptions,
+    write_album_minmax_with_options, AlbumMinmaxOptions, ApplyOptions,
 };
 use mp3rgain::replaygain::{self, AnalysisMode, ReplayGainResult};
 use mp3rgain::{
@@ -90,6 +90,10 @@ pub enum WorkerEvent {
         /// AAC frames left at their original gain because they could not be
         /// parsed (issue #402).
         unparsed_frames: u32,
+        /// One channel moved and the other did not (Apply Channel Gain),
+        /// which leaves the file at no single level the row can show
+        /// (issue #471).
+        one_channel: bool,
     },
     /// Dry-run analog of `FileApplied`: predict_apply succeeded, no bytes
     /// changed. UI shows "Would apply N steps" in the row status.
@@ -130,15 +134,17 @@ pub enum WorkerEvent {
         message: String,
     },
 
-    /// Undo succeeded on `idx`. `steps_undone` is the left-channel gain
-    /// step value that was stored in the undo tag — i.e. the cumulative
-    /// gain that was applied to this file across previous applies, and
-    /// that the undo just rolled back. The UI uses it to reverse the
-    /// post-apply display shift so the volume / gain columns return to
-    /// their pre-apply values without forcing a re-analyze (issue #171).
+    /// Undo succeeded on `idx`. `steps_undone` is the gain step value that
+    /// was stored in the undo tag — i.e. the cumulative gain that was
+    /// applied to this file across previous applies, and that the undo just
+    /// rolled back. The UI uses it to reverse the post-apply display shift so
+    /// the volume / gain columns return to their pre-apply values without
+    /// forcing a re-analyze (issue #171). `None` when the two channels were
+    /// rolled back by different amounts, which no single shift describes
+    /// (issue #471).
     FileUndone {
         idx: usize,
-        steps_undone: i32,
+        steps_undone: Option<i32>,
     },
     /// `frames == 0` outcome: undo ran but the file had no recorded changes
     /// to roll back. Kept separate so the row status reads "no changes" rather
@@ -426,7 +432,8 @@ pub fn spawn_album_analysis(
     WorkerHandle { rx, cancel }
 }
 
-/// Spawn the apply worker (used by both Track Gain and Album Gain).
+/// Spawn the apply worker, used by every gain apply: track, album, manual,
+/// and channel gain.
 ///
 /// Jobs run through [`run_job_pool`], matching the parallel Track Analysis
 /// path so wall time scales with cores (issue #158 follow-up comment). Each
@@ -471,6 +478,7 @@ pub fn spawn_apply(
                 send(&tx, &ctx, WorkerEvent::FileStart { idx: job.idx });
 
                 let album_member = writes_album_minmax && job.album_info.is_some();
+                let one_channel = job.channel.is_some();
                 let opts = build_apply_options(
                     job.steps,
                     job.track_result,
@@ -512,6 +520,7 @@ pub fn spawn_apply(
                                     actual_steps: report.actual_steps,
                                     from_stored: job.from_stored,
                                     unparsed_frames: report.unparsed_frames,
+                                    one_channel,
                                 },
                             );
                         }
@@ -543,6 +552,9 @@ pub fn spawn_apply(
         // of the three modes that was (issues #159, #224, #338). A row whose
         // write fails is gained but incomplete, so it counts as an error.
         let album_members = album_members.into_inner().unwrap();
+        let mut minmax_opts = AlbumMinmaxOptions::default();
+        minmax_opts.tag_layout = ui_opts.tag_layout;
+        minmax_opts.preserve_timestamp = ui_opts.preserve_timestamp;
         for group in &album_minmax_groups {
             // A group's rows that never reached the apply (skipped, not MP3)
             // or failed it are not members and must not be stamped.
@@ -552,16 +564,7 @@ pub fn spawn_apply(
                 .collect();
             // A second write after the apply restored the mtime, so Preserve
             // mtime has to restore it again (issue #436).
-            let mtimes: Vec<_> = entries
-                .iter()
-                .map(|&(path, _)| read_mtime_if(path, ui_opts.preserve_timestamp))
-                .collect();
-            let minmax_errors = write_album_minmax_with_layout(&entries, ui_opts.tag_layout);
-            for (&(path, _), mtime) in entries.iter().zip(mtimes) {
-                if let Some(mtime) = mtime {
-                    restore_timestamp(path, mtime);
-                }
-            }
+            let minmax_errors = write_album_minmax_with_options(&entries, &minmax_opts);
             for (path, e) in minmax_errors {
                 applied.fetch_sub(1, Ordering::Relaxed);
                 errors.fetch_add(1, Ordering::Relaxed);
@@ -628,7 +631,11 @@ pub fn spawn_undo(
                 // UI how many steps to reverse on the display. We can't read
                 // it after undo because undo_gain_auto deletes the tag (issue #171).
                 let steps_undone =
-                    mp3rgain::read_undo_steps(&path, ui_opts.tag_layout).unwrap_or(0);
+                    match mp3rgain::read_undo_channel_steps(&path, ui_opts.tag_layout) {
+                        Some((left, right)) if left != right => None,
+                        Some((left, _)) => Some(left),
+                        None => Some(0),
+                    };
 
                 let result = mp3rgain::undo_gain_auto(&path, ui_opts.tag_layout);
                 match result {
@@ -916,6 +923,9 @@ fn build_apply_options(
     ui_opts: ApplyOptionsUi,
 ) -> ApplyOptions {
     let mut opts = ApplyOptions::new(steps);
+    // The analysis has already classified the container, which the apply
+    // would otherwise probe again, as the CLI passes it too.
+    opts.file_type = track_result.as_ref().map(ReplayGainResult::file_type);
     opts.track_result = track_result;
     opts.album_info = album_info;
     opts.channel = channel;
@@ -931,7 +941,7 @@ fn build_apply_options(
 }
 
 /// Worker thread count: available cores, falling back to 1.
-fn available_threads() -> usize {
+pub(crate) fn available_threads() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
@@ -979,9 +989,10 @@ fn send(tx: &Sender<WorkerEvent>, ctx: &egui::Context, event: WorkerEvent) {
     ctx.request_repaint();
 }
 
-/// Which apply finished. The status line is one sentence so a translation
-/// can reorder it; the English matches the old "<verb> <action> on N file(s)".
-#[derive(Clone, Copy)]
+/// Which apply is running or finished. The status line is one sentence so a
+/// translation can reorder it; the English matches the old "<verb> <action>
+/// on N file(s)".
+#[derive(Clone, Copy, PartialEq)]
 pub enum GainPhrase {
     Track,
     Manual,
