@@ -39,6 +39,7 @@ What ships today:
 
 ## Unreleased
 
+- mp3rgui translations: German (@M-Igashi and Claude Code, reviewed by @Rosenheim23) and Indonesian (@saimskywalker); the Japanese and Italian ones refined (#440, #460, #461, #462, #480)
 - mp3rgui: an Apply that first rescans the files without stored tags applies to the rows selected at the click, not to whatever is selected when the rescan ends
 - mp3rgui: Apply Channel Gain, and an Undo that rolls the channels back by different amounts, clear the row's numbers instead of shifting them as if both channels moved, which also fed the next Apply Track Gain a wrong gain; library: `read_undo_channel_steps` (#471)
 - `-s d` leaves an untagged M4A alone, including one whose metadata ends in an empty `ilst`, and `-u` no longer leaves an empty `udta` behind
