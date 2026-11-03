@@ -39,7 +39,7 @@ What ships today:
 
 ## Unreleased
 
-Nothing yet.
+- mp3rgui: Help > Bake'n Deck for DJs opens the Bake'n Deck site; the German catalogue gains the three texts #473 changed, which had been showing in English
 
 ## Release history
 

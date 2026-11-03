@@ -45,10 +45,17 @@ fn language_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) 
     });
 }
 
+const BAKEN_URL: &str = "https://baken.ravers.workers.dev";
+
 fn help_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
     ui.menu_button(tr!("Help"), |ui| {
         if ui.button(tr!("About mp3rgui")).clicked() {
             app.show_about = true;
+            ui.close_menu();
+        }
+        ui.separator();
+        if ui.button(tr!("Bake'n Deck for DJs")).clicked() {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(BAKEN_URL));
             ui.close_menu();
         }
     });

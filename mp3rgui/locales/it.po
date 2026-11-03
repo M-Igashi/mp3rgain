@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mp3rgui\n"
 "Report-Msgid-Bugs-To: https://github.com/M-Igashi/mp3rgain/issues\n"
-"POT-Creation-Date: 2026-10-29 09:47+0000\n"
+"POT-Creation-Date: 2026-11-03 08:45+0000\n"
 "PO-Revision-Date: 2026-10-27 13:00+0100\n"
 "Last-Translator: Privato72\n"
 "Language: it\n"
@@ -58,95 +58,95 @@ msgstr "Simulazione: {} passi"
 msgid "Error"
 msgstr "Errore"
 
-#: src/app.rs:813
+#: src/app.rs:870
 msgid "{} file(s) queued, will be added when processing finishes"
 msgstr "{} file in coda, verranno aggiunti al termine dell'elaborazione"
 
-#: src/app.rs:856
+#: src/app.rs:913
 msgid "Added {} file(s), {} duplicate(s) skipped"
 msgstr "File aggiunti: {}, duplicati saltati: {}"
 
-#: src/app.rs:858
+#: src/app.rs:915
 msgid "Added {} file(s)"
 msgstr "File aggiunti: {}"
 
-#: src/app.rs:982
+#: src/app.rs:1039
 msgid "Cancelling..."
 msgstr "Annullamento in corso..."
 
-#: src/app.rs:992
+#: src/app.rs:1049
 msgid "Could not open file location: {}"
 msgstr "Impossibile aprire il percorso del file: {}"
 
-#: src/app.rs:1078
+#: src/app.rs:1135
 msgid "Analyzing {} file(s) without stored tags..."
 msgstr "Analisi di {} file senza tag salvati..."
 
-#: src/app.rs:1133
+#: src/app.rs:1190
 msgid "No track gain values — run Track Analysis first"
 msgstr "Nessun valore di guadagno traccia: esegui prima Analisi traccia"
 
-#: src/app.rs:1363
+#: src/app.rs:1420
 msgid "Channel gain only applies to MP3 — selection had no eligible files"
 msgstr "Il guadagno canale si applica solo agli MP3: nessun file idoneo nella selezione"
 
-#: src/app.rs:1432
+#: src/app.rs:1489
 msgid "Analyzing {} file(s) without consistent stored album tags..."
 msgstr "Analisi di {} file senza tag album salvati coerenti..."
 
-#: src/app.rs:1519
+#: src/app.rs:1576
 msgid "No album gain values — run Album Analysis first"
 msgstr "Nessun valore di guadagno album: esegui prima Analisi album"
 
-#: src/app.rs:1548
+#: src/app.rs:1605
 msgid "Analyzing tracks..."
 msgstr "Analisi delle tracce..."
 
-#: src/app.rs:1549
+#: src/app.rs:1606
 msgid "Analyzing album..."
 msgstr "Analisi dell'album..."
 
-#: src/app.rs:1550
+#: src/app.rs:1607
 msgid "Applying track gain..."
 msgstr "Applicazione guadagno traccia..."
 
-#: src/app.rs:1551
+#: src/app.rs:1608
 msgid "Applying album gain..."
 msgstr "Applicazione guadagno album..."
 
-#: src/app.rs:1552
+#: src/app.rs:1609
 msgid "Applying manual gain..."
 msgstr "Applicazione guadagno manuale..."
 
-#: src/app.rs:1553
+#: src/app.rs:1610
 msgid "Applying channel gain..."
 msgstr "Applicazione guadagno canale..."
 
-#: src/app.rs:1554
+#: src/app.rs:1611
 msgid "Undoing gain changes..."
 msgstr "Annullamento modifiche al guadagno..."
 
-#: src/app.rs:1555
+#: src/app.rs:1612
 msgid "Checking stored tags..."
 msgstr "Controllo tag salvati..."
 
-#: src/app.rs:1556
+#: src/app.rs:1613
 msgid "Finding max amplitude..."
 msgstr "Ricerca ampiezza massima..."
 
-#: src/app.rs:1557
+#: src/app.rs:1614
 msgid "Deleting stored tags..."
 msgstr "Eliminazione tag salvati..."
 
-#: src/app.rs:1558
+#: src/app.rs:1615
 msgid "Reading existing ReplayGain values..."
 msgstr "Lettura valori ReplayGain esistenti..."
 
-#: src/app.rs:1664
+#: src/app.rs:1721
 msgid "Album analysis failed: {}"
 msgstr "Analisi album non riuscita: {}"
 
-#: src/app.rs:1761
+#: src/app.rs:1811
 msgid "Cancelled"
 msgstr "Annullato"
 
@@ -155,11 +155,11 @@ msgctxt "language name"
 msgid "English"
 msgstr "Italiano"
 
-#: src/i18n.rs:105 src/ui/menu.rs:59
+#: src/i18n.rs:105 src/ui/menu.rs:66
 msgid "Add Files..."
 msgstr "Aggiungi file..."
 
-#: src/i18n.rs:115 src/i18n.rs:119 src/ui/menu.rs:18
+#: src/i18n.rs:136 src/i18n.rs:140 src/ui/menu.rs:18
 msgid "System default"
 msgstr "Predefinita di sistema"
 
@@ -167,87 +167,91 @@ msgstr "Predefinita di sistema"
 msgid "Language"
 msgstr "Lingua"
 
-#: src/ui/menu.rs:49
+#: src/ui/menu.rs:51
 msgid "Help"
 msgstr "Aiuto"
 
-#: src/ui/menu.rs:50 src/ui/mod.rs:26
+#: src/ui/menu.rs:52 src/ui/mod.rs:26
 msgid "About mp3rgui"
 msgstr "Informazioni su mp3rgui"
 
-#: src/ui/menu.rs:58
+#: src/ui/menu.rs:57
+msgid "Bake'n Deck for DJs"
+msgstr "Bake'n Deck per DJ"
+
+#: src/ui/menu.rs:65
 msgid "File"
 msgstr "File"
 
-#: src/ui/menu.rs:63
+#: src/ui/menu.rs:70
 msgid "Add Folder..."
 msgstr "Aggiungi cartella..."
 
-#: src/ui/menu.rs:67
+#: src/ui/menu.rs:74
 msgid "Add Folder (with subfolders)..."
 msgstr "Aggiungi cartella (con sottocartelle)..."
 
-#: src/ui/menu.rs:72
+#: src/ui/menu.rs:79
 msgid "Clear File List"
 msgstr "Svuota elenco file"
 
-#: src/ui/menu.rs:77 src/ui/status.rs:14
+#: src/ui/menu.rs:84 src/ui/status.rs:14
 msgid "Exit"
 msgstr "Esci"
 
-#: src/ui/menu.rs:84
+#: src/ui/menu.rs:91
 msgid "Analysis"
 msgstr "Analisi"
 
-#: src/ui/menu.rs:86 src/ui/toolbar.rs:24
+#: src/ui/menu.rs:93 src/ui/toolbar.rs:24
 msgid "Track Analysis"
 msgstr "Analisi traccia"
 
-#: src/ui/menu.rs:90 src/ui/toolbar.rs:27
+#: src/ui/menu.rs:97 src/ui/toolbar.rs:27
 msgid "Album Analysis"
 msgstr "Analisi album"
 
-#: src/ui/menu.rs:94
+#: src/ui/menu.rs:101
 msgid "Find Max Amplitude"
 msgstr "Trova ampiezza massima"
 
-#: src/ui/menu.rs:99
+#: src/ui/menu.rs:106
 msgid "Check Stored Tags"
 msgstr "Controlla tag salvati"
 
-#: src/ui/menu.rs:108
+#: src/ui/menu.rs:115
 msgid "Modify Gain"
 msgstr "Modifica guadagno"
 
-#: src/ui/menu.rs:110
+#: src/ui/menu.rs:117
 msgid "Apply Track Gain"
 msgstr "Applica guadagno traccia"
 
-#: src/ui/menu.rs:114
+#: src/ui/menu.rs:121
 msgid "Apply Album Gain"
 msgstr "Applica guadagno album"
 
-#: src/ui/menu.rs:118
+#: src/ui/menu.rs:125
 msgid "Apply Manual Gain..."
 msgstr "Applica guadagno manuale..."
 
-#: src/ui/menu.rs:122
+#: src/ui/menu.rs:129
 msgid "Apply Channel Gain (MP3)..."
 msgstr "Applica guadagno canale (MP3)..."
 
-#: src/ui/menu.rs:128
+#: src/ui/menu.rs:135
 msgid "Undo All"
 msgstr "Annulla tutto"
 
-#: src/ui/menu.rs:130
+#: src/ui/menu.rs:137
 msgid "Undo Selected"
 msgstr "Annulla selezionati"
 
-#: src/ui/menu.rs:137
+#: src/ui/menu.rs:144
 msgid "Delete Stored Tags (All)..."
 msgstr "Elimina tag salvati (tutti)..."
 
-#: src/ui/menu.rs:139
+#: src/ui/menu.rs:146
 msgid "Delete Stored Tags (Selected)..."
 msgstr "Elimina tag salvati (selezionati)..."
 
@@ -651,154 +655,154 @@ msgstr "File audio"
 msgid "Drag and drop MP3 files here, or use the toolbar buttons to add files"
 msgstr "Trascina qui i file MP3, oppure usa i pulsanti della barra degli strumenti per aggiungere file"
 
-#: src/worker.rs:282
+#: src/worker.rs:288
 msgid "Analyzed {} file(s), {} error(s)"
 msgstr "File analizzati: {}, errori: {}"
 
-#: src/worker.rs:284
+#: src/worker.rs:290
 msgid "Analyzed {} file(s)"
 msgstr "File analizzati: {}"
 
-#: src/worker.rs:575
+#: src/worker.rs:577
 msgid "Gain applied, but MP3GAIN_ALBUM_MINMAX was not written: {e}"
 msgstr "Guadagno applicato, ma MP3GAIN_ALBUM_MINMAX non è stato scritto: {e}"
 
-#: src/worker.rs:671
+#: src/worker.rs:677
 msgid "Undone {} file(s)"
 msgstr "Modifiche annullate su {} file"
 
-#: src/worker.rs:673
+#: src/worker.rs:679
 msgid "Undone {} file(s), {} had no changes to undo"
 msgstr "Modifiche annullate su {} file, {} senza modifiche da annullare"
 
-#: src/worker.rs:677
+#: src/worker.rs:683
 msgid "Undone {} file(s), {} error(s)"
 msgstr "Modifiche annullate su {} file, errori: {}"
 
-#: src/worker.rs:679
+#: src/worker.rs:685
 msgid "Undone {} file(s), {} had no changes to undo, {} error(s)"
 msgstr "Modifiche annullate su {} file, {} senza modifiche da annullare, errori: {}"
 
-#: src/worker.rs:757
+#: src/worker.rs:763
 msgid "Deleted stored tags from {} file(s), {} error(s)"
 msgstr "Tag salvati eliminati da {} file, errori: {}"
 
-#: src/worker.rs:762
+#: src/worker.rs:768
 msgid "Deleted stored tags from {} file(s)"
 msgstr "Tag salvati eliminati da {} file"
 
-#: src/worker.rs:828
+#: src/worker.rs:834
 msgid "Max amplitude scanned on {} file(s), {} error(s)"
 msgstr "Ampiezza massima rilevata su {} file, errori: {}"
 
-#: src/worker.rs:833
+#: src/worker.rs:839
 msgid "Max amplitude scanned on {} file(s)"
 msgstr "Ampiezza massima rilevata su {} file"
 
-#: src/worker.rs:887
+#: src/worker.rs:893
 msgid "Checked stored tags for {} file(s)"
 msgstr "Tag salvati controllati su {} file"
 
-#: src/worker.rs:999
+#: src/worker.rs:1005
 msgid "Applied track gain on {} file(s)"
 msgstr "Guadagno traccia applicato a {} file"
 
-#: src/worker.rs:1002
+#: src/worker.rs:1008
 msgid "Applied track gain on {} file(s), {} error(s)"
 msgstr "Guadagno traccia applicato a {} file, errori: {}"
 
-#: src/worker.rs:1007
+#: src/worker.rs:1013
 msgid "Dry-ran track gain on {} file(s)"
 msgstr "Guadagno traccia simulato su {} file"
 
-#: src/worker.rs:1010
+#: src/worker.rs:1016
 msgid "Dry-ran track gain on {} file(s), {} error(s)"
 msgstr "Guadagno traccia simulato su {} file, errori: {}"
 
-#: src/worker.rs:1015
+#: src/worker.rs:1021
 msgid "Applied manual gain on {} file(s)"
 msgstr "Guadagno manuale applicato a {} file"
 
-#: src/worker.rs:1018
+#: src/worker.rs:1024
 msgid "Applied manual gain on {} file(s), {} error(s)"
 msgstr "Guadagno manuale applicato a {} file, errori: {}"
 
-#: src/worker.rs:1023
+#: src/worker.rs:1029
 msgid "Dry-ran manual gain on {} file(s)"
 msgstr "Guadagno manuale simulato su {} file"
 
-#: src/worker.rs:1026
+#: src/worker.rs:1032
 msgid "Dry-ran manual gain on {} file(s), {} error(s)"
 msgstr "Guadagno manuale simulato su {} file, errori: {}"
 
-#: src/worker.rs:1031
+#: src/worker.rs:1037
 msgid "Applied channel gain on {} file(s)"
 msgstr "Guadagno canale applicato a {} file"
 
-#: src/worker.rs:1034
+#: src/worker.rs:1040
 msgid "Applied channel gain on {} file(s), {} error(s)"
 msgstr "Guadagno canale applicato a {} file, errori: {}"
 
-#: src/worker.rs:1039
+#: src/worker.rs:1045
 msgid "Dry-ran channel gain on {} file(s)"
 msgstr "Guadagno canale simulato su {} file"
 
-#: src/worker.rs:1042
+#: src/worker.rs:1048
 msgid "Dry-ran channel gain on {} file(s), {} error(s)"
 msgstr "Guadagno canale simulato su {} file, errori: {}"
 
-#: src/worker.rs:1047
+#: src/worker.rs:1053
 msgid "Applied album gain on {} file(s)"
 msgstr "Guadagno album applicato a {} file"
 
-#: src/worker.rs:1050
+#: src/worker.rs:1056
 msgid "Applied album gain on {} file(s), {} error(s)"
 msgstr "Guadagno album applicato a {} file, errori: {}"
 
-#: src/worker.rs:1055
+#: src/worker.rs:1061
 msgid "Dry-ran album gain on {} file(s)"
 msgstr "Guadagno album simulato su {} file"
 
-#: src/worker.rs:1058
+#: src/worker.rs:1064
 msgid "Dry-ran album gain on {} file(s), {} error(s)"
 msgstr "Guadagno album simulato su {} file, errori: {}"
 
-#: src/worker.rs:1078
+#: src/worker.rs:1084
 msgid "Album analysis complete ({} tracks)"
 msgstr "Analisi album completata (tracce: {})"
 
-#: src/worker.rs:1080
+#: src/worker.rs:1086
 msgid "Album analysis complete ({} tracks); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
 msgstr "Analisi album completata (tracce: {}); album con più di una pubblicazione (stesso artista e tag album): {}. Passa il mouse su Guadagno album per vedere il raggruppamento."
 
-#: src/worker.rs:1086
+#: src/worker.rs:1092
 msgid "Album analysis complete ({} tracks, {} skipped)"
 msgstr "Analisi album completata (tracce: {}, saltate: {})"
 
-#: src/worker.rs:1091
+#: src/worker.rs:1097
 msgid "Album analysis complete ({} tracks, {} skipped); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
 msgstr "Analisi album completata (tracce: {}, saltate: {}); album con più di una pubblicazione (stesso artista e tag album): {}. Passa il mouse su Guadagno album per vedere il raggruppamento."
 
-#: src/worker.rs:1098
+#: src/worker.rs:1104
 msgid "Album analysis complete ({} albums, {} tracks)"
 msgstr "Analisi album completata (album: {}, tracce: {})"
 
-#: src/worker.rs:1103
+#: src/worker.rs:1109
 msgid "Album analysis complete ({} albums, {} tracks); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
 msgstr "Analisi album completata (album: {}, tracce: {}); album con più di una pubblicazione (stesso artista e tag album): {}. Passa il mouse su Guadagno album per vedere il raggruppamento."
 
-#: src/worker.rs:1110
+#: src/worker.rs:1116
 msgid "Album analysis complete ({} albums, {} tracks, {} skipped)"
 msgstr "Analisi album completata (album: {}, tracce: {}, saltate: {})"
 
-#: src/worker.rs:1116
+#: src/worker.rs:1122
 msgid "Album analysis complete ({} albums, {} tracks, {} skipped); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
 msgstr "Analisi album completata (album: {}, tracce: {}, saltate: {}); album con più di una pubblicazione (stesso artista e tag album): {}. Passa il mouse su Guadagno album per vedere il raggruppamento."
 
-#: src/worker.rs:1125
+#: src/worker.rs:1131
 msgid "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed"
 msgstr "Analisi album (tracce analizzate: {}, saltate: {}, album non riusciti: {})"
 
-#: src/worker.rs:1131
+#: src/worker.rs:1137
 msgid "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed; {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
 msgstr "Analisi album (tracce analizzate: {}, saltate: {}, album non riusciti: {}); album con più di una pubblicazione (stesso artista e tag album): {}. Passa il mouse su Guadagno album per vedere il raggruppamento."

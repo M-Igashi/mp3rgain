@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mp3rgui\n"
 "Report-Msgid-Bugs-To: https://github.com/M-Igashi/mp3rgain/issues\n"
-"POT-Creation-Date: 2026-10-29 09:47+0000\n"
+"POT-Creation-Date: 2026-11-03 08:45+0000\n"
 "PO-Revision-Date: 2026-10-31 08:00+0800\n"
 "Last-Translator: saimskywalker\n"
 "Language-Team: Indonesian\n"
@@ -60,95 +60,95 @@ msgstr "Simulasi: {} langkah"
 msgid "Error"
 msgstr "Kesalahan"
 
-#: src/app.rs:813
+#: src/app.rs:870
 msgid "{} file(s) queued, will be added when processing finishes"
 msgstr "{} berkas dalam antrean, akan ditambahkan setelah pemrosesan selesai"
 
-#: src/app.rs:856
+#: src/app.rs:913
 msgid "Added {} file(s), {} duplicate(s) skipped"
 msgstr "{} berkas ditambahkan, {} duplikat dilewati"
 
-#: src/app.rs:858
+#: src/app.rs:915
 msgid "Added {} file(s)"
 msgstr "{} berkas ditambahkan"
 
-#: src/app.rs:982
+#: src/app.rs:1039
 msgid "Cancelling..."
 msgstr "Membatalkan..."
 
-#: src/app.rs:992
+#: src/app.rs:1049
 msgid "Could not open file location: {}"
 msgstr "Tidak dapat membuka lokasi berkas: {}"
 
-#: src/app.rs:1078
+#: src/app.rs:1135
 msgid "Analyzing {} file(s) without stored tags..."
 msgstr "Menganalisis {} berkas tanpa tag tersimpan..."
 
-#: src/app.rs:1133
+#: src/app.rs:1190
 msgid "No track gain values — run Track Analysis first"
 msgstr "Belum ada nilai gain trek — jalankan Analisis Trek terlebih dahulu"
 
-#: src/app.rs:1363
+#: src/app.rs:1420
 msgid "Channel gain only applies to MP3 — selection had no eligible files"
 msgstr "Gain kanal hanya berlaku untuk MP3 — pilihan tidak berisi berkas yang sesuai"
 
-#: src/app.rs:1432
+#: src/app.rs:1489
 msgid "Analyzing {} file(s) without consistent stored album tags..."
 msgstr "Menganalisis {} berkas tanpa tag album tersimpan yang konsisten..."
 
-#: src/app.rs:1519
+#: src/app.rs:1576
 msgid "No album gain values — run Album Analysis first"
 msgstr "Belum ada nilai gain album — jalankan Analisis Album terlebih dahulu"
 
-#: src/app.rs:1548
+#: src/app.rs:1605
 msgid "Analyzing tracks..."
 msgstr "Menganalisis trek..."
 
-#: src/app.rs:1549
+#: src/app.rs:1606
 msgid "Analyzing album..."
 msgstr "Menganalisis album..."
 
-#: src/app.rs:1550
+#: src/app.rs:1607
 msgid "Applying track gain..."
 msgstr "Menerapkan gain trek..."
 
-#: src/app.rs:1551
+#: src/app.rs:1608
 msgid "Applying album gain..."
 msgstr "Menerapkan gain album..."
 
-#: src/app.rs:1552
+#: src/app.rs:1609
 msgid "Applying manual gain..."
 msgstr "Menerapkan gain manual..."
 
-#: src/app.rs:1553
+#: src/app.rs:1610
 msgid "Applying channel gain..."
 msgstr "Menerapkan gain kanal..."
 
-#: src/app.rs:1554
+#: src/app.rs:1611
 msgid "Undoing gain changes..."
 msgstr "Mengurungkan perubahan gain..."
 
-#: src/app.rs:1555
+#: src/app.rs:1612
 msgid "Checking stored tags..."
 msgstr "Memeriksa tag tersimpan..."
 
-#: src/app.rs:1556
+#: src/app.rs:1613
 msgid "Finding max amplitude..."
 msgstr "Mencari amplitudo maksimum..."
 
-#: src/app.rs:1557
+#: src/app.rs:1614
 msgid "Deleting stored tags..."
 msgstr "Menghapus tag tersimpan..."
 
-#: src/app.rs:1558
+#: src/app.rs:1615
 msgid "Reading existing ReplayGain values..."
 msgstr "Membaca nilai ReplayGain yang ada..."
 
-#: src/app.rs:1664
+#: src/app.rs:1721
 msgid "Album analysis failed: {}"
 msgstr "Analisis album gagal: {}"
 
-#: src/app.rs:1761
+#: src/app.rs:1811
 msgid "Cancelled"
 msgstr "Dibatalkan"
 
@@ -157,11 +157,11 @@ msgctxt "language name"
 msgid "English"
 msgstr "Bahasa Indonesia"
 
-#: src/i18n.rs:105 src/ui/menu.rs:59
+#: src/i18n.rs:105 src/ui/menu.rs:66
 msgid "Add Files..."
 msgstr "Tambah Berkas..."
 
-#: src/i18n.rs:115 src/i18n.rs:119 src/ui/menu.rs:18
+#: src/i18n.rs:136 src/i18n.rs:140 src/ui/menu.rs:18
 msgid "System default"
 msgstr "Bawaan sistem"
 
@@ -169,87 +169,91 @@ msgstr "Bawaan sistem"
 msgid "Language"
 msgstr "Bahasa"
 
-#: src/ui/menu.rs:49
+#: src/ui/menu.rs:51
 msgid "Help"
 msgstr "Bantuan"
 
-#: src/ui/menu.rs:50 src/ui/mod.rs:26
+#: src/ui/menu.rs:52 src/ui/mod.rs:26
 msgid "About mp3rgui"
 msgstr "Tentang mp3rgui"
 
-#: src/ui/menu.rs:58
+#: src/ui/menu.rs:57
+msgid "Bake'n Deck for DJs"
+msgstr "Bake'n Deck untuk DJ"
+
+#: src/ui/menu.rs:65
 msgid "File"
 msgstr "Berkas"
 
-#: src/ui/menu.rs:63
+#: src/ui/menu.rs:70
 msgid "Add Folder..."
 msgstr "Tambah Folder..."
 
-#: src/ui/menu.rs:67
+#: src/ui/menu.rs:74
 msgid "Add Folder (with subfolders)..."
 msgstr "Tambah Folder (dengan subfolder)..."
 
-#: src/ui/menu.rs:72
+#: src/ui/menu.rs:79
 msgid "Clear File List"
 msgstr "Kosongkan Daftar Berkas"
 
-#: src/ui/menu.rs:77 src/ui/status.rs:14
+#: src/ui/menu.rs:84 src/ui/status.rs:14
 msgid "Exit"
 msgstr "Keluar"
 
-#: src/ui/menu.rs:84
+#: src/ui/menu.rs:91
 msgid "Analysis"
 msgstr "Analisis"
 
-#: src/ui/menu.rs:86 src/ui/toolbar.rs:24
+#: src/ui/menu.rs:93 src/ui/toolbar.rs:24
 msgid "Track Analysis"
 msgstr "Analisis Trek"
 
-#: src/ui/menu.rs:90 src/ui/toolbar.rs:27
+#: src/ui/menu.rs:97 src/ui/toolbar.rs:27
 msgid "Album Analysis"
 msgstr "Analisis Album"
 
-#: src/ui/menu.rs:94
+#: src/ui/menu.rs:101
 msgid "Find Max Amplitude"
 msgstr "Cari Amplitudo Maksimum"
 
-#: src/ui/menu.rs:99
+#: src/ui/menu.rs:106
 msgid "Check Stored Tags"
 msgstr "Periksa Tag Tersimpan"
 
-#: src/ui/menu.rs:108
+#: src/ui/menu.rs:115
 msgid "Modify Gain"
 msgstr "Ubah Gain"
 
-#: src/ui/menu.rs:110
+#: src/ui/menu.rs:117
 msgid "Apply Track Gain"
 msgstr "Terapkan Gain Trek"
 
-#: src/ui/menu.rs:114
+#: src/ui/menu.rs:121
 msgid "Apply Album Gain"
 msgstr "Terapkan Gain Album"
 
-#: src/ui/menu.rs:118
+#: src/ui/menu.rs:125
 msgid "Apply Manual Gain..."
 msgstr "Terapkan Gain Manual..."
 
-#: src/ui/menu.rs:122
+#: src/ui/menu.rs:129
 msgid "Apply Channel Gain (MP3)..."
 msgstr "Terapkan Gain Kanal (MP3)..."
 
-#: src/ui/menu.rs:128
+#: src/ui/menu.rs:135
 msgid "Undo All"
 msgstr "Urungkan Semua"
 
-#: src/ui/menu.rs:130
+#: src/ui/menu.rs:137
 msgid "Undo Selected"
 msgstr "Urungkan yang Dipilih"
 
-#: src/ui/menu.rs:137
+#: src/ui/menu.rs:144
 msgid "Delete Stored Tags (All)..."
 msgstr "Hapus Tag Tersimpan (Semua)..."
 
-#: src/ui/menu.rs:139
+#: src/ui/menu.rs:146
 msgid "Delete Stored Tags (Selected)..."
 msgstr "Hapus Tag Tersimpan (yang Dipilih)..."
 
@@ -653,154 +657,154 @@ msgstr "Berkas audio"
 msgid "Drag and drop MP3 files here, or use the toolbar buttons to add files"
 msgstr "Seret dan lepas berkas MP3 di sini, atau gunakan tombol bilah alat untuk menambahkan berkas"
 
-#: src/worker.rs:282
+#: src/worker.rs:288
 msgid "Analyzed {} file(s), {} error(s)"
 msgstr "{} berkas dianalisis, {} kesalahan"
 
-#: src/worker.rs:284
+#: src/worker.rs:290
 msgid "Analyzed {} file(s)"
 msgstr "{} berkas dianalisis"
 
-#: src/worker.rs:575
+#: src/worker.rs:577
 msgid "Gain applied, but MP3GAIN_ALBUM_MINMAX was not written: {e}"
 msgstr "Gain diterapkan, tetapi MP3GAIN_ALBUM_MINMAX tidak ditulis: {e}"
 
-#: src/worker.rs:671
+#: src/worker.rs:677
 msgid "Undone {} file(s)"
 msgstr "{} berkas diurungkan"
 
-#: src/worker.rs:673
+#: src/worker.rs:679
 msgid "Undone {} file(s), {} had no changes to undo"
 msgstr "{} berkas diurungkan, {} tidak memiliki perubahan untuk diurungkan"
 
-#: src/worker.rs:677
+#: src/worker.rs:683
 msgid "Undone {} file(s), {} error(s)"
 msgstr "{} berkas diurungkan, {} kesalahan"
 
-#: src/worker.rs:679
+#: src/worker.rs:685
 msgid "Undone {} file(s), {} had no changes to undo, {} error(s)"
 msgstr "{} berkas diurungkan, {} tidak memiliki perubahan untuk diurungkan, {} kesalahan"
 
-#: src/worker.rs:757
+#: src/worker.rs:763
 msgid "Deleted stored tags from {} file(s), {} error(s)"
 msgstr "Tag tersimpan dihapus dari {} berkas, {} kesalahan"
 
-#: src/worker.rs:762
+#: src/worker.rs:768
 msgid "Deleted stored tags from {} file(s)"
 msgstr "Tag tersimpan dihapus dari {} berkas"
 
-#: src/worker.rs:828
+#: src/worker.rs:834
 msgid "Max amplitude scanned on {} file(s), {} error(s)"
 msgstr "Amplitudo maksimum dipindai pada {} berkas, {} kesalahan"
 
-#: src/worker.rs:833
+#: src/worker.rs:839
 msgid "Max amplitude scanned on {} file(s)"
 msgstr "Amplitudo maksimum dipindai pada {} berkas"
 
-#: src/worker.rs:887
+#: src/worker.rs:893
 msgid "Checked stored tags for {} file(s)"
 msgstr "Tag tersimpan diperiksa untuk {} berkas"
 
-#: src/worker.rs:999
+#: src/worker.rs:1005
 msgid "Applied track gain on {} file(s)"
 msgstr "Gain trek diterapkan pada {} berkas"
 
-#: src/worker.rs:1002
+#: src/worker.rs:1008
 msgid "Applied track gain on {} file(s), {} error(s)"
 msgstr "Gain trek diterapkan pada {} berkas, {} kesalahan"
 
-#: src/worker.rs:1007
+#: src/worker.rs:1013
 msgid "Dry-ran track gain on {} file(s)"
 msgstr "Gain trek disimulasikan pada {} berkas"
 
-#: src/worker.rs:1010
+#: src/worker.rs:1016
 msgid "Dry-ran track gain on {} file(s), {} error(s)"
 msgstr "Gain trek disimulasikan pada {} berkas, {} kesalahan"
 
-#: src/worker.rs:1015
+#: src/worker.rs:1021
 msgid "Applied manual gain on {} file(s)"
 msgstr "Gain manual diterapkan pada {} berkas"
 
-#: src/worker.rs:1018
+#: src/worker.rs:1024
 msgid "Applied manual gain on {} file(s), {} error(s)"
 msgstr "Gain manual diterapkan pada {} berkas, {} kesalahan"
 
-#: src/worker.rs:1023
+#: src/worker.rs:1029
 msgid "Dry-ran manual gain on {} file(s)"
 msgstr "Gain manual disimulasikan pada {} berkas"
 
-#: src/worker.rs:1026
+#: src/worker.rs:1032
 msgid "Dry-ran manual gain on {} file(s), {} error(s)"
 msgstr "Gain manual disimulasikan pada {} berkas, {} kesalahan"
 
-#: src/worker.rs:1031
+#: src/worker.rs:1037
 msgid "Applied channel gain on {} file(s)"
 msgstr "Gain kanal diterapkan pada {} berkas"
 
-#: src/worker.rs:1034
+#: src/worker.rs:1040
 msgid "Applied channel gain on {} file(s), {} error(s)"
 msgstr "Gain kanal diterapkan pada {} berkas, {} kesalahan"
 
-#: src/worker.rs:1039
+#: src/worker.rs:1045
 msgid "Dry-ran channel gain on {} file(s)"
 msgstr "Gain kanal disimulasikan pada {} berkas"
 
-#: src/worker.rs:1042
+#: src/worker.rs:1048
 msgid "Dry-ran channel gain on {} file(s), {} error(s)"
 msgstr "Gain kanal disimulasikan pada {} berkas, {} kesalahan"
 
-#: src/worker.rs:1047
+#: src/worker.rs:1053
 msgid "Applied album gain on {} file(s)"
 msgstr "Gain album diterapkan pada {} berkas"
 
-#: src/worker.rs:1050
+#: src/worker.rs:1056
 msgid "Applied album gain on {} file(s), {} error(s)"
 msgstr "Gain album diterapkan pada {} berkas, {} kesalahan"
 
-#: src/worker.rs:1055
+#: src/worker.rs:1061
 msgid "Dry-ran album gain on {} file(s)"
 msgstr "Gain album disimulasikan pada {} berkas"
 
-#: src/worker.rs:1058
+#: src/worker.rs:1064
 msgid "Dry-ran album gain on {} file(s), {} error(s)"
 msgstr "Gain album disimulasikan pada {} berkas, {} kesalahan"
 
-#: src/worker.rs:1078
+#: src/worker.rs:1084
 msgid "Album analysis complete ({} tracks)"
 msgstr "Analisis album selesai ({} trek)"
 
-#: src/worker.rs:1080
+#: src/worker.rs:1086
 msgid "Album analysis complete ({} tracks); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
 msgstr "Analisis album selesai ({} trek); {} album berisi lebih dari satu rilisan (tag artis dan album sama). Arahkan kursor ke Gain Album untuk melihat pengelompokannya."
 
-#: src/worker.rs:1086
+#: src/worker.rs:1092
 msgid "Album analysis complete ({} tracks, {} skipped)"
 msgstr "Analisis album selesai ({} trek, {} dilewati)"
 
-#: src/worker.rs:1091
+#: src/worker.rs:1097
 msgid "Album analysis complete ({} tracks, {} skipped); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
 msgstr "Analisis album selesai ({} trek, {} dilewati); {} album berisi lebih dari satu rilisan (tag artis dan album sama). Arahkan kursor ke Gain Album untuk melihat pengelompokannya."
 
-#: src/worker.rs:1098
+#: src/worker.rs:1104
 msgid "Album analysis complete ({} albums, {} tracks)"
 msgstr "Analisis album selesai ({} album, {} trek)"
 
-#: src/worker.rs:1103
+#: src/worker.rs:1109
 msgid "Album analysis complete ({} albums, {} tracks); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
 msgstr "Analisis album selesai ({} album, {} trek); {} album berisi lebih dari satu rilisan (tag artis dan album sama). Arahkan kursor ke Gain Album untuk melihat pengelompokannya."
 
-#: src/worker.rs:1110
+#: src/worker.rs:1116
 msgid "Album analysis complete ({} albums, {} tracks, {} skipped)"
 msgstr "Analisis album selesai ({} album, {} trek, {} dilewati)"
 
-#: src/worker.rs:1116
+#: src/worker.rs:1122
 msgid "Album analysis complete ({} albums, {} tracks, {} skipped); {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
 msgstr "Analisis album selesai ({} album, {} trek, {} dilewati); {} album berisi lebih dari satu rilisan (tag artis dan album sama). Arahkan kursor ke Gain Album untuk melihat pengelompokannya."
 
-#: src/worker.rs:1125
+#: src/worker.rs:1131
 msgid "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed"
 msgstr "Analisis album: {} trek dianalisis, {} dilewati, {} album gagal"
 
-#: src/worker.rs:1131
+#: src/worker.rs:1137
 msgid "Album analysis: {} tracks analyzed, {} skipped, {} album(s) failed; {} album(s) hold more than one release (same artist and album tag). Hover Album Gain to see the grouping."
 msgstr "Analisis album: {} trek dianalisis, {} dilewati, {} album gagal; {} album berisi lebih dari satu rilisan (tag artis dan album sama). Arahkan kursor ke Gain Album untuk melihat pengelompokannya."
