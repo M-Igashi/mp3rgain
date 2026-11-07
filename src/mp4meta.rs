@@ -128,6 +128,11 @@ impl BoxHeader {
 }
 
 /// Freeform tag (---- box) for ReplayGain
+///
+/// Internal: no public function produces or accepts one. It stays `pub`, and
+/// hidden from the docs, only because narrowing it is a semver break
+/// (issue #465).
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

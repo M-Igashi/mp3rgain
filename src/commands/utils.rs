@@ -5,6 +5,7 @@ use mp3rgain::replaygain::{self, AlbumAnalysisReport};
 use rayon::prelude::*;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::threading::effective_threads;
@@ -15,6 +16,21 @@ use crate::progress::{
     progress_set_message,
 };
 use crate::util::get_filename;
+
+/// A file an album analysis left out, as the library's `on_failure` reported
+/// it (issue #464).
+pub struct LeftOut {
+    pub message: String,
+    /// A format mp3rgain cannot adjust: a skip, not a failure (issue #330).
+    pub unsupported: bool,
+}
+
+pub struct AlbumAnalysis {
+    pub report: mp3rgain::error::Result<AlbumAnalysisReport>,
+    /// Why each left-out file was left out, indexed like the analyzed paths.
+    /// Filled even when `report` is the error for every file failing.
+    pub left_out: Vec<Option<LeftOut>>,
+}
 
 /// Run one album analysis over `paths`, driving the shared album progress
 /// bar. Serial runs get the byte-level bar via `on_progress`; parallel runs
@@ -31,7 +47,7 @@ pub fn run_album_analysis(
     opts: &Options,
     skip_errors: bool,
     shared_pb: Option<&ProgressBar>,
-) -> mp3rgain::error::Result<AlbumAnalysisReport> {
+) -> AlbumAnalysis {
     let threads = effective_threads(opts);
     let parallel = threads > 1 && paths.len() > 1;
     let show_progress = shared_pb.is_none() && opts.text_output();
@@ -49,6 +65,13 @@ pub fn run_album_analysis(
             pb.inc(1);
         }
     };
+    let left_out: Mutex<Vec<Option<LeftOut>>> = Mutex::new(paths.iter().map(|_| None).collect());
+    let on_failure = |i: usize, e: &mp3rgain::Error| {
+        left_out.lock().unwrap()[i] = Some(LeftOut {
+            message: e.to_string(),
+            unsupported: e.is_unsupported_format(),
+        });
+    };
 
     let report = replaygain::analyze_album_with_options(
         paths,
@@ -61,6 +84,7 @@ pub fn run_album_analysis(
                 Some(_) => Some(&on_shared_complete as _),
                 None => parallel.then_some(&on_complete as _),
             },
+            on_failure: Some(&on_failure),
             cancel: None,
             mode: opts.analysis_mode,
             true_peak: opts.true_peak,
@@ -69,7 +93,10 @@ pub fn run_album_analysis(
     );
 
     progress_finish(pb);
-    report
+    AlbumAnalysis {
+        report,
+        left_out: left_out.into_inner().unwrap(),
+    }
 }
 
 /// mp3gain-compatible TSV header shared by the info and apply commands.

@@ -433,7 +433,8 @@ pub struct AlbumAnalysisReport {
     /// The album result, computed from the successfully-analyzed tracks only.
     pub album: AlbumGainResult,
     /// `(file_index, error_message)` for each file that was skipped, in input
-    /// order.
+    /// order. The errors themselves go to
+    /// [`AlbumAnalysisOptions::on_failure`].
     pub failures: Vec<(usize, String)>,
     /// Maps track results back to inputs: `album.tracks()[k]` is
     /// `files[successful_indices[k]]`.
@@ -2365,6 +2366,9 @@ pub type AlbumProgressFn<'a> = &'a (dyn Fn(usize, u64, u64) + Sync);
 /// Per-file completion callback: `(file_index, path)`.
 pub type AlbumCompleteFn<'a> = &'a (dyn Fn(usize, &Path) + Sync);
 
+/// Per-file failure callback: `(file_index, error)`.
+pub type AlbumFailureFn<'a> = &'a (dyn Fn(usize, &Error) + Sync);
+
 /// Options for [`analyze_album_with_options`] (issue #250).
 ///
 /// `Default` is serial, strict analysis of the first audio track with no
@@ -2393,6 +2397,14 @@ pub struct AlbumAnalysisOptions<'a> {
     /// file finishes (whether it succeeded or failed). On the parallel path
     /// it is called from rayon worker threads, so it must be `Sync`.
     pub on_complete: Option<AlbumCompleteFn<'a>>,
+    /// Per-file failure callback `(file_index, error)`, invoked for each file
+    /// the album leaves out, with the error that left it out, in input order
+    /// on the calling thread. [`AlbumAnalysisReport::failures`] keeps only
+    /// the message and [`Error::AllFilesFailed`] not even that, so this is
+    /// where a frontend can ask [`Error::is_unsupported_format`] without
+    /// probing the file again (issue #464). A failure that aborts the album
+    /// is not passed here; it is the returned error.
+    pub on_failure: Option<AlbumFailureFn<'a>>,
     /// Cooperative cancellation, checked at file boundaries. Once set,
     /// remaining files are not analyzed and [`Error::Cancelled`] is
     /// returned. Files already being decoded run to completion.
@@ -2449,6 +2461,7 @@ fn analyze_album_serial(
         track_index,
         on_progress,
         on_complete,
+        on_failure,
         skip_errors,
         cancel,
         mode,
@@ -2456,7 +2469,7 @@ fn analyze_album_serial(
         chunk,
         ..
     } = *opts;
-    let mut album = AlbumFold::new(mode, files.len());
+    let mut album = AlbumFold::new(mode, files.len(), on_failure);
 
     for (i, file) in files.iter().enumerate() {
         if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
@@ -2502,6 +2515,7 @@ fn analyze_album_parallel_internal(
     let AlbumAnalysisOptions {
         track_index,
         on_complete,
+        on_failure,
         skip_errors,
         cancel,
         mode,
@@ -2538,7 +2552,7 @@ fn analyze_album_parallel_internal(
         return Err(Error::Cancelled);
     }
 
-    let mut album = AlbumFold::new(mode, files.len());
+    let mut album = AlbumFold::new(mode, files.len(), on_failure);
     for (i, track) in tracks.into_iter().enumerate() {
         album.add(i, track);
     }
@@ -2548,24 +2562,26 @@ fn analyze_album_parallel_internal(
 /// An album as its tracks fold into it. Tracks are added in input order, so
 /// the album state and peak come out the same whichever path analyzed them.
 #[cfg(feature = "replaygain")]
-struct AlbumFold {
+struct AlbumFold<'a> {
     tracks: Vec<ReplayGainResult>,
     peak: f64,
     /// Accumulates every track's state, like B[] in the original mp3gain.
     state: LoudnessState,
     failures: Vec<(usize, String)>,
     successful_indices: Vec<usize>,
+    on_failure: Option<AlbumFailureFn<'a>>,
 }
 
 #[cfg(feature = "replaygain")]
-impl AlbumFold {
-    fn new(mode: AnalysisMode, files: usize) -> Self {
+impl<'a> AlbumFold<'a> {
+    fn new(mode: AnalysisMode, files: usize, on_failure: Option<AlbumFailureFn<'a>>) -> Self {
         Self {
             tracks: Vec::with_capacity(files),
             peak: 0.0,
             state: LoudnessState::new(mode),
             failures: Vec::new(),
             successful_indices: Vec::with_capacity(files),
+            on_failure,
         }
     }
 
@@ -2578,7 +2594,12 @@ impl AlbumFold {
                 self.tracks.push(internal.result);
                 self.successful_indices.push(i);
             }
-            Err(e) => self.failures.push((i, e.to_string())),
+            Err(e) => {
+                if let Some(cb) = self.on_failure {
+                    cb(i, &e);
+                }
+                self.failures.push((i, e.to_string()));
+            }
         }
     }
 
@@ -3028,6 +3049,41 @@ mod tests {
         };
         let result = analyze_album_with_options(&files, &lenient);
         assert!(matches!(result, Err(Error::AllFilesFailed { count: 2 })));
+    }
+
+    /// Issue #464: the per-file errors reach `on_failure` in input order,
+    /// including when the album fails as a whole, so a frontend can classify
+    /// them without probing or analyzing the files again.
+    #[cfg(feature = "replaygain")]
+    #[test]
+    fn album_failures_reach_on_failure_with_their_errors() {
+        let alac = Path::new("tests/fixtures/test_alac.m4a");
+        let missing = Path::new("tests/fixtures/missing-1.mp3");
+        let good = Path::new("tests/fixtures/test_stereo.mp3");
+
+        for threads in [1, 4] {
+            for (files, all_fail) in [
+                (vec![alac, missing, good], false),
+                (vec![alac, missing], true),
+            ] {
+                let seen = std::sync::Mutex::new(Vec::new());
+                let record =
+                    |i: usize, e: &Error| seen.lock().unwrap().push((i, e.is_unsupported_format()));
+                let opts = AlbumAnalysisOptions {
+                    threads,
+                    skip_errors: true,
+                    on_failure: Some(&record),
+                    ..Default::default()
+                };
+                let result = analyze_album_with_options(&files, &opts);
+                assert_eq!(result.is_err(), all_fail, "threads {threads}");
+                assert_eq!(
+                    *seen.lock().unwrap(),
+                    [(0, true), (1, false)],
+                    "threads {threads}, all_fail {all_fail}"
+                );
+            }
+        }
     }
 
     /// Issue #379: a fresh RG1 analysis reported the raw histogram value as

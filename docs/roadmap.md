@@ -40,6 +40,8 @@ What ships today:
 ## Unreleased
 
 - mp3rgui: Help > Bake'n Deck for DJs opens the Bake'n Deck site; the German catalogue gains the three texts #473 changed, which had been showing in English
+- Library: `AlbumAnalysisOptions::on_failure` hands over the error of each file an album analysis leaves out, so the CLI no longer probes those files again, nor analyzes a set a second time when every file in it failed (#464)
+- Library: `mp4meta::FreeformTag`, which no public function produces or accepts, is hidden from the docs (#465)
 
 ## Release history
 

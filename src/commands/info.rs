@@ -1,14 +1,15 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::mp4meta;
-use mp3rgain::replaygain::{self, AlbumAnalysisReport, ReplayGainResult};
+use mp3rgain::replaygain::ReplayGainResult;
 use rayon::prelude::*;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::cli::options::{Options, OutputFormat};
 use crate::commands::utils::{
-    exit_if_failed, finish_without_summary, for_each_file, run_album_analysis, TSV_HEADER,
+    exit_if_failed, finish_without_summary, for_each_file, run_album_analysis, AlbumAnalysis,
+    LeftOut, TSV_HEADER,
 };
 use crate::processors::info::{
     format_rg_row, process_info, scan_gain_range_for_row, tsv_album_row,
@@ -42,11 +43,9 @@ enum Row {
     Unsupported(String),
 }
 
-/// Classify an analysis failure. The album pass surfaces failures as strings
-/// rather than [`mp3rgain::Error`] values, so the file is re-probed — cheap,
-/// and only for files that already failed.
-fn failure_row(path: &Path, msg: String) -> Row {
-    if mp4meta::unsupported_audio_format(path).is_some() {
+fn failure_row(left_out: &LeftOut) -> Row {
+    let msg = left_out.message.clone();
+    if left_out.unsupported {
         Row::Unsupported(msg)
     } else {
         Row::Failed(msg)
@@ -67,33 +66,32 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
         }
     }
 
-    let mp3_report = analyze_set(&mp3_set, opts);
-    let mp4_report = analyze_set(&mp4_set, opts);
+    let mp3_analysis = analyze_set(&mp3_set, opts);
+    let mp4_analysis = analyze_set(&mp4_set, opts);
 
     // Assemble per-file rows in input order.
     let mut rows: Vec<Option<Row>> = (0..files.len()).map(|_| None).collect();
-    for (set, report) in [(&mp3_set, &mp3_report), (&mp4_set, &mp4_report)] {
-        match report {
-            Some(report) => {
+    for (set, analysis) in [(&mp3_set, &mp3_analysis), (&mp4_set, &mp4_analysis)] {
+        let Some(analysis) = analysis else {
+            continue;
+        };
+        match &analysis.report {
+            Ok(report) => {
                 for (k, &set_idx) in report.successful_indices.iter().enumerate() {
                     rows[set[set_idx].0] = Some(Row::Analyzed(report.album.tracks()[k].clone()));
                 }
-                for (set_idx, msg) in &report.failures {
-                    let (orig_idx, path) = set[*set_idx];
-                    rows[orig_idx] = Some(failure_row(path, msg.clone()));
+            }
+            // Every file failed. Each one's own reason replaces this below;
+            // only a build without the replaygain feature has none.
+            Err(e) => {
+                for &(orig_idx, _) in set.iter() {
+                    rows[orig_idx] = Some(Row::Failed(e.to_string()));
                 }
             }
-            None => {
-                // Every file in this set failed the album pass; re-probe each
-                // file to recover its individual error message (failed probes
-                // are cheap — no decoding happens).
-                for &(orig_idx, path) in set.iter() {
-                    let msg = replaygain::analyze_track_with_index(path, opts.track_index)
-                        .err()
-                        .map(|e| e.to_string())
-                        .unwrap_or_else(|| "analysis failed".to_string());
-                    rows[orig_idx] = Some(failure_row(path, msg));
-                }
+        }
+        for (&(orig_idx, _), left_out) in set.iter().zip(&analysis.left_out) {
+            if let Some(left_out) = left_out {
+                rows[orig_idx] = Some(failure_row(left_out));
             }
         }
     }
@@ -138,7 +136,9 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
     // Prefer the MP3 report, but fall back to the MP4 one if every MP3
     // failed — otherwise the album summary would silently disappear.
     // -e leaves it out, as mp3gain -e does (issue #378).
-    let summary_report = mp3_report.as_ref().or(mp4_report.as_ref());
+    let summary_report = [&mp3_analysis, &mp4_analysis]
+        .into_iter()
+        .find_map(|a| a.as_ref()?.report.as_ref().ok());
 
     if any_ok && !opts.skip_album {
         if let Some(report) = summary_report {
@@ -168,13 +168,13 @@ fn cmd_info_replaygain(files: &[PathBuf], opts: &Options) -> Result<()> {
 }
 
 /// Run one lenient album analysis over a partition, driving a progress bar.
-/// Returns `None` for an empty set or when every file in the set failed.
-fn analyze_set(set: &[(usize, &Path)], opts: &Options) -> Option<AlbumAnalysisReport> {
+/// Returns `None` for an empty set.
+fn analyze_set(set: &[(usize, &Path)], opts: &Options) -> Option<AlbumAnalysis> {
     if set.is_empty() {
         return None;
     }
     let paths: Vec<&Path> = set.iter().map(|&(_, p)| p).collect();
-    run_album_analysis(&paths, opts, true, None).ok()
+    Some(run_album_analysis(&paths, opts, true, None))
 }
 
 /// `-o json` info: per-file MP3 frame statistics.

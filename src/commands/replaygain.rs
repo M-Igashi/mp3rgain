@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::*;
 use indicatif::{MultiProgress, ProgressBar};
 use mp3rgain::replaygain::{AlbumAnalysisReport, AlbumGainResult, AudioFileType, ReplayGainResult};
-use mp3rgain::{mp4meta, AacAlbumInfo, AlbumLabel, Error};
+use mp3rgain::{AacAlbumInfo, AlbumLabel};
 use rayon::prelude::*;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use crate::commands::albumgroup::{group_files, AlbumGroup};
 use crate::commands::threading::effective_threads;
 use crate::commands::utils::{
     finish_with_output, finish_with_summary, for_each_file_with_analysis_bar, run_album_analysis,
-    update_counters, CompletionFlush, TSV_HEADER,
+    update_counters, AlbumAnalysis, CompletionFlush, LeftOut, TSV_HEADER,
 };
 use crate::json_output::{
     FileStatus, JsonAlbumResult, JsonDirectoryAlbum, JsonFileResult, JsonOutput,
@@ -427,7 +427,10 @@ fn run_album(
 
     // -s R: reuse stored album tags when every file carries a consistent
     // set; otherwise fall back to the full rescan (issue #298).
-    let album_analysis = match stored_album_report(files, opts) {
+    let AlbumAnalysis {
+        report: album_analysis,
+        left_out,
+    } = match stored_album_report(files, opts) {
         Some(report) => {
             if opts.text_output() {
                 writeln!(
@@ -439,7 +442,10 @@ fn run_album(
             // Nothing was decoded, so the shared bar has to be told that this
             // album's files are accounted for or it never reaches its total.
             advance(bars.and_then(|b| b.analysis.as_ref()), files.len());
-            Ok(report)
+            AlbumAnalysis {
+                report: Ok(report),
+                left_out: Vec::new(),
+            }
         }
         None => {
             if opts.text_output() {
@@ -458,24 +464,31 @@ fn run_album(
         Ok(report) => {
             let AlbumAnalysisReport {
                 album: album_result,
-                failures,
                 successful_indices,
+                ..
             } = report;
 
             // Index failures by file position for O(1) lookup during the
             // apply phase. Walk failures once, reporting skipped files in text
             // mode. Two kinds arrive here: `--skip-errors` tolerating a
             // genuine failure, which still counts as failed, and a format
-            // mp3rgain cannot adjust, which does not (issue #330) — the album
-            // analysis drops those either way, so they are re-probed to tell
-            // them apart.
+            // mp3rgain cannot adjust, which does not (issue #330). The album
+            // analysis drops those either way, and `left_out` tells them
+            // apart.
             let mut failure_msgs: Vec<Option<String>> = vec![None; files.len()];
             let mut unsupported: Vec<bool> = vec![false; files.len()];
             let mut failure_count = 0usize;
             let report_skipped = opts.text_output();
-            for (idx, msg) in failures {
+            for (idx, entry) in left_out.into_iter().enumerate() {
+                let Some(LeftOut {
+                    message: msg,
+                    unsupported: is_unsupported,
+                }) = entry
+                else {
+                    continue;
+                };
                 let filename = get_filename(&files[idx]);
-                if mp4meta::unsupported_audio_format(&files[idx]).is_some() {
+                if is_unsupported {
                     unsupported[idx] = true;
                     if report_skipped {
                         writeln!(
@@ -833,20 +846,18 @@ fn run_album(
             // is a set of skips, not a failure: the track path reports exactly
             // that for the same files, and `-a` should not disagree
             // (issue #330). Collecting into an `Option<Vec<_>>` short-circuits
-            // on the first file that is *not* an unsupported format, so this
-            // is both the test and the per-file reasons in one pass.
-            let unsupported: Option<Vec<&'static str>> = files
-                .iter()
-                .map(|f| mp4meta::unsupported_audio_format(f))
+            // on the first file that was *not* left out as an unsupported
+            // format, so this is both the test and the per-file reasons in one
+            // pass.
+            let reasons: Option<Vec<String>> = left_out
+                .into_iter()
+                .map(|entry| entry.filter(|e| e.unsupported).map(|e| e.message))
                 .collect();
-            if let Some(formats) = unsupported {
+            if let Some(reasons) = reasons {
                 let json_results = files
                     .iter()
-                    .zip(formats)
-                    .map(|(f, format)| {
-                        let reason = Error::UnsupportedFormat { format }.to_string();
-                        report_unsupported_format(f, get_filename(f), &reason, opts)
-                    })
+                    .zip(reasons)
+                    .map(|(f, reason)| report_unsupported_format(f, get_filename(f), &reason, opts))
                     .collect();
                 return Ok(AlbumRun {
                     json_results,

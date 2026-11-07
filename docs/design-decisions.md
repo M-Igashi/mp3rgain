@@ -90,6 +90,10 @@ Do not propose a change to these paths on the grounds that it is equivalent. If 
 
 **`--album-depth` is not exposed in the GUI.** It exists because a CLI user cannot glob a library on Windows and cannot exceed `ARG_MAX` anywhere, and neither constraint reaches a GUI. Selecting rows and choosing **Single album** covers the case it would serve. PR #343.
 
+## Library API that semver holds in place
+
+**`AlbumAnalysisReport::failures` holds strings, `Error::AllFilesFailed` carries only a count, and `mp4meta::FreeformTag` is `pub` with no way to obtain one.** Each is the shape a whole-codebase review would change, and each change is a semver break: the report has public fields and is not `#[non_exhaustive]`, the error is a struct variant, and narrowing a type's visibility removes it from the API. No major release is planned, so the additive half was done instead. `AlbumAnalysisOptions::on_failure` hands over the `Error` of each file the album leaves out, which is what the CLI classifies with, and `FreeformTag` is `#[doc(hidden)]`. A new `AlbumAnalysisOptions` field is not treated as a break: the struct is built with `..Default::default()`, and `true_peak` and `chunk` were added in minor releases the same way. Fold the rest into the next breaking change, as #266 was for 3.0. Issues #464 and #465.
+
 ## Where the reasoning lives
 
 Commit messages in this repo carry the *why*, at length, and so do PR bodies. `836deee` and `56d2763` are whole-codebase review passes that each end with a list of what was examined and deliberately left alone. When something here looks arbitrary, `git log -S` on the line is usually faster than reasoning about it from scratch.
