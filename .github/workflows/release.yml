@@ -156,6 +156,8 @@ jobs:
     environment: release
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       windows_x64_sha256: ${{ steps.checksums.outputs.windows_x64_sha256 }}
@@ -376,6 +378,15 @@ jobs:
           echo "gui_windows_arm64_sha256=$(cat "dist/mp3rgui-${TAG}-windows-arm64.zip.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "gui_windows_setup_sha256=$(cat "dist/mp3rgui-${TAG}-windows-setup.exe.sha256" | awk '{print $1}')" >> $GITHUB_OUTPUT
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.dmg
+            dist/*.exe
+
       - name: Create Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
@@ -466,6 +477,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     continue-on-error: true
     strategy:
       matrix:
@@ -508,12 +521,15 @@ jobs:
         run: ls -la ../mp3rgain*.deb
 
       - name: Generate checksum
+        id: deb
         env:
           VERSION: ${{ needs.release.outputs.version }}
           ARCH: ${{ matrix.arch }}
         run: |
           cd ..
           sha256sum "mp3rgain_${VERSION}-1_${ARCH}.deb" > "mp3rgain_${VERSION}-1_${ARCH}.deb.sha256"
+          # attest-build-provenance rejects '..' in subject-path
+          echo "path=$PWD/mp3rgain_${VERSION}-1_${ARCH}.deb" >> "$GITHUB_OUTPUT"
 
       - name: Upload to release
         env:
@@ -524,6 +540,11 @@ jobs:
             ../mp3rgain_${{ needs.release.outputs.version }}-1_${{ matrix.arch }}.deb
             ../mp3rgain_${{ needs.release.outputs.version }}-1_${{ matrix.arch }}.deb.sha256
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.deb.outputs.path }}
+
   # Build GUI Debian package
   build-deb-gui:
     name: Build GUI Debian Package (${{ matrix.arch }})
@@ -531,6 +552,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     continue-on-error: true
     strategy:
       matrix:
@@ -573,12 +596,15 @@ jobs:
         run: ls -la ../mp3rgui*.deb
 
       - name: Generate checksum
+        id: deb
         env:
           VERSION: ${{ needs.release.outputs.version }}
           ARCH: ${{ matrix.arch }}
         run: |
           cd ..
           sha256sum "mp3rgui_${VERSION}-1_${ARCH}.deb" > "mp3rgui_${VERSION}-1_${ARCH}.deb.sha256"
+          # attest-build-provenance rejects '..' in subject-path
+          echo "path=$PWD/mp3rgui_${VERSION}-1_${ARCH}.deb" >> "$GITHUB_OUTPUT"
 
       - name: Upload to release
         env:
@@ -588,6 +614,11 @@ jobs:
           files: |
             ../mp3rgui_${{ needs.release.outputs.version }}-1_${{ matrix.arch }}.deb
             ../mp3rgui_${{ needs.release.outputs.version }}-1_${{ matrix.arch }}.deb.sha256
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.deb.outputs.path }}
 
   # Publish to crates.io
   publish-cargo:
