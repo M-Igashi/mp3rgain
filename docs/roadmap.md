@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current status: v3.16.0 (2026-11-09)
+## Current status: v3.16.1 (2026-11-09)
 
 mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writes standard `REPLAYGAIN_*` tags, and can bake the correction into the bitstream losslessly. For MP3 it is a modern drop-in replacement for mp3gain. For AAC it is the only actively maintained command-line tool that does this: aacgain has been abandoned since about 2009, and foobar2000, the reference-grade ReplayGain suite, offers a comparable scalefactor-based AAC rewrite ("Apply ReplayGain to file content") but only as a Windows GUI with no undo.
 
@@ -39,11 +39,17 @@ What ships today:
 
 ## Unreleased
 
-- Release: the x86_64 Linux mp3rgui and both amd64 `.deb` packages are built on Ubuntu 24.04 again; in 3.16.0 they came from `ubuntu-latest`, by then Ubuntu 26.04, so x86_64 mp3rgui needed glibc 2.43 and neither started nor installed on Ubuntu 24.04 or Debian 13
+Nothing yet.
 
 ## Release history
 
 One line per change. The [release notes](https://github.com/M-Igashi/mp3rgain/releases) and the linked issues have the details.
+
+### v3.16.1 - mp3rgui Starts on Ubuntu 24.04 and Debian 13 Again
+
+Nothing changed in the code or the output; only the runner that builds the x86_64 Linux GUI and the amd64 `.deb` packages did.
+
+- Release: built on a pinned `ubuntu-24.04` again; 3.16.0's came from `ubuntu-latest`, by then Ubuntu 26.04, so x86_64 mp3rgui needed glibc 2.43 and neither started nor installed on Ubuntu 24.04 or Debian 13
 
 ### v3.16.0 - Build Provenance & Single-Pass Album Failures
 
