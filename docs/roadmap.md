@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current status: v3.15.0 (2026-10-30)
+## Current status: v3.16.0 (2026-11-09)
 
 mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writes standard `REPLAYGAIN_*` tags, and can bake the correction into the bitstream losslessly. For MP3 it is a modern drop-in replacement for mp3gain. For AAC it is the only actively maintained command-line tool that does this: aacgain has been abandoned since about 2009, and foobar2000, the reference-grade ReplayGain suite, offers a comparable scalefactor-based AAC rewrite ("Apply ReplayGain to file content") but only as a Windows GUI with no undo.
 
@@ -39,14 +39,20 @@ What ships today:
 
 ## Unreleased
 
-- mp3rgui: Help > Bake'n Deck for DJs opens the Bake'n Deck site; the German catalogue gains the three texts #473 changed, which had been showing in English
-- Library: `AlbumAnalysisOptions::on_failure` hands over the error of each file an album analysis leaves out, so the CLI no longer probes those files again, nor analyzes a set a second time when every file in it failed (#464)
-- Library: `mp4meta::FreeformTag`, which no public function produces or accepts, is hidden from the docs (#465)
-- Release: every binary archive, installer, and `.deb` gets a GitHub build provenance attestation, verifiable with `gh attestation verify <file> --repo M-Igashi/mp3rgain` (#482)
+Nothing yet.
 
 ## Release history
 
 One line per change. The [release notes](https://github.com/M-Igashi/mp3rgain/releases) and the linked issues have the details.
+
+### v3.16.0 - Build Provenance & Single-Pass Album Failures
+
+The analysis, the applied gains, and the command-line output are unchanged; an album with a file that fails is no longer decoded twice, and the release assets carry build provenance attestations.
+
+- mp3rgui: Help > Bake'n Deck for DJs opens the Bake'n Deck site; the German catalogue gains the three texts #473 changed, which had been showing in English
+- Library: `AlbumAnalysisOptions::on_failure` hands over the error of each file an album analysis leaves out, so the CLI no longer probes those files again, nor analyzes a set a second time when every file in it failed (#464)
+- Library: `mp4meta::FreeformTag`, which no public function produces or accepts, is hidden from the docs (#465)
+- Release: every binary archive, installer, and `.deb` gets a GitHub build provenance attestation, verifiable with `gh attestation verify <file> --repo M-Igashi/mp3rgain` (#482)
 
 ### v3.15.0 - mp3rgui in German & Indonesian, Lighter Tag Writes
 
