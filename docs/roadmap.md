@@ -39,7 +39,7 @@ What ships today:
 
 ## Unreleased
 
-Nothing yet.
+- CI: apt.yml's install check runs on Ubuntu 24.04 again, so it covers the oldest glibc and apt the packages must work with; since `ubuntu-latest` became 26.04 it had only checked Debian 13 and Ubuntu 26.04
 
 ## Release history
 

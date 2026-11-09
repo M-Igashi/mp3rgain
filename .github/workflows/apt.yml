@@ -31,7 +31,9 @@ jobs:
   publish:
     name: Publish apt index
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
+    # Pinned: the install check below needs a runner with the oldest glibc
+    # and apt we support. ubuntu-latest is 26.04 since November 2026.
+    runs-on: ubuntu-24.04
     environment: apt
     permissions:
       contents: write
@@ -94,8 +96,9 @@ jobs:
           gh release upload "v$VERSION" --repo "$GITHUB_REPOSITORY" --clobber \
             Packages Packages.gz Release Release.gpg InRelease mp3rgain-archive-keyring.gpg
 
-      # Install the way the README says, from releases/latest, with apt's
-      # gpgv on the runner and apt 3 on Debian 13 and Ubuntu 26.04, which the
+      # Install the way the README says, from releases/latest: on the
+      # Ubuntu 24.04 runner (apt 2 with gpgv, glibc 2.39, the oldest the GUI
+      # must run on), and with apt 3 on Debian 13 and Ubuntu 26.04, which the
       # PPA served until this repository replaced it. Only meaningful when
       # this release is the latest one.
       - name: Install from the repository
