@@ -39,7 +39,7 @@ What ships today:
 
 ## Unreleased
 
-Nothing yet.
+- Release: the x86_64 Linux mp3rgui and both amd64 `.deb` packages are built on Ubuntu 24.04 again; in 3.16.0 they came from `ubuntu-latest`, by then Ubuntu 26.04, so x86_64 mp3rgui needed glibc 2.43 and neither started nor installed on Ubuntu 24.04 or Debian 13
 
 ## Release history
 

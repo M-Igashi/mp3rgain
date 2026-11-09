@@ -71,8 +71,11 @@ jobs:
             os: macos-latest
           - target: aarch64-apple-darwin
             os: macos-latest
+          # The GUI links glibc, so the runner sets the oldest distribution
+          # it starts on. Not ubuntu-latest: its move to 26.04 made 3.16.0
+          # need glibc 2.43. Both amd64 .deb jobs are pinned for the same reason.
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
           - target: x86_64-pc-windows-msvc
@@ -484,7 +487,7 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - arch: arm64
             os: ubuntu-24.04-arm
     steps:
@@ -559,7 +562,7 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - arch: arm64
             os: ubuntu-24.04-arm
     steps:
