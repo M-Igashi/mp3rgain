@@ -71,7 +71,7 @@ yay -S baken-bin                   # Arch Linux
 cargo install baken                # All platforms (ffmpeg required)
 ```
 
-Bake'n Deck for Mac, the native app edition, is on the [Mac App Store](https://apps.apple.com/app/baken-deck/id6808813823).
+Bake'n Deck for Mac, the native app edition, is on the [Mac App Store](https://baken.ravers.workers.dev/get?from=mp3rgain-docs).
 
 ## Typical workflows
 
