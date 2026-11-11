@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current status: v3.16.1 (2026-11-09)
+## Current status: v3.16.2 (2026-11-11)
 
 mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writes standard `REPLAYGAIN_*` tags, and can bake the correction into the bitstream losslessly. For MP3 it is a modern drop-in replacement for mp3gain. For AAC it is the only actively maintained command-line tool that does this: aacgain has been abandoned since about 2009, and foobar2000, the reference-grade ReplayGain suite, offers a comparable scalefactor-based AAC rewrite ("Apply ReplayGain to file content") but only as a Windows GUI with no undo.
 
@@ -39,12 +39,19 @@ What ships today:
 
 ## Unreleased
 
-- CI: apt.yml's install check runs on Ubuntu 24.04 again, so it covers the oldest glibc and apt the packages must work with; since `ubuntu-latest` became 26.04 it had only checked Debian 13 and Ubuntu 26.04
-- Tags: removing mp3rgain's values from an MP3's ID3v2 tag (`-u -s i`, `-s d -s i`) removes the tag when nothing else is left in it, so a file that had no tag gets back its original length instead of keeping an empty 2 KB one (#483)
+Nothing yet.
 
 ## Release history
 
 One line per change. The [release notes](https://github.com/M-Igashi/mp3rgain/releases) and the linked issues have the details.
+
+### v3.16.2 - No Empty ID3v2 Tag Left Behind
+
+The analysis, the applied gains, and the command-line output are unchanged; removing mp3rgain's values from an MP3's ID3v2 tag no longer leaves an empty one. Found in a code review by Claude Fable 5.2.
+
+- CI: apt.yml's install check runs on Ubuntu 24.04 again, so it covers the oldest glibc and apt the packages must work with; since `ubuntu-latest` became 26.04 it had only checked Debian 13 and Ubuntu 26.04
+- Tags: removing mp3rgain's values from an MP3's ID3v2 tag (`-u -s i`, `-s d -s i`) removes the tag when nothing else is left in it, so a file that had no tag gets back its original length instead of keeping an empty 2 KB one (#483)
+- Docs: SECURITY.md explains how to verify the build provenance attestations of release downloads (#484)
 
 ### v3.16.1 - mp3rgui Starts on Ubuntu 24.04 and Debian 13 Again
 
