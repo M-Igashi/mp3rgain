@@ -40,6 +40,7 @@ What ships today:
 ## Unreleased
 
 - CI: apt.yml's install check runs on Ubuntu 24.04 again, so it covers the oldest glibc and apt the packages must work with; since `ubuntu-latest` became 26.04 it had only checked Debian 13 and Ubuntu 26.04
+- Tags: removing mp3rgain's values from an MP3's ID3v2 tag (`-u -s i`, `-s d -s i`) removes the tag when nothing else is left in it, so a file that had no tag gets back its original length instead of keeping an empty 2 KB one (#483)
 
 ## Release history
 

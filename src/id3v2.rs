@@ -101,11 +101,23 @@ const GROWTH_PADDING: usize = 2048;
 /// it fits, and given [`GROWTH_PADDING`] when it has to grow (issue #467). The
 /// crate still locates the region and does the write; a wrong estimate here
 /// only costs the move it used to make every time.
+///
+/// A tag left with no frames is removed, padding included, rather than
+/// written: stripping mp3rgain's values from a file that had no tag before
+/// would otherwise leave an empty header and 2 KB of zeros (issue #483).
 fn write_tag_direct(path: &Path, tag: &mut id3::Tag) -> Result<()> {
+    let id3_error = |e: id3::Error| Error::Id3v2Error {
+        message: e.to_string(),
+    };
     let len = encoded_len(tag).or_else(|| {
         tag.frames_vec_mut().retain(is_frame_encodable);
         encoded_len(tag)
     });
+    if tag.frames().next().is_none() {
+        return id3::Tag::remove_from_path(path)
+            .map(|_| ())
+            .map_err(id3_error);
+    }
     let padding = match (len, tag_region_len(path)) {
         (Some(len), Some(region)) if len <= region => region - len,
         _ => GROWTH_PADDING,
@@ -114,9 +126,7 @@ fn write_tag_direct(path: &Path, tag: &mut id3::Tag) -> Result<()> {
         .version(TARGET_VERSION)
         .padding(padding)
         .write_to_path(tag, path)
-        .map_err(|e| Error::Id3v2Error {
-            message: e.to_string(),
-        })
+        .map_err(id3_error)
 }
 
 /// Length of `tag` encoded as [`TARGET_VERSION`] without padding, `None` when
@@ -541,6 +551,42 @@ mod tests {
         assert_eq!(grown[region..], audio);
         write_id3v2_replaygain_direct(&path, &rg("+2.000000 dB")).unwrap();
         assert_eq!(std::fs::read(&path).unwrap().len(), grown.len());
+
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    /// Issue #483: stripping mp3rgain's values from a file that had no tag
+    /// removes the tag, padding included, instead of leaving an empty one.
+    /// A tag that keeps other frames is still written.
+    #[test]
+    fn stripping_every_frame_removes_the_tag() {
+        let dir = std::env::temp_dir().join("mp3rgain_id3v2_strip_tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("stripped.mp3");
+        let audio = [0xFFu8, 0xFB, 0x90, 0x00, 1, 2, 3, 4];
+        let rg = Id3v2ReplayGain {
+            track_gain: Some("-1.000000 dB".to_string()),
+            undo: Some("-002,-002,N".to_string()),
+            ..Default::default()
+        };
+
+        std::fs::write(&path, audio).unwrap();
+        write_id3v2_replaygain_direct(&path, &rg).unwrap();
+        delete_id3v2_replaygain_direct(&path).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), audio);
+
+        std::fs::write(&path, audio).unwrap();
+        write_id3v2_replaygain(&path, &rg).unwrap();
+        delete_id3v2_replaygain(&path).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), audio);
+
+        let mut tag = id3::Tag::new();
+        tag.set_title("Title");
+        tag.write_to_path(&path, TARGET_VERSION).unwrap();
+        write_id3v2_replaygain_direct(&path, &rg).unwrap();
+        delete_id3v2_replaygain_direct(&path).unwrap();
+        assert_eq!(read_tag(&path).unwrap().title(), Some("Title"));
+        assert!(read_id3v2_replaygain(&path).unwrap().undo.is_none());
 
         std::fs::remove_file(&path).unwrap();
     }
