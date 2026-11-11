@@ -153,7 +153,7 @@ cargo audit --file mp3rgui/Cargo.lock
 cargo geiger
 ```
 
-CI also runs CodeQL and GitHub's dependency review; see [SECURITY.md](../SECURITY.md).
+CI also runs CodeQL and GitHub's dependency review; see [SECURITY.md](../SECURITY.md), which also explains how to verify the build provenance attestation of a release download.
 
 ## References
 
