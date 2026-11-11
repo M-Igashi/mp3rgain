@@ -75,7 +75,7 @@ The signing key's fingerprint is `54E7 BDDA 7581 ED3A 9689 0E9D 1697 D52D 7E5A 2
 
 Notes:
 
-- Archives for every platform are on [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases). The **[install guide](https://mp3rgain.tyna.ninja/install)** covers checksum verification and troubleshooting (Windows Defender false positives, missing OpenGL, Ubuntu releases older than 22.04).
+- Archives for every platform are on [GitHub Releases](https://github.com/M-Igashi/mp3rgain/releases). The **[install guide](https://mp3rgain.tyna.ninja/install)** covers checksum verification and troubleshooting (Windows Defender false positives, missing OpenGL, Ubuntu releases older than 22.04). Each archive, installer, and `.deb` also carries a build provenance attestation: `gh attestation verify <file> --repo M-Igashi/mp3rgain` ([SECURITY.md](SECURITY.md#verifying-release-downloads)).
 - On macOS the GUI app and DMG are signed with a Developer ID and notarized. The CLI binary is not signed.
 - Windows binaries and the installer are not code-signed.
 - `mp3rgain-bin` on the AUR is maintained by a third party. This project publishes only `mp3rgui` there.
