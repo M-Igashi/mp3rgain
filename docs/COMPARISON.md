@@ -149,6 +149,9 @@ For AAC in MP4/M4A, mp3rgain uses its own `mp3rgain_undo` and `mp3rgain_minmax` 
 # macOS (Homebrew)
 brew install M-Igashi/tap/mp3rgain
 
+# macOS (MacPorts)
+sudo port install mp3rgain
+
 # Windows (winget)
 winget install M-Igashi.mp3rgain
 
@@ -157,6 +160,9 @@ sudo apt install mp3rgain
 
 # Arch Linux (community-maintained AUR package)
 yay -S mp3rgain-bin
+
+# Nix
+nix profile install github:M-Igashi/mp3rgain
 
 # pkgx (macOS, Linux)
 pkgx mp3rgain
@@ -244,7 +250,7 @@ mp3rgain -a *.mp3               # gain baked into global_gain, plus residual tag
 
 ## Security
 
-See [security.md](security.md) for the CVE details.
+See [security.md](security.md) for the CVE details, or the shorter [Is mp3gain safe?](https://mp3rgain.tyna.ninja/security) on the website.
 
 | Tool | Security status |
 |------|-----------------|
@@ -258,8 +264,8 @@ See [security.md](security.md) for the CVE details.
 
 - Lossless gain moves in whole 1.5 dB steps, so the audio lands within about 0.75 dB of the target (`--tags-only` writes exact values).
 - MP3 and AAC-LC only: no HE-AAC, FLAC, Ogg, Opus, WAV, or ALAC.
-- `-g` and `-l` leave existing `REPLAYGAIN_*` tags unchanged (see [Avoiding double volume adjustment](#avoiding-double-volume-adjustment)).
-- Undo restores every audio frame, but after an ID3v2 tag write the file is not byte-identical to the original (the ID3v2 tag is rewritten as ID3v2.4). Frames whose `global_gain` clamped at 0 or 255 cannot be restored.
+- `-l` leaves existing `REPLAYGAIN_*` tags unchanged (see [Avoiding double volume adjustment](#avoiding-double-volume-adjustment)).
+- Undo restores every audio frame. A file that had no ID3v2 tag of its own comes back byte-identical (since 3.16.2); one that had an ID3v2 tag keeps it, rewritten as ID3v2.4. Frames whose `global_gain` clamped at 0 or 255 cannot be restored.
 - Raw ADTS streams with CRC protection (`protection_absent = 0`) keep their original CRC after a gain change. ffmpeg and Apple's encoder do not write ADTS CRCs, so there is nothing to test the update against.
 
 ### aacgain

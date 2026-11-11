@@ -9,7 +9,7 @@ license = "MIT"
 repository = "https://github.com/M-Igashi/mp3rgain"
 homepage = "https://mp3rgain.tyna.ninja"
 readme = "README.md"
-keywords = ["mp3", "audio", "gain", "volume", "lossless"]
+keywords = ["mp3gain", "replaygain", "mp3", "aac", "volume"]
 categories = ["multimedia::audio", "command-line-utilities"]
 exclude = ["mp3rgui/", "target/", "packages/", "docs/*.md", "docs/branding/", "scripts/", ".github/", ".claude/", "tests/*.rs", "tests/reference/", "CLAUDE.md", "flake.nix", "flake.lock"]
 

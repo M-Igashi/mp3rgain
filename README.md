@@ -10,11 +10,11 @@
 [![GitHub Downloads](https://img.shields.io/github/downloads/M-Igashi/mp3rgain/total?label=downloads&color=brightgreen)](https://m-igashi.github.io/mp3rgain/)
 [![mp3gain compatible](https://img.shields.io/badge/mp3gain-compatible-brightgreen.svg)](docs/compatibility-report.md)
 
-**Lossless MP3/AAC volume adjustment - a modern mp3gain / aacgain replacement written in Rust**
+**Lossless MP3 and AAC volume normalization: a maintained mp3gain and aacgain alternative, written in Rust**
 
-mp3rgain changes the volume of MP3 and AAC files without re-encoding. It rewrites the `global_gain` value stored in each frame, the same field mp3gain and aacgain edit, so the audio is never decoded and compressed again and no quality is lost. It runs ReplayGain track and album analysis, writes standard `REPLAYGAIN_*` tags, and stores an undo tag so the change can be reverted.
+mp3rgain makes MP3 and AAC files play at the same loudness without re-encoding them. It rewrites the `global_gain` value stored in each frame, the same field mp3gain and aacgain edit, so the audio is never decoded and compressed again, no quality is lost, and the new volume plays on every device. It runs ReplayGain track and album analysis, writes standard `REPLAYGAIN_*` tags, and stores an undo tag so the change can be reverted. It comes as a command-line tool (`mp3rgain`) and a desktop app (`mp3rgui`) for Windows, macOS, and Linux.
 
-🌐 **Website:** [mp3rgain.tyna.ninja](https://mp3rgain.tyna.ninja/): install guide, [CLI reference](https://mp3rgain.tyna.ninja/docs/cli), [FAQ](https://mp3rgain.tyna.ninja/faq), and [tool comparison](https://mp3rgain.tyna.ninja/vs-mp3gain)
+🌐 **Website:** [mp3rgain.tyna.ninja](https://mp3rgain.tyna.ninja/): [install guide](https://mp3rgain.tyna.ninja/install), [desktop app](https://mp3rgain.tyna.ninja/gui), [how it works](https://mp3rgain.tyna.ninja/how-it-works), [CLI reference](https://mp3rgain.tyna.ninja/docs/cli), [mp3gain alternatives compared](https://mp3rgain.tyna.ninja/vs-mp3gain), [is mp3gain safe?](https://mp3rgain.tyna.ninja/security), and [FAQ](https://mp3rgain.tyna.ninja/faq)
 
 - **Lossless**: only the per-frame `global_gain` field changes. Works on MP3, AAC in M4A/MP4 (including the audio track of a video MP4), and raw ADTS `.aac`.
 - **Reversible**: `-u` restores the original gain from the undo tag. A frame whose gain would pass the 0..255 limit is clamped instead, cannot be restored exactly, and triggers a warning.
@@ -22,7 +22,8 @@ mp3rgain changes the volume of MP3 and AAC files without re-encoding. It rewrite
 - **mp3gain compatible**: mp3gain's flags, TSV output, and `MP3GAIN_UNDO` tag, so scripts and tools built around mp3gain keep working.
 - **Built for whole libraries**: recursive scans (`-R`), one album per folder or per release, parallel processing, JSON and TSV output.
 - **One binary**: no runtime or codecs to install. macOS (universal), Linux, and Windows, each on x86_64 and ARM64.
-- **GUI**: `mp3rgui`, a desktop app with drag and drop.
+- **GUI**: `mp3rgui`, a desktop app with drag and drop that follows the classic MP3Gain workflow, in seven languages.
+- **Memory safe**: written in Rust with no `unsafe` blocks of its own, and none of the C code behind the published mp3gain and aacgain CVEs ([docs/security.md](docs/security.md)).
 
 > [!IMPORTANT]
 > **AAC files that crackle after a gain change by mp3rgain 2.8.0 to 3.11.1:** those versions left some frames of FDK-AAC encodes at their original volume ([#402](https://github.com/M-Igashi/mp3rgain/issues/402)). Undo such files with the old version first (`mp3rgain -u`, or Undo Selected in mp3rgui), then upgrade and apply the gain again. Undoing them with 3.12.0 or later makes it worse: the new version also moves the frames the old one never changed, so they end up louder than the original. If you have already upgraded, the 3.11.1 downloads are on [its release page](https://github.com/M-Igashi/mp3rgain/releases/tag/v3.11.1). MP3 files, and AAC files that do not crackle, need nothing. Details are in the [3.12.0 release notes](https://github.com/M-Igashi/mp3rgain/releases/tag/v3.12.0).
@@ -40,6 +41,7 @@ mp3rgain changes the volume of MP3 and AAC files without re-encoding. It rewrite
 | Platform | Command |
 |----------|---------|
 | macOS (Homebrew) | `brew install M-Igashi/tap/mp3rgain` |
+| macOS (MacPorts) | `sudo port install mp3rgain` |
 | Windows (winget) | `winget install M-Igashi.mp3rgain` |
 | Debian 12+ / Ubuntu 22.04+ (apt, 26.04 included) | Add the [apt repository](#debian-and-ubuntu-apt-repository), then `sudo apt install mp3rgain` |
 | Arch Linux (AUR, third-party) | `yay -S mp3rgain-bin` |
@@ -164,21 +166,32 @@ let info = analyze(Path::new("song.mp3"))?;
 
 `apply_gain` and `analyze` are low-level MP3 helpers: `apply_gain` rewrites the frames and writes no undo tag. The pipeline the CLI and GUI share (atomic write, undo and ReplayGain tags, MP3 and AAC) is `apply::apply_with_options`. API documentation: [docs.rs/mp3rgain](https://docs.rs/mp3rgain).
 
-## Why mp3rgain?
+## Why mp3rgain instead of mp3gain or aacgain?
 
-The original [mp3gain](http://mp3gain.sourceforge.net/) has had no release since 1.6.2, and [aacgain](https://github.com/dgilman/aacgain) none since 2.0.0 (2019); their release builds still carry known CVEs ([docs/security.md](docs/security.md)). mp3rgain is a memory-safe Rust replacement that covers both formats in one tool. It defaults to mp3gain-identical ReplayGain 1.0 values, with BS.1770 loudness (`--rg2` / `--r128`) as an opt-in. How it compares to rsgain, loudgain, foobar2000, and ffmpeg, and when to use those instead, is covered in the **[tool comparison](https://mp3rgain.tyna.ninja/vs-mp3gain)** and [docs/COMPARISON.md](docs/COMPARISON.md).
+The original [mp3gain](http://mp3gain.sourceforge.net/) has had no release since 1.6.2, and [aacgain](https://github.com/dgilman/aacgain) none since 2.0.0 (2019); their release builds still carry known CVEs. Debian and Ubuntu ship a patched mp3gain, while its Windows downloads and every aacgain build are unpatched ([is mp3gain safe?](https://mp3rgain.tyna.ninja/security), [docs/security.md](docs/security.md)). mp3rgain is a memory-safe Rust replacement that covers both formats in one tool. It defaults to mp3gain-identical ReplayGain 1.0 values, with BS.1770 loudness (`--rg2` / `--r128`) as an opt-in. [How lossless gain works](https://mp3rgain.tyna.ninja/how-it-works) explains the method.
+
+mp3rgain is not always the right tool:
+
+- FLAC, Ogg, Opus, or WAV files, or a setup where every player honours ReplayGain tags: use [rsgain](https://github.com/complexlogic/rsgain).
+- A Windows desktop where you want the reference ReplayGain 2.0 scanner: use [foobar2000](https://www.foobar2000.org/).
+- An exact loudness target, where re-encoding is acceptable: use ffmpeg `loudnorm`.
+- A DJ library for rekordbox and CDJs: use [Bake'n Deck](https://baken.ravers.workers.dev).
+
+The **[tool comparison](https://mp3rgain.tyna.ninja/vs-mp3gain)** and [docs/COMPARISON.md](docs/COMPARISON.md) cover each of these in detail.
 
 ## Documentation
 
 - [CLI Reference](https://mp3rgain.tyna.ninja/docs/cli): options, analysis modes, exit codes, output formats, recipes
 - [Install Guide](https://mp3rgain.tyna.ninja/install): all platforms, verification, troubleshooting
+- [Desktop App](https://mp3rgain.tyna.ninja/gui): using mp3rgui step by step, its options, coming from MP3Gain
+- [How It Works](https://mp3rgain.tyna.ninja/how-it-works): the gain field, 1.5 dB steps, residual tags, undo
 - [Migration Guide](docs/migrating-from-mp3gain.md): flag equivalence, substitution patterns, tag layout, beets config
 - [Technical Comparison](docs/COMPARISON.md): mp3gain, aacgain, and other ReplayGain tools
 - [Compatibility Report](docs/compatibility-report.md): bit-level verification against the original mp3gain
 - [Parallel Performance](docs/perf-parallel.md): `-j` / `--threads` design and benchmarks
 - [Use Cases](docs/use-cases.md): integration examples (beets, Bake'n Deck, etc.)
 - [Design Decisions](docs/design-decisions.md): things that look like defects but are deliberate, and where each was decided
-- [Security](docs/security.md): memory safety and CVE analysis
+- [Security](docs/security.md): memory safety and CVE analysis ([summary on the website](https://mp3rgain.tyna.ninja/security))
 - [Roadmap](docs/roadmap.md): development plans
 - [Man page](docs/man/mp3rgain.1): installed by the `.deb` packages (apt repository) and the PPA
 - [FAQ](https://mp3rgain.tyna.ninja/faq) · [Download Stats](https://m-igashi.github.io/mp3rgain/)

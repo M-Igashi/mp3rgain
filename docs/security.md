@@ -2,7 +2,7 @@
 
 mp3rgain is a rewrite of mp3gain in Rust. It shares no code with mp3gain or aacgain, and none of the C components behind their published CVEs. This page lists those CVEs, where they live, and why their bug classes do not carry over. It describes the design rather than a tested guarantee: no CVE proof-of-concept file is part of mp3rgain's test suite, and there is no fuzzing harness yet.
 
-To report a vulnerability in mp3rgain, see [SECURITY.md](../SECURITY.md).
+To report a vulnerability in mp3rgain, see [SECURITY.md](../SECURITY.md). A shorter version of this page, written for people deciding whether their copy of mp3gain is safe to keep using, is on the website: [Is mp3gain safe?](https://mp3rgain.tyna.ninja/security).
 
 ## Vulnerabilities in the original mp3gain
 

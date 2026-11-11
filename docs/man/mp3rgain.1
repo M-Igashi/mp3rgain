@@ -346,9 +346,9 @@ values are removed as well, since they described the adjusted audio.
 Every audio frame is restored exactly, except frames whose
 .I global_gain
 was clamped at 0 or 255. The file as a whole is byte-identical to the original
-only when no ID3v2 tag was written: with the default MP3 layout, an existing
-ID3v2 tag stays rewritten as ID3v2.4 and a file that had none keeps an empty
-ID3v2 header. A file that was never adjusted is an error, and so is an undo
+when it had no ID3v2 tag of its own: an ID3v2 tag that undo leaves empty is
+removed. An existing ID3v2 tag stays rewritten as ID3v2.4. A file that was
+never adjusted is an error, and so is an undo
 tag with different left and right values on a mono or joint-stereo MP3: mp3gain
 writes one when it refuses
 .B \-l

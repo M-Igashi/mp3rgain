@@ -2,7 +2,7 @@
 
 ## Current status: v3.16.2 (2026-11-11)
 
-mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writes standard `REPLAYGAIN_*` tags, and can bake the correction into the bitstream losslessly. For MP3 it is a modern drop-in replacement for mp3gain. For AAC it is the only actively maintained command-line tool that does this: aacgain has been abandoned since about 2009, and foobar2000, the reference-grade ReplayGain suite, offers a comparable scalefactor-based AAC rewrite ("Apply ReplayGain to file content") but only as a Windows GUI with no undo.
+mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writes standard `REPLAYGAIN_*` tags, and can bake the correction into the bitstream losslessly. For MP3 it is a modern drop-in replacement for mp3gain. For AAC it is the only actively maintained command-line tool that does this: aacgain's last release was 2.0.0 in 2019 and its last commit was in 2022, and foobar2000, the reference-grade ReplayGain suite, offers a comparable scalefactor-based AAC rewrite ("Apply ReplayGain to file content") but only as a Windows GUI with no undo.
 
 What ships today:
 
@@ -39,7 +39,11 @@ What ships today:
 
 ## Unreleased
 
-Nothing yet.
+Documentation only; nothing changed in the code or the output.
+
+- Docs: COMPARISON, the migration guide, and the man page say what undo leaves behind since 3.16.2: a file that had no ID3v2 tag comes back byte-identical, on MP3 and raw ADTS (#483); they still described the empty tag of 3.16.1
+- Docs: the README lists MacPorts, says when another tool fits better, and links the website's new pages (desktop app, how lossless gain works, is mp3gain safe?); COMPARISON no longer says `-g` leaves stored ReplayGain values unchanged
+- crates.io: the keywords are `mp3gain`, `replaygain`, `mp3`, `aac`, and `volume`
 
 ## Release history
 
