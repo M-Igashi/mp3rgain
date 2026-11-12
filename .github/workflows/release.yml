@@ -452,6 +452,7 @@ jobs:
           sed -i "s|url \"https://github.com/M-Igashi/mp3rgain/releases/download/v[^\"]*|url \"https://github.com/M-Igashi/mp3rgain/releases/download/${TAG}/mp3rgain-${TAG}-macos-universal.tar.gz|" mp3rgain.rb
           sed -i "s|sha256 \"[^\"]*\"|sha256 \"${MACOS_SHA256}\"|" mp3rgain.rb
           sed -i "s|version \"[^\"]*\"|version \"${VERSION}\"|" mp3rgain.rb
+          sed -i 's|homepage "[^"]*"|homepage "https://mp3rgain.tyna.ninja/"|' mp3rgain.rb
 
       - name: Update GUI cask
         env:
@@ -460,6 +461,7 @@ jobs:
         run: |
           cd homebrew-tap/Casks
           sed -i "s|version \"[^\"]*\"|version \"${VERSION}\"|" mp3rgui.rb
+          sed -i 's|homepage "[^"]*"|homepage "https://mp3rgain.tyna.ninja/gui"|' mp3rgui.rb
           sed -i "s|sha256 \"[^\"]*\"|sha256 \"${GUI_MACOS_DMG_SHA256}\"|" mp3rgui.rb
 
       - name: Commit and push
