@@ -878,9 +878,8 @@ fn parse_scale_factor_data(
     let mut noise_pcm_flag = true;
     let scf_table = scf_huffman_table();
 
-    for g in 0..info.window_groups {
-        for sfb in 0..info.max_sfb {
-            let cb = section.sfb_cb[g][sfb];
+    for group in &section.sfb_cb[..info.window_groups] {
+        for &cb in &group[..info.max_sfb] {
             if cb == ZERO_HCB {
                 continue;
             }
