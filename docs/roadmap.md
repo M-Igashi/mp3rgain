@@ -23,7 +23,7 @@ What ships today:
 - [ ] More mp3rgui translations, one `.po` file per language (#440); `pt_PT` is offered
 - [ ] Homebrew core formula (#8); today it is in the `M-Igashi/tap` tap
 - [ ] nixpkgs package (#314); the flake in this repo already works, see [packages/nix/README.md](../packages/nix/README.md)
-- [ ] Official Debian archive package (#394, ITP [#1126519](https://bugs.debian.org/1126519)): `id3` needs packaging in `debcargo-conf`, `indicatif` 0.18 and `console` 0.16 are only in experimental, and the upload needs a sponsor
+- [ ] Official Debian archive package (#394, ITP [#1126519](https://bugs.debian.org/1126519)): `id3` and `mp3rgain` are packaged in `debcargo-conf` (merge requests [!1542](https://salsa.debian.org/rust-team/debcargo-conf/-/merge_requests/1542) and [!1543](https://salsa.debian.org/rust-team/debcargo-conf/-/merge_requests/1543)) and wait for a sponsor's upload; `indicatif` 0.18 is only in experimental, so the package builds against 0.17 for now
 - [ ] Fedora/RPM package
 - [ ] Flatpak package
 - [ ] FLAC support
