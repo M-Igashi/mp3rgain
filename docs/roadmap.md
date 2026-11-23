@@ -39,8 +39,9 @@ What ships today:
 
 ## Unreleased
 
-Documentation, and a link to it at the end of `mp3rgain -h`; nothing else changed in the code or the output.
+Documentation, a link to it at the end of `mp3rgain -h`, and one GUI display fix; nothing else changed in the code or the output.
 
+- GUI: the sort arrow in a column header is drawn as a triangle instead of an empty box; `▴` / `▾` are missing from egui's proportional fonts, so the header uses `⏶` / `⏷` from its bundled icon font (#489)
 - Docs: COMPARISON, the migration guide, and the man page say what undo leaves behind since 3.16.2: a file that had no ID3v2 tag comes back byte-identical, on MP3 and raw ADTS (#483); they still described the empty tag of 3.16.1
 - Docs: the README lists MacPorts, says when another tool fits better, and links the website's new pages (desktop app, how lossless gain works, is mp3gain safe?); COMPARISON no longer says `-g` leaves stored ReplayGain values unchanged
 - Docs: the man page says how to read the analysis output of a file that was already adjusted: a small dB change next to a gain change of 0 is the remainder below one step, not a missing tag (#490)
