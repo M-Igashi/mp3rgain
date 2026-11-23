@@ -133,4 +133,7 @@ pub fn print_usage() {
     );
     println!("    - Default analysis is ReplayGain 1.0 (mp3gain-identical values);");
     println!("      --rg2 / --r128 opt into BS.1770 loudness measurement");
+    println!();
+    println!("{}", "DOCUMENTATION:".cyan().bold());
+    println!("    https://mp3rgain.tyna.ninja/docs/cli");
 }

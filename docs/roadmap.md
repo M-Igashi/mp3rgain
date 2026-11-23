@@ -39,11 +39,12 @@ What ships today:
 
 ## Unreleased
 
-Documentation only; nothing changed in the code or the output.
+Documentation, and a link to it at the end of `mp3rgain -h`; nothing else changed in the code or the output.
 
 - Docs: COMPARISON, the migration guide, and the man page say what undo leaves behind since 3.16.2: a file that had no ID3v2 tag comes back byte-identical, on MP3 and raw ADTS (#483); they still described the empty tag of 3.16.1
 - Docs: the README lists MacPorts, says when another tool fits better, and links the website's new pages (desktop app, how lossless gain works, is mp3gain safe?); COMPARISON no longer says `-g` leaves stored ReplayGain values unchanged
 - Docs: the man page says how to read the analysis output of a file that was already adjusted: a small dB change next to a gain change of 0 is the remainder below one step, not a missing tag (#490)
+- CLI: `mp3rgain -h` ends with the address of the online CLI reference, and the man page lists it under SEE ALSO; Windows users have no man page to read (#490)
 - crates.io: the keywords are `mp3gain`, `replaygain`, `mp3`, `aac`, and `volume`
 
 ## Release history
