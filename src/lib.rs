@@ -608,7 +608,9 @@ pub fn read_undo_channel_steps(file_path: &Path, layout: TagLayout) -> Option<(i
         AudioFileType::Aac => {
             let undo_tags = mp4meta::read_undo_tags(file_path).ok()?;
             // AAC already stores the applied gain.
-            return Some(ape::parse_undo_values(undo_tags.undo()));
+            return undo_tags
+                .undo()
+                .map(|undo| ape::parse_undo_values(Some(undo)));
         }
         // Raw ADTS keeps the MP3 undo-delta convention, in ID3v2 only.
         AudioFileType::Adts => return from_id3v2(),

@@ -580,62 +580,36 @@ fn freeform_tags_in_moov(
     moov_content_start: usize,
     moov_content_size: usize,
 ) -> Vec<FreeformTag> {
-    let (udta_pos, udta_header) =
-        match find_box_in_container(data, moov_content_start, moov_content_size, UDTA) {
-            Some(x) => x,
-            None => return Vec::new(),
-        };
+    let (_, ilst) = locate_ilst(data, moov_content_start, moov_content_size);
+    ilst_items(ilst)
+        .filter(|(_, header)| header.box_type == FREEFORM)
+        .filter_map(|(pos, header)| parse_freeform_tag(item_content(ilst, pos, &header)))
+        .filter(|tag| tag.namespace() == ITUNES_NAMESPACE)
+        .collect()
+}
 
-    let udta_content_start = udta_pos + udta_header.header_size as usize;
-    let udta_content_size = udta_header.content_size() as usize;
-
-    let (meta_pos, meta_header) =
-        match find_box_in_container(data, udta_content_start, udta_content_size, META) {
-            Some(x) => x,
-            None => return Vec::new(),
-        };
-
-    let meta_content_start = meta_pos + meta_header.header_size as usize + 4;
-    let meta_content_size = (meta_header.content_size() as usize).saturating_sub(4);
-
-    let (ilst_pos, ilst_header) =
-        match find_box_in_container(data, meta_content_start, meta_content_size, ILST) {
-            Some(x) => x,
-            None => return Vec::new(),
-        };
-
-    let ilst_content_start = ilst_pos + ilst_header.header_size as usize;
-    let ilst_content_size = ilst_header.content_size() as usize;
-
-    let mut tags = Vec::new();
-    // Clamp to the buffer: a malformed ilst can declare a size past EOF.
-    let ilst_end = ilst_content_start
-        .saturating_add(ilst_content_size)
-        .min(data.len());
-    let mut pos = ilst_content_start;
-    while pos + 8 <= ilst_end {
-        let mut cursor = Cursor::new(&data[pos..]);
-        if let Ok(Some(header)) = BoxHeader::read(&mut cursor) {
-            if header.size == 0 || pos + header.size as usize > ilst_end {
-                break;
-            }
-
-            if header.box_type == FREEFORM {
-                let tag_data = &data[pos + header.header_size as usize..pos + header.size as usize];
-                if let Some(tag) = parse_freeform_tag(tag_data) {
-                    if tag.namespace() == ITUNES_NAMESPACE {
-                        tags.push(tag);
-                    }
-                }
-            }
-
-            pos += header.size as usize;
-        } else {
-            break;
+/// The boxes in an `ilst`'s content, as `(position, header)`, up to the first
+/// one that is malformed or runs past the content. The size is compared with
+/// what is left rather than added to the position, so a 64-bit size near
+/// `u64::MAX` cannot wrap past the check.
+fn ilst_items(content: &[u8]) -> impl Iterator<Item = (usize, BoxHeader)> + '_ {
+    let mut pos = 0;
+    std::iter::from_fn(move || {
+        let rest = content.get(pos..).filter(|rest| rest.len() >= 8)?;
+        let header = BoxHeader::read(&mut Cursor::new(rest)).ok()??;
+        if header.size == 0 || header.size > rest.len() as u64 {
+            return None;
         }
-    }
+        let item = pos;
+        pos += header.size as usize;
+        Some((item, header))
+    })
+}
 
-    tags
+/// The content of the box `header` at `pos`, which [`ilst_items`] has checked
+/// lies within `data`.
+fn item_content<'a>(data: &'a [u8], pos: usize, header: &BoxHeader) -> &'a [u8] {
+    &data[pos + header.header_size as usize..pos + header.size as usize]
 }
 
 /// Read ReplayGain tags from MP4/M4A file
@@ -749,7 +723,6 @@ pub(crate) fn update_mp4_undo_metadata(data: &[u8], tags: &UndoTags) -> Result<V
 /// items go after the items kept and the ReplayGain items after them. Two
 /// rebuilds held three copies of the file during the second one and walked
 /// the chunk offsets twice (issue #469).
-#[cfg(feature = "aac")]
 pub(crate) fn update_mp4_gain_metadata(
     data: &[u8],
     undo: &UndoTags,
@@ -770,7 +743,7 @@ pub(crate) fn update_mp4_gain_metadata(
 
 /// Common logic for rebuilding MP4 file with updated ilst content.
 /// `make_ilst` takes existing ilst content (or empty) and returns the new ilst box.
-fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl Fn(&[u8]) -> Vec<u8>) -> Result<Vec<u8>> {
+fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl FnOnce(&[u8]) -> Vec<u8>) -> Result<Vec<u8>> {
     // Find moov box
     let (moov_pos, moov_header) = find_box(data, MOOV).ok_or(Error::NoMoovBox)?;
 
@@ -778,9 +751,9 @@ fn rebuild_mp4_with_ilst(data: &[u8], make_ilst: impl Fn(&[u8]) -> Vec<u8>) -> R
     let moov_content_size = moov_header.content_size() as usize;
     let moov_end = box_end(data, moov_pos, moov_header.size as usize, "moov")?;
 
-    // Try to find existing ilst or create new metadata structure
-    let (new_ilst, ilst_info) =
-        find_ilst_location(data, moov_content_start, moov_content_size, &make_ilst)?;
+    // Find the existing ilst, or where a new one has to go
+    let (ilst_info, existing_ilst) = locate_ilst(data, moov_content_start, moov_content_size);
+    let new_ilst = make_ilst(existing_ilst);
 
     // A header-only ilst holds no tags. With no ilst to empty, or one that
     // was empty already, there is nothing to write: inserting empty
@@ -951,80 +924,58 @@ enum IlstLocation {
     NeedsUdta,
 }
 
-fn find_ilst_location(
+/// Where udta -> meta -> ilst stands in a `moov` region of `data`, and the
+/// existing ilst's content, clamped to `data` (empty unless the ilst exists).
+/// Shared by the tag reader and the rebuild, so the two agree on where the
+/// tags are.
+fn locate_ilst(
     data: &[u8],
     moov_content_start: usize,
     moov_content_size: usize,
-    make_ilst: &impl Fn(&[u8]) -> Vec<u8>,
-) -> Result<(Vec<u8>, IlstLocation)> {
-    // Find udta
-    let (udta_pos, udta_header) =
-        match find_box_in_container(data, moov_content_start, moov_content_size, UDTA) {
-            Some(x) => x,
-            None => {
-                let ilst = make_ilst(&[]);
-                return Ok((ilst, IlstLocation::NeedsUdta));
-            }
-        };
-
+) -> (IlstLocation, &[u8]) {
+    let Some((udta_pos, udta_header)) =
+        find_box_in_container(data, moov_content_start, moov_content_size, UDTA)
+    else {
+        return (IlstLocation::NeedsUdta, &[]);
+    };
     let udta_content_start = udta_pos + udta_header.header_size as usize;
     let udta_content_size = udta_header.content_size() as usize;
 
-    // Find meta
-    let (meta_pos, meta_header) =
-        match find_box_in_container(data, udta_content_start, udta_content_size, META) {
-            Some(x) => x,
-            None => {
-                let ilst = make_ilst(&[]);
-                return Ok((
-                    ilst,
-                    IlstLocation::NeedsMeta {
-                        udta_pos,
-                        udta_size: udta_header.size as usize,
-                    },
-                ));
-            }
+    let Some((meta_pos, meta_header)) =
+        find_box_in_container(data, udta_content_start, udta_content_size, META)
+    else {
+        let location = IlstLocation::NeedsMeta {
+            udta_pos,
+            udta_size: udta_header.size as usize,
         };
-
+        return (location, &[]);
+    };
     let meta_content_start = meta_pos + meta_header.header_size as usize + 4; // +4 for version/flags
     let meta_content_size = (meta_header.content_size() as usize).saturating_sub(4);
 
-    // Find ilst
-    let (ilst_pos, ilst_header) =
-        match find_box_in_container(data, meta_content_start, meta_content_size, ILST) {
-            Some(x) => x,
-            None => {
-                let ilst = make_ilst(&[]);
-                return Ok((
-                    ilst,
-                    IlstLocation::NeedsIlst {
-                        meta_pos,
-                        meta_size: meta_header.size as usize,
-                        udta_pos,
-                    },
-                ));
-            }
+    let Some((ilst_pos, ilst_header)) =
+        find_box_in_container(data, meta_content_start, meta_content_size, ILST)
+    else {
+        let location = IlstLocation::NeedsIlst {
+            meta_pos,
+            meta_size: meta_header.size as usize,
+            udta_pos,
         };
+        return (location, &[]);
+    };
 
-    // Parse existing ilst and merge with new tags. Clamp to the buffer so a
-    // malformed ilst size cannot slice past EOF.
+    // Clamp to the buffer so a malformed ilst size cannot slice past EOF.
     let ilst_content_start = (ilst_pos + ilst_header.header_size as usize).min(data.len());
     let ilst_content_end = ilst_content_start
         .saturating_add(ilst_header.content_size() as usize)
         .min(data.len());
-    let existing_content = &data[ilst_content_start..ilst_content_end];
-
-    let new_ilst = make_ilst(existing_content);
-
-    Ok((
-        new_ilst,
-        IlstLocation::Existing {
-            ilst_pos,
-            ilst_size: ilst_header.size as usize,
-            meta_pos,
-            udta_pos,
-        },
-    ))
+    let location = IlstLocation::Existing {
+        ilst_pos,
+        ilst_size: ilst_header.size as usize,
+        meta_pos,
+        udta_pos,
+    };
+    (location, &data[ilst_content_start..ilst_content_end])
 }
 
 /// Check if a box at the given position is an iTunes freeform tag whose name
@@ -1038,8 +989,7 @@ fn is_freeform_matching(
     if header.box_type != FREEFORM {
         return false;
     }
-    let inner_data = &data[pos + header.header_size as usize..pos + header.size as usize];
-    parse_freeform_tag(inner_data)
+    parse_freeform_tag(item_content(data, pos, header))
         .is_some_and(|tag| tag.namespace() == ITUNES_NAMESPACE && name_matches(tag.name()))
 }
 
@@ -1069,7 +1019,7 @@ fn repair_swapped_data_header(data: &[u8], pos: usize, header: &BoxHeader) -> Op
     if !is_replaygain_freeform(data, pos, header) && !is_undo_freeform(data, pos, header) {
         return None;
     }
-    let item = &data[pos + header.header_size as usize..pos + header.size as usize];
+    let item = item_content(data, pos, header);
     let (data_pos, data_header) = find_box_in_container(item, 0, item.len(), DATA)?;
     let start = data_pos + data_header.header_size as usize;
     if item.get(start..start + 8)? != SWAPPED_DATA_HEADER {
@@ -1086,26 +1036,13 @@ fn create_ilst_box_filtered(
     let mut content = Vec::new();
 
     // Copy existing tags that don't match the filter
-    let mut pos = 0;
-    while pos + 8 <= existing_content.len() {
-        let mut cursor = Cursor::new(&existing_content[pos..]);
-        if let Ok(Some(header)) = BoxHeader::read(&mut cursor) {
-            if header.size == 0 || pos + header.size as usize > existing_content.len() {
-                break;
-            }
-
-            let tag_data = &existing_content[pos..pos + header.size as usize];
-
-            if !should_replace(existing_content, pos, &header) {
-                match repair_swapped_data_header(existing_content, pos, &header) {
-                    Some(repaired) => content.extend_from_slice(&repaired),
-                    None => content.extend_from_slice(tag_data),
-                }
-            }
-
-            pos += header.size as usize;
-        } else {
-            break;
+    for (pos, header) in ilst_items(existing_content) {
+        if should_replace(existing_content, pos, &header) {
+            continue;
+        }
+        match repair_swapped_data_header(existing_content, pos, &header) {
+            Some(repaired) => content.extend_from_slice(&repaired),
+            None => content.extend_from_slice(&existing_content[pos..pos + header.size as usize]),
         }
     }
 
@@ -1234,7 +1171,9 @@ fn update_chunk_offsets(
         None => return Ok(()),
     };
 
-    let moov_end = (moov_pos + moov_header.size as usize).min(data.len());
+    let moov_end = moov_pos
+        .saturating_add(moov_header.size as usize)
+        .min(data.len());
 
     // Recursively find and update stco/co64 boxes within moov
     update_offsets_recursive(data, moov_pos + 8, moov_end, size_diff, original_moov_end)?;
@@ -1349,11 +1288,11 @@ pub fn delete_gain_tags(file_path: &Path) -> Result<()> {
         return Ok(());
     }
     let data = fs::read(file_path).map_err(|e| Error::io_read(file_path, e))?;
-    let new_data = rebuild_mp4_with_ilst(&data, |existing| {
-        create_ilst_box_filtered(&[], existing, |data, pos, header| {
-            is_replaygain_freeform(data, pos, header) || is_undo_freeform(data, pos, header)
-        })
-    })?;
+    let new_data = update_mp4_gain_metadata(
+        &data,
+        &UndoTags::default(),
+        Some(&ReplayGainTags::default()),
+    )?;
     // Nothing to delete: leave the file, its mtime and its hard links alone.
     if new_data == data {
         return Ok(());
@@ -1510,7 +1449,7 @@ impl Iterator for TrakIter<'_> {
         self.pos = if trak_header.size == 0 {
             self.end
         } else {
-            trak_pos + trak_header.size as usize
+            trak_pos.saturating_add(trak_header.size as usize)
         };
         Some(item)
     }
@@ -1554,7 +1493,9 @@ pub(crate) fn find_trak_sample_info(
     // stsd has 4-byte version/flags + 4-byte entry count before entries.
     // Clamp to the buffer: the declared stsd size may overrun a truncated file.
     let entries_start = stsd_pos + stsd_header.header_size as usize + 8;
-    let stsd_end = (stsd_pos + stsd_header.size as usize).min(data.len());
+    let stsd_end = stsd_pos
+        .saturating_add(stsd_header.size as usize)
+        .min(data.len());
 
     if entries_start + 8 > stsd_end {
         return None;
@@ -2229,6 +2170,31 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A 64-bit item size near `u64::MAX` wrapped the bounds check and
+    /// panicked on the slice. The walk stops at that item, in the reader and
+    /// in the rebuild, and keeps the items before it.
+    #[test]
+    fn test_oversized_ilst_item_stops_the_walk() {
+        let mut rg = ReplayGainTags::default();
+        rg.set_track(-1.0, 0.5);
+        let clean = create_ilst_box(&rg, &[]);
+        let mut ilst = clean.clone();
+        ilst.extend([0, 0, 0, 1]);
+        ilst.extend(b"----");
+        ilst.extend(u64::MAX.to_be_bytes());
+        ilst.extend([0u8; 16]);
+        let size = ilst.len() as u32;
+        ilst[..4].copy_from_slice(&size.to_be_bytes());
+
+        let moov_content = create_udta_box(&create_meta_box(&ilst));
+        let tags = freeform_tags_in_moov(&moov_content, 0, moov_content.len());
+        assert_eq!(replaygain_tags_from_freeform(&tags), rg);
+        assert_eq!(
+            create_ilst_box_filtered(&[], &ilst[8..], |_, _, _| false),
+            clean
+        );
     }
 
     #[test]

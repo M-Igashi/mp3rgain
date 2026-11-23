@@ -284,6 +284,11 @@ impl FileEntry {
     /// Drop the measurement and the album values that came with it.
     fn forget_measurement(&mut self) {
         self.set_measurement(None);
+        self.clear_album();
+    }
+
+    /// Drop the album values, which only an album analysis sets.
+    fn clear_album(&mut self) {
         self.album_info = None;
         self.album_label = None;
     }
@@ -755,9 +760,7 @@ impl Mp3rgainApp {
     /// snapshot is kept — it reflects the file, not the analysis.
     pub fn invalidate_analysis_results(&mut self) {
         for file in &mut self.files {
-            file.set_measurement(None);
-            file.album_info = None;
-            file.album_label = None;
+            file.forget_measurement();
             file.status = FileStatus::Pending;
         }
         self.display_order_dirty = true;
@@ -1063,8 +1066,7 @@ impl Mp3rgainApp {
         for &idx in &targets {
             if let Some(f) = self.files.get_mut(idx) {
                 f.status = FileStatus::Pending;
-                f.album_info = None;
-                f.album_label = None;
+                f.clear_album();
             }
         }
 
@@ -1088,8 +1090,7 @@ impl Mp3rgainApp {
         for &idx in &targets {
             if let Some(f) = self.files.get_mut(idx) {
                 f.status = FileStatus::Pending;
-                f.album_info = None;
-                f.album_label = None;
+                f.clear_album();
             }
         }
 
@@ -1252,6 +1253,16 @@ impl Mp3rgainApp {
             album_gain_db,
             album_peak,
         })
+    }
+
+    /// How many files [`Self::target_indices`] returns, without building the
+    /// list, for the dialogs that show it every frame.
+    pub fn target_count(&self) -> usize {
+        if self.selected_indices.is_empty() {
+            self.files.len()
+        } else {
+            self.selected_indices.len()
+        }
     }
 
     /// Selected files, or all loaded files when nothing is selected.
@@ -1474,8 +1485,7 @@ impl Mp3rgainApp {
                 for &(idx, _) in rescan.iter().flat_map(|g| &g.rows) {
                     if let Some(f) = self.files.get_mut(idx) {
                         f.status = FileStatus::Pending;
-                        f.album_info = None;
-                        f.album_label = None;
+                        f.clear_album();
                     }
                 }
                 let total: usize = rescan.iter().map(|g| g.rows.len()).sum();
@@ -1637,8 +1647,9 @@ impl Mp3rgainApp {
             }
         }
         // Worker events mutate sortable row fields (volume, gains, status),
-        // so any applied event invalidates the cached display order.
-        if !events.is_empty() {
+        // so any applied event invalidates the cached display order, unless
+        // the table is unsorted or sorted by file name, which no event changes.
+        if !events.is_empty() && self.sort_column.is_some_and(|c| c != SortColumn::Filename) {
             self.display_order_dirty = true;
         }
         for event in events {
@@ -1710,15 +1721,11 @@ impl Mp3rgainApp {
                         file.status = FileStatus::Analyzed;
                     }
                 }
-                for (idx, msg) in failures {
-                    if let Some(file) = self.files.get_mut(idx) {
-                        file.set_measurement(None);
-                        file.status = FileStatus::Error(msg);
-                    }
-                }
+                self.mark_analysis_failed(failures);
             }
-            WorkerEvent::AlbumAnalysisFailed(msg) => {
-                self.status_message = tr!("Album analysis failed: {}", msg);
+            WorkerEvent::AlbumAnalysisFailed { message, failures } => {
+                self.status_message = tr!("Album analysis failed: {}", message);
+                self.mark_analysis_failed(failures);
             }
             WorkerEvent::FileApplied {
                 idx,
@@ -1797,8 +1804,7 @@ impl Mp3rgainApp {
                     // any prior RG-derived gain (track and album) goes with
                     // it rather than claiming an out-of-date target.
                     file.set_measurement(Some(Measurement::Headroom { peak }));
-                    file.album_info = None;
-                    file.album_label = None;
+                    file.clear_album();
                     file.status = FileStatus::Analyzed;
                 }
             }
@@ -1817,6 +1823,15 @@ impl Mp3rgainApp {
             WorkerEvent::Done { message } => {
                 self.status_message = message;
                 self.total_progress = 1.0;
+            }
+        }
+    }
+
+    fn mark_analysis_failed(&mut self, failures: Vec<(usize, String)>) {
+        for (idx, msg) in failures {
+            if let Some(file) = self.files.get_mut(idx) {
+                file.set_measurement(None);
+                file.status = FileStatus::Error(msg);
             }
         }
     }

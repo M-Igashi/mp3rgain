@@ -249,12 +249,14 @@ impl Error {
     /// Without this, an ALAC file fails analysis with symphonia's
     /// "unsupported audio codec" and the MP3 apply path reports
     /// [`Self::NoMp3Frames`] for a file that was never an MP3, both of which
-    /// read as genuine failures. Costs a 128-byte header read, and only on the
+    /// read as genuine failures. Symphonia drops a track whose sample entry it
+    /// does not know (`drms`, say), so such a file arrives as
+    /// [`Self::NoAudioTrack`]. Costs a 128-byte header read, and only on the
     /// failure path.
     pub fn refine_format(self, path: &Path) -> Self {
         if !matches!(
             self,
-            Self::NoMp3Frames | Self::Decode(_) | Self::ProbeFailed { .. }
+            Self::NoMp3Frames | Self::Decode(_) | Self::ProbeFailed { .. } | Self::NoAudioTrack
         ) {
             return self;
         }

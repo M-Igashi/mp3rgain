@@ -39,7 +39,7 @@ What ships today:
 
 ## Unreleased
 
-Documentation, a link to it at the end of `mp3rgain -h`, and one GUI display fix; nothing else changed in the code or the output.
+Documentation, a link to it at the end of `mp3rgain -h`, a GUI display fix, and the fixes of a whole-codebase review: crafted M4A and AAC files no longer crash mp3rgain, an MP4 with an unknown codec is skipped like ALAC, and mp3rgui shows why each file of a failed album failed. Output for every other file is unchanged.
 
 - GUI: the sort arrow in a column header is drawn as a triangle instead of an empty box; `▴` / `▾` are missing from egui's proportional fonts, so the header uses `⏶` / `⏷` from its bundled icon font (#489)
 - Docs: COMPARISON, the migration guide, and the man page say what undo leaves behind since 3.16.2: a file that had no ID3v2 tag comes back byte-identical, on MP3 and raw ADTS (#483); they still described the empty tag of 3.16.1
@@ -47,6 +47,10 @@ Documentation, a link to it at the end of `mp3rgain -h`, and one GUI display fix
 - Docs: the man page says how to read the analysis output of a file that was already adjusted: a small dB change next to a gain change of 0 is the remainder below one step, not a missing tag (#490)
 - CLI: `mp3rgain -h` ends with the address of the online CLI reference, and the man page lists it under SEE ALSO; Windows users have no man page to read (#490)
 - crates.io: the keywords are `mp3gain`, `replaygain`, `mp3`, `aac`, and `volume`
+- Fix: a crafted M4A crashed `-s c`, `-s d`, and every AAC apply with a metadata item declaring a 64-bit size near the maximum, and `-x` and the AAC apply with a sample offset near it; the bounds checks no longer wrap. A crafted APEv2 value size could do the same on 32-bit builds (Termux arm and i686)
+- CLI: an MP4 whose audio codec symphonia does not know (`drms`, say) is a skipped format, like ALAC, instead of failing with "No audio track found"; the info output and `-a` had regressed to the failure in 3.16.0, and `-r` had always reported it so
+- GUI: when every file of an album fails analysis, each row shows its reason instead of staying at "Analyzing...", and drops the values of an earlier analysis
+- Library: `read_undo_steps` and `read_undo_channel_steps` return `None` for an M4A without an undo tag, as documented and as for MP3, instead of `Some(0)`
 
 ## Release history
 

@@ -3051,6 +3051,23 @@ mod tests {
         assert!(matches!(result, Err(Error::AllFilesFailed { count: 2 })));
     }
 
+    /// An MP4 codec symphonia does not know (`drms` here) loses its track in
+    /// the probe, so the analysis fails with `NoAudioTrack`. mp3rgain still
+    /// recognizes the format, and skips it as it skips ALAC (issue #330).
+    #[cfg(feature = "replaygain")]
+    #[test]
+    fn unknown_mp4_codec_is_an_unsupported_format() {
+        let mut data = std::fs::read("tests/fixtures/test_aac.m4a").unwrap();
+        let at = data.windows(4).position(|w| w == b"mp4a").unwrap();
+        data[at..at + 4].copy_from_slice(b"drms");
+        let path = std::env::temp_dir().join("mp3rgain_unknown_codec.m4a");
+        std::fs::write(&path, &data).unwrap();
+
+        let err = analyze_track(&path).unwrap_err();
+        std::fs::remove_file(&path).unwrap();
+        assert!(err.is_unsupported_format(), "{err}");
+    }
+
     /// Issue #464: the per-file errors reach `on_failure` in input order,
     /// including when the album fails as a whole, so a frontend can classify
     /// them without probing or analyzing the files again.

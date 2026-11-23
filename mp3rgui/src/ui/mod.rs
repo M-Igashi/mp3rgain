@@ -94,7 +94,7 @@ fn render_channel_gain_modal(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     if !app.channel_gain_modal.open {
         return;
     }
-    let count = app.target_indices().len();
+    let count = app.target_count();
     let modal_state = &mut app.channel_gain_modal;
     let committed = modal(
         ctx,
@@ -146,7 +146,7 @@ fn render_manual_gain_modal(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     if !app.manual_gain_modal.open {
         return;
     }
-    let count = app.target_indices().len();
+    let count = app.target_count();
     let modal_state = &mut app.manual_gain_modal;
     let committed = modal(
         ctx,
@@ -182,7 +182,7 @@ fn render_delete_confirm(app: &mut Mp3rgainApp, ctx: &egui::Context) {
     if !app.confirm_delete_tags {
         return;
     }
-    let count = app.target_indices().len();
+    let count = app.target_count();
     let committed = modal(
         ctx,
         tr!("Delete stored tags"),

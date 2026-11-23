@@ -74,7 +74,12 @@ pub enum WorkerEvent {
         /// nothing to name.
         album_label: Option<String>,
     },
-    AlbumAnalysisFailed(String),
+    /// The album as a whole failed. `failures` gives every row of the group
+    /// an outcome: the reason it was left out, or the album's own error.
+    AlbumAnalysisFailed {
+        message: String,
+        failures: Vec<(usize, String)>,
+    },
 
     /// Apply succeeded for `idx`. `actual_steps` is what `apply_with_options`
     /// actually wrote (may differ from the requested steps when prevent_clipping
@@ -367,12 +372,20 @@ pub fn spawn_album_analysis(
                 }
             };
 
+            // Each file's reason, kept for an album that fails as a whole:
+            // its report, and the reasons in it, never arrive (issue #464).
+            let left_out: Mutex<Vec<Option<String>>> = Mutex::new(vec![None; group.len()]);
+            let on_failure = |pos: usize, e: &mp3rgain::Error| {
+                left_out.lock().unwrap()[pos] = Some(e.to_string());
+            };
+
             let result = replaygain::analyze_album_with_options(
                 &path_refs,
                 &replaygain::AlbumAnalysisOptions {
                     threads,
                     skip_errors: true,
                     on_complete: Some(&on_complete),
+                    on_failure: Some(&on_failure),
                     cancel: Some(&cancel_w),
                     mode,
                     ..Default::default()
@@ -414,7 +427,19 @@ pub fn spawn_album_analysis(
                 }
                 Err(e) => {
                     error_groups += 1;
-                    send(&tx, &ctx, WorkerEvent::AlbumAnalysisFailed(e.to_string()));
+                    // `on_complete` marked every row Analyzing, so each one
+                    // needs an outcome or it stays that way.
+                    let message = e.to_string();
+                    let failures = original_indices
+                        .iter()
+                        .zip(left_out.into_inner().unwrap())
+                        .map(|(&idx, reason)| (idx, reason.unwrap_or_else(|| message.clone())))
+                        .collect();
+                    send(
+                        &tx,
+                        &ctx,
+                        WorkerEvent::AlbumAnalysisFailed { message, failures },
+                    );
                 }
             }
         }
@@ -1142,5 +1167,36 @@ fn album_done_message(
             error_groups,
             merged_groups
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An album whose every file fails gives each row its own reason. The
+    /// rows used to stay at Analyzing, with only the status line told.
+    #[test]
+    fn failed_album_gives_every_row_an_outcome() {
+        let group = crate::app::AlbumGroup {
+            label: None,
+            merged_releases: false,
+            rows: vec![
+                (3, PathBuf::from("../tests/fixtures/test_alac.m4a")),
+                (7, PathBuf::from("../tests/fixtures/missing.mp3")),
+            ],
+        };
+        let handle = spawn_album_analysis(egui::Context::default(), vec![group], AnalysisMode::Rg1);
+        let failures = handle
+            .rx
+            .iter()
+            .find_map(|event| match event {
+                WorkerEvent::AlbumAnalysisFailed { failures, .. } => Some(failures),
+                _ => None,
+            })
+            .expect("the album did not fail");
+        let rows: Vec<usize> = failures.iter().map(|&(idx, _)| idx).collect();
+        assert_eq!(rows, [3, 7]);
+        assert!(failures[0].1.contains("ALAC"), "{}", failures[0].1);
     }
 }

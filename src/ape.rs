@@ -282,7 +282,9 @@ pub fn read_ape_tag(data: &[u8]) -> Option<ApeTag> {
         let key = String::from_utf8_lossy(&data[key_start..pos]).to_string();
         pos += 1;
 
-        if pos + value_size > footer_start {
+        // `pos <= footer_start` here; subtracting keeps a 32-bit `usize`
+        // from wrapping on a crafted value size.
+        if value_size > footer_start - pos {
             break;
         }
         let value = String::from_utf8_lossy(&data[pos..pos + value_size]).to_string();
