@@ -560,6 +560,26 @@ Steps  dB
   \-2    \-3.0
 .fi
 .RE
+.PP
+The analysis output shows a measurement and the action that follows from it.
+.B Recommended \(dqTrack\(dq dB change
+is how far the audio is from the target, and
+.B Recommended \(dqTrack\(dq mp3 gain change
+is that distance rounded to whole steps. Only the steps can be applied, so a
+file that has already been adjusted still shows a small dB change, up to about
+0.75 dB either way, next to a gain change of 0. A gain change of 0 means there
+is nothing left to apply. The analysis measures the audio and never reads the
+stored tags: the remainder it prints is the value
+.B \-r
+and
+.B \-a
+store in
+.B REPLAYGAIN_TRACK_GAIN
+(see
+.BR FILES ),
+so it is not a sign that the tag is missing.
+.BR mp3gain (1)
+prints the same two lines.
 .SH REPLAYGAIN
 By default
 .B mp3rgain
