@@ -54,7 +54,13 @@ fn render_stored_tags_cell(ui: &mut egui::Ui, tags: Option<&StoredTagsView>) {
     });
 }
 
-/// Clickable sort-header. Shows ▴ / ▾ on the active column and toggles
+/// Sort direction arrows. They come from egui's bundled emoji-icon-font,
+/// which every platform loads: `▴` / `▾` exist only in the monospace Hack
+/// font and rendered as empty boxes in proportional text (issue #489).
+const SORT_ASCENDING: &str = " ⏶";
+const SORT_DESCENDING: &str = " ⏷";
+
+/// Clickable sort-header. Shows ⏶ / ⏷ on the active column and toggles
 /// `app.sort_column` / `app.sort_descending` on click (issue #167).
 /// `hover_text` is the tooltip shown when the header is hovered; pass an
 /// empty string for the default "Click to sort" hint.
@@ -68,9 +74,9 @@ fn sort_header(
     let active = app.sort_column == Some(column);
     let arrow = if active {
         if app.sort_descending {
-            " ▾"
+            SORT_DESCENDING
         } else {
-            " ▴"
+            SORT_ASCENDING
         }
     } else {
         ""
@@ -341,5 +347,20 @@ pub fn render(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
     }
     if let Some(path) = pending_reveal {
         app.reveal_in_file_manager(&path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// No system font involved: the arrows must resolve in egui's own fonts.
+    #[test]
+    fn sort_arrows_exist_in_bundled_fonts() {
+        let fonts = egui::epaint::text::Fonts::new(1.0, 2048, egui::FontDefinitions::default());
+        let id = egui::FontId::proportional(14.0);
+        for arrow in [SORT_ASCENDING, SORT_DESCENDING] {
+            assert!(fonts.has_glyphs(&id, arrow.trim()), "{arrow:?}");
+        }
     }
 }
