@@ -707,6 +707,7 @@ impl Mp3rgainApp {
             &cc.egui_ctx,
             &crate::i18n::font_locale(settings.ui_language.as_deref()),
         );
+        crate::ui::theme::install(&cc.egui_ctx);
         Self {
             files: Vec::new(),
             target_volume: settings.target_volume,

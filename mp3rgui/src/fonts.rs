@@ -89,19 +89,87 @@ const CANDIDATES: &[(Lang, &str)] = &[
     (Lang::Ko, "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"),
 ];
 
-/// Install egui's default fonts plus the system CJK fallback, if one exists.
-/// `locale` (`zh_CN`, `ko_KR`, `en_US`) comes from `i18n::font_locale`.
+/// The desktop's own UI face, put in front of egui's Ubuntu-Light so the
+/// window reads like the rest of the system. Linux keeps egui's default:
+/// there is no one face to pick there.
+#[cfg(target_os = "macos")]
+const UI_FACES: &[&str] = &["/System/Library/Fonts/SFNS.ttf"];
+
+#[cfg(windows)]
+const UI_FACES: &[&str] = &["segoeui.ttf"];
+
+#[cfg(not(any(target_os = "macos", windows)))]
+const UI_FACES: &[&str] = &[];
+
+/// Install egui's default fonts, the desktop's UI face in front of them and
+/// the system CJK fallback after them, where those exist. `locale` (`zh_CN`,
+/// `ko_KR`, `en_US`) comes from `i18n::font_locale`.
 pub fn install(ctx: &egui::Context, locale: &str) {
     let mut defs = egui::FontDefinitions::default();
-    if let Some((path, bytes)) = load_fallback(locale) {
+    if let Some((path, bytes)) = UI_FACES.iter().find_map(|name| load(font_path(name))) {
         let name = path.display().to_string();
         defs.font_data
             .insert(name.clone(), Arc::new(egui::FontData::from_static(bytes)));
+        defs.families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .insert(0, name);
+    }
+    if let Some((path, bytes)) = load_fallback(locale) {
+        let name = path.display().to_string();
+        let mut data = egui::FontData::from_static(bytes);
+        if let Some(primary) = primary_face(&defs) {
+            data.tweak.y_offset_factor = baseline_shift(&primary, &data);
+        }
+        defs.font_data.insert(name.clone(), Arc::new(data));
         for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
             defs.families.entry(family).or_default().push(name.clone());
         }
     }
     ctx.set_fonts(defs);
+}
+
+fn primary_face(defs: &egui::FontDefinitions) -> Option<Arc<egui::FontData>> {
+    let name = defs
+        .families
+        .get(&egui::FontFamily::Proportional)?
+        .first()?;
+    defs.font_data.get(name).cloned()
+}
+
+/// How far down to move the fallback's glyphs, as a fraction of the font
+/// size, so that their baseline meets the primary face's. egui places a
+/// fallback glyph at its own ascent plus half the difference in line height,
+/// so a face with a large line gap, as CJK faces have, sat kana and kanji
+/// above the Latin text beside them, as in `01 夜明け.mp3`.
+fn baseline_shift(primary: &Arc<egui::FontData>, fallback: &egui::FontData) -> f32 {
+    const SIZE: f32 = 100.0;
+    let mut defs = egui::FontDefinitions::empty();
+    for (name, data) in [
+        ("primary", primary.clone()),
+        ("fallback", Arc::new(fallback.clone())),
+    ] {
+        defs.font_data.insert(name.into(), data);
+        defs.families
+            .insert(egui::FontFamily::Name(name.into()), vec![name.into()]);
+    }
+    let fonts = egui::epaint::text::Fonts::new(1.0, 1024, defs);
+    let metrics = |family: &str, samples: &str| {
+        let id = egui::FontId::new(SIZE, egui::FontFamily::Name(family.into()));
+        let sample = samples
+            .chars()
+            .map(String::from)
+            .find(|c| fonts.has_glyphs(&id, c))?;
+        let galley = fonts.layout_no_wrap(sample, id.clone(), egui::Color32::WHITE);
+        let ascent = galley.rows.first()?.glyphs.first()?.pos.y;
+        Some((ascent, fonts.row_height(&id)))
+    };
+    match (metrics("primary", "H"), metrics("fallback", "あ한中")) {
+        (Some((primary_ascent, primary_height)), Some((ascent, height))) => {
+            (primary_ascent - ascent - 0.5 * (primary_height - height)) / SIZE
+        }
+        _ => 0.0,
+    }
 }
 
 /// Font files read so far. Each is read once and never freed, so a language
@@ -110,15 +178,17 @@ pub fn install(ctx: &egui::Context, locale: &str) {
 static LOADED: Mutex<Vec<(PathBuf, &'static [u8])>> = Mutex::new(Vec::new());
 
 fn load_fallback(locale: &str) -> Option<(PathBuf, &'static [u8])> {
+    fallback_candidates(locale).into_iter().find_map(load)
+}
+
+fn load(path: PathBuf) -> Option<(PathBuf, &'static [u8])> {
     let mut loaded = LOADED.lock().unwrap_or_else(PoisonError::into_inner);
-    fallback_candidates(locale).into_iter().find_map(|path| {
-        if let Some(&(_, bytes)) = loaded.iter().find(|(p, _)| *p == path) {
-            return Some((path, bytes));
-        }
-        let bytes: &'static [u8] = Box::leak(std::fs::read(&path).ok()?.into_boxed_slice());
-        loaded.push((path.clone(), bytes));
-        Some((path, bytes))
-    })
+    if let Some(&(_, bytes)) = loaded.iter().find(|(p, _)| *p == path) {
+        return Some((path, bytes));
+    }
+    let bytes: &'static [u8] = Box::leak(std::fs::read(&path).ok()?.into_boxed_slice());
+    loaded.push((path.clone(), bytes));
+    Some((path, bytes))
 }
 
 /// Candidate font files in preference order: the explicit override, the

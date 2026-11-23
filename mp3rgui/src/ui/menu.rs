@@ -63,7 +63,11 @@ fn help_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui) {
 
 fn file_menu(app: &mut Mp3rgainApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     ui.menu_button(tr!("File"), |ui| {
-        if ui.button(tr!("Add Files...")).clicked() {
+        let shortcut = ctx.format_shortcut(&super::ADD_FILES_SHORTCUT);
+        if ui
+            .add(egui::Button::new(tr!("Add Files...")).shortcut_text(shortcut))
+            .clicked()
+        {
             super::pick_files(app);
             ui.close_menu();
         }
