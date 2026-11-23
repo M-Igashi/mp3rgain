@@ -552,7 +552,7 @@ fn sample_table_in_moov(
                 break;
             }
             entries.push(SampleEntry {
-                file_offset: chunk_offset + offset_in_chunk,
+                file_offset: chunk_offset.saturating_add(offset_in_chunk),
                 size: sample_sizes[sample_idx],
             });
             offset_in_chunk += sample_sizes[sample_idx] as u64;
@@ -673,9 +673,12 @@ fn parse_esds_sample_rate(data: &[u8], start: usize, end: usize) -> Option<u32> 
     // Find esds box
     let (esds_pos, esds_h) = mp4meta::find_box_in_container(data, start, end - start, ESDS)?;
     let esds_content = esds_pos + esds_h.header_size as usize + 4; // skip version/flags
-                                                                   // Clamp the declared box size to the buffer so a truncated esds cannot
-                                                                   // index past EOF in find_audio_specific_config.
-    let esds_end = (esds_pos + esds_h.size as usize).min(data.len());
+
+    // Clamp the declared box size to the buffer so a truncated esds cannot
+    // index past EOF in find_audio_specific_config.
+    let esds_end = esds_pos
+        .saturating_add(esds_h.size as usize)
+        .min(data.len());
 
     let asc_data = find_audio_specific_config(data, esds_content, esds_end)?;
 
@@ -1649,13 +1652,15 @@ pub(crate) fn analyze_aac_gains_from_data(data: &[u8]) -> Result<AacAnalysis> {
     let mut sbr = false;
 
     for (idx, entry) in sample_table.iter().enumerate() {
+        // Checked, so an offset near `u64::MAX` cannot wrap past the bound.
         let sample_start = entry.file_offset as usize;
-        let sample_end = sample_start + entry.size as usize;
-
-        if sample_end > data.len() {
+        let Some(sample_end) = sample_start
+            .checked_add(entry.size as usize)
+            .filter(|&end| end <= data.len())
+        else {
             parse_warnings += 1;
             continue;
-        }
+        };
 
         let sample_data = &data[sample_start..sample_end];
         let mut reader = BitReader::new(sample_data);

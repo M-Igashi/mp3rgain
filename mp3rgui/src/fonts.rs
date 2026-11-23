@@ -7,12 +7,13 @@
 //! fallback. Only glyphs missing from egui's own fonts are taken from it, so
 //! Latin text is unchanged.
 //!
-//! Exactly one font is loaded, at startup, for every user: a file name can
-//! need it whatever the UI language, and reading it takes a few
-//! milliseconds. The bytes are kept for the life of the process and handed to
-//! egui as static data, which it parses in place; owned bytes it copies, so
-//! the Japanese face cost 15 MB resident instead of 7, and the Korean one
-//! 105 MB instead of 52 (issue #470).
+//! One font is loaded at startup, for every user: a file name can need it
+//! whatever the UI language, and reading it takes a few milliseconds. A
+//! language switch to another CJK group loads that group's face as well.
+//! Every face read is kept for the life of the process and handed to egui as
+//! static data, which it parses in place; owned bytes it copies, so the
+//! Japanese face cost 15 MB resident instead of 7, and the Korean one 105 MB
+//! instead of 52 (issue #470).
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};

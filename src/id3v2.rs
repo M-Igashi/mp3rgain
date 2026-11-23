@@ -145,21 +145,17 @@ fn encoded_len(tag: &id3::Tag) -> Option<usize> {
 /// padding too. `None` without a tag, or when the tag claims the whole file,
 /// which the crate then replaces entirely.
 fn tag_region_len(path: &Path) -> Option<usize> {
-    use std::io::{BufReader, Read, Seek, SeekFrom};
-    let mut file = std::fs::File::open(path).ok()?;
-    let file_len = file.metadata().ok()?.len();
-    let mut head = [0u8; 10];
-    file.read_exact(&mut head).ok()?;
-    let tag_len = crate::frame::skip_id3v2(&head);
-    if tag_len == 0 || tag_len as u64 >= file_len {
+    use std::io::{BufReader, Read, Seek};
+    let mut file = crate::frame::open_after_id3v2(path).ok()?;
+    let tag_len = file.stream_position().ok()?;
+    if tag_len == 0 || tag_len >= file.metadata().ok()?.len() {
         return None;
     }
-    file.seek(SeekFrom::Start(tag_len as u64)).ok()?;
     let zeros = BufReader::new(file)
         .bytes()
         .take_while(|b| matches!(b, Ok(0)))
         .count();
-    Some(tag_len + zeros)
+    Some(tag_len as usize + zeros)
 }
 
 /// Rewrite the tag atomically: copy the file to a sibling temp, write the tag

@@ -142,12 +142,14 @@ fn stored_album_report(files: &[PathBuf], opts: &Options) -> Option<AlbumAnalysi
 /// JSON record for a file the album pass never analyzed. An unsupported
 /// format is recorded as a skip so it stays out of the failure count, matching
 /// the yellow line the text path prints (issue #330).
-fn unanalyzed_result(file: &Path, msg: Option<&str>, unsupported: bool) -> JsonFileResult {
-    let reason = msg.unwrap_or("analysis failed");
-    if unsupported {
-        JsonFileResult::skipped(file, reason)
-    } else {
-        JsonFileResult::error(file, reason)
+fn unanalyzed_result(file: &Path, left_out: Option<&LeftOut>) -> JsonFileResult {
+    match left_out {
+        Some(LeftOut {
+            message,
+            unsupported: true,
+        }) => JsonFileResult::skipped(file, message),
+        Some(LeftOut { message, .. }) => JsonFileResult::error(file, message),
+        None => JsonFileResult::error(file, "analysis failed"),
     }
 }
 
@@ -468,18 +470,16 @@ fn run_album(
                 ..
             } = report;
 
-            // Index failures by file position for O(1) lookup during the
-            // apply phase. Walk failures once, reporting skipped files in text
-            // mode. Two kinds arrive here: `--skip-errors` tolerating a
-            // genuine failure, which still counts as failed, and a format
-            // mp3rgain cannot adjust, which does not (issue #330). The album
-            // analysis drops those either way, and `left_out` tells them
-            // apart.
-            let mut failure_msgs: Vec<Option<String>> = vec![None; files.len()];
-            let mut unsupported: Vec<bool> = vec![false; files.len()];
+            // Report the files the analysis left out, in text mode. Two kinds
+            // arrive here: `--skip-errors` tolerating a genuine failure, which
+            // still counts as failed, and a format mp3rgain cannot adjust,
+            // which does not (issue #330). The album analysis drops those
+            // either way, and `left_out` tells them apart. It is empty when
+            // the stored tags stood in for the analysis, hence `get` below.
+            let left_out_at = |i: usize| left_out.get(i).and_then(Option::as_ref);
             let mut failure_count = 0usize;
             let report_skipped = opts.text_output();
-            for (idx, entry) in left_out.into_iter().enumerate() {
+            for (idx, entry) in left_out.iter().enumerate() {
                 let Some(LeftOut {
                     message: msg,
                     unsupported: is_unsupported,
@@ -488,8 +488,7 @@ fn run_album(
                     continue;
                 };
                 let filename = get_filename(&files[idx]);
-                if is_unsupported {
-                    unsupported[idx] = true;
+                if *is_unsupported {
                     if report_skipped {
                         writeln!(
                             sink.err(),
@@ -511,7 +510,6 @@ fn run_album(
                         )?;
                     }
                 }
-                failure_msgs[idx] = Some(msg);
             }
 
             // Build a mapping from file index -> track-result index. Files that
@@ -647,9 +645,7 @@ fn run_album(
                                     ..JsonFileResult::from_analysis(file, track)
                                 }
                             }
-                            None => {
-                                unanalyzed_result(file, failure_msgs[i].as_deref(), unsupported[i])
-                            }
+                            None => unanalyzed_result(file, left_out_at(i)),
                         })
                         .collect()
                 } else {
@@ -728,12 +724,8 @@ fn run_album(
                         by_index[*file_idx] = Some(result.clone());
                     }
                     for (i, slot) in by_index.iter_mut().enumerate() {
-                        if slot.is_none() && failure_msgs[i].is_some() {
-                            *slot = Some(unanalyzed_result(
-                                &files[i],
-                                failure_msgs[i].as_deref(),
-                                unsupported[i],
-                            ));
+                        if let (None, Some(entry)) = (&slot, left_out_at(i)) {
+                            *slot = Some(unanalyzed_result(&files[i], Some(entry)));
                         }
                     }
                     for entry in by_index.into_iter().flatten() {
@@ -768,7 +760,7 @@ fn run_album(
                             applied[i] = result.status == Some(FileStatus::Success);
                             result
                         }
-                        None => unanalyzed_result(file, failure_msgs[i].as_deref(), unsupported[i]),
+                        None => unanalyzed_result(file, left_out_at(i)),
                     };
                     update_counters(&result, &mut successful, &mut failed);
 

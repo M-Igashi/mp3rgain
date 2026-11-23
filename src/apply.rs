@@ -1206,7 +1206,7 @@ pub struct AlbumMinmaxOptions {
 
 /// [`write_album_minmax_with_layout`] that can also keep each file's mtime,
 /// as [`ApplyOptions::preserve_timestamp`] does for the apply before it, so a
-/// frontend does not have to wrap the call to restore the times (issue #436).
+/// frontend does not have to wrap the call to restore the times (issue #463).
 pub fn write_album_minmax_with_options<'a>(
     files: &[(&'a Path, Option<(u8, u8)>)],
     opts: &AlbumMinmaxOptions,

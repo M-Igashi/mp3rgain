@@ -11,13 +11,7 @@ include!(concat!(env!("OUT_DIR"), "/locale/catalogues.rs"));
 /// is a catalogue name such as `pt_BR`. `sys-locale` reports `pt-BR`; gettext
 /// names the file `pt_BR.po`, and `include-po` falls back from `pt_BR` to `pt`.
 pub fn apply(choice: Option<&str>) {
-    let resolved = resolved_locale(choice);
-    let code = if choice == Some("en") {
-        "en"
-    } else {
-        resolved.as_str()
-    };
-    let _ = translators::set_locale(code);
+    let _ = translators::set_locale(&resolved_locale(choice));
 }
 
 /// Locale whose CJK font group comes first: the UI language when it is
