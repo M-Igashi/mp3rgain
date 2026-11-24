@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current status: v3.16.2 (2026-11-11)
+## Current status: v3.17.0 (2026-11-24)
 
 mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writes standard `REPLAYGAIN_*` tags, and can bake the correction into the bitstream losslessly. For MP3 it is a modern drop-in replacement for mp3gain. For AAC it is the only actively maintained command-line tool that does this: aacgain's last release was 2.0.0 in 2019 and its last commit was in 2022, and foobar2000, the reference-grade ReplayGain suite, offers a comparable scalefactor-based AAC rewrite ("Apply ReplayGain to file content") but only as a Windows GUI with no undo.
 
@@ -11,6 +11,7 @@ What ships today:
 - mp3gain command-line compatibility, down to the stored tags; the differences are listed in [migrating-from-mp3gain.md](migrating-from-mp3gain.md)
 - Tags-only mode, album grouping by directory, release tags, or depth, reuse of stored tags (`-s R`)
 - Parallel processing across and within files, JSON and TSV output
+- An audio hash (`--audio-hash`) that tags, the container, and gain changes leave alone, for finding copies of one encode
 - GUI (mp3rgui) for macOS, Windows, and Linux, in English, Brazilian Portuguese, German, Indonesian, Italian, Japanese, and Turkish
 - A documented library API on crates.io and docs.rs
 - Distribution through crates.io, Homebrew, winget, .deb with an apt repository, Ubuntu PPA (deprecated, updated until 2026-12-31), AUR (GUI), MacPorts, pkgx, Termux (TUR), a Nix flake, and a GHCR Docker image
@@ -39,7 +40,15 @@ What ships today:
 
 ## Unreleased
 
-A new `--audio-hash` action for finding duplicates, documentation, a link to it at the end of `mp3rgain -h`, a redesigned GUI, and the fixes of a whole-codebase review: crafted M4A and AAC files no longer crash mp3rgain, an MP4 with an unknown codec is skipped like ALAC, and mp3rgui shows why each file of a failed album failed. Output for every other file is unchanged.
+Nothing yet.
+
+## Release history
+
+One line per change. The [release notes](https://github.com/M-Igashi/mp3rgain/releases) and the linked issues have the details.
+
+### v3.17.0 - Audio Hash, and a New Look for mp3rgui
+
+The analysis and the applied gains are unchanged; `--audio-hash` is new, mp3rgui has a new look, a `-g` or `-l` that takes a value to exactly 0 now warns, an MP4 with an unknown codec is skipped like ALAC, and crafted M4A files no longer crash mp3rgain.
 
 - CLI and library: `--audio-hash` prints a hash of each file's audio that tags, the container, and a gain change by mp3gain, aacgain, or mp3rgain (and its undo) leave alone, so copies of one encode can be found however they were tagged or adjusted; `mp3rgain::audio_hash` in the crate. Each version of the definition is frozen once released (`mp3rgain-v1:`) and specified in [audio-hash.md](audio-hash.md) (#491)
 - GUI: redesigned without changing a string, so every translation still applies: the toolbar reads as three steps (add, analyze, apply), the settings sit in segmented controls, a click or right-click anywhere on a row selects it and the right-click menu holds the row actions, Delete removes the selected rows, Cmd/Ctrl+O adds files, the light and dark themes use the website's green, and macOS and Windows get their system UI font. CJK text in a file name or the Japanese UI now sits on the baseline of the Latin text beside it, which it had not since #321
@@ -54,10 +63,6 @@ A new `--audio-hash` action for finding duplicates, documentation, a link to it 
 - GUI: when every file of an album fails analysis, each row shows its reason instead of staying at "Analyzing...", and drops the values of an earlier analysis
 - Library: `read_undo_steps` and `read_undo_channel_steps` return `None` for an M4A without an undo tag, as documented and as for MP3, instead of `Some(0)`
 - Fix: a `-g` or `-l` that lowers a `global_gain` onto exactly 0 gets the "clamped at 0" warning, since undo leaves a 0 alone and cannot restore it, and AAC applies now report clamping and such zeros as MP3 ones do; the bytes written are unchanged (#496)
-
-## Release history
-
-One line per change. The [release notes](https://github.com/M-Igashi/mp3rgain/releases) and the linked issues have the details.
 
 ### v3.16.2 - No Empty ID3v2 Tag Left Behind
 
