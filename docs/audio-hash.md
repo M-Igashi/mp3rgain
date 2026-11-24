@@ -62,7 +62,7 @@ codec  = "mp3" | "aac"
 unit   = kind (1 byte), body length (u32 LE), body, value count (u32 LE), values (i16 LE each)
 ```
 
-The units follow the order of the stream. There are five kinds:
+The units follow the order of the stream. A unit without values has a value count of 0. There are five kinds:
 
 | Kind | Unit | Body | Values |
 |---|---|---|---|
@@ -78,7 +78,7 @@ A file that yields no unit of kind 1, 2, 4, or 5 has no hash.
 
 Each `global_gain` field of a kind 1 or kind 4 unit has an effective value: 0 when its channel codes no spectral data (an MP3 granule and channel whose `part2_3_length` is 0, an AAC channel whose `max_sfb` is 0), and the field's 8-bit value otherwise.
 
-The reference `r` is the first effective value that is not 0, over all kind 1 units of an MP3 or all kind 4 units of an AAC stream, in stream order. A gain change adds the same number of steps to every value that is not 0 and leaves every 0 alone, so it moves `r` with the rest.
+The reference `r` is the first effective value that is not 0, over all kind 1 units of an MP3 or all kind 4 units of an AAC stream, in stream order. A gain change adds the same number of steps to every value that is not 0 and leaves every 0 alone, so it moves `r` with the rest. When every effective value is 0 there is no `r`, and none is needed.
 
 An effective value of 0 is written as -32768 (bytes `00 80`). Any other effective value `e` is written as `e - r`, which lies between -254 and 254.
 
@@ -93,8 +93,8 @@ An effective value of 0 is written as -32768 (bytes `00 80`). Any other effectiv
 
 MP3 and ADTS are hashed between a start and an end offset.
 
-- **start**: when the file is at least 10 bytes long and begins with `ID3`, start is 10 plus the size in bytes 6 to 9, read as four 7-bit groups (`(b6 & 0x7F) << 21 | (b7 & 0x7F) << 14 | (b8 & 0x7F) << 7 | (b9 & 0x7F)`). Otherwise start is 0. Only one tag is skipped, and its footer flag is not read.
-- **end**: the file length, less 128 when the file is at least 128 bytes long and its last 128 bytes begin with `TAG`. Then, when end is at least 32 and the 8 bytes at end - 32 are `APETAGEX`, an APEv2 footer is there: with `size` the u32 LE at end - 20 and `flags` the u32 LE at end - 12, and `header` 32 when bit 31 of `flags` is set and 0 otherwise, end becomes end - size - header, unless that would be negative.
+- **start**: when the file is at least 10 bytes long and begins with `ID3`, start is 10 plus the size in bytes 6 to 9, read as four 7-bit groups (`(b6 & 0x7F) << 21 | (b7 & 0x7F) << 14 | (b8 & 0x7F) << 7 | (b9 & 0x7F)`). Otherwise start is 0. Only one tag is skipped, and its footer flag is not read. When start is not below end, the region is empty and holds no frames.
+- **end**: the file length, less 128 when the file is at least 128 bytes long and its last 128 bytes begin with `TAG`. Then, when end is at least 32 and the 8 bytes at end - 32 are `APETAGEX`, an APEv2 footer is there: with `size` the u32 LE at end - 20 and `flags` the u32 LE at end - 12, and `header` 32 when bit 31 of `flags` is set and 0 otherwise, end becomes end - size - header, unless size + header is greater than end, in which case end stays as it was.
 
 ### MP3 frames
 
@@ -126,14 +126,14 @@ while p + 4 <= end:
     else:            linked = (n <= end)
     if not linked: p = p + 1, continue
     if the frame at p is a Xing frame: p = n, continue
-    if reference is set and (version, sampling frequency) differs from it: p = p + 1, continue
-    if reference is none: reference = (version, sampling frequency)
+    if reference is set and (version, sampling frequency index) differs from it: p = p + 1, continue
+    if reference is none: reference = (version, sampling frequency index)
     the frame from p to n is adjusted; p = n
 ```
 
 Each adjusted frame that is not a VBRI frame is a kind 1 unit. A VBRI frame gives no unit, and its values take no part in choosing `r`.
 
-**Other frames.** Before the first adjusted frame, between two adjusted frames, and after the last one (or over the whole region when there is none), the bytes from `a` (start, or the end of an adjusted frame) to `b` (the next adjusted frame, or end) are searched for further frames:
+**Other frames.** Before the first adjusted frame, between two adjusted frames, and after the last one (or over the whole region when there is none), the bytes from `a` (start, or the end of an adjusted frame) to `b` (the next adjusted frame, or end) are searched for further frames. A VBRI frame found by the walk above counts as an adjusted frame here, although it gives no unit.
 
 ```text
 q = a
@@ -148,7 +148,7 @@ while q + 4 <= b:
 
 These are frames a gain change leaves alone, such as the part of a file joined from two encodes whose MPEG version or sampling frequency differs from the first frame's. Everything else in the stretch is passed over.
 
-**Body.** The frame's bytes, with bit 0 of byte 2 (private) and bits 2 and 3 of byte 3 (original and copyright) cleared, every `global_gain` field of a kind 1 unit set to 0, and, when the frame is protected, bytes 4 and 5 (the CRC) removed.
+**Body.** The frame's bytes, with the private bit cleared (`b2 & 0x01`), the copyright and original bits cleared (`b3 & 0x0C`), every `global_gain` field of a kind 1 unit set to 0, and, when the frame is protected, bytes 4 and 5 (the CRC) removed.
 
 **`global_gain` fields.** In the side information, counting bits from its first byte, the fields of granule `g` and channel `c` form a block that starts at bit `pre + (g * channels + c) * size`:
 

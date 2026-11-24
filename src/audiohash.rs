@@ -519,9 +519,11 @@ mod tests {
         "test_vbr.mp3",
     ];
 
-    /// The v1 value of every fixture. A change here means v1 changed, which
+    /// The v1 value of the fixtures. A change here means v1 changed, which
     /// it must never do once released: a different definition is a new
-    /// version.
+    /// version. test_stereo, test_mono, test_joint_stereo, and test_vbr are
+    /// left out, since CI encodes them afresh with whatever ffmpeg it has;
+    /// [`v1_value_of_a_built_stream_is_frozen`] covers what they would.
     #[test]
     fn v1_values_are_frozen() {
         let expected = [
@@ -542,28 +544,12 @@ mod tests {
                 "mp3rgain-v1:48ead0467c6137f8512c108def2182cd04d3f3b9ebcd3e7f6c49627ca040a844",
             ),
             (
-                "test_joint_stereo.mp3",
-                "mp3rgain-v1:2909a53defb4860e84844d9ce4fe3f47ff9c0ab2b1fba510435ec7ee1037dddb",
-            ),
-            (
                 "test_lame_gapless.mp3",
                 "mp3rgain-v1:f5a559939bb258afcb4436ae4b770635a41b45938ce96ed2cfa3fae90352b309",
             ),
             (
-                "test_mono.mp3",
-                "mp3rgain-v1:7c151524fe1b7596530e6436d483e1e2ef7bf7b81c9d567511212ce66c555368",
-            ),
-            (
                 "test_simple_stereo.mp3",
                 "mp3rgain-v1:672ae0ea1554b38afe0e4c4b4e1fc58f626b4141b689fee7b2341a035955f9f3",
-            ),
-            (
-                "test_stereo.mp3",
-                "mp3rgain-v1:ea944a209fbcd4c63b788dbf5b5bb69a627040239866c4c688c857d86ac4e9e6",
-            ),
-            (
-                "test_vbr.mp3",
-                "mp3rgain-v1:23d6fd641cc85fde16f176eb6695611685229a8dc8bc8a0db59d75b3ef14b567",
             ),
         ];
         for (name, value) in expected {
@@ -572,6 +558,36 @@ mod tests {
             }
             assert_eq!(hash(&fixture(name)).to_string(), value, "{name}");
         }
+    }
+
+    /// A stream built here, so its bytes never depend on an encoder: an
+    /// ID3v2 tag, a silent frame with a moved gain, frames with a coded 0, a
+    /// CRC-protected frame, a stretch at another sample rate, junk, and an
+    /// APEv2 tag plus ID3v1 at the end.
+    #[test]
+    fn v1_value_of_a_built_stream_is_frozen() {
+        let mut protected = make_frame(0, 0, 155, 0x5A);
+        protected[1] = 0xFA;
+        let mut data = b"ID3\x04\x00\x00\x00\x00\x00\x04tag!".to_vec();
+        data.extend(stream(&[
+            make_silent_frame(0, 0, 7, 0),
+            make_frame(0, 0, 150, 0x22),
+            make_frame(0, 1, 0, 0x33),
+            protected,
+            make_frame(0, 0, 160, 0x44),
+            make_frame(1, 3, 140, 0x66),
+            make_frame(1, 3, 141, 0x67),
+        ]));
+        data.extend_from_slice(b"LYRICSBEGINjunk");
+        let mut ape = crate::ape::ApeTag::new();
+        ape.set_undo_gain(-2, -2, false);
+        let mut data = crate::ape::replace_ape_tag(&data, &ape);
+        data.extend_from_slice(b"TAG");
+        data.resize(data.len() + 125, b' ');
+        assert_eq!(
+            hash(&data).to_string(),
+            "mp3rgain-v1:521a6e19b958424d5b2a2faa6d09325adc55338f680747a8086817fbf902122d"
+        );
     }
 
     #[test]
