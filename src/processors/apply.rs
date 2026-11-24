@@ -142,10 +142,10 @@ fn process_apply_into(
 }
 
 /// Warn when a saturating manual-gain apply clamped global_gain values at
-/// the [0, 255] boundary (issue #207). Saturation is lossy — the clamped
-/// frames can no longer be byte-restored by undo, so the lossless guarantee
-/// silently doesn't hold there. ReplayGain adjustments never get near this
-/// range, so the warning only fires for extreme manual `-g` / `-l` values.
+/// the [0, 255] boundary (issue #207), or lowered one onto exactly 0, which
+/// undo leaves alone as well (issue #496). Either way those frames can no
+/// longer be byte-restored by undo, so the lossless guarantee silently does
+/// not hold there. Only extreme manual `-g` / `-l` values get that far.
 fn emit_saturation_warning(
     report: &mp3rgain::ApplyReport,
     opts: &Options,

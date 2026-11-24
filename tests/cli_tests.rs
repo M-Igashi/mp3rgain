@@ -841,6 +841,33 @@ fn channel_gain_without_wrap_still_saturates() {
     assert_eq!(undo.as_deref(), Some("-010,+000,N"));
 }
 
+/// Issue #496: a `-g` that lowers the lowest global_gain onto exactly 0 is
+/// reported like a clamp, on MP3, M4A, and raw ADTS, since undo leaves a 0
+/// alone and cannot restore it. One step less is not reported.
+#[test]
+fn a_gain_change_that_lands_on_zero_is_reported() {
+    for fixture in ["test_mono.mp3", "test_aac.m4a", "test_adts.aac"] {
+        let (min, _) = mp3rgain::gain_range(&Path::new("tests/fixtures").join(fixture)).unwrap();
+        assert!(min > 1, "{fixture}");
+        for (steps, reported) in [(min as i32 - 1, false), (min as i32, true)] {
+            let album = TempAlbum::new(&[fixture]);
+            let path = album.files[0].to_str().unwrap();
+            let out = run(&["-g", &format!("-{steps}"), path]);
+            assert!(out.status.success(), "{fixture} -{steps}: {out:?}");
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(
+                stderr.contains("clamped at 0 (silence)"),
+                reported,
+                "{fixture} -{steps}: {stderr}"
+            );
+            assert_eq!(
+                mp3rgain::gain_range(&album.files[0]).unwrap().0 == 0,
+                reported
+            );
+        }
+    }
+}
+
 #[test]
 fn channel_wrap_without_undo_still_wraps() {
     let album = TempAlbum::new(&["test_simple_stereo.mp3"]);

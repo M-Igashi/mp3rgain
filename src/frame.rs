@@ -494,16 +494,20 @@ impl GainMode {
 ///
 /// `frames` is the number of frames touched (the value the function used
 /// to return bare). `saturated_low` / `saturated_high` count global_gain
-/// values that clamped at 0 (silence) / 255 (distortion) under saturating
-/// mode, where the requested adjustment couldn't be fully applied and the
-/// original value is lost — i.e. the apply is no longer losslessly
-/// reversible at those locations (issue #207). Wrapping mode never
-/// saturates, so both counts stay 0.
+/// values that ended at 0 (silence) / clamped at 255 (distortion) under
+/// saturating mode, where the original value is lost, i.e. the apply is no
+/// longer losslessly reversible at those locations (issue #207). A value
+/// lowered to exactly 0 counts too: undo leaves a 0 alone, so it cannot come
+/// back (issue #496). Wrapping mode never saturates, so both counts stay 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SaturationStats {
     pub frames: usize,
     pub saturated_low: usize,
     pub saturated_high: usize,
+    /// Values whose target lay outside 0..=255, so the audio is no longer
+    /// the original shifted by the requested steps. A value that lands on
+    /// exactly 0 is still shifted correctly and is not counted here.
+    pub clamped: usize,
     /// Post-apply minimum global_gain across the touched locations.
     pub min_gain: u8,
     /// Post-apply maximum global_gain across the touched locations.
@@ -516,6 +520,7 @@ impl Default for SaturationStats {
             frames: 0,
             saturated_low: 0,
             saturated_high: 0,
+            clamped: 0,
             min_gain: 255,
             max_gain: 0,
         }
@@ -524,23 +529,31 @@ impl Default for SaturationStats {
 
 impl SaturationStats {
     /// Whether any value clamped, so the stored residual can no longer be
-    /// computed arithmetically.
+    /// computed arithmetically. A value that landed on exactly 0 does not
+    /// make it so: the audio is still the original shifted by the requested
+    /// steps, only undo cannot bring that value back.
     pub fn saturated(&self) -> bool {
-        self.saturated_low > 0 || self.saturated_high > 0
+        self.clamped > 0
     }
 
     /// Record one saturating adjustment of `current` by `steps`, using the
     /// same `[-255, 255]` step clamp as [`adjust_gain_value`]. A 0 is left
     /// as it is in both directions, so undo restores it and it is not counted.
-    fn tally(&mut self, current: u8, steps: i32) {
+    /// A value that ends at 0 cannot be restored, since undo leaves the 0
+    /// alone, so it counts whether it was lowered onto 0 or clamped there
+    /// (issue #496).
+    pub(crate) fn tally(&mut self, current: u8, steps: i32) {
         if current == 0 {
             return;
         }
         let target = current as i32 + steps.clamp(-255, 255);
         if target > 255 {
             self.saturated_high += 1;
-        } else if target < 0 {
+        } else if target <= 0 {
             self.saturated_low += 1;
+        }
+        if !(0..=255).contains(&target) {
+            self.clamped += 1;
         }
     }
 }
@@ -709,10 +722,17 @@ mod tests {
         s.tally(10, -50); //  -40 -> clamps low
         s.tally(100, 10); //  110 -> in range
         s.tally(255, 0); //   255 -> exactly at ceiling, not over
-        s.tally(0, 0); //     0   -> exactly at floor, not under
+        s.tally(0, 0); //     0   -> left alone, not counted
         s.tally(0, -50); //   0   -> left alone, not clamped
         assert_eq!(s.saturated_high, 2);
         assert_eq!(s.saturated_low, 1);
+        assert_eq!(s.clamped, 3);
+
+        // Issue #496: lowered onto exactly 0, the value is lost to undo like
+        // a clamped one, though the audio is still shifted exactly.
+        s.tally(5, -5);
+        assert_eq!(s.saturated_low, 2);
+        assert_eq!(s.clamped, 3);
     }
 
     /// Issue #417: a global_gain of 0 stays 0 in saturating mode, as in
