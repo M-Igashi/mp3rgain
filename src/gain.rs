@@ -355,12 +355,13 @@ pub fn undo_gain(file_path: &Path) -> Result<usize> {
     tag.remove_replaygain();
 
     // Under the split layout the REPLAYGAIN_* residuals live in ID3v2 and
-    // described the gained audio too (issue #306). Strip them on the temp
-    // file so the rollback and both containers' cleanup land in one rename,
+    // described the gained audio too (issue #306). Strip them in the same
+    // write, so the rollback and both containers' cleanup land in one rename,
     // where a separate pass afterwards cost a second full-file copy.
     crate::apply::with_temp_file(file_path, |original, temp| {
-        write_with_ape_tag(temp, &data, &tag).map_err(|e| Error::io_write(original, e))?;
-        crate::id3v2::remove_id3v2_rg_values_direct(temp)
+        crate::id3v2::write_stripped(temp, data, &crate::ape::UNDONE_KEYS, |bytes| {
+            write_with_ape_tag(temp, bytes, &tag).map_err(|e| Error::io_write(original, e))
+        })
     })?;
 
     Ok(frames)

@@ -39,7 +39,7 @@ What ships today:
 
 ## Unreleased
 
-Nothing yet.
+- An undo that leaves the ID3v2 tag with no frames (an MP3 that had no ID3v2 tag before the default `-r` or `-s i`, and most raw ADTS files) writes the file once instead of twice, so `-u` and mp3rgui's Undo take about a quarter less time on such MP3 files; the bytes written are unchanged (#497)
 
 ## Release history
 
