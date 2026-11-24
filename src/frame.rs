@@ -399,7 +399,13 @@ pub(crate) fn frame_at(data: &[u8], pos: usize, audio_end: usize) -> Option<Fram
 /// a stray valid-looking header inside trailing tags/garbage (a different
 /// sample rate) would be counted as a frame and inflate `MP3GAIN_MINMAX`
 /// (issue #214).
-fn next_frame(
+///
+/// The audio hash ([`crate::audiohash`]) walks the same frames, which is what
+/// keeps it unchanged by a gain change, and its v1 definition in
+/// `docs/audio-hash.md` spells out these rules and [`find_audio_end`]'s. A
+/// change to which frames are accepted changes v1 hashes, so it needs a new
+/// hash version as well.
+pub(crate) fn next_frame(
     data: &[u8],
     mut pos: usize,
     audio_end: usize,

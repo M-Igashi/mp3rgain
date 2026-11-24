@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::*;
 use mp3rgain::replaygain::AnalysisMode;
-use mp3rgain::{Channel, TagLayout};
+use mp3rgain::{AudioHashVersion, Channel, TagLayout};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -24,6 +24,23 @@ fn parse_album_depth(value: &str) -> Result<usize> {
     value
         .parse::<usize>()
         .map_err(|_| anyhow::anyhow!("--album-depth needs a level count, got '{}'", value))
+}
+
+/// `--audio-hash=<version>`: `1` or `v1`. A version that does not exist is
+/// an error rather than the latest, since a script that names one compares
+/// against hashes stored under it.
+fn parse_audio_hash_version(value: &str) -> Result<AudioHashVersion> {
+    AudioHashVersion::parse(value).ok_or_else(|| {
+        let known: Vec<String> = AudioHashVersion::ALL
+            .iter()
+            .map(|v| v.to_string())
+            .collect();
+        anyhow::anyhow!(
+            "unknown --audio-hash version '{}' (available: {})",
+            value,
+            known.join(", ")
+        )
+    })
 }
 
 fn parse_thread_count(value: &str, flag: &str) -> Result<usize> {
@@ -121,6 +138,18 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
 
         if arg == "--tags-only" {
             opts.tags_only = true;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--audio-hash" {
+            opts.audio_hash = Some(AudioHashVersion::LATEST);
+            i += 1;
+            continue;
+        }
+
+        if let Some(version) = arg.strip_prefix("--audio-hash=") {
+            opts.audio_hash = Some(parse_audio_hash_version(version)?);
             i += 1;
             continue;
         }
@@ -424,6 +453,35 @@ pub fn parse_args(args: &[String]) -> Result<Options> {
         };
         if let Some(flag) = conflict {
             anyhow::bail!("--tags-only cannot be combined with {}", flag);
+        }
+    }
+
+    // --audio-hash only reads, and hashes the first audio track. Paired with
+    // an action, one of the two would be silently dropped.
+    if opts.audio_hash.is_some() {
+        let stored_tag_flag = match opts.stored_tag_mode {
+            StoredTagMode::Check => "-s c",
+            StoredTagMode::Delete => "-s d",
+            StoredTagMode::Skip => "-s s",
+            StoredTagMode::None => "-s R",
+        };
+        let conflicts = [
+            (opts.gain_steps.is_some(), "-g"),
+            (opts.channel_gain.is_some(), "-l"),
+            (opts.track_gain, "-r"),
+            (opts.album_gain, "-a"),
+            (opts.skip_album, "-e"),
+            (opts.undo, "-u"),
+            (opts.max_amplitude_only, "-x"),
+            (opts.tags_only, "--tags-only"),
+            (opts.track_index.is_some(), "-i"),
+            (
+                opts.stored_tag_mode != StoredTagMode::None || opts.use_stored_tags,
+                stored_tag_flag,
+            ),
+        ];
+        if let Some((_, flag)) = conflicts.iter().find(|(set, _)| *set) {
+            anyhow::bail!("--audio-hash cannot be combined with {}", flag);
         }
     }
 

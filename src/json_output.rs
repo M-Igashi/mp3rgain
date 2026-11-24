@@ -83,6 +83,9 @@ pub struct JsonFileResult {
     pub peak: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_amplitude: Option<f64>,
+    /// `--audio-hash` (issue #491), as printed in text mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

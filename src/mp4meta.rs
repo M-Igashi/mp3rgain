@@ -1656,17 +1656,34 @@ pub fn unsupported_audio_format(file_path: &Path) -> Option<&'static str> {
 /// the bytes doesn't reopen the file to classify it. Same rule: MP4 brand
 /// plus an `mp4a` (or undetectable) codec.
 pub fn is_aac_data(data: &[u8]) -> bool {
-    if !is_mp4_header(data) {
-        return false;
-    }
-    let codec = find_box(data, MOOV).and_then(|(moov_pos, moov_header)| {
+    is_mp4_header(data) && matches!(codec_in_data(data), Some(Mp4AudioCodec::Aac) | None)
+}
+
+/// [`detect_mp4_audio_codec`] on a whole file already in memory.
+fn codec_in_data(data: &[u8]) -> Option<Mp4AudioCodec> {
+    find_box(data, MOOV).and_then(|(moov_pos, moov_header)| {
         detect_codec_in_moov(
             data,
             moov_pos + moov_header.header_size as usize,
             moov_header.content_size() as usize,
         )
-    });
-    matches!(codec, Some(Mp4AudioCodec::Aac) | None)
+    })
+}
+
+/// [`unsupported_audio_format`] on a whole file already in memory, without
+/// its HE-AAC check: ALAC, another MP4 audio codec, or DRM-protected M4P.
+pub(crate) fn unsupported_mp4_format(data: &[u8]) -> Option<&'static str> {
+    if data.len() < 12 || &data[4..8] != b"ftyp" {
+        return None;
+    }
+    if is_mp4_header(data) {
+        return match codec_in_data(data) {
+            Some(Mp4AudioCodec::Alac) => Some("ALAC"),
+            Some(Mp4AudioCodec::Unknown) => Some("this MP4 audio codec"),
+            _ => None,
+        };
+    }
+    (&data[8..12] == b"M4P ").then_some("DRM-protected M4P")
 }
 
 /// Count the number of audio tracks in an MP4 file.

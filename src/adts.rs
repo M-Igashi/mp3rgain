@@ -19,8 +19,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::aac::{
-    apply_aac_gain_to_data, blocks_have_sbr, ensure_gain_adjustable, AacAnalysis, AacGainLocation,
-    BitReader, SAMPLE_RATE_TABLE,
+    apply_aac_gain_to_data, blocks_have_sbr, ensure_gain_adjustable, AacAnalysis, BitReader,
+    SAMPLE_RATE_TABLE,
 };
 use crate::error::{Error, Result};
 use crate::frame::{find_audio_end, open_after_id3v2, skip_id3v2};
@@ -28,19 +28,21 @@ use crate::frame::{find_audio_end, open_after_id3v2, skip_id3v2};
 /// Fixed ADTS header length, without the optional 16-bit CRC.
 const HEADER_LEN: usize = 7;
 
-struct AdtsHeader {
+pub(crate) struct AdtsHeader {
     /// Bytes from the start of the frame to its first raw_data_block.
-    header_len: usize,
+    pub header_len: usize,
     /// `aac_frame_length`: the whole frame including the header.
-    frame_len: usize,
-    sample_rate: u32,
-    channel_config: u8,
+    pub frame_len: usize,
+    /// The audio object type: `profile` plus one.
+    pub object_type: u8,
+    pub sample_rate: u32,
+    pub channel_config: u8,
     /// `number_of_raw_data_blocks_in_frame` (already un-biased).
-    blocks: u8,
+    pub blocks: u8,
 }
 
 /// Parse the ADTS header at the start of `data`, or `None` if there isn't one.
-fn parse_adts_header(data: &[u8]) -> Option<AdtsHeader> {
+pub(crate) fn parse_adts_header(data: &[u8]) -> Option<AdtsHeader> {
     let h = data.get(..HEADER_LEN)?;
 
     // 12-bit syncword plus `layer == 00`. The layer bits are what separate
@@ -69,6 +71,7 @@ fn parse_adts_header(data: &[u8]) -> Option<AdtsHeader> {
     Some(AdtsHeader {
         header_len,
         frame_len,
+        object_type: (h[2] >> 6) + 1,
         sample_rate,
         channel_config,
         blocks: (h[6] & 0x03) + 1,
@@ -231,14 +234,8 @@ pub fn analyze_adts_gains_from_data(data: &[u8]) -> Result<AacAnalysis> {
                     min_gain = min_gain.min(loc.original_gain());
                     max_gain = max_gain.max(loc.original_gain());
                     channel_count = channel_count.max(loc.channel() + 1);
-                    all_locations.push(AacGainLocation::new(
-                        frame_index,
-                        (block_start + loc.sample_byte_offset() as usize) as u64,
-                        loc.sample_byte_offset(),
-                        loc.bit_offset(),
-                        loc.channel(),
-                        loc.original_gain(),
-                    ));
+                    let file_offset = (block_start + loc.sample_byte_offset() as usize) as u64;
+                    all_locations.push(loc.placed(frame_index, file_offset));
                 }
             }
             Err(_) => parse_warnings += 1,

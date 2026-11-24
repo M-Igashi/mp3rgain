@@ -48,6 +48,7 @@
 //!
 //! - [`analysis`] - MP3 file analysis and amplitude detection
 //! - [`apply`] - The unified apply pipeline both frontends drive ([`apply_with_options`])
+//! - [`audiohash`] - A hash of the encoded audio that tags and gain changes leave alone ([`audio_hash`])
 //! - [`gain`] - Gain adjustment operations and the [`GainOptions`] builder
 //! - [`ape`] - APEv2 tag reading, writing, and management
 //! - [`bitrate`] - Average bitrate and CBR/VBR of a file, for display
@@ -82,6 +83,7 @@ pub mod albummeta;
 pub mod analysis;
 pub mod ape;
 pub mod apply;
+pub mod audiohash;
 pub mod bitrate;
 #[cfg(feature = "replaygain")]
 pub mod bs1770;
@@ -108,6 +110,7 @@ pub use apply::{
     write_album_minmax_with_options, write_replaygain_tags_only, AacAlbumInfo, AlbumMinmaxOptions,
     ApplyOptions, ApplyReport, ClippingDetection, TagsOnlyOptions,
 };
+pub use audiohash::{audio_hash, audio_hash_data, AudioHash, AudioHashVersion};
 pub use bitrate::{read_bitrate, Bitrate, BitrateMode};
 pub use error::{Error, Result};
 pub use gain::{

@@ -1,5 +1,5 @@
 use mp3rgain::replaygain::AnalysisMode;
-use mp3rgain::{Channel, TagLayout};
+use mp3rgain::{AudioHashVersion, Channel, TagLayout};
 use std::path::PathBuf;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +85,8 @@ pub struct Options {
     // provenance would otherwise be lost.
     pub arg_roots: Vec<PathBuf>,
     pub max_amplitude_only: bool, // -x: only find max amplitude
+    // --audio-hash[=<version>]: print each file's audio hash (issue #491).
+    pub audio_hash: Option<AudioHashVersion>,
     pub track_index: Option<u32>, // -i <index>: track index for multi-track files
 
     // Behavior options

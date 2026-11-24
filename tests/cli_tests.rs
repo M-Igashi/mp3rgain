@@ -2744,3 +2744,106 @@ fn manual_gain_shifts_the_stored_range_and_adds_none() {
         );
     }
 }
+
+/// `--audio-hash` (issue #491): one `<hash>  <path>` line per file.
+fn audio_hashes(files: &[&str]) -> BTreeMap<String, String> {
+    let mut args = vec!["--audio-hash"];
+    args.extend_from_slice(files);
+    let out = run(&args);
+    assert!(out.status.success(), "{out:?}");
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let (hash, path) = line.split_once("  ").expect("hash and path");
+            assert!(hash.starts_with("mp3rgain-v1:"), "{line}");
+            (path.to_string(), hash.to_string())
+        })
+        .collect()
+}
+
+/// The hash is the same before a gain change, after it, after track gain
+/// with its tags, and after an undo, on MP3, M4A, and raw ADTS alike.
+#[test]
+fn audio_hash_survives_gain_changes_tags_and_undo() {
+    let album = TempAlbum::new(&[
+        "test_mono.mp3",
+        "test_joint_stereo.mp3",
+        "test_vbr.mp3",
+        "test_aac.m4a",
+        "test_adts.aac",
+    ]);
+    let files = album.args();
+    let before = audio_hashes(&files);
+    assert_eq!(before.len(), files.len());
+    let originals: Vec<Vec<u8>> = album.files.iter().map(|f| fs::read(f).unwrap()).collect();
+
+    for action in [
+        &["-g", "3"][..],
+        &["-r", "-c"],
+        &["-u"],
+        &["-g", "-2", "-s", "i"],
+    ] {
+        let mut args = action.to_vec();
+        args.extend_from_slice(&files);
+        let out = run(&args);
+        assert!(out.status.success(), "{action:?}: {out:?}");
+        assert_eq!(audio_hashes(&files), before, "after {action:?}");
+    }
+    for (file, original) in album.files.iter().zip(&originals) {
+        assert_ne!(&fs::read(file).unwrap(), original, "{file:?} unchanged");
+    }
+
+    // The ADTS fixture is the M4A's stream, so the two hash alike.
+    let hash_of = |name: &str| &before[album.dir.join(name).to_str().unwrap()];
+    assert_eq!(hash_of("test_aac.m4a"), hash_of("test_adts.aac"));
+}
+
+#[test]
+fn audio_hash_tsv_json_and_versions() {
+    let mono = "tests/fixtures/test_mono.mp3";
+    let text = audio_hashes(&[mono]);
+    let hash = &text[mono];
+
+    let out = run(&["--audio-hash=v1", mono]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("{hash}  {mono}\n")
+    );
+    let out = run(&["--audio-hash=1", "-o", "tsv", mono]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("File\tAudio hash\n{mono}\t{hash}\n")
+    );
+    let out = run(&["--audio-hash", "-o", "json", mono]);
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["files"][0]["audio_hash"], hash.as_str());
+
+    let out = run(&["--audio-hash=v9", mono]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("available: v1"));
+    for action in [&["-g", "2"][..], &["-r"], &["-u"], &["-x"], &["-s", "d"]] {
+        let mut args = vec!["--audio-hash"];
+        args.extend_from_slice(action);
+        args.push(mono);
+        let out = run(&args);
+        assert!(!out.status.success(), "{action:?} was accepted");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("cannot be combined"),
+            "{action:?}: {out:?}"
+        );
+    }
+}
+
+/// ALAC has no audio hash: a skip, like everywhere else, not a failure. A
+/// missing file is a failure.
+#[test]
+fn audio_hash_skips_alac_and_fails_on_a_missing_file() {
+    let out = run(&["--audio-hash", "tests/fixtures/test_alac.m4a"]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("ALAC has no audio hash"));
+
+    let out = run(&["--audio-hash", "tests/fixtures/missing.mp3"]);
+    assert!(!out.status.success());
+}
