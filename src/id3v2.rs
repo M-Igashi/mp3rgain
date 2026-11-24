@@ -8,7 +8,7 @@ use crate::ape::{
     parse_undo_values, parse_undo_wrap, range_wraps_out, shift_stored_value, MP3GAIN_VALUE_KEYS,
     TAG_MP3GAIN_ALBUM_MINMAX, TAG_MP3GAIN_MINMAX, TAG_MP3GAIN_UNDO, TAG_REPLAYGAIN_ALBUM_GAIN,
     TAG_REPLAYGAIN_ALBUM_PEAK, TAG_REPLAYGAIN_ALGORITHM, TAG_REPLAYGAIN_TRACK_GAIN,
-    TAG_REPLAYGAIN_TRACK_PEAK, UNDONE_KEYS,
+    TAG_REPLAYGAIN_TRACK_PEAK,
 };
 use crate::error::{Error, Result};
 use crate::gain::apply_undo_to_data;
@@ -40,15 +40,23 @@ pub struct Id3v2ReplayGain {
 }
 
 pub(crate) fn read_tag(path: &Path) -> Result<id3::Tag> {
-    match id3::Tag::read_from_path(path) {
+    tag_or_empty(id3::Tag::read_from_path(path))
+}
+
+fn tag_or_empty(read: id3::Result<id3::Tag>) -> Result<id3::Tag> {
+    match read {
         Ok(tag) => Ok(tag),
         Err(id3::Error {
             kind: id3::ErrorKind::NoTag,
             ..
         }) => Ok(id3::Tag::new()),
-        Err(e) => Err(Error::Id3v2Error {
-            message: e.to_string(),
-        }),
+        Err(e) => Err(id3_error(e)),
+    }
+}
+
+fn id3_error(e: id3::Error) -> Error {
+    Error::Id3v2Error {
+        message: e.to_string(),
     }
 }
 
@@ -106,9 +114,6 @@ const GROWTH_PADDING: usize = 2048;
 /// written: stripping mp3rgain's values from a file that had no tag before
 /// would otherwise leave an empty header and 2 KB of zeros (issue #483).
 fn write_tag_direct(path: &Path, tag: &mut id3::Tag) -> Result<()> {
-    let id3_error = |e: id3::Error| Error::Id3v2Error {
-        message: e.to_string(),
-    };
     let len = encoded_len(tag).or_else(|| {
         tag.frames_vec_mut().retain(is_frame_encodable);
         encoded_len(tag)
@@ -291,14 +296,32 @@ pub fn delete_id3v2_replaygain(path: &Path) -> Result<()> {
     write_tag(path, &mut tag)
 }
 
-/// [`delete_id3v2_replaygain`] without the temp+rename dance, for callers
-/// already writing onto a not-yet-visible temp file (issue #232).
-pub(crate) fn delete_id3v2_replaygain_direct(path: &Path) -> Result<()> {
-    let mut tag = read_tag(path)?;
-    if !strip_txxx(&mut tag, &MP3GAIN_VALUE_KEYS) {
-        return Ok(());
+/// Strip the `descriptions` TXXX frames from the ID3v2 tag at the start of
+/// `data`, a whole file an undo has read and is about to write to its temp
+/// file, then call `write` with the bytes to write there.
+///
+/// A tag left with no frames is removed from `data` itself, by the same `id3`
+/// call [`write_tag_direct`] uses on a file, so the undo writes the audio
+/// once: removing the tag from the temp after writing it moved the whole
+/// audio stream there a second time (issue #497). A tag that keeps frames is
+/// written over the temp afterwards, where it fits the region it came from.
+pub(crate) fn write_stripped(
+    temp: &Path,
+    data: Vec<u8>,
+    descriptions: &[&str],
+    write: impl FnOnce(&[u8]) -> Result<()>,
+) -> Result<()> {
+    let mut tag = tag_or_empty(id3::Tag::read_from2(std::io::Cursor::new(&data)))?;
+    if !strip_txxx(&mut tag, descriptions) {
+        return write(&data);
     }
-    write_tag_direct(path, &mut tag)
+    if tag.frames().next().is_some() {
+        write(&data)?;
+        return write_tag_direct(temp, &mut tag);
+    }
+    let mut file = std::io::Cursor::new(data);
+    id3::Tag::remove_from_file(&mut file).map_err(id3_error)?;
+    write(file.get_ref())
 }
 
 /// Remove every TXXX frame whose description matches one of `descriptions`,
@@ -338,11 +361,12 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
     // (temp + rename) so a failed tag rewrite can't leave the delta applied
     // with the undo tag still present (issue #227).
     crate::apply::with_temp_file(path, |original, temp| {
-        std::fs::write(temp, &data).map_err(|e| Error::io_write(original, e))?;
         // Issue #306: everything mp3rgain stored (undo, minmax, and the
         // REPLAYGAIN_* residuals) described the gained audio, so strip it
         // all in the same write.
-        delete_id3v2_replaygain_direct(temp)?;
+        write_stripped(temp, data, &MP3GAIN_VALUE_KEYS, |bytes| {
+            std::fs::write(temp, bytes).map_err(|e| Error::io_write(original, e))
+        })?;
         // The APEv2 copies (a stale `REPLAYGAIN_*` set from mp3gain or an
         // earlier `-s a` run, and the album range) described the gained
         // audio too. A tail rewrite on the temp folds their removal into the
@@ -350,23 +374,6 @@ pub fn undo_gain_id3v2(path: &Path) -> Result<usize> {
         crate::ape::remove_ape_undone_gain_values(temp)
     })?;
     Ok(frames)
-}
-
-/// Post-undo cleanup for cross-container layouts (issue #306): drop the
-/// [`UNDONE_KEYS`] frames, leaving any `MP3GAIN_UNDO` / `MP3GAIN_MINMAX`
-/// alone. Files without such frames are left untouched rather than
-/// rewritten.
-///
-/// Writes in place, without the temp+rename dance, because the only caller
-/// (the APEv2 undo path) hands it a not-yet-visible temp file it is about to
-/// rename over the original — so the ID3v2 cleanup rides along instead of
-/// costing a second full-file copy.
-pub(crate) fn remove_id3v2_rg_values_direct(path: &Path) -> Result<()> {
-    let mut tag = read_tag(path)?;
-    if !strip_txxx(&mut tag, &UNDONE_KEYS) {
-        return Ok(());
-    }
-    write_tag_direct(path, &mut tag)
 }
 
 /// Add (or replace) the `MP3GAIN_ALBUM_MINMAX` TXXX frame, preserving the
@@ -553,7 +560,8 @@ mod tests {
 
     /// Issue #483: stripping mp3rgain's values from a file that had no tag
     /// removes the tag, padding included, instead of leaving an empty one.
-    /// A tag that keeps other frames is still written.
+    /// A tag that keeps other frames is still written. The undo's strip of
+    /// the file in memory (issue #497) and the atomic delete agree.
     #[test]
     fn stripping_every_frame_removes_the_tag() {
         let dir = std::env::temp_dir().join("mp3rgain_id3v2_strip_tests");
@@ -566,9 +574,17 @@ mod tests {
             ..Default::default()
         };
 
+        let strip = |path: &Path| {
+            let data = std::fs::read(path).unwrap();
+            write_stripped(path, data, &MP3GAIN_VALUE_KEYS, |bytes| {
+                std::fs::write(path, bytes).map_err(|e| Error::io_write(path, e))
+            })
+            .unwrap();
+        };
+
         std::fs::write(&path, audio).unwrap();
         write_id3v2_replaygain_direct(&path, &rg).unwrap();
-        delete_id3v2_replaygain_direct(&path).unwrap();
+        strip(&path);
         assert_eq!(std::fs::read(&path).unwrap(), audio);
 
         std::fs::write(&path, audio).unwrap();
@@ -580,7 +596,7 @@ mod tests {
         tag.set_title("Title");
         tag.write_to_path(&path, TARGET_VERSION).unwrap();
         write_id3v2_replaygain_direct(&path, &rg).unwrap();
-        delete_id3v2_replaygain_direct(&path).unwrap();
+        strip(&path);
         assert_eq!(read_tag(&path).unwrap().title(), Some("Title"));
         assert!(read_id3v2_replaygain(&path).unwrap().undo.is_none());
 

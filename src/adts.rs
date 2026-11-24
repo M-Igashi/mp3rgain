@@ -364,11 +364,12 @@ pub fn undo_adts_gain(file_path: &Path) -> Result<usize> {
 
     // One visible write: a failed tag rewrite can't leave the audio rolled
     // back with the undo tag still claiming a pending delta (issue #227).
+    // Issue #306: the REPLAYGAIN_* residuals described the gained audio, so
+    // they go in the same write as the undo/minmax frames.
     crate::apply::with_temp_file(file_path, |original, temp| {
-        fs::write(temp, &data).map_err(|e| Error::io_write(original, e))?;
-        // Issue #306: the REPLAYGAIN_* residuals described the gained audio,
-        // so they go in the same write as the undo/minmax frames.
-        crate::id3v2::delete_id3v2_replaygain_direct(temp)
+        crate::id3v2::write_stripped(temp, data, &crate::ape::MP3GAIN_VALUE_KEYS, |bytes| {
+            fs::write(temp, bytes).map_err(|e| Error::io_write(original, e))
+        })
     })?;
 
     Ok(modified)
