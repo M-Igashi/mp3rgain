@@ -39,8 +39,9 @@ What ships today:
 
 ## Unreleased
 
-Documentation, a link to it at the end of `mp3rgain -h`, a redesigned GUI, and the fixes of a whole-codebase review: crafted M4A and AAC files no longer crash mp3rgain, an MP4 with an unknown codec is skipped like ALAC, and mp3rgui shows why each file of a failed album failed. Output for every other file is unchanged.
+A new `--audio-hash` action for finding duplicates, documentation, a link to it at the end of `mp3rgain -h`, a redesigned GUI, and the fixes of a whole-codebase review: crafted M4A and AAC files no longer crash mp3rgain, an MP4 with an unknown codec is skipped like ALAC, and mp3rgui shows why each file of a failed album failed. Output for every other file is unchanged.
 
+- CLI and library: `--audio-hash` prints a hash of each file's audio that tags, the container, and a gain change by mp3gain, aacgain, or mp3rgain (and its undo) leave alone, so copies of one encode can be found however they were tagged or adjusted; `mp3rgain::audio_hash` in the crate. Each version of the definition is frozen once released (`mp3rgain-v1:`) and specified in [audio-hash.md](audio-hash.md) (#491)
 - GUI: redesigned without changing a string, so every translation still applies: the toolbar reads as three steps (add, analyze, apply), the settings sit in segmented controls, a click or right-click anywhere on a row selects it and the right-click menu holds the row actions, Delete removes the selected rows, Cmd/Ctrl+O adds files, the light and dark themes use the website's green, and macOS and Windows get their system UI font. CJK text in a file name or the Japanese UI now sits on the baseline of the Latin text beside it, which it had not since #321
 - GUI: the sort arrow in a column header is drawn as a triangle instead of an empty box; `▴` / `▾` are missing from egui's proportional fonts, so the header uses `⏶` / `⏷` from its bundled icon font (#489)
 - Docs: COMPARISON, the migration guide, and the man page say what undo leaves behind since 3.16.2: a file that had no ID3v2 tag comes back byte-identical, on MP3 and raw ADTS (#483); they still described the empty tag of 3.16.1

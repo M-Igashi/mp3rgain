@@ -394,6 +394,41 @@ If both are given, the last one wins.
 .B \-x
 Only find and display the maximum amplitude of the file.
 Does not apply any changes.
+.TP
+.BR \-\-audio\-hash [ =\fIversion\fR ]
+Print a hash of each file's encoded audio, one
+.I "hash  path"
+line per file in the form of
+.BR sha256sum (1),
+to find copies of one encode.
+Tags, the container (an M4A and its raw ADTS stream hash alike), the Xing,
+Info, or VBRI frame, and a gain change by mp3gain, aacgain, or mp3rgain in
+their default mode, as well as its undo, all leave the hash unchanged; a clamped,
+wrapped, or single-channel change, or a different encode, does not.
+Nothing is written.
+A hash reads
+.BR mp3rgain\-v1: ,
+the version of its definition, followed by 64 hexadecimal digits.
+A version gives the same value in every later release; without
+.I version
+the latest is used.
+With
+.BR "\-o tsv" ,
+the output is a header row and one path and hash per line; with
+.BR "\-o json" ,
+each file carries an
+.B audio_hash
+field.
+Cannot be combined with an action such as
+.BR \-g ,
+.BR \-r ,
+.BR \-a ,
+.BR \-u ,
+or
+.BR \-x .
+The definition is in
+.I docs/audio\-hash.md
+in the source repository.
 .SS "Behavior Options"
 .TP
 .B \-p
@@ -542,6 +577,9 @@ Report the track gain that would be applied, in JSON.
 .TP
 .B mp3rgain \-R /path/to/music
 Analyze all audio files in a directory tree.
+.TP
+.B mp3rgain \-\-audio\-hash \-R /music
+Print the audio hash of every file in a library, to find duplicates.
 .SH GAIN VALUES
 Each gain step corresponds to 1.5 dB (20\(mulog10(2)/4 = 1.5051 dB), which is
 fixed by the MP3 specification.
@@ -723,7 +761,10 @@ only prints a warning, as in mp3gain.
 Error occurred (invalid arguments, unknown long option, file not found, etc.).
 A batch in which any single file failed exits 1, including the read-only
 commands (plain analysis,
-.BR \-s " c and " \-x ),
+.BR "\-s c" ,
+.BR \-x ,
+and
+.BR \-\-audio\-hash ),
 so a scripted scan cannot mistake an unreadable file for a clean run.
 .SH SECURITY
 .B mp3rgain

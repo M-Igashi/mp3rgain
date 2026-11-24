@@ -1,6 +1,6 @@
 use colored::*;
 use mp3rgain::replaygain::REPLAYGAIN_REFERENCE_DB;
-use mp3rgain::GAIN_STEP_DB;
+use mp3rgain::{AudioHashVersion, GAIN_STEP_DB};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -52,6 +52,18 @@ pub fn print_usage() {
     println!("                Analysis only: gain and tags apply to the first track");
     println!("    -u          Undo gain changes (restore from the stored undo tag)");
     println!("    -x          Only find max amplitude of file");
+    println!("    --audio-hash  Print a hash of each file's audio that tags, the container,");
+    println!("                and gain changes leave alone, to find copies of one encode.");
+    println!("                Changes nothing. --audio-hash=<version> picks a definition");
+    let versions: Vec<String> = AudioHashVersion::ALL
+        .iter()
+        .map(|v| v.to_string())
+        .collect();
+    println!(
+        "                (available: {}; default {})",
+        versions.join(", "),
+        AudioHashVersion::LATEST
+    );
     println!("    -s <mode>   Stored tag handling:");
     println!("                  c = check/show stored tag info");
     println!("                  d = delete stored tag info (with -u: undo gain first)");
@@ -94,6 +106,7 @@ pub fn print_usage() {
     println!("    mp3rgain -e *.mp3              Analyze each track, no album summary");
     println!("    mp3rgain -u song.mp3           Undo previous gain changes");
     println!("    mp3rgain -x song.mp3           Show max amplitude only");
+    println!("    mp3rgain --audio-hash -R /music  Audio hash per file, to find duplicates");
     println!("    mp3rgain -s R -a *.mp3         Album gain from stored tags (rescan only");
     println!("                                   if any file lacks them)");
     println!("    mp3rgain -s c *.mp3            Check stored tag info");

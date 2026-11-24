@@ -36,6 +36,8 @@ pub struct AacGainLocation {
     bit_offset: u8,
     channel: u8,
     original_gain: u8,
+    #[cfg_attr(feature = "serde", serde(default))]
+    max_sfb: u8,
 }
 
 impl AacGainLocation {
@@ -54,7 +56,25 @@ impl AacGainLocation {
             bit_offset,
             channel,
             original_gain,
+            max_sfb: 0,
         }
+    }
+
+    /// This location at `file_offset` in sample `sample_index`, for a block
+    /// parsed on its own.
+    pub(crate) fn placed(self, sample_index: u32, file_offset: u64) -> Self {
+        Self {
+            sample_index,
+            file_offset,
+            ..self
+        }
+    }
+
+    /// `max_sfb` of the channel's `ics_info`. With 0 the channel codes no
+    /// spectral data, and its `global_gain` has no effect on the decoded
+    /// audio.
+    pub(crate) fn max_sfb(&self) -> u8 {
+        self.max_sfb
     }
 
     /// Index of the AAC sample (frame) this field was found in.
@@ -420,9 +440,9 @@ fn decode_huffman_slow(
 // MP4 sample table parser
 // =============================================================================
 
-struct SampleEntry {
-    file_offset: u64,
-    size: u32,
+pub(crate) struct SampleEntry {
+    pub file_offset: u64,
+    pub size: u32,
 }
 
 /// Verify that `count` entries of `entry_size` bytes starting at `start` fit
@@ -448,7 +468,7 @@ fn check_table_bounds(
 
 /// Build sample table: for each AAC sample, compute (file_offset, size).
 /// Returns (sample_entries, stsd_pos).
-fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
+pub(crate) fn build_sample_table(data: &[u8]) -> Result<(Vec<SampleEntry>, usize)> {
     let (moov_pos, moov_header) = mp4meta::find_box(data, mp4meta::MOOV).ok_or(Error::NoMoovBox)?;
     let moov_start = moov_pos + moov_header.header_size as usize;
     let moov_size = moov_header.content_size() as usize;
@@ -627,7 +647,7 @@ pub(crate) const SAMPLE_RATE_TABLE: [u32; 13] = [
     96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350,
 ];
 
-fn parse_audio_config(data: &[u8], stsd_pos: usize) -> Result<u32> {
+pub(crate) fn parse_audio_config(data: &[u8], stsd_pos: usize) -> Result<u32> {
     // stsd: header(8) + version/flags(4) + entry_count(4) + entries
     // mp4a entry: size(4) + 'mp4a'(4) + reserved(6) + data_ref_index(2)
     //   + version(2) + revision(2) + vendor(4) + channel_count(2)
@@ -670,7 +690,57 @@ fn parse_audio_config(data: &[u8], stsd_pos: usize) -> Result<u32> {
 }
 
 fn parse_esds_sample_rate(data: &[u8], start: usize, end: usize) -> Option<u32> {
-    // Find esds box
+    let mut reader = BitReader::new(esds_asc(data, start, end)?);
+    read_object_type(&mut reader)?;
+    read_sampling_frequency(&mut reader)
+}
+
+/// The leading fields of an AudioSpecificConfig (ISO 14496-3, 1.6.2.1), for
+/// the core AAC stream. An explicitly signalled SBR or PS stream (object type
+/// 5 or 29) declares its core object type after the extension sampling
+/// frequency, and its first sampling frequency and channel configuration are
+/// the core's, which is also what an ADTS header of the same stream carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AudioSpecificConfig {
+    pub object_type: u8,
+    pub sample_rate: u32,
+    pub channel_config: u8,
+}
+
+/// `GetAudioObjectType()`: five bits, escaped to 32 + six more by a 31.
+fn read_object_type(reader: &mut BitReader) -> Option<u8> {
+    match reader.read_bits(5).ok()? as u8 {
+        31 => Some(32 + reader.read_bits(6).ok()? as u8),
+        aot => Some(aot),
+    }
+}
+
+/// A sampling frequency index, or 0xF followed by the frequency in 24 bits.
+fn read_sampling_frequency(reader: &mut BitReader) -> Option<u32> {
+    match reader.read_bits(4).ok()? {
+        0x0F => reader.read_bits(24).ok(),
+        index => SAMPLE_RATE_TABLE.get(index as usize).copied(),
+    }
+}
+
+fn parse_audio_specific_config(asc: &[u8]) -> Option<AudioSpecificConfig> {
+    let mut reader = BitReader::new(asc);
+    let mut object_type = read_object_type(&mut reader)?;
+    let sample_rate = read_sampling_frequency(&mut reader)?;
+    let channel_config = reader.read_bits(4).ok()? as u8;
+    if object_type == 5 || object_type == 29 {
+        read_sampling_frequency(&mut reader)?;
+        object_type = read_object_type(&mut reader)?;
+    }
+    Some(AudioSpecificConfig {
+        object_type,
+        sample_rate,
+        channel_config,
+    })
+}
+
+/// The AudioSpecificConfig bytes inside the `esds` box found in `start..end`.
+fn esds_asc(data: &[u8], start: usize, end: usize) -> Option<&[u8]> {
     let (esds_pos, esds_h) = mp4meta::find_box_in_container(data, start, end - start, ESDS)?;
     let esds_content = esds_pos + esds_h.header_size as usize + 4; // skip version/flags
 
@@ -680,30 +750,20 @@ fn parse_esds_sample_rate(data: &[u8], start: usize, end: usize) -> Option<u32> 
         .saturating_add(esds_h.size as usize)
         .min(data.len());
 
-    let asc_data = find_audio_specific_config(data, esds_content, esds_end)?;
+    find_audio_specific_config(data, esds_content, esds_end)
+}
 
-    if asc_data.len() < 2 {
+/// The AudioSpecificConfig of the `mp4a` sample entry at `stsd_pos`, without
+/// [`parse_audio_config`]'s fallback to the entry's own sample rate field.
+pub(crate) fn mp4a_audio_config(data: &[u8], stsd_pos: usize) -> Option<AudioSpecificConfig> {
+    let mp4a_start = stsd_pos + 16;
+    let mp4a_size = read_u32_be(data.get(..mp4a_start + 4)?, mp4a_start) as usize;
+    let mp4a_end = mp4a_start.saturating_add(mp4a_size).min(data.len());
+    let esds_search_start = mp4a_start + 36;
+    if esds_search_start >= mp4a_end {
         return None;
     }
-
-    // AudioSpecificConfig: audioObjectType(5 bits) + samplingFrequencyIndex(4 bits)
-    let _aot = (asc_data[0] >> 3) & 0x1F;
-    let sr_idx = ((asc_data[0] & 0x07) << 1) | (asc_data[1] >> 7);
-
-    if sr_idx == 0x0F && asc_data.len() >= 5 {
-        // 24-bit explicit frequency
-        let freq = ((asc_data[1] as u32 & 0x7F) << 17)
-            | ((asc_data[2] as u32) << 9)
-            | ((asc_data[3] as u32) << 1)
-            | ((asc_data[4] as u32) >> 7);
-        return Some(freq);
-    }
-
-    if (sr_idx as usize) < SAMPLE_RATE_TABLE.len() {
-        Some(SAMPLE_RATE_TABLE[sr_idx as usize])
-    } else {
-        None
-    }
+    parse_audio_specific_config(esds_asc(data, esds_search_start, mp4a_end)?)
 }
 
 fn find_audio_specific_config(data: &[u8], start: usize, end: usize) -> Option<&[u8]> {
@@ -1064,7 +1124,7 @@ fn parse_ics(
     let (byte_off, bit_off) = reader.position();
     let global_gain = reader.read_bits(8)? as u8;
 
-    let gain_loc = AacGainLocation::new(
+    let mut gain_loc = AacGainLocation::new(
         0, // sample_index: filled in by caller
         0, // file_offset: filled in by caller
         byte_off as u32,
@@ -1080,6 +1140,7 @@ fn parse_ics(
         Some(info) => info.clone(),
         None => parse_ics_info(reader)?,
     };
+    gain_loc.max_sfb = info.max_sfb as u8;
 
     // Get SWB band offsets for this window type
     let (long_bands, short_bands) = aac_codebooks::swb_offsets(sample_rate);
@@ -1669,9 +1730,9 @@ pub(crate) fn analyze_aac_gains_from_data(data: &[u8]) -> Result<AacAnalysis> {
         match parse_raw_data_block(&mut reader, sample_rate, &mut sample_locations) {
             Ok(sample_sbr) => {
                 sbr |= sample_sbr;
-                for mut loc in sample_locations.drain(..) {
-                    loc.sample_index = idx as u32;
-                    loc.file_offset = entry.file_offset + loc.sample_byte_offset as u64;
+                for loc in sample_locations.drain(..) {
+                    let file_offset = entry.file_offset + loc.sample_byte_offset as u64;
+                    let loc = loc.placed(idx as u32, file_offset);
                     min_gain = min_gain.min(loc.original_gain);
                     max_gain = max_gain.max(loc.original_gain);
                     max_channel = max_channel.max(loc.channel);

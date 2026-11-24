@@ -1,5 +1,6 @@
 pub mod albumgroup;
 pub mod apply;
+pub mod audio_hash;
 pub mod info;
 pub mod max_amplitude;
 pub mod replaygain;
@@ -15,6 +16,7 @@ use crate::cli::options::{AlbumGrouping, Options, StoredTagMode};
 use crate::cli::parse_args::{dedup_files, expand_files_recursive};
 
 use apply::{cmd_apply, cmd_apply_channel};
+use audio_hash::cmd_audio_hash;
 use info::cmd_info;
 use max_amplitude::cmd_max_amplitude;
 use replaygain::{cmd_album_gain, cmd_album_gain_grouped, cmd_track_gain};
@@ -87,7 +89,12 @@ pub fn run(mut opts: Options) -> Result<()> {
         );
     }
 
-    // Determine action based on options
+    // Determine action based on options. parse_args has refused every other
+    // action next to --audio-hash.
+    if let Some(version) = opts.audio_hash {
+        return cmd_audio_hash(&opts.files, version, &opts);
+    }
+
     if opts.max_amplitude_only {
         // -x: only find max amplitude
         return cmd_max_amplitude(&opts.files, &opts);

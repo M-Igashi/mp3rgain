@@ -96,6 +96,7 @@ mp3rgain -r --tags-only *.mp3           # Write ReplayGain tags, leave the audio
 mp3rgain -g 2 song.mp3                  # Manual gain: +2 steps = +3.01 dB (1 step = 1.5051 dB)
 mp3rgain -n -r *.mp3                    # Dry run: show what would change
 mp3rgain -u song.mp3                    # Undo
+mp3rgain --audio-hash -R /music         # Hash the audio, not its tags or gain, to find duplicates
 ```
 
 Run `mp3rgain -h` for every option, or see the **[full CLI reference](https://mp3rgain.tyna.ninja/docs/cli)** (analysis modes, tag handling, exit codes, recipes). Files are processed in parallel by default; `-j 1` forces serial processing ([design and benchmarks](docs/perf-parallel.md)).
@@ -190,6 +191,7 @@ The **[tool comparison](https://mp3rgain.tyna.ninja/vs-mp3gain)** and [docs/COMP
 - [Compatibility Report](docs/compatibility-report.md): bit-level verification against the original mp3gain
 - [Parallel Performance](docs/perf-parallel.md): `-j` / `--threads` design and benchmarks
 - [Use Cases](docs/use-cases.md): integration examples (beets, Bake'n Deck, etc.)
+- [Audio Hash](docs/audio-hash.md): what `--audio-hash` matches, and its full definition
 - [Design Decisions](docs/design-decisions.md): things that look like defects but are deliberate, and where each was decided
 - [Security](docs/security.md): memory safety and CVE analysis ([summary on the website](https://mp3rgain.tyna.ninja/security))
 - [Roadmap](docs/roadmap.md): development plans
