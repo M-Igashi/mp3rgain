@@ -265,7 +265,7 @@ See [security.md](security.md) for the CVE details, or the shorter [Is mp3gain s
 - Lossless gain moves in whole 1.5 dB steps, so the audio lands within about 0.75 dB of the target (`--tags-only` writes exact values).
 - MP3 and AAC-LC only: no HE-AAC, FLAC, Ogg, Opus, WAV, or ALAC.
 - `-l` leaves existing `REPLAYGAIN_*` tags unchanged (see [Avoiding double volume adjustment](#avoiding-double-volume-adjustment)).
-- Undo restores every audio frame. A file that had no ID3v2 tag of its own comes back byte-identical (since 3.16.2); one that had an ID3v2 tag keeps it, rewritten as ID3v2.4. Frames whose `global_gain` clamped at 0 or 255 cannot be restored.
+- Undo restores every audio frame. A file that had no ID3v2 tag of its own comes back byte-identical (since 3.16.2); one that had an ID3v2 tag keeps it, rewritten as ID3v2.4. Frames whose `global_gain` clamped at 0 or 255, or was lowered onto exactly 0, cannot be restored.
 - Raw ADTS streams with CRC protection (`protection_absent = 0`) keep their original CRC after a gain change. ffmpeg and Apple's encoder do not write ADTS CRCs, so there is nothing to test the update against.
 
 ### aacgain

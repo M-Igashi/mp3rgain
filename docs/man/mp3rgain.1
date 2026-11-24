@@ -345,7 +345,8 @@ iTunes freeform atom for AAC in MP4, ID3v2 for raw ADTS). The
 values are removed as well, since they described the adjusted audio.
 Every audio frame is restored exactly, except frames whose
 .I global_gain
-was clamped at 0 or 255. The file as a whole is byte-identical to the original
+was clamped at 0 or 255, or lowered onto exactly 0, which undo leaves alone
+like any other 0. The file as a whole is byte-identical to the original
 when it had no ID3v2 tag of its own: an ID3v2 tag that undo leaves empty is
 removed. An existing ID3v2 tag stays rewritten as ID3v2.4. A file that was
 never adjusted is an error, and so is an undo

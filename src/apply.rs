@@ -189,13 +189,14 @@ pub struct ApplyReport {
     /// wrap mode).
     pub clipping_detected: Option<ClippingDetection>,
 
-    /// MP3 global_gain values that clamped at 0 (silence) during a
-    /// saturating apply, where the requested gain couldn't be fully
-    /// applied (issue #207). Always 0 for wrap mode and for [`predict_apply`].
+    /// global_gain values that a saturating apply left at 0 (silence), MP3
+    /// and AAC alike: clamped there, or lowered onto exactly 0, which undo
+    /// leaves alone as well (issues #207, #496). Either way undo cannot bring
+    /// them back. Always 0 for wrap mode and for [`predict_apply`].
     pub saturated_low: usize,
 
-    /// MP3 global_gain values that clamped at 255 (distortion) during a
-    /// saturating apply (issue #207).
+    /// global_gain values that clamped at 255 (distortion) during a
+    /// saturating apply, MP3 and AAC alike (issue #207).
     pub saturated_high: usize,
 
     /// Post-apply (max, min) global_gain range of an MP3 or raw ADTS stream,
@@ -281,6 +282,23 @@ fn apply_with_options_inner(file_path: &Path, opts: &ApplyOptions) -> Result<App
     // double-apply.
     let mut saturation = SaturationStats::default();
     let mut aac = AacApplyOutcome::default();
+
+    // Issue #496: the AAC apply saturates as the MP3 one does, so a value it
+    // takes to 0 or clamps at 255 is reported the same way. It is counted from
+    // the analysis the apply then reuses, which holds every value it moves.
+    #[cfg(feature = "aac")]
+    if is_aac && actual_steps != 0 {
+        if aac_analysis.is_none() {
+            aac_analysis = if container == AudioFileType::Adts {
+                adts::analyze_adts_gains(file_path).ok()
+            } else {
+                aac::analyze_aac_gains(file_path).ok()
+            };
+        }
+        for loc in aac_analysis.iter().flat_map(|a| a.gain_locations()) {
+            saturation.tally(loc.original_gain(), actual_steps);
+        }
+    }
     let modified = if container == AudioFileType::Adts {
         aac = apply_adts_bytes(file_path, actual_steps, opts, aac_analysis)?;
         aac.modified

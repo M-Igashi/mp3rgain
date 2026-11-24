@@ -53,6 +53,7 @@ A new `--audio-hash` action for finding duplicates, documentation, a link to it 
 - CLI: an MP4 whose audio codec symphonia does not know (`drms`, say) is a skipped format, like ALAC, instead of failing with "No audio track found"; the info output and `-a` had regressed to the failure in 3.16.0, and `-r` had always reported it so
 - GUI: when every file of an album fails analysis, each row shows its reason instead of staying at "Analyzing...", and drops the values of an earlier analysis
 - Library: `read_undo_steps` and `read_undo_channel_steps` return `None` for an M4A without an undo tag, as documented and as for MP3, instead of `Some(0)`
+- Fix: a `-g` or `-l` that lowers a `global_gain` onto exactly 0 gets the "clamped at 0" warning, since undo leaves a 0 alone and cannot restore it, and AAC applies now report clamping and such zeros as MP3 ones do; the bytes written are unchanged (#496)
 
 ## Release history
 
