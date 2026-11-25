@@ -327,6 +327,18 @@ impl ReplayGainResult {
         self.peak = peak;
         self
     }
+
+    /// This result as the file measures after `applied_db` of gain was
+    /// written into it: louder by that much, needing that much less gain,
+    /// with the peak scaled to match. A frontend that applies again from a
+    /// cached analysis passes this, so the residual `REPLAYGAIN_*` values
+    /// written then describe the file as it is (issue #502).
+    pub fn after_gain(mut self, applied_db: f64) -> Self {
+        self.loudness_db += applied_db;
+        self.gain_db -= applied_db;
+        self.peak = crate::gain::apply_gain_to_peak(self.peak, applied_db);
+        self
+    }
 }
 
 impl std::fmt::Display for ReplayGainResult {
@@ -2946,6 +2958,26 @@ mod tests {
         assert_eq!(updated.loudness_db(), original.loudness_db());
         assert_eq!(updated.sample_rate(), original.sample_rate());
         assert_eq!(updated.file_type(), original.file_type());
+    }
+
+    #[test]
+    fn after_gain_shifts_gain_loudness_and_peak() {
+        let original = ReplayGainResult::new(
+            92.65,
+            -3.65,
+            0.5,
+            44_100,
+            AudioFileType::Mp3,
+            AnalysisMode::Rg1,
+        );
+        let applied = crate::gain::steps_to_db(-2);
+        let after = original.clone().after_gain(applied);
+        assert!((after.gain_db() - (-3.65 - applied)).abs() < 1e-9);
+        assert!((after.loudness_db() - (92.65 + applied)).abs() < 1e-9);
+        assert_eq!(after.peak(), crate::gain::apply_gain_to_peak(0.5, applied));
+        assert_eq!(after.sample_rate(), original.sample_rate());
+        let back = after.after_gain(-applied);
+        assert!((back.gain_db() - original.gain_db()).abs() < 1e-9);
     }
 
     #[cfg(feature = "replaygain")]

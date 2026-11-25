@@ -40,6 +40,7 @@ What ships today:
 ## Unreleased
 
 - An undo that leaves the ID3v2 tag with no frames (an MP3 that had no ID3v2 tag before the default `-r` or `-s i`, and most raw ADTS files) writes the file once instead of twice, so `-u` and mp3rgui's Undo take about a quarter less time on such MP3 files; the bytes written are unchanged (#497)
+- mp3rgui: applying Track Gain or Album Gain again to a file it had already applied to wrote the original analysis into the ReplayGain tags instead of the residual left after the earlier apply; the audio was right, only the tags were wrong (#502)
 
 ## Release history
 

@@ -228,16 +228,27 @@ impl FileEntry {
         d
     }
 
-    /// The `ReplayGainResult` handed to `ApplyJob`, with its peak moved to
-    /// the file's current level so prevent-clipping judges the file as it
-    /// is now (issue #172). `None` unless a fresh analysis exists: rows
-    /// imported from tags or scanned for headroom fall back to the
-    /// headroom-based clipping check, like manual gain.
+    /// The `ReplayGainResult` handed to `ApplyJob`, moved to the file's
+    /// current level: the peak, so prevent-clipping judges the file as it is
+    /// now (issue #172), and the gain, so the residual RG tags an apply
+    /// writes leave out what earlier applies baked in (issue #502). `None`
+    /// unless a fresh analysis exists: rows imported from tags or scanned
+    /// for headroom fall back to the headroom-based clipping check, like
+    /// manual gain.
     pub fn apply_track_result(&self) -> Option<ReplayGainResult> {
-        match (&self.measurement, self.current_track_peak()) {
-            (Some(Measurement::Analyzed(r)), Some(peak)) => Some(r.clone().with_peak(peak)),
+        match &self.measurement {
+            Some(Measurement::Analyzed(r)) => Some(r.clone().after_gain(self.applied_db)),
             _ => None,
         }
+    }
+
+    /// `album_info` moved to the file's current level, for the same reason
+    /// as [`Self::apply_track_result`].
+    pub fn apply_album_info(&self) -> Option<AacAlbumInfo> {
+        self.album_info.map(|a| AacAlbumInfo {
+            album_gain_db: a.album_gain_db - self.applied_db,
+            album_peak: apply_gain_to_peak(a.album_peak, self.applied_db),
+        })
     }
 
     /// The CBR/VBR column's text, empty where the mode is unknown.
@@ -1570,7 +1581,7 @@ impl Mp3rgainApp {
                         path: f.path.clone(),
                         steps: db_to_steps(gain_db),
                         track_result: f.apply_track_result(),
-                        album_info: f.album_info,
+                        album_info: f.apply_album_info(),
                         channel: None,
                         from_stored: false,
                         clipping_prevented: false,
@@ -2126,6 +2137,36 @@ mod tests {
         assert!(groups[0].merged_releases, "and that has to be reported");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Issue #502: a second Apply Track Gain rounds to 0 steps, and the RG
+    /// tags it writes must still be the residual, not the original gain.
+    #[test]
+    fn apply_result_leaves_out_gain_already_applied() {
+        let mut file = analyzed(-3.65, 0.5);
+        file.album_info = Some(AacAlbumInfo {
+            album_gain_db: -4.0,
+            album_peak: 0.7,
+        });
+        file.record_apply(-2, false);
+        let applied = steps_to_db(-2);
+
+        let track = file.apply_track_result().unwrap();
+        assert!(close(Some(track.gain_db()), Some(-3.65 - applied)));
+        assert!(close(
+            Some(track.peak()),
+            Some(apply_gain_to_peak(0.5, applied))
+        ));
+        let album = file.apply_album_info().unwrap();
+        assert!(close(Some(album.album_gain_db), Some(-4.0 - applied)));
+        assert!(close(
+            Some(album.album_peak),
+            Some(apply_gain_to_peak(0.7, applied))
+        ));
+        assert_eq!(
+            db_to_steps(file.display(89.0, AnalysisMode::Rg1).track_gain.unwrap()),
+            0
+        );
     }
 
     #[test]
