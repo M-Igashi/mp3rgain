@@ -46,7 +46,7 @@ The root flake is for installing directly from GitHub. A nixpkgs package pins a 
 
    rustPlatform.buildRustPackage rec {
      pname = "mp3rgain";
-     version = "3.17.0";
+     version = "3.17.1";
 
      src = fetchFromGitHub {
        owner = "M-Igashi";

@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current status: v3.17.0 (2026-11-24)
+## Current status: v3.17.1 (2026-11-25)
 
 mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writes standard `REPLAYGAIN_*` tags, and can bake the correction into the bitstream losslessly. For MP3 it is a modern drop-in replacement for mp3gain. For AAC it is the only actively maintained command-line tool that does this: aacgain's last release was 2.0.0 in 2019 and its last commit was in 2022, and foobar2000, the reference-grade ReplayGain suite, offers a comparable scalefactor-based AAC rewrite ("Apply ReplayGain to file content") but only as a Windows GUI with no undo.
 
@@ -39,12 +39,18 @@ What ships today:
 
 ## Unreleased
 
-- An undo that leaves the ID3v2 tag with no frames (an MP3 that had no ID3v2 tag before the default `-r` or `-s i`, and most raw ADTS files) writes the file once instead of twice, so `-u` and mp3rgui's Undo take about a quarter less time on such MP3 files; the bytes written are unchanged (#497)
-- mp3rgui: applying Track Gain or Album Gain again to a file it had already applied to wrote the original analysis into the ReplayGain tags instead of the residual left after the earlier apply; the audio was right, only the tags were wrong (#502)
+Nothing yet.
 
 ## Release history
 
 One line per change. The [release notes](https://github.com/M-Igashi/mp3rgain/releases) and the linked issues have the details.
+
+### v3.17.1 - mp3rgui ReplayGain Tags After a Second Apply
+
+A fix for mp3rgui and a faster undo. The analysis, the applied gains, and the CLI's output are unchanged.
+
+- An undo that leaves the ID3v2 tag with no frames (an MP3 that had no ID3v2 tag before the default `-r` or `-s i`, and most raw ADTS files) writes the file once instead of twice, so `-u` and mp3rgui's Undo take about a quarter less time on such MP3 files; the bytes written are unchanged (#497)
+- mp3rgui: applying Track Gain or Album Gain again to a file it had already applied to wrote the original analysis into the ReplayGain tags instead of the residual left after the earlier apply; the audio was right, only the tags were wrong (#502)
 
 ### v3.17.0 - Audio Hash, and a New Look for mp3rgui
 
