@@ -1,6 +1,6 @@
 # mp3rgain Roadmap
 
-## Current status: v3.17.1 (2026-11-25)
+## Current status: v3.17.2 (2026-11-26)
 
 mp3rgain is a ReplayGain tool in the mp3gain lineage. It analyses loudness, writes standard `REPLAYGAIN_*` tags, and can bake the correction into the bitstream losslessly. For MP3 it is a modern drop-in replacement for mp3gain. For AAC it is the only actively maintained command-line tool that does this: aacgain's last release was 2.0.0 in 2019 and its last commit was in 2022, and foobar2000, the reference-grade ReplayGain suite, offers a comparable scalefactor-based AAC rewrite ("Apply ReplayGain to file content") but only as a Windows GUI with no undo.
 
@@ -39,11 +39,17 @@ What ships today:
 
 ## Unreleased
 
-- Library: `audio_hash` and its `sha2` dependency sit behind the new feature `audio-hash`, on by default. A crate that depends on mp3rgain with `default-features = false` and does not name it no longer gets `sha2` in its dependency tree, and no longer gets `audio_hash`, `audio_hash_data`, `AudioHash`, and `AudioHashVersion`. The CLI and mp3rgui are unchanged (#505).
+Nothing yet.
 
 ## Release history
 
 One line per change. The [release notes](https://github.com/M-Igashi/mp3rgain/releases) and the linked issues have the details.
+
+### v3.17.2 - The Audio Hash as a Library Feature
+
+A library release: the CLI and mp3rgui are unchanged, as are the analysis and the applied gains.
+
+- Library: `audio_hash` and its `sha2` dependency sit behind the new feature `audio-hash`, on by default. A crate that depends on mp3rgain with `default-features = false` and does not name it no longer gets `sha2` in its dependency tree, and no longer gets `audio_hash`, `audio_hash_data`, `AudioHash`, and `AudioHashVersion`. The CLI and mp3rgui are unchanged (#505).
 
 ### v3.17.1 - mp3rgui ReplayGain Tags After a Second Apply
 
