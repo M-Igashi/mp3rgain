@@ -39,7 +39,7 @@ What ships today:
 
 ## Unreleased
 
-Nothing yet.
+- Library: `audio_hash` and its `sha2` dependency sit behind the new feature `audio-hash`, on by default. A crate that depends on mp3rgain with `default-features = false` and does not name it no longer gets `sha2` in its dependency tree, and no longer gets `audio_hash`, `audio_hash_data`, `AudioHash`, and `AudioHashVersion`. The CLI and mp3rgui are unchanged.
 
 ## Release history
 

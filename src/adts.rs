@@ -34,6 +34,7 @@ pub(crate) struct AdtsHeader {
     /// `aac_frame_length`: the whole frame including the header.
     pub frame_len: usize,
     /// The audio object type: `profile` plus one.
+    #[cfg_attr(not(feature = "audio-hash"), allow(dead_code))]
     pub object_type: u8,
     pub sample_rate: u32,
     pub channel_config: u8,

@@ -14,11 +14,14 @@ categories = ["multimedia::audio", "command-line-utilities"]
 exclude = ["mp3rgui/", "target/", "packages/", "docs/*.md", "docs/branding/", "docs/guide/", "scripts/", ".github/", ".claude/", "tests/*.rs", "tests/reference/", "CLAUDE.md", "flake.nix", "flake.lock"]
 
 [features]
-default = ["replaygain", "aac"]
+default = ["replaygain", "aac", "audio-hash"]
 replaygain = ["symphonia"]
 aac = ["symphonia-aac"]
 symphonia-aac = ["symphonia"]
 serde = []
+# `audio_hash` and the CLI's --audio-hash. On by default; a library user that
+# turns it off gets a dependency tree without `sha2`.
+audio-hash = ["dep:sha2"]
 
 [dependencies]
 anyhow = "1.0"
@@ -27,7 +30,7 @@ colored = "3.1"
 symphonia = { version = "0.6.0", optional = true, default-features = false, features = ["mp3", "aac", "isomp4", "all-meta"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sha2 = "0.10"
+sha2 = { version = "0.10", optional = true }
 id3 = "1"
 indicatif = "0.18"
 rayon = "1.10"
@@ -39,7 +42,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "mp3rgain"
 path = "src/main.rs"
-required-features = ["replaygain", "aac"]
+required-features = ["replaygain", "aac", "audio-hash"]
 
 [profile.release]
 lto = "thin"
