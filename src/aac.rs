@@ -73,6 +73,7 @@ impl AacGainLocation {
     /// `max_sfb` of the channel's `ics_info`. With 0 the channel codes no
     /// spectral data, and its `global_gain` has no effect on the decoded
     /// audio.
+    #[cfg_attr(not(feature = "audio-hash"), allow(dead_code))]
     pub(crate) fn max_sfb(&self) -> u8 {
         self.max_sfb
     }
@@ -701,6 +702,7 @@ fn parse_esds_sample_rate(data: &[u8], start: usize, end: usize) -> Option<u32> 
 /// frequency, and its first sampling frequency and channel configuration are
 /// the core's, which is also what an ADTS header of the same stream carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(feature = "audio-hash"), allow(dead_code))]
 pub(crate) struct AudioSpecificConfig {
     pub object_type: u8,
     pub sample_rate: u32,
@@ -723,6 +725,7 @@ fn read_sampling_frequency(reader: &mut BitReader) -> Option<u32> {
     }
 }
 
+#[cfg_attr(not(feature = "audio-hash"), allow(dead_code))]
 fn parse_audio_specific_config(asc: &[u8]) -> Option<AudioSpecificConfig> {
     let mut reader = BitReader::new(asc);
     let mut object_type = read_object_type(&mut reader)?;
@@ -755,6 +758,7 @@ fn esds_asc(data: &[u8], start: usize, end: usize) -> Option<&[u8]> {
 
 /// The AudioSpecificConfig of the `mp4a` sample entry at `stsd_pos`, without
 /// [`parse_audio_config`]'s fallback to the entry's own sample rate field.
+#[cfg_attr(not(feature = "audio-hash"), allow(dead_code))]
 pub(crate) fn mp4a_audio_config(data: &[u8], stsd_pos: usize) -> Option<AudioSpecificConfig> {
     let mp4a_start = stsd_pos + 16;
     let mp4a_size = read_u32_be(data.get(..mp4a_start + 4)?, mp4a_start) as usize;

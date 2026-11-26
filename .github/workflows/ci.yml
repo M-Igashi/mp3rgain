@@ -101,6 +101,9 @@ jobs:
       - name: Build with replaygain feature
         run: cargo build --features replaygain --verbose
 
+      - name: Build the library without audio-hash
+        run: cargo build --lib --no-default-features --features replaygain,aac --verbose
+
   gui:
     name: GUI on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

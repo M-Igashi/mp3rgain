@@ -16,7 +16,7 @@ mp3rgain-v1:7c151524fe1b7596530e6436d483e1e2ef7bf7b81c9d567511212ce66c555368  so
 
 Hashing only reads: nothing is written to the file. A file whose format has no hash (ALAC, another MP4 codec, or DRM-protected M4P) is reported as skipped and does not set the exit status; one that cannot be read or holds no audio does.
 
-From Rust: `mp3rgain::audio_hash(path, AudioHashVersion::LATEST)`, or `audio_hash_data(bytes, version)` for a file already in memory. Both return an `AudioHash`, whose `Display` is the text form above and whose `digest()` is the 32 bytes.
+From Rust: `mp3rgain::audio_hash(path, AudioHashVersion::LATEST)`, or `audio_hash_data(bytes, version)` for a file already in memory. Both return an `AudioHash`, whose `Display` is the text form above and whose `digest()` is the 32 bytes. They belong to the crate's `audio-hash` feature, which is on by default and brings the `sha2` dependency; with `default-features = false`, name it to keep them.
 
 ## What a match means
 

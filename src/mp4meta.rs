@@ -1672,6 +1672,7 @@ fn codec_in_data(data: &[u8]) -> Option<Mp4AudioCodec> {
 
 /// [`unsupported_audio_format`] on a whole file already in memory, without
 /// its HE-AAC check: ALAC, another MP4 audio codec, or DRM-protected M4P.
+#[cfg_attr(not(feature = "audio-hash"), allow(dead_code))]
 pub(crate) fn unsupported_mp4_format(data: &[u8]) -> Option<&'static str> {
     if data.len() < 12 || &data[4..8] != b"ftyp" {
         return None;
